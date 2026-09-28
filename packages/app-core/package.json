@@ -1,0 +1,41 @@
+{
+  "name": "@sanchay/app-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./copy": "./src/copy/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sanchay/api-client": "workspace:*",
+    "@sanchay/contract": "workspace:*",
+    "@sanchay/domain": "workspace:*",
+    "@sanchay/money": "workspace:*",
+    "@sanchay/validation": "workspace:*",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.103.2",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@orpc/client": "catalog:",
+    "@sanchay/config": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "@testing-library/dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
