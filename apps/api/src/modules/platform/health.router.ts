@@ -4,8 +4,10 @@ import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { DB, type DbHandle } from '../../db/client.js';
 import { AppError } from './errors.js';
+import { InfraRoute } from './http-decorators.js';
 
 /** D-11: /ready checks only the database until the S2 kernel adds pg-boss, worker heartbeat and NAV age. */
+@InfraRoute('APP_AND_API_HOSTS')
 @Controller()
 export class HealthRouter {
   constructor(@Inject(DB) private readonly dbh: DbHandle) {}

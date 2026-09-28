@@ -14,7 +14,7 @@ permissions: {}
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -67,6 +67,10 @@ jobs:
         env:
           SANCHAY_PLATFORM_ARN: ARN-000000 # clearly fake CI fixture; real value comes from the deploy env
           SANCHAY_PLATFORM_ARN_VALID_TILL: '2099-12-31'
+      - name: Integration tests (Testcontainers)
+        run: pnpm test:int
+      - name: DB drift
+        run: pnpm --filter=@sanchay/api db:check
 
       - name: Secret scan (gitleaks)
         run: >-

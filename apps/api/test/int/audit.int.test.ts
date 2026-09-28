@@ -47,13 +47,19 @@ describe('AuditService', () => {
       'revokedCount',
       'status',
     ]);
-    expect(AUDIT_ACTIONS).toEqual({
-      AUTH_SIGNUP: 'AUTH_SIGNUP',
-      AUTH_LOGIN: 'AUTH_LOGIN',
-      AUTH_LOGOUT: 'AUTH_LOGOUT',
-      AUTH_SESSIONS_REVOKED_ALL: 'AUTH_SESSIONS_REVOKED_ALL',
-      AUTH_OTP_LOCKOUT: 'AUTH_OTP_LOCKOUT',
-    });
+    expect(Object.keys(AUDIT_ACTIONS).sort()).toEqual([
+      'AUTH_LOGIN',
+      'AUTH_LOGOUT',
+      'AUTH_OTP_FAILED',
+      'AUTH_OTP_LOCKED',
+      'AUTH_OTP_LOCKOUT',
+      'AUTH_OTP_SENT',
+      'AUTH_SESSIONS_REVOKED_ALL',
+      'AUTH_SIGNUP',
+      'CONTACT_EMAIL_OTP_SENT',
+      'CONTACT_EMAIL_VERIFIED',
+    ]);
+    for (const [key, value] of Object.entries(AUDIT_ACTIONS)) expect(value).toBe(key);
   });
 
   it('writes the request context and only allow-listed primitive data', async () => {

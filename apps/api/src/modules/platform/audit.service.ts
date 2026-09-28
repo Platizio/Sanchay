@@ -21,13 +21,27 @@ export const AUDIT_DATA_ALLOWLIST = [
   'status',
 ] as const;
 
-/** Plan-01 action names. `AuditEventInput.action` stays `string` so later modules add their own. */
+/**
+ * Plan-01 audit action names. Append-only: the MVP ops SQL views and runbooks key on these exact strings.
+ * `AuditEventInput.action` stays `string` so later modules add their own.
+ */
 export const AUDIT_ACTIONS = {
   AUTH_SIGNUP: 'AUTH_SIGNUP',
   AUTH_LOGIN: 'AUTH_LOGIN',
   AUTH_LOGOUT: 'AUTH_LOGOUT',
   AUTH_SESSIONS_REVOKED_ALL: 'AUTH_SESSIONS_REVOKED_ALL',
+  /** Destination locked out: 3 codes burned LOCKED for one (purpose, destination) within 60 min; issues refused for 30 min (B13). */
   AUTH_OTP_LOCKOUT: 'AUTH_OTP_LOCKOUT',
+  /** A login OTP was issued and handed to the SMS sender (B19). */
+  AUTH_OTP_SENT: 'AUTH_OTP_SENT',
+  /** A login OTP verify failed with OTP_INVALID or OTP_EXPIRED (B19). */
+  AUTH_OTP_FAILED: 'AUTH_OTP_FAILED',
+  /** One code burned: its 5th wrong attempt, or any later attempt on that burned code (OTP_LOCKED, B19). */
+  AUTH_OTP_LOCKED: 'AUTH_OTP_LOCKED',
+  /** An add-email OTP was issued and sent (B20). */
+  CONTACT_EMAIL_OTP_SENT: 'CONTACT_EMAIL_OTP_SENT',
+  /** The investor's first email was verified and recorded as CURRENT (B20). */
+  CONTACT_EMAIL_VERIFIED: 'CONTACT_EMAIL_VERIFIED',
 } as const;
 
 export interface AuditEventInput {
