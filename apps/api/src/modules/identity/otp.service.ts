@@ -1,8 +1,8 @@
-import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, gt, gte, inArray, isNull, lt, type SQL, sql } from 'drizzle-orm';
 import { AppConfig } from '../../config/app-config.js';
-import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
+import { DB, type DbExecutor, type DbHandle, type Tx } from '../../db/client.js';
 import { EMAIL_SENDER, type EmailSender } from '../../integrations/email/port.js';
 import { EMAIL_TEMPLATE_IDS, emailOtpMessage } from '../../integrations/email/templates.js';
 import {
@@ -85,6 +85,15 @@ export async function withSendTimeout<T>(send: Promise<T>, timeoutMs: number): P
 /** Start of the Indian calendar day (UTC+05:30) that contains `at`. */
 export function istDayStart(at: Date): Date {
   return new Date(Math.floor((at.getTime() + IST_OFFSET_MS) / DAY) * DAY - IST_OFFSET_MS);
+}
+
+/**
+ * 64-bit key for pg_advisory_xact_lock. A namespaced SHA-256 prefix rather than hashtext(): 32-bit
+ * hashtext collisions between two different scopes would be far likelier, and the keys must be known
+ * client-side so they can be taken in one global (ascending) order, which rules out lock-order deadlocks.
+ */
+export function otpAdvisoryKey(name: string): bigint {
+  return createHash('sha256').update(`sanchay:${name}`).digest().readBigInt64BE(0);
 }
 
 /**
@@ -173,6 +182,11 @@ export class OtpService {
   /**
    * The challengeId returned here IS otp_codes.id (H-5). The send is synchronous (deviation D-17, R-07):
    * it runs after the transaction has committed and waits at most `sendTimeoutMs`.
+   *
+   * Race safety (B13 ledger, final review): every quota below is read-then-insert, so the transaction first
+   * takes transaction-scoped advisory locks on the destination, the IP, the device and (SMS only) the global
+   * IST-day SMS budget, and only then counts and inserts. A concurrent issue sharing any of those scopes
+   * waits for this commit and then counts this row, so no burst can pass the cooldown or a cap.
    */
   async issue(input: IssueOtpInput): Promise<IssuedOtp> {
     const now = this.clock.now();
@@ -181,7 +195,7 @@ export class OtpService {
     const message = this.render(input, code);
     const referenceId = input.referenceId ?? null;
     const destinationBidx = this.destinationBidx(input.destination);
-    await this.assertAllowed(input, referenceId, destinationBidx, now);
+    await this.assertNotLockedOut(input, destinationBidx, now);
 
     const pepperKid = this.keys.currentOtpPepperKid;
     const destinationMasked =
@@ -190,10 +204,13 @@ export class OtpService {
         : maskEmail(input.destination.value);
     const expiresAt = new Date(now.getTime() + OTP_POLICY.ttlMs);
 
+    let supersededIds: string[];
     try {
-      await this.dbh.db.transaction(
+      supersededIds = await this.dbh.db.transaction(
         async (tx) => {
-          await tx
+          await this.lockIssueScopes(tx, input, destinationBidx);
+          await this.assertWithinQuotas(tx, input, referenceId, destinationBidx, now);
+          const superseded = await tx
             .update(otpCodes)
             .set({ consumedAt: now, consumedReason: 'SUPERSEDED' })
             .where(
@@ -201,7 +218,8 @@ export class OtpService {
                 this.scope(input.purpose, destinationBidx, referenceId),
                 isNull(otpCodes.consumedAt),
               ),
-            );
+            )
+            .returning({ id: otpCodes.id });
           await tx.insert(otpCodes).values({
             id,
             createdAt: now,
@@ -223,11 +241,12 @@ export class OtpService {
             deviceRefHash: input.deviceRefHash ?? null,
             templateId: message.templateId,
           });
+          return superseded.map((r) => r.id);
         },
         { isolationLevel: 'read committed' },
       );
     } catch (error) {
-      // A concurrent issue for the same scope won otp_codes_live_scope_uq.
+      // Backstop: a concurrent issue for the same scope won otp_codes_live_scope_uq.
       if (pgErrorCodeOf(error) === '23505') {
         throw new AppError('OTP_COOLDOWN', { retryAfterSeconds: OTP_POLICY.cooldownMs / SECOND });
       }
@@ -251,8 +270,7 @@ export class OtpService {
             });
       result = await withSendTimeout(send, this.sendTimeoutMs);
     } catch (cause) {
-      // An undelivered (or timed-out) code must not burn cooldown or quota.
-      await this.dbh.db.delete(otpCodes).where(eq(otpCodes.id, id));
+      await this.undoUndeliveredIssue(id, supersededIds, now);
       throw new AppError(
         input.destination.channel === 'SMS' ? 'SMS_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
         {
@@ -271,6 +289,72 @@ export class OtpService {
       resendAfterSeconds: OTP_POLICY.cooldownMs / SECOND,
       destinationMasked,
     };
+  }
+
+  /**
+   * An undelivered (or timed-out) code must not burn cooldown or quota, and must not cost the investor the
+   * code they already hold: the new row is deleted and the row(s) this call superseded are made live again.
+   * Best effort: a cleanup failure is logged and swallowed, so it can never replace the caller's 503 mapping
+   * (SMS_UNAVAILABLE / PROVIDER_UNAVAILABLE) or lose the provider cause.
+   */
+  private async undoUndeliveredIssue(
+    id: string,
+    supersededIds: readonly string[],
+    supersededAt: Date,
+  ): Promise<void> {
+    try {
+      await this.dbh.db.delete(otpCodes).where(eq(otpCodes.id, id));
+    } catch (error) {
+      this.log.error(
+        `otp.issue_cleanup_failed: could not delete undelivered otp ${id} (${pgErrorCodeOf(error) ?? 'no sqlstate'})`,
+      );
+      // The undelivered row is still live, so a restore would collide with otp_codes_live_scope_uq.
+      return;
+    }
+    if (supersededIds.length === 0) return;
+    try {
+      await this.dbh.db
+        .update(otpCodes)
+        .set({ consumedAt: null, consumedReason: null })
+        .where(
+          and(
+            inArray(otpCodes.id, [...supersededIds]),
+            eq(otpCodes.consumedReason, 'SUPERSEDED'),
+            eq(otpCodes.consumedAt, supersededAt),
+          ),
+        );
+    } catch (error) {
+      // Typically 23505: a newer issue for the same scope already holds the live slot, which is fine.
+      this.log.error(
+        `otp.issue_cleanup_failed: could not restore superseded otp ${supersededIds.join(',')} (${pgErrorCodeOf(error) ?? 'no sqlstate'})`,
+      );
+    }
+  }
+
+  /**
+   * Transaction-scoped advisory locks (released at commit or rollback) that serialize the read-then-insert
+   * quota checks: destination (cooldown, per-destination hour/day), IP and device (shared LOGIN/VERIFY_EMAIL
+   * quotas) and one global key for the 2,000 SMS per IST day cap. Taken in ascending key order, so two
+   * issues can never deadlock on each other.
+   */
+  private async lockIssueScopes(
+    tx: Tx,
+    input: IssueOtpInput,
+    destinationBidx: Buffer,
+  ): Promise<void> {
+    const names = [`otp-dest:${destinationBidx.toString('hex')}`];
+    if (SHARED_QUOTA_PURPOSES.includes(input.purpose)) {
+      if (input.ip !== null) names.push(`otp-ip:${input.ip}`);
+      const device = input.deviceRefHash ?? null;
+      if (device !== null) names.push(`otp-device:${device.toString('hex')}`);
+    }
+    if (input.destination.channel === 'SMS') names.push('otp-sms-day');
+    const keys = [...new Set(names.map(otpAdvisoryKey))].sort((a, b) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    for (const key of keys) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${key.toString()}::bigint)`);
+    }
   }
 
   /**
@@ -439,17 +523,19 @@ export class OtpService {
     throw new Error(`OtpService: cannot render ${purpose} over ${destination.channel}`);
   }
 
-  /** Order (delta §5.4): lockout, cooldown, per-destination hour/day, per-IP, per-device, global SMS cap. */
-  private async assertAllowed(
+  /**
+   * Order (delta §5.4): lockout, cooldown, per-destination hour/day, per-IP, per-device, global SMS cap.
+   * The lockout check runs first, on the pool and before the issue transaction: it depends only on LOCKED
+   * burns (written by verify, never by issue), so it needs no lock, and its REFUSED audit is an own
+   * autocommit write that must never wait on a second main-pool connection while a transaction holds one.
+   */
+  private async assertNotLockedOut(
     input: IssueOtpInput,
-    referenceId: string | null,
     destinationBidx: Buffer,
     now: Date,
   ): Promise<void> {
-    const db = this.dbh.db;
-
     const lockSince = new Date(now.getTime() - OTP_POLICY.lockoutWindowMs - OTP_POLICY.lockoutMs);
-    const burns = await db
+    const burns = await this.dbh.db
       .select({ at: otpCodes.consumedAt })
       .from(otpCodes)
       .where(
@@ -479,8 +565,20 @@ export class OtpService {
         retryAfterSeconds: Math.ceil((endsAt.getTime() - now.getTime()) / SECOND),
       });
     }
+  }
 
-    const [last] = await db
+  /**
+   * The rest of the delta §5.4 order. Runs inside the issue transaction after lockIssueScopes, so every
+   * count below already includes every committed competitor for the same destination, IP, device or SMS day.
+   */
+  private async assertWithinQuotas(
+    tx: Tx,
+    input: IssueOtpInput,
+    referenceId: string | null,
+    destinationBidx: Buffer,
+    now: Date,
+  ): Promise<void> {
+    const [last] = await tx
       .select({ createdAt: otpCodes.createdAt })
       .from(otpCodes)
       .where(this.scope(input.purpose, destinationBidx, referenceId))
@@ -501,7 +599,7 @@ export class OtpService {
       const sharedPurpose = inArray(otpCodes.purpose, SHARED_QUOTA_PURPOSES);
       const hourAgo = new Date(now.getTime() - HOUR);
       const dayAgo = new Date(now.getTime() - DAY);
-      const [dest] = await db
+      const [dest] = await tx
         .select({
           hour: sql<number>`count(*) filter (where ${otpCodes.createdAt} > ${hourAgo.toISOString()})`.mapWith(
             Number,
@@ -526,7 +624,7 @@ export class OtpService {
       const perIp = this.config.env.SANCHAY_OTP_PER_IP_PER_HOUR;
       if (
         input.ip !== null &&
-        (await this.countSince(and(eq(otpCodes.ip, input.ip), sharedPurpose), hourAgo)) >= perIp
+        (await this.countSince(tx, and(eq(otpCodes.ip, input.ip), sharedPurpose), hourAgo)) >= perIp
       ) {
         throw new AppError('RATE_LIMITED', { retryable: true });
       }
@@ -534,8 +632,11 @@ export class OtpService {
       const device = input.deviceRefHash ?? null;
       if (
         device !== null &&
-        (await this.countSince(and(eq(otpCodes.deviceRefHash, device), sharedPurpose), hourAgo)) >=
-          OTP_POLICY.perDevicePerHour
+        (await this.countSince(
+          tx,
+          and(eq(otpCodes.deviceRefHash, device), sharedPurpose),
+          hourAgo,
+        )) >= OTP_POLICY.perDevicePerHour
       ) {
         throw new AppError('RATE_LIMITED', { retryable: true });
       }
@@ -543,7 +644,7 @@ export class OtpService {
 
     if (input.destination.channel === 'SMS') {
       const since = istDayStart(now);
-      const [today] = await db
+      const [today] = await tx
         .select({ n: sql<number>`count(*)`.mapWith(Number) })
         .from(otpCodes)
         .where(and(eq(otpCodes.channel, 'SMS'), gte(otpCodes.createdAt, since)));
@@ -557,8 +658,12 @@ export class OtpService {
     }
   }
 
-  private async countSince(condition: SQL | undefined, since: Date): Promise<number> {
-    const [row] = await this.dbh.db
+  private async countSince(
+    exec: DbExecutor,
+    condition: SQL | undefined,
+    since: Date,
+  ): Promise<number> {
+    const [row] = await exec
       .select({ n: sql<number>`count(*)`.mapWith(Number) })
       .from(otpCodes)
       .where(and(condition, gt(otpCodes.createdAt, since)));
