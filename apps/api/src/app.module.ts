@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import { type DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ORPCModule } from '@orpc/nest';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { Logger, LoggerModule } from 'nestjs-pino';
@@ -21,6 +22,7 @@ import {
   headerValue,
   type SanchayClsStore,
 } from './modules/platform/request-context.js';
+import { throttleKey, throttleTracker } from './modules/platform/throttle.js';
 
 type RawRequest = IncomingMessage & { id?: string };
 
@@ -47,6 +49,11 @@ export class AppModule {
             },
           },
         }),
+        ThrottlerModule.forRoot({
+          throttlers: [{ name: 'default', ttl: 60_000, limit: env.SANCHAY_THROTTLE_PER_MINUTE }],
+          getTracker: throttleTracker,
+          generateKey: throttleKey,
+        }),
         ORPCModule.forRootAsync({
           inject: [ClsService, Logger],
           useFactory: (cls: ClsService<SanchayClsStore>, logger: Logger) =>
@@ -62,6 +69,7 @@ export class AppModule {
         // Order matters: client identification, then session. B21 appends ThrottlerGuard third.
         { provide: APP_GUARD, useClass: ClientGuard },
         { provide: APP_GUARD, useClass: SessionGuard },
+        { provide: APP_GUARD, useClass: ThrottlerGuard },
       ],
     };
   }
