@@ -1,8 +1,8 @@
-import { createHmac, randomInt } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, gt, gte, isNull, type SQL, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull, lt, type SQL, sql } from 'drizzle-orm';
 import { AppConfig } from '../../config/app-config.js';
-import { DB, type DbHandle } from '../../db/client.js';
+import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { EMAIL_SENDER, type EmailSender } from '../../integrations/email/port.js';
 import { EMAIL_TEMPLATE_IDS, emailOtpMessage } from '../../integrations/email/templates.js';
 import {
@@ -21,7 +21,7 @@ import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock, DAY, HOUR, MINUTE, SECOND } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
-import { newId } from '../platform/ids.js';
+import { asRowId, newId, UUID_RE } from '../platform/ids.js';
 import { KEY_SERVICE, type KeyService } from '../platform/key-service.js';
 import { pgErrorCodeOf } from '../platform/pg-errors.js';
 import { type OtpChannel, type OtpPurpose, otpCodes } from './identity.schema.js';
@@ -103,6 +103,19 @@ export interface IssuedOtp {
   destinationMasked: string;
 }
 
+export interface VerifyOtpInput {
+  challengeId: string;
+  purpose: OtpPurpose;
+  code: string;
+}
+
+export interface VerifiedOtp {
+  otpId: string;
+  channel: OtpChannel;
+  destination: string;
+  destinationBidx: Buffer;
+}
+
 interface RenderedOtp {
   templateId: string;
   subject: string;
@@ -111,6 +124,12 @@ interface RenderedOtp {
 
 export function generateOtpCode(): string {
   return randomInt(0, 1_000_000).toString().padStart(6, '0');
+}
+
+function consumedError(reason: string | null): AppError {
+  if (reason === 'LOCKED') return new AppError('OTP_LOCKED');
+  if (reason === 'EXPIRED') return new AppError('OTP_EXPIRED');
+  return new AppError('OTP_INVALID');
 }
 
 @Injectable()
@@ -232,6 +251,114 @@ export class OtpService {
       resendAfterSeconds: OTP_POLICY.cooldownMs / SECOND,
       destinationMasked,
     };
+  }
+
+  /**
+   * Attempt increments, burns and the lockout audit are committed on the pool, so they survive any caller rollback.
+   * The final consume runs on `exec`, so it commits or rolls back with the caller's transaction.
+   */
+  async verify(exec: DbExecutor, input: VerifyOtpInput): Promise<VerifiedOtp> {
+    if (!UUID_RE.test(input.challengeId)) throw new AppError('OTP_INVALID');
+    const now = this.clock.now();
+    const otpId = asRowId('otp_codes', input.challengeId);
+    const db = this.dbh.db;
+
+    const [row] = await db
+      .select()
+      .from(otpCodes)
+      .where(and(eq(otpCodes.id, otpId), eq(otpCodes.purpose, input.purpose)))
+      .limit(1);
+    if (row === undefined) throw new AppError('OTP_INVALID');
+    if (row.consumedAt !== null) throw consumedError(row.consumedReason);
+
+    if (row.expiresAt.getTime() <= now.getTime()) {
+      await this.burn(row.id, 'EXPIRED', now);
+      throw new AppError('OTP_EXPIRED');
+    }
+
+    const [bumped] = await db
+      .update(otpCodes)
+      .set({ attempts: sql`${otpCodes.attempts} + 1` })
+      .where(
+        and(
+          eq(otpCodes.id, row.id),
+          isNull(otpCodes.consumedAt),
+          lt(otpCodes.attempts, OTP_POLICY.maxAttempts),
+        ),
+      )
+      .returning({ attempts: otpCodes.attempts });
+    if (bumped === undefined) throw new AppError('OTP_LOCKED');
+
+    const expected = this.codeHmac(
+      row.pepperKid,
+      row.purpose,
+      row.destinationBidx,
+      row.id,
+      input.code,
+    );
+    if (!timingSafeEqual(expected, row.codeHmac)) {
+      if (bumped.attempts >= OTP_POLICY.maxAttempts) {
+        await this.burn(row.id, 'LOCKED', now);
+        await this.noteLockout(row.purpose, row.channel, row.destinationBidx, now);
+        throw new AppError('OTP_LOCKED');
+      }
+      throw new AppError('OTP_INVALID');
+    }
+
+    const [consumed] = await exec
+      .update(otpCodes)
+      .set({ consumedAt: now, consumedReason: 'VERIFIED' })
+      .where(and(eq(otpCodes.id, row.id), isNull(otpCodes.consumedAt)))
+      .returning({ id: otpCodes.id });
+    if (consumed === undefined) throw new AppError('OTP_INVALID');
+
+    return {
+      otpId: row.id,
+      channel: row.channel,
+      destination: this.crypto.decrypt(row.destinationEnc, {
+        table: 'otp_codes',
+        column: 'destination_enc',
+        rowId: otpId,
+      }),
+      destinationBidx: row.destinationBidx,
+    };
+  }
+
+  private async burn(id: string, reason: 'EXPIRED' | 'LOCKED', now: Date): Promise<void> {
+    await this.dbh.db
+      .update(otpCodes)
+      .set({ consumedAt: now, consumedReason: reason })
+      .where(and(eq(otpCodes.id, id), isNull(otpCodes.consumedAt)));
+  }
+
+  /** Audits AUTH_OTP_LOCKOUT (STARTED) when this burn is the 3rd LOCKED code for (purpose, destination) within 60 min. */
+  private async noteLockout(
+    purpose: OtpPurpose,
+    channel: OtpChannel,
+    destinationBidx: Buffer,
+    now: Date,
+  ): Promise<void> {
+    const since = new Date(now.getTime() - OTP_POLICY.lockoutWindowMs);
+    const [row] = await this.dbh.db
+      .select({ n: sql<number>`count(*)`.mapWith(Number) })
+      .from(otpCodes)
+      .where(
+        and(
+          eq(otpCodes.purpose, purpose),
+          eq(otpCodes.destinationBidx, destinationBidx),
+          eq(otpCodes.consumedReason, 'LOCKED'),
+          gt(otpCodes.consumedAt, since),
+        ),
+      );
+    if ((row?.n ?? 0) >= OTP_POLICY.lockoutBurns) {
+      await this.audit.record(null, {
+        action: AUDIT_ACTIONS.AUTH_OTP_LOCKOUT,
+        actorType: 'ANONYMOUS',
+        entityType: 'otp_destination',
+        entityId: destinationBidx.toString('hex'),
+        data: { purpose, channel, outcome: 'STARTED' },
+      });
+    }
   }
 
   private destinationBidx(destination: OtpDestination): Buffer {
