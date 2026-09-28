@@ -6,7 +6,7 @@ Later tasks append rows or update the Status and "Written by" cells only.
 | ADR | Title | Status | Written by |
 |---|---|---|---|
 | 0001 | Toolchain, dependency versions and supply-chain settings | Accepted | Plan 01 Task A1 |
-| 0002 | Universal UI: RN StyleSheet plus tokens in the MVP; Uniwind decision deferred | Planned (stub) | Plan 01 Task C4 |
+| 0002 | Universal UI: RN StyleSheet plus tokens in the MVP; Uniwind decision deferred | Accepted | Plan 01 Task C4 |
 | 0003 | oRPC / NestJS / Fastify gate | Planned | Plan 01 Task B22 (gate record) |
 | 0004 | Bundle budgets | Reserved (P2) | Phase 2 |
 | 0005 | Hosts and edge: four-host model, HostGuard, `/api/v1` on every host (H-1) | Planned | Plan 01 Task C10 |
