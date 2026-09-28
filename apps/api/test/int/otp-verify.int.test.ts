@@ -1,11 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { AppConfig } from '../../src/config/app-config.js';
+import { createDb } from '../../src/db/client.js';
 import { auditEvents, otpCodes } from '../../src/db/schema.js';
-import type { IssueOtpInput } from '../../src/modules/identity/otp.service.js';
+import { type IssueOtpInput, OtpService } from '../../src/modules/identity/otp.service.js';
+import { AuditService } from '../../src/modules/platform/audit.service.js';
 import { MINUTE, SECOND } from '../../src/modules/platform/clock.js';
 import { AppError } from '../../src/modules/platform/errors.js';
 import { createTestDatabase, type TestDatabase } from './db.js';
-import { otpFixture } from './otp-fixture.js';
+import { noRequestContext, otpFixture } from './otp-fixture.js';
 
 let t: TestDatabase;
 let f: ReturnType<typeof otpFixture>;
@@ -174,4 +177,56 @@ describe('OtpService.verify', () => {
     expect((refused as AppError).code).toBe('RATE_LIMITED');
     expect((refused as AppError).options.retryAfterSeconds).toBe(1800);
   });
+
+  it('keeps verifying (row select, attempt bump, burn AND the lockout audit) when the caller holds the ' +
+    'only connection in the main pool (round-1 fix for the B14 pool-deadlock finding)', async () => {
+    // Two prior lockouts on the roomy shared-fixture pool, so the 3rd burn below also has to write the
+    // AUTH_OTP_LOCKOUT audit (noteLockout's count query and the audit insert), not just look up the row
+    // and bump the attempt counter.
+    await lockCurrentChallenge();
+    f.clock.advance(31 * SECOND);
+    challengeId = (await f.otp.issue(login())).challengeId;
+    await lockCurrentChallenge();
+    f.clock.advance(31 * SECOND);
+    challengeId = (await f.otp.issue(login())).challengeId;
+    const good = f.sms.latestCode(mobile);
+    for (let i = 0; i < 4; i++) await outcomeOf(verify(wrong(good)));
+
+    // A main pool with exactly one connection, already checked out by the caller's own open transaction
+    // -- the shape a future B19/E4 caller uses -- plus a separate small bookkeeping pool. Before the
+    // round-1 fix, verify's pool-side lookup/bump/burn/audit ran on the same pool as `exec` and would
+    // have hung forever waiting for a second connection the starved main pool can never hand out.
+    const mainDbh = createDb(t.url, 1);
+    const bookkeepingDbh = createDb(t.url, 3);
+    try {
+      const scopedOtp = new OtpService(
+        mainDbh,
+        bookkeepingDbh,
+        f.crypto,
+        f.keys,
+        f.clock,
+        f.sms,
+        f.email,
+        new AppConfig(f.env),
+        new AuditService(bookkeepingDbh, noRequestContext, f.clock),
+      );
+      const outcome = await mainDbh.db
+        .transaction((tx) =>
+          scopedOtp.verify(tx, { challengeId, purpose: 'LOGIN', code: wrong(good) }),
+        )
+        .catch((e: unknown) => e);
+      expect(outcome).toBeInstanceOf(AppError);
+      expect((outcome as AppError).code).toBe('OTP_LOCKED');
+      expect(await row()).toMatchObject({ attempts: 5, consumedReason: 'LOCKED' });
+
+      const entityId = f.crypto.blindIndex('mobile', mobile).toString('hex');
+      const started = (
+        await t.db.select().from(auditEvents).where(eq(auditEvents.entityId, entityId))
+      ).filter((a) => a.data.outcome === 'STARTED');
+      expect(started).toHaveLength(1);
+    } finally {
+      await mainDbh.close();
+      await bookkeepingDbh.close();
+    }
+  }, 15_000);
 });

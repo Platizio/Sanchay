@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { auditEvents, otpCodes } from '../../src/db/schema.js';
@@ -164,6 +164,34 @@ describe('OtpService.issue', () => {
       'RATE_LIMITED',
     );
   });
+
+  it(
+    'does not count CONSENT sends toward, or block them with, the LOGIN/VERIFY_EMAIL per-destination/' +
+      'IP/device quotas (H-3 round-1 fix)',
+    async () => {
+      const mobile = nextMobile();
+      const ip = '198.51.100.77';
+      const device = Buffer.alloc(32, 7);
+      const consent = (): IssueOtpInput => ({
+        purpose: 'CONSENT',
+        destination: { channel: 'SMS', value: mobile },
+        referenceId: randomUUID(),
+        ip,
+        deviceRefHash: device,
+        consentSms: { template: 'ATTEST' },
+      });
+      // 6 distinct CONSENT challenges (own referenceId each, so none hits the 30 s per-challenge cooldown)
+      // to the same destination/IP/device, all within the same instant: more than the LOGIN 5/hour
+      // per-destination budget and the 10/hour per-device budget. None of them is rate-limited by those
+      // LOGIN/VERIFY_EMAIL-only quotas; CONSENT's own regime (Plan-03 E4) is out of this service's scope.
+      for (let i = 0; i < 6; i++) {
+        expect((await outcome(f.otp.issue(consent()))).code).toBe('OK');
+      }
+      // A LOGIN to the same destination/IP/device right after is unaffected too: none of the 6 CONSENT
+      // sends counted toward its 5/hour (destination), 20/hour (IP) or 10/hour (device) budgets.
+      expect((await outcome(f.otp.issue(sms(mobile, ip, device)))).code).toBe('OK');
+    },
+  );
 
   it('reads the per-IP limit from SANCHAY_OTP_PER_IP_PER_HOUR', async () => {
     const g = otpFixture(t, { SANCHAY_OTP_PER_IP_PER_HOUR: '3' });

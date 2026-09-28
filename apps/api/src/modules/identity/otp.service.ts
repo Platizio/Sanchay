@@ -1,6 +1,6 @@
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, gt, gte, isNull, lt, type SQL, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, lt, type SQL, sql } from 'drizzle-orm';
 import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { EMAIL_SENDER, type EmailSender } from '../../integrations/email/port.js';
@@ -46,6 +46,25 @@ export const OTP_POLICY = {
 } as const;
 
 const IST_OFFSET_MS = 330 * MINUTE;
+
+/**
+ * H-3 (precedence 1, binding spec): the per-destination hour/day, per-IP and per-device quotas below are
+ * shared only by LOGIN and VERIFY_EMAIL. CONSENT has its own regime — at most 3 sends per challenge, a
+ * 30 s cooldown and at most 10 consent sends per investor per hour — owned by the Plan-03 consent engine
+ * (E4, `sendOtp`, `docs/superpowers/plans/2026-09-28-plans-02-04-outlines.md:403`), not by this service.
+ * Fix for the B13 round-1 review finding: a CONSENT row must never count toward, or be blocked by, the
+ * shared LOGIN/VERIFY_EMAIL budget for the same destination/IP/device. Lockout, the 30 s cooldown and the
+ * global SMS cap are unaffected: they still apply to every purpose.
+ */
+const SHARED_QUOTA_PURPOSES: readonly OtpPurpose[] = ['LOGIN', 'VERIFY_EMAIL'];
+
+/** A small, separate connection pool for OtpService.verify's pool-side bookkeeping (round-1 fix for the
+ * B14 review finding). verify's row select, guarded attempt bump, burns and lockout audit must never draw
+ * from the same pool a caller's own open transaction (`exec`) may have fully checked out — otherwise
+ * enough concurrent `verify(tx, ...)` callers permanently deadlock the whole pool. Whoever wires OtpService
+ * into a Nest module (B19/identity module) must provide this as its own small `DbHandle`
+ * (`createDb(env.DATABASE_URL, 2..4)`), separate from the `DB` token, and close it on shutdown too. */
+export const OTP_BOOKKEEPING_DB = Symbol('OTP_BOOKKEEPING_DB');
 
 /** D-17 (R-07): rejects with SenderUnavailableError when the provider has not answered within `timeoutMs`. */
 export async function withSendTimeout<T>(send: Promise<T>, timeoutMs: number): Promise<T> {
@@ -141,6 +160,7 @@ export class OtpService {
 
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(OTP_BOOKKEEPING_DB) private readonly bookkeepingDb: DbHandle,
     @Inject(Crypto) private readonly crypto: Crypto,
     @Inject(KEY_SERVICE) private readonly keys: KeyService,
     @Inject(CLOCK) private readonly clock: Clock,
@@ -261,7 +281,10 @@ export class OtpService {
     if (!UUID_RE.test(input.challengeId)) throw new AppError('OTP_INVALID');
     const now = this.clock.now();
     const otpId = asRowId('otp_codes', input.challengeId);
-    const db = this.dbh.db;
+    // Pool-side bookkeeping runs on its own small pool, never on `this.dbh.db`: `exec` may already be a
+    // transaction the caller checked a connection out of on the main pool, and enough concurrent callers
+    // would otherwise deadlock it (round-1 fix). Only the final consume below runs on `exec`.
+    const db = this.bookkeepingDb.db;
 
     const [row] = await db
       .select()
@@ -324,14 +347,19 @@ export class OtpService {
     };
   }
 
+  /** Pool-side bookkeeping (round-1 fix): runs on `bookkeepingDb`, never on the possibly-exhausted main pool. */
   private async burn(id: string, reason: 'EXPIRED' | 'LOCKED', now: Date): Promise<void> {
-    await this.dbh.db
+    await this.bookkeepingDb.db
       .update(otpCodes)
       .set({ consumedAt: now, consumedReason: reason })
       .where(and(eq(otpCodes.id, id), isNull(otpCodes.consumedAt)));
   }
 
-  /** Audits AUTH_OTP_LOCKOUT (STARTED) when this burn is the 3rd LOCKED code for (purpose, destination) within 60 min. */
+  /**
+   * Audits AUTH_OTP_LOCKOUT (STARTED) when this burn is the 3rd LOCKED code for (purpose, destination)
+   * within 60 min. Pool-side bookkeeping (round-1 fix): the count and the audit write both run on
+   * `bookkeepingDb`, never on the possibly-exhausted main pool.
+   */
   private async noteLockout(
     purpose: OtpPurpose,
     channel: OtpChannel,
@@ -339,7 +367,7 @@ export class OtpService {
     now: Date,
   ): Promise<void> {
     const since = new Date(now.getTime() - OTP_POLICY.lockoutWindowMs);
-    const [row] = await this.dbh.db
+    const [row] = await this.bookkeepingDb.db
       .select({ n: sql<number>`count(*)`.mapWith(Number) })
       .from(otpCodes)
       .where(
@@ -351,7 +379,7 @@ export class OtpService {
         ),
       );
     if ((row?.n ?? 0) >= OTP_POLICY.lockoutBurns) {
-      await this.audit.record(null, {
+      await this.audit.record(this.bookkeepingDb.db, {
         action: AUDIT_ACTIONS.AUTH_OTP_LOCKOUT,
         actorType: 'ANONYMOUS',
         entityType: 'otp_destination',
@@ -467,36 +495,50 @@ export class OtpService {
       }
     }
 
-    const hourAgo = new Date(now.getTime() - HOUR);
-    const dayAgo = new Date(now.getTime() - DAY);
-    const [dest] = await db
-      .select({
-        hour: sql<number>`count(*) filter (where ${otpCodes.createdAt} > ${hourAgo.toISOString()})`.mapWith(
-          Number,
-        ),
-        day: sql<number>`count(*)`.mapWith(Number),
-      })
-      .from(otpCodes)
-      .where(and(eq(otpCodes.destinationBidx, destinationBidx), gt(otpCodes.createdAt, dayAgo)));
-    if (
-      (dest?.hour ?? 0) >= OTP_POLICY.perDestinationPerHour ||
-      (dest?.day ?? 0) >= OTP_POLICY.perDestinationPerDay
-    ) {
-      throw new AppError('RATE_LIMITED', { retryable: true });
-    }
+    // H-3: shared only by LOGIN and VERIFY_EMAIL. A CONSENT request never checks these, and a CONSENT row
+    // is excluded from the counts (via `sharedPurpose`) so it never counts toward another request's budget.
+    if (SHARED_QUOTA_PURPOSES.includes(input.purpose)) {
+      const sharedPurpose = inArray(otpCodes.purpose, SHARED_QUOTA_PURPOSES);
+      const hourAgo = new Date(now.getTime() - HOUR);
+      const dayAgo = new Date(now.getTime() - DAY);
+      const [dest] = await db
+        .select({
+          hour: sql<number>`count(*) filter (where ${otpCodes.createdAt} > ${hourAgo.toISOString()})`.mapWith(
+            Number,
+          ),
+          day: sql<number>`count(*)`.mapWith(Number),
+        })
+        .from(otpCodes)
+        .where(
+          and(
+            eq(otpCodes.destinationBidx, destinationBidx),
+            gt(otpCodes.createdAt, dayAgo),
+            sharedPurpose,
+          ),
+        );
+      if (
+        (dest?.hour ?? 0) >= OTP_POLICY.perDestinationPerHour ||
+        (dest?.day ?? 0) >= OTP_POLICY.perDestinationPerDay
+      ) {
+        throw new AppError('RATE_LIMITED', { retryable: true });
+      }
 
-    const perIp = this.config.env.SANCHAY_OTP_PER_IP_PER_HOUR;
-    if (input.ip !== null && (await this.countSince(eq(otpCodes.ip, input.ip), hourAgo)) >= perIp) {
-      throw new AppError('RATE_LIMITED', { retryable: true });
-    }
+      const perIp = this.config.env.SANCHAY_OTP_PER_IP_PER_HOUR;
+      if (
+        input.ip !== null &&
+        (await this.countSince(and(eq(otpCodes.ip, input.ip), sharedPurpose), hourAgo)) >= perIp
+      ) {
+        throw new AppError('RATE_LIMITED', { retryable: true });
+      }
 
-    const device = input.deviceRefHash ?? null;
-    if (
-      device !== null &&
-      (await this.countSince(eq(otpCodes.deviceRefHash, device), hourAgo)) >=
-        OTP_POLICY.perDevicePerHour
-    ) {
-      throw new AppError('RATE_LIMITED', { retryable: true });
+      const device = input.deviceRefHash ?? null;
+      if (
+        device !== null &&
+        (await this.countSince(and(eq(otpCodes.deviceRefHash, device), sharedPurpose), hourAgo)) >=
+          OTP_POLICY.perDevicePerHour
+      ) {
+        throw new AppError('RATE_LIMITED', { retryable: true });
+      }
     }
 
     if (input.destination.channel === 'SMS') {
@@ -515,7 +557,7 @@ export class OtpService {
     }
   }
 
-  private async countSince(condition: SQL, since: Date): Promise<number> {
+  private async countSince(condition: SQL | undefined, since: Date): Promise<number> {
     const [row] = await this.dbh.db
       .select({ n: sql<number>`count(*)`.mapWith(Number) })
       .from(otpCodes)
