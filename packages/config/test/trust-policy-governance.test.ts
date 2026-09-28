@@ -28,6 +28,17 @@ const workspacePath = resolve(repoRoot, 'pnpm-workspace.yaml');
 const rulingsPath = resolve(repoRoot, 'docs/delivery/rulings.md');
 const adrPath = resolve(repoRoot, 'docs/adr/0001-versions.md');
 
+/**
+ * Review finding (batch C1-C4-C5, round 4): the ruling commit (`160b8f0`) and the commit that
+ * acts on it (`471ed0f`) share one git identity, so rulings.md text alone cannot tell an owner
+ * ruling from implementer self-authorization. Each excluded entry therefore also needs an
+ * ADR-0001 row that points at the owner's decision as recorded outside this repo and outside
+ * any implementer's output (for example the harness record of the owner's answer), with the
+ * record's UTC time and SHA-256, so a reviewer can check the record independently.
+ */
+const OWNER_DECISION_RECORD =
+  /owner decision record: [^|]*?\banswered (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z), sha256 ([0-9a-f]{64})\b/;
+
 /** An exact `name@version` or `@scope/name@version`: no range, no bare name, no pattern. */
 const EXACT_ENTRY =
   /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?$/;
@@ -90,6 +101,29 @@ describe('pnpm trust-policy governance', () => {
         adrRows.some((row) => row.includes(`'${entry}'`)),
         `docs/adr/0001-versions.md has no trustPolicyExclude row for ${entry}`,
       ).toBe(true);
+    }
+  });
+
+  it('ties every trustPolicyExclude entry to an owner decision recorded outside the repo', () => {
+    const entries = trustPolicyExcludeEntries(workspace) ?? [];
+    const adrRows = readFileSync(adrPath, 'utf8')
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('|') && line.includes('trustPolicyExclude'));
+    for (const entry of entries) {
+      const record = adrRows
+        .filter((row) => row.includes(`'${entry}'`))
+        .map((row) => OWNER_DECISION_RECORD.exec(row))
+        .find((match) => match !== null);
+      expect(
+        record,
+        `docs/adr/0001-versions.md has no trustPolicyExclude row for ${entry} that cites the ` +
+          "owner's decision record ('owner decision record: <where>, answered <UTC ISO-8601>, " +
+          "sha256 <64 hex>') — a rulings.md line written under the implementer's own identity " +
+          'cannot be told apart from self-authorization',
+      ).toBeTruthy();
+      const answeredAt = Date.parse(record?.[1] ?? '');
+      expect(Number.isNaN(answeredAt), `unparseable answer time for ${entry}`).toBe(false);
+      expect(answeredAt).toBeLessThanOrEqual(Date.now());
     }
   });
 
