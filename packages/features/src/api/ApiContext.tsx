@@ -1,0 +1,25 @@
+import { type ApiClient, type ApiUtils, createApiUtils } from '@sanchay/api-client';
+import { type AuthApi, authApiFrom } from '@sanchay/app-core';
+import { createContext, type ReactNode, useContext, useMemo } from 'react';
+
+export interface ApiContextValue {
+  client: ApiClient;
+  utils: ApiUtils;
+  auth: AuthApi;
+}
+
+const ApiContext = createContext<ApiContextValue | null>(null);
+
+export function ApiProvider({ client, children }: { client: ApiClient; children: ReactNode }) {
+  const value = useMemo(
+    () => ({ client, utils: createApiUtils(client), auth: authApiFrom(client) }),
+    [client],
+  );
+  return <ApiContext.Provider value={value}>{children}</ApiContext.Provider>;
+}
+
+export function useApi(): ApiContextValue {
+  const api = useContext(ApiContext);
+  if (!api) throw new Error('useApi must be used inside <ApiProvider>');
+  return api;
+}
