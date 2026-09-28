@@ -4,7 +4,7 @@ import { ORPCError, ValidationError } from '@orpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { mapException } from './api-exception.filter.js';
 import { AppError, envelopeFor, normalizeOrpcError } from './errors.js';
-import { pgErrorCodeOf } from './pg-errors.js';
+import { pgConstraintOf, pgErrorCodeOf } from './pg-errors.js';
 
 describe('envelopeFor', () => {
   it('builds the oRPC-native wire shape with the catalogue status', () => {
@@ -100,5 +100,16 @@ describe('pgErrorCodeOf', () => {
     expect(pgErrorCodeOf({ code: '23505' })).toBe('23505');
     expect(pgErrorCodeOf({ cause: { code: '23514' } })).toBe('23514');
     expect(pgErrorCodeOf(new Error('x'))).toBeUndefined();
+  });
+});
+
+describe('pgConstraintOf', () => {
+  it('reads the violated constraint directly or from a wrapped cause', () => {
+    expect(pgConstraintOf({ code: '23505', constraint: 'investors_email_bidx_uq' })).toBe(
+      'investors_email_bidx_uq',
+    );
+    expect(pgConstraintOf({ cause: { code: '23505', constraint: 'x_uq' } })).toBe('x_uq');
+    expect(pgConstraintOf(new Error('x'))).toBeUndefined();
+    expect(pgConstraintOf(null)).toBeUndefined();
   });
 });

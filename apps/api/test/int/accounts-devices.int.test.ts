@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { investorContacts, investorDevices } from '../../src/db/schema.js';
 import { DeviceRegistry } from '../../src/modules/identity/device-registry.service.js';
@@ -29,6 +29,36 @@ afterAll(async () => {
 
 const fieldCode = (e: unknown): string | undefined =>
   e instanceof AppError ? e.options?.fields?.[0]?.code : undefined;
+
+/** setVerifiedEmail inside a transaction that stays open (row lock held, nothing committed) until release(). */
+function heldEmailTx(investorId: string, email: string) {
+  let release = (): void => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let markWritten = (): void => undefined;
+  const written = new Promise<void>((resolve) => {
+    markWritten = resolve;
+  });
+  const done = t.db.transaction(async (tx) => {
+    await accounts.setVerifiedEmail(tx, investorId, email);
+    markWritten();
+    await gate;
+  });
+  return { written, release, done };
+}
+
+/** Resolves once some other session in this database is blocked waiting on a lock. */
+async function untilLockWaiter(): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    const res = await t.db.execute(
+      sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+    );
+    if (Number((res.rows[0] as { n: number }).n) > 0) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error('no session ever waited on a lock');
+}
 
 describe('InvestorAccounts', () => {
   it('creates an investor with encrypted mobile, blind index and a CURRENT contact', async () => {
@@ -84,6 +114,54 @@ describe('InvestorAccounts', () => {
       (e: unknown) => e,
     );
     expect(fieldCode(again)).toBe('EMAIL_ALREADY_VERIFIED');
+  });
+
+  it('refuses a concurrent second email for the same investor with EMAIL_ALREADY_VERIFIED (no silent overwrite)', async () => {
+    const a = await accounts.createWithVerifiedMobile(t.db, '9876500105');
+    const first = heldEmailTx(a.id, 'first@example.com');
+    await first.written;
+    // The second call passes the SELECT-based check (the first write is not committed yet), then blocks on the row lock.
+    const second = accounts.setVerifiedEmail(t.db, a.id, 'second@example.com').then(
+      () => null,
+      (e: unknown) => e,
+    );
+    await untilLockWaiter();
+    first.release();
+    await first.done;
+    const lost = await second;
+    expect(lost).toBeInstanceOf(AppError);
+    expect(fieldCode(lost)).toBe('EMAIL_ALREADY_VERIFIED');
+    const reloaded = await accounts.findById(t.db, a.id);
+    expect(reloaded && accounts.decryptEmail(reloaded)).toBe('first@example.com');
+    const current = await t.db
+      .select()
+      .from(investorContacts)
+      .where(
+        and(
+          eq(investorContacts.investorId, a.id),
+          eq(investorContacts.kind, 'EMAIL'),
+          eq(investorContacts.status, 'CURRENT'),
+        ),
+      );
+    expect(current.map((c) => c.masked)).toEqual(['f•••@example.com']);
+  });
+
+  it('maps a concurrent cross-investor email race (investors_email_bidx_uq) to EMAIL_IN_USE, not a 500', async () => {
+    const a = await accounts.createWithVerifiedMobile(t.db, '9876500106');
+    const b = await accounts.createWithVerifiedMobile(t.db, '9876500107');
+    const first = heldEmailTx(a.id, 'shared@example.com');
+    await first.written;
+    const second = accounts.setVerifiedEmail(t.db, b.id, 'shared@example.com').then(
+      () => null,
+      (e: unknown) => e,
+    );
+    await untilLockWaiter();
+    first.release();
+    await first.done;
+    const lost = await second;
+    expect(lost).toBeInstanceOf(AppError);
+    expect((lost as AppError).code).toBe('VALIDATION_FAILED');
+    expect(fieldCode(lost)).toBe('EMAIL_IN_USE');
   });
 });
 
