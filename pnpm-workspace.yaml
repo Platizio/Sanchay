@@ -14,12 +14,20 @@ blockExoticSubdeps: true
 trustPolicy: no-downgrade
 
 # H-16/A1 rule: an install error about `trustPolicy` is reported to the lead, never resolved
-# by adding a `trustPolicyExclude` entry. `@nestjs/cli@11.0.24` pins `chokidar@4.0.3`, which
+# by the implementer alone; only a recorded ruling adds a `trustPolicyExclude` entry (R-28
+# below). `@nestjs/cli@11.0.24` pins `chokidar@4.0.3`, which
 # lacks an npm provenance attestation (4.0.0/4.0.1 have one, 4.0.2/4.0.3 do not; registry
 # check 2026-09-28), tripping `no-downgrade`. Pin the dependency to the last provenance-
 # carrying release instead of excluding the trust check. See ADR-0001 (review fix, round 1).
 overrides:
   chokidar: 4.0.1
+
+# Owner ruling R-28 (docs/delivery/rulings.md): exact `name@version` trust-policy exceptions
+# only, never a range, bare name or pattern; `trustPolicy: no-downgrade` stays on for everything
+# else. Every entry has an ADR-0001 row with the reason, dependency path and re-check date.
+trustPolicyExclude:
+  - 'semver@6.3.1'
+  - 'ua-parser-js@1.0.41'
 
 # Exact versions only (never a bare name or a pattern). Every entry has an ADR-0001 row with an expiry.
 minimumReleaseAgeExclude:
