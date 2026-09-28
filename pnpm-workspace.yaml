@@ -78,6 +78,16 @@ minimumReleaseAgeExclude:
   - 'turbo@2.11.4'
   - 'unplugin-swc@2.0.0'
   - 'w3c-xmlserializer@6.0.0'
+  - '@expo/cli@57.0.27'
+  - '@expo/router-server@57.0.11'
+  - '@expo/ui@57.0.20'
+  - 'babel-preset-expo@57.0.13'
+  - 'expo@57.0.25'
+  - 'expo-glass-effect@57.0.4'
+  - 'expo-linking@57.0.11'
+  - 'expo-modules-core@57.0.19'
+  - 'expo-modules-jsi@57.1.1'
+  - 'expo-router@57.0.23'
 
 # pnpm 11 strictDepBuilds: every dependency with an install script needs an explicit entry (replaces onlyBuiltDependencies, X-08).
 allowBuilds:
