@@ -1,14 +1,17 @@
 import type { IncomingMessage } from 'node:http';
 import { type DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ORPCModule } from '@orpc/nest';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { Logger, LoggerModule } from 'nestjs-pino';
 import { v7 as uuidv7 } from 'uuid';
 import type { Env } from './config/env.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
+import { IdentityModule } from './modules/identity/identity.module.js';
+import { SessionGuard } from './modules/identity/session.guard.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
+import { ClientGuard } from './modules/platform/client.guard.js';
 import { HealthRouter } from './modules/platform/health.router.js';
 import { buildPinoHttpOptions } from './modules/platform/logging.js';
 import { buildOrpcConfig } from './modules/platform/orpc.js';
@@ -51,9 +54,15 @@ export class AppModule {
         }),
         PlatformModule.forRoot(env),
         IntegrationsModule.forRoot(env),
+        IdentityModule,
       ],
       controllers: [HealthRouter],
-      providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],
+      providers: [
+        { provide: APP_FILTER, useClass: ApiExceptionFilter },
+        // Order matters: client identification, then session. B21 appends ThrottlerGuard third.
+        { provide: APP_GUARD, useClass: ClientGuard },
+        { provide: APP_GUARD, useClass: SessionGuard },
+      ],
     };
   }
 }

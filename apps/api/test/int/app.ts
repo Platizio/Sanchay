@@ -1,3 +1,4 @@
+import type { DynamicModule, Type } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module.js';
@@ -23,12 +24,19 @@ export interface TestApp {
 }
 
 export async function bootTestApp(
-  options: { env?: Record<string, string>; clock?: FakeClock } = {},
+  options: {
+    env?: Record<string, string>;
+    clock?: FakeClock;
+    /** Extra test-only modules (for example InfraRoutesTestModule); AppModule's global guards apply to them. */
+    testModules?: Array<Type<unknown> | DynamicModule>;
+  } = {},
 ): Promise<TestApp> {
   const db = await createTestDatabase();
   const env = testEnv(db.url, options.env);
   const clock = options.clock ?? new FakeClock();
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot(env)] })
+  const moduleRef = await Test.createTestingModule({
+    imports: [AppModule.forRoot(env), ...(options.testModules ?? [])],
+  })
     .overrideProvider(CLOCK)
     .useValue(clock)
     .compile();
