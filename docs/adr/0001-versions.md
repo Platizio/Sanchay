@@ -1,0 +1,201 @@
+# ADR-0001: Toolchain, dependency versions and supply-chain settings
+
+- Status: Accepted (created in Plan 01 Task A1; later tasks append table rows only)
+- Date: 2026-09-25 (versions and publish dates retrieved from the npm registry on this date; re-verified 2026-09-28 during A1 execution)
+- Scope: the Sanchay monorepo (legal entity and ARN holder: Platizio)
+
+## Context
+
+Design §A.2 fixes the launch versions. PO-1 keeps NestJS on 11.2.6; 12.x comes later as hardening work.
+pnpm 12 is a Rust rewrite with behavioural differences, so the MVP stays on the maintained 11.x line.
+Expo SDK 57 bundles React 19.2.3, and Next 16.3.6 peers `^19`, so the repo has one React version.
+H-16 / D-PLATFORM-112 require a 7-day release-age gate, strict dependency builds, no exotic transitive
+sources, a no-downgrade trust policy and a frozen lockfile in CI.
+
+## Decision
+
+### Toolchain
+
+| Tool | Version | Where pinned |
+|---|---|---|
+| Node | 24.21.0 (CI/Docker authority); local floor 24.13.1 | `.node-version` = `24.21.0`; root `engines.node` = `>=24.13.1 <25` (ruling R-23; see "Local engines floor" below) |
+| pnpm | 11.27.0 | root `packageManager` |
+| gitleaks | 8.30.x | installed per machine (`winget install --id Gitleaks.Gitleaks -e`); not required for A1 (lefthook/gitleaks hooks arrive in Task A2) |
+| Maestro CLI | 2.10.0 | installed per machine (local only in the MVP) |
+
+#### Local engines floor (ruling R-23)
+
+The A1 dev machine has Node 24.13.1, not the CI/Docker-pinned 24.21.0. Per controller ruling R-23, root
+`package.json` `engines.node` is set to `>=24.13.1 <25` so `pnpm install` does not hit
+`ERR_PNPM_UNSUPPORTED_ENGINE` locally, while `.node-version` stays `24.21.0` as the CI/Docker authority.
+This is a deliberate, ruling-approved deviation from the task brief's literal `>=24.21.0 <25`; see
+"Appended rows" below.
+
+### Supply-chain settings (`pnpm-workspace.yaml`)
+
+| Key | Value | Verified against |
+|---|---|---|
+| nodeLinker | hoisted | Expo monorepo guidance |
+| engineStrict | true | pnpm settings docs |
+| strictDepBuilds | true | pnpm settings docs, Build settings (default true); re-checked against `pnpm.io/settings/build` on 2026-09-28 |
+| allowBuilds | 12-entry map | pnpm settings docs, Build settings: replaces `onlyBuiltDependencies`, `onlyBuiltDependenciesFile`, `neverBuiltDependencies`, `ignoredBuiltDependencies` and `ignoreDepScripts` (removed in v11); re-checked 2026-09-28 |
+| minimumReleaseAge | 10080 (7 days) | pnpm settings docs, Dependency resolution (v11 default is 1440 minutes); re-checked 2026-09-28 |
+| minimumReleaseAgeStrict | true | pnpm settings docs, Dependency resolution (v11; fail instead of falling back to an immature version). Set explicitly, although it already defaults to true once minimumReleaseAge is configured. |
+| minimumReleaseAgeExclude | exact `name@version` entries only | pnpm settings docs, Dependency resolution (version-scoped exclusions) |
+| blockExoticSubdeps | true | pnpm settings docs, Dependency resolution (default true in v11) |
+| trustPolicy | no-downgrade | pnpm settings docs, Dependency resolution |
+
+All nine key names above were re-verified against the live pnpm documentation (`pnpm.io/settings`,
+`pnpm.io/settings/build`, `pnpm.io/settings/dependency-resolution`) on 2026-09-28 during A1 execution, per
+the A1 instruction to check every supply-chain key name before use. None have been renamed for pnpm 11.27;
+all nine are current.
+
+There is no `.npmrc` in the repo. `.npmrc` is git-ignored, and auth tokens live only in the user-level `~/.npmrc`.
+CI installs with `--frozen-lockfile`.
+
+### Release-age exclusions (catalog pins published on or after 2026-09-21)
+
+Remove an entry after its expiry date. The lead does this at the sprint checkpoints, as an A1-rule edit with an appended row.
+
+**Turbo platform-binary package names corrected during A1.** The task brief listed the six turbo optional
+platform binaries as unscoped `turbo-<platform>@2.11.4` (e.g. `turbo-darwin-64@2.11.4`). Running
+`npm view turbo@2.11.4 optionalDependencies --json` on 2026-09-28 shows the real package names are scoped
+`@turbo/<platform>@2.11.4` (`@turbo/darwin-64`, `@turbo/darwin-arm64`, `@turbo/linux-64`, `@turbo/linux-arm64`,
+`@turbo/windows-64`, `@turbo/windows-arm64`), all published at the same timestamp as `turbo@2.11.4` itself
+(2026-09-24T22:16Z / 22:17Z). `pnpm-workspace.yaml` uses the verified `@turbo/*` names below so
+`minimumReleaseAgeExclude` actually matches what pnpm resolves; the unscoped names would not have matched
+and `pnpm install` would have refused on the real platform package for this machine (`@turbo/windows-64`).
+
+| Entry | Published (registry) | Expires | Reason |
+|---|---|---|---|
+| @nestjs/common@11.2.6 | 2026-09-23 | 2026-09-30 | PO-1 pin (Nest 11 legacy line) |
+| @nestjs/core@11.2.6 | 2026-09-23 | 2026-09-30 | PO-1 pin |
+| @nestjs/platform-fastify@11.2.6 | 2026-09-23 | 2026-09-30 | PO-1 pin |
+| @nestjs/testing@11.2.6 | 2026-09-23 | 2026-09-30 | PO-1 pin |
+| @nestjs/throttler@6.7.1 | 2026-09-24 | 2026-10-01 | design §A.2 pin |
+| @orpc/client@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/contract@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/nest@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/openapi-client@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/openapi@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/server@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/tanstack-query@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @orpc/zod@1.15.4 | 2026-09-23 | 2026-09-30 | design §A.2 pin |
+| @tanstack/query-core@5.103.2 | 2026-09-21 | 2026-09-28 | same release as @tanstack/react-query |
+| @tanstack/react-query@5.103.2 | 2026-09-21 | 2026-09-28 | design §A.2 pin |
+| @turbo/darwin-64@2.11.4 | 2026-09-24 | 2026-10-01 | turbo platform binary (optional dependency); name corrected from brief's `turbo-darwin-64`, see note above |
+| @turbo/darwin-arm64@2.11.4 | 2026-09-24 | 2026-10-01 | turbo platform binary (optional dependency); name corrected, see note above |
+| @turbo/linux-64@2.11.4 | 2026-09-24 | 2026-10-01 | turbo platform binary (optional dependency); name corrected, see note above |
+| @turbo/linux-arm64@2.11.4 | 2026-09-24 | 2026-10-01 | turbo platform binary (optional dependency); name corrected, see note above |
+| @turbo/windows-64@2.11.4 | 2026-09-24 | 2026-10-01 | turbo platform binary (optional dependency); name corrected, see note above (matches this dev machine) |
+| @turbo/windows-arm64@2.11.4 | 2026-09-24 | 2026-10-01 | turbo platform binary (optional dependency); name corrected, see note above |
+| drizzle-kit@0.31.11 | 2026-09-21 | 2026-09-28 | design §A.2 pin |
+| drizzle-orm@0.45.3 | 2026-09-21 | 2026-09-28 | design §A.2 pin (never below 0.45.2: SQL-injection fix) |
+| nestjs-cls@7.0.1 | 2026-09-24 | 2026-10-01 | design §A.2 pin |
+| next@16.3.6 | 2026-09-22 | 2026-09-29 | design §A.2 pin (latest 16.3.x RSC security patch) |
+| turbo@2.11.4 | 2026-09-24 | 2026-10-01 | design §A.2 pin; installed by A1 itself |
+
+### pnpm catalog (single source: `pnpm-workspace.yaml`, owned by Task A1)
+
+| Package | Version | Source |
+|---|---|---|
+| @biomejs/biome | 2.5.14 | design §A.2 |
+| @hookform/resolvers | 5.9.1 | design §A.2 |
+| @nestjs/cli | 11.0.24 | outside §A.2 (Nest 11 CLI line, PO-1) |
+| @nestjs/common | 11.2.6 | design §A.2, PO-1 |
+| @nestjs/config | 4.0.4 | design §A.2 |
+| @nestjs/core | 11.2.6 | design §A.2, PO-1 |
+| @nestjs/platform-fastify | 11.2.6 | design §A.2, PO-1 |
+| @nestjs/testing | 11.2.6 | design §A.2, PO-1 |
+| @nestjs/throttler | 6.7.1 | design §A.2 |
+| @orpc/client | 1.15.4 | design §A.2 |
+| @orpc/contract | 1.15.4 | design §A.2 |
+| @orpc/nest | 1.15.4 | design §A.2 |
+| @orpc/openapi | 1.15.4 | design §A.2 |
+| @orpc/openapi-client | 1.15.4 | design §A.2 |
+| @orpc/server | 1.15.4 | design §A.2 |
+| @orpc/tanstack-query | 1.15.4 | design §A.2 |
+| @orpc/zod | 1.15.4 | design §A.2 |
+| @playwright/test | 1.63.0 | design §A.2 |
+| @swc/cli | 0.8.1 | outside §A.2 (`nest build -b swc`) |
+| @swc/core | 1.16.2 | outside §A.2 (`nest build -b swc`, unplugin-swc) |
+| @tailwindcss/postcss | 4.3.3 | design §A.2 |
+| @tanstack/query-core | 5.103.2 | outside §A.2 (same line as @tanstack/react-query) |
+| @tanstack/react-query | 5.103.2 | design §A.2 |
+| @testcontainers/postgresql | 12.1.0 | design §A.2 |
+| @testing-library/dom | 10.4.2 | outside §A.2 (ui tests) |
+| @testing-library/react | 16.3.3 | outside §A.2 (ui tests) |
+| @testing-library/user-event | 14.6.7 | outside §A.2 (ui tests) |
+| @types/node | 24.13.6 | outside §A.2 (single pin, review X-06) |
+| @types/pg | 8.23.1 | outside §A.2 |
+| @types/react | 19.2.9 | outside §A.2 |
+| @types/react-dom | 19.2.7 | outside §A.2 |
+| @vitest/coverage-v8 | 5.0.1 | outside §A.2 (must equal vitest) |
+| babel-plugin-react-compiler | 1.0.0 | outside §A.2 (Next `reactCompiler`) |
+| decimal.js | 10.6.0 | design §A.2 |
+| drizzle-kit | 0.31.11 | design §A.2 |
+| drizzle-orm | 0.45.3 | design §A.2 |
+| fast-check | 4.10.2 | outside §A.2 (property tests) |
+| fastify | 5.11.3 | outside §A.2 (@nestjs/platform-fastify peer) |
+| jsdom | 30.1.1 | outside §A.2 (ui tests) |
+| lefthook | 2.1.14 | design §A.2 |
+| light-my-request | 6.6.0 | outside §A.2 (Fastify inject in API tests) |
+| msw | 2.15.0 | design §A.2 |
+| nestjs-cls | 7.0.1 | design §A.2 |
+| nestjs-pino | 5.2.0 | design §A.2 |
+| next | 16.3.6 | design §A.2 |
+| pg | 8.23.0 | design §A.2 |
+| pino | 10.3.1 | design §A.2 |
+| pino-http | 11.0.0 | design §A.2 |
+| react | 19.2.3 | design §A.2 (one version; Expo 57 bundled) |
+| react-dom | 19.2.3 | design §A.2 (one version) |
+| react-hook-form | 7.88.0 | design §A.2 |
+| react-native | 0.86.3 | design §A.2 (Expo 57 bundled) |
+| react-native-web | 0.21.2 | outside §A.2 (design: "pin in S0") |
+| reflect-metadata | 0.2.2 | outside §A.2 (Nest peer) |
+| rxjs | 7.8.2 | outside §A.2 (Nest peer) |
+| tailwindcss | 4.3.3 | design §A.2 |
+| turbo | 2.11.4 | design §A.2 |
+| typescript | 6.0.3 | design §A.2 |
+| unplugin-swc | 2.0.0 | outside §A.2 (decorator metadata in Vitest for the API) |
+| uuid | 14.0.2 | design §A.2 |
+| vite | 7.3.6 | outside §A.2 (Vitest 5 peer; single pin, review X-06) |
+| vitest | 5.0.1 | design §A.2 |
+| zod | 4.6.5 | design §A.2 |
+
+Expo modules are not in the catalog. They are pinned directly in `apps/mobile/package.json` (Task C14) with
+`npx expo install`, and each gets a row appended here.
+
+### allowBuilds (pnpm 11 `strictDepBuilds=true`)
+
+| Package | Allowed | Rationale |
+|---|---|---|
+| @nestjs/core | false | postinstall only prints the opencollective banner |
+| @node-rs/argon2 | true | native hashing binary (design §A.3 build allow-list) |
+| @swc/core | true | native compiler binary for `nest build -b swc` and unplugin-swc |
+| @tailwindcss/oxide | true | native Tailwind 4 engine used by the web build |
+| cpu-features | false | optional native addon of ssh2 (pulled in by testcontainers); not needed |
+| esbuild | true | native binary used by Vite 7 / Vitest 5 |
+| lefthook | true | installs the git-hook binary |
+| msw | false | postinstall only refreshes a service-worker file we do not use |
+| protobufjs | false | pulled in by testcontainers → dockerode → @grpc/proto-loader; its postinstall is not needed |
+| sharp | true | next/image |
+| ssh2 | false | optional native crypto build; the JS fallback is enough for testcontainers |
+| unrs-resolver | true | native resolver binary used by build tooling |
+
+## Consequences
+
+- The catalog has exactly one pin per package. Packages reference `catalog:` and never redefine a version. No task after A1 edits `catalog:`.
+- After A1, `pnpm-workspace.yaml` changes only under the A1 rule:
+  - an `allowBuilds` entry on `ERR_PNPM_IGNORED_BUILDS` (`true` only if a runtime binary is needed);
+  - an exact `name@version` `minimumReleaseAgeExclude` entry on a release-age refusal.
+
+  Each change appends a row below. Release-age rows carry `expires <publish date + 7 days>` in the Reason column.
+- An install failure caused by `trustPolicy: no-downgrade` is escalated to the lead. It is never excluded silently.
+
+## Appended rows
+
+| Date | Task | Change | Reason |
+|---|---|---|---|
+| 2026-09-28 | A1 | root `package.json` `engines.node` set to `>=24.13.1 <25` instead of the brief's `>=24.21.0 <25`; `.node-version` stays `24.21.0` | local dev machine has Node 24.13.1; CI/Docker keep the 24.21.0 pin as authority; controller ruling R-23 |
+| 2026-09-28 | A1 | `minimumReleaseAgeExclude` and the release-age table use `@turbo/<platform>@2.11.4` (scoped) instead of the brief's `turbo-<platform>@2.11.4` (unscoped) for all six turbo platform binaries | `npm view turbo@2.11.4 optionalDependencies --json` shows the real package names are `@turbo/*`; the unscoped names do not exist on the registry and would not have matched what pnpm resolves, expires 2026-10-01 |

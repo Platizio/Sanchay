@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.vitest/
+.turbo/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+.npmrc
+.DS_Store
+Thumbs.db
+.claude-flow/
+.superpowers/

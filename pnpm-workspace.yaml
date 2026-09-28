@@ -1,0 +1,123 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+nodeLinker: hoisted
+engineStrict: true
+
+# Supply chain (H-16, D-PLATFORM-112). Key names verified against pnpm docs 2026-09-25; see ADR-0001.
+strictDepBuilds: true
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+blockExoticSubdeps: true
+trustPolicy: no-downgrade
+
+# Exact versions only (never a bare name or a pattern). Every entry has an ADR-0001 row with an expiry.
+minimumReleaseAgeExclude:
+  - '@nestjs/common@11.2.6'
+  - '@nestjs/core@11.2.6'
+  - '@nestjs/platform-fastify@11.2.6'
+  - '@nestjs/testing@11.2.6'
+  - '@nestjs/throttler@6.7.1'
+  - '@orpc/client@1.15.4'
+  - '@orpc/contract@1.15.4'
+  - '@orpc/nest@1.15.4'
+  - '@orpc/openapi-client@1.15.4'
+  - '@orpc/openapi@1.15.4'
+  - '@orpc/server@1.15.4'
+  - '@orpc/tanstack-query@1.15.4'
+  - '@orpc/zod@1.15.4'
+  - '@tanstack/query-core@5.103.2'
+  - '@tanstack/react-query@5.103.2'
+  - '@turbo/darwin-64@2.11.4'
+  - '@turbo/darwin-arm64@2.11.4'
+  - '@turbo/linux-64@2.11.4'
+  - '@turbo/linux-arm64@2.11.4'
+  - '@turbo/windows-64@2.11.4'
+  - '@turbo/windows-arm64@2.11.4'
+  - 'drizzle-kit@0.31.11'
+  - 'drizzle-orm@0.45.3'
+  - 'nestjs-cls@7.0.1'
+  - 'next@16.3.6'
+  - 'turbo@2.11.4'
+
+# pnpm 11 strictDepBuilds: every dependency with an install script needs an explicit entry (replaces onlyBuiltDependencies, X-08).
+allowBuilds:
+  '@nestjs/core': false
+  '@node-rs/argon2': true
+  '@swc/core': true
+  '@tailwindcss/oxide': true
+  cpu-features: false
+  esbuild: true
+  lefthook: true
+  msw: false
+  protobufjs: false
+  sharp: true
+  ssh2: false
+  unrs-resolver: true
+
+catalog:
+  '@biomejs/biome': 2.5.14
+  '@hookform/resolvers': 5.9.1
+  '@nestjs/cli': 11.0.24
+  '@nestjs/common': 11.2.6
+  '@nestjs/config': 4.0.4
+  '@nestjs/core': 11.2.6
+  '@nestjs/platform-fastify': 11.2.6
+  '@nestjs/testing': 11.2.6
+  '@nestjs/throttler': 6.7.1
+  '@orpc/client': 1.15.4
+  '@orpc/contract': 1.15.4
+  '@orpc/nest': 1.15.4
+  '@orpc/openapi': 1.15.4
+  '@orpc/openapi-client': 1.15.4
+  '@orpc/server': 1.15.4
+  '@orpc/tanstack-query': 1.15.4
+  '@orpc/zod': 1.15.4
+  '@playwright/test': 1.63.0
+  '@swc/cli': 0.8.1
+  '@swc/core': 1.16.2
+  '@tailwindcss/postcss': 4.3.3
+  '@tanstack/query-core': 5.103.2
+  '@tanstack/react-query': 5.103.2
+  '@testcontainers/postgresql': 12.1.0
+  '@testing-library/dom': 10.4.2
+  '@testing-library/react': 16.3.3
+  '@testing-library/user-event': 14.6.7
+  '@types/node': 24.13.6
+  '@types/pg': 8.23.1
+  '@types/react': 19.2.9
+  '@types/react-dom': 19.2.7
+  '@vitest/coverage-v8': 5.0.1
+  babel-plugin-react-compiler: 1.0.0
+  decimal.js: 10.6.0
+  drizzle-kit: 0.31.11
+  drizzle-orm: 0.45.3
+  fast-check: 4.10.2
+  fastify: 5.11.3
+  jsdom: 30.1.1
+  lefthook: 2.1.14
+  light-my-request: 6.6.0
+  msw: 2.15.0
+  nestjs-cls: 7.0.1
+  nestjs-pino: 5.2.0
+  next: 16.3.6
+  pg: 8.23.0
+  pino: 10.3.1
+  pino-http: 11.0.0
+  react: 19.2.3
+  react-dom: 19.2.3
+  react-hook-form: 7.88.0
+  react-native: 0.86.3
+  react-native-web: 0.21.2
+  reflect-metadata: 0.2.2
+  rxjs: 7.8.2
+  tailwindcss: 4.3.3
+  turbo: 2.11.4
+  typescript: 6.0.3
+  unplugin-swc: 2.0.0
+  uuid: 14.0.2
+  vite: 7.3.6
+  vitest: 5.0.1
+  zod: 4.6.5
