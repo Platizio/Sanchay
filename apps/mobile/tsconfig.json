@@ -1,0 +1,10 @@
+{
+  "extends": "@sanchay/config/tsconfig/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src/lib", "vitest.config.mts"]
+}
