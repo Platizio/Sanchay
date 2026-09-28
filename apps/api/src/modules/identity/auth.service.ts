@@ -62,66 +62,79 @@ export class AuthService {
   /** MVP: a valid SMS code always signs in; a new installation is only flagged (isNewDevice). Step-up is P2-3. */
   async verifyLoginOtp(challengeId: string, code: string): Promise<SignedIn> {
     const ctx = requireDeviceContext(this.cls);
-    return this.inTx(async (tx) => {
-      const verified = await this.verifyOrAudit(tx, challengeId, code);
-      if (verified.channel !== 'SMS') throw new AppError('OTP_INVALID');
-      const mobile = verified.destination;
-      const existing = await this.accounts.findByMobile(tx, mobile);
-      // The S2 pilot invite gate (403 PILOT_INVITE_REQUIRED) hooks in here, before a new investor is created.
-      const investor = existing ?? (await this.accounts.createWithVerifiedMobile(tx, mobile));
-      if (BLOCKED_STATUSES.has(investor.status)) throw new AppError('FORBIDDEN');
-      const { device, isNew: isNewDevice } = await this.devices.upsert(tx, investor.id, {
-        platform: ctx.platform,
-        refHash: ctx.deviceRefHash,
-        appVersion: ctx.appVersion,
-      });
-      const session = await this.sessions.create(tx, {
-        investorId: investor.id,
-        deviceId: device.id,
-        platform: ctx.platform,
-        ip: ctx.ip,
-        userAgent: ctx.userAgent,
-      });
-      const isNewInvestor = existing === null;
-      await this.audit.record(tx, {
-        action: isNewInvestor ? AUDIT_ACTIONS.AUTH_SIGNUP : AUDIT_ACTIONS.AUTH_LOGIN,
-        actorType: 'INVESTOR',
-        actorId: investor.id,
-        entityType: 'investor',
-        entityId: investor.id,
-        data: {
+    let verifyFailure: AppError | null = null;
+    try {
+      return await this.inTx(async (tx) => {
+        let verified: VerifiedOtp;
+        try {
+          verified = await this.otp.verify(tx, { challengeId, purpose: 'LOGIN', code });
+        } catch (error) {
+          if (error instanceof AppError) verifyFailure = error;
+          throw error;
+        }
+        if (verified.channel !== 'SMS') throw new AppError('OTP_INVALID');
+        const mobile = verified.destination;
+        const existing = await this.accounts.findByMobile(tx, mobile);
+        // The S2 pilot invite gate (403 PILOT_INVITE_REQUIRED) hooks in here, before a new investor is created.
+        const investor = existing ?? (await this.accounts.createWithVerifiedMobile(tx, mobile));
+        if (BLOCKED_STATUSES.has(investor.status)) throw new AppError('FORBIDDEN');
+        const { device, isNew: isNewDevice } = await this.devices.upsert(tx, investor.id, {
           platform: ctx.platform,
-          sessionId: session.sessionId,
+          refHash: ctx.deviceRefHash,
+          appVersion: ctx.appVersion,
+        });
+        const session = await this.sessions.create(tx, {
+          investorId: investor.id,
           deviceId: device.id,
+          platform: ctx.platform,
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        });
+        const isNewInvestor = existing === null;
+        await this.audit.record(tx, {
+          action: isNewInvestor ? AUDIT_ACTIONS.AUTH_SIGNUP : AUDIT_ACTIONS.AUTH_LOGIN,
+          actorType: 'INVESTOR',
+          actorId: investor.id,
+          entityType: 'investor',
+          entityId: investor.id,
+          data: {
+            platform: ctx.platform,
+            sessionId: session.sessionId,
+            deviceId: device.id,
+            isNewInvestor,
+            isNewDevice,
+            challengeId,
+          },
+        });
+        return {
+          status: 'SIGNED_IN',
+          investorId: investor.id,
           isNewInvestor,
           isNewDevice,
-          challengeId,
-        },
+          session,
+        };
       });
-      return { status: 'SIGNED_IN', investorId: investor.id, isNewInvestor, isNewDevice, session };
-    });
+    } catch (error) {
+      if (verifyFailure !== null) await this.auditVerifyFailure(verifyFailure, challengeId);
+      throw error;
+    }
   }
 
   /**
-   * Failed attempts are audited outside the transaction so the record survives the rollback.
-   * OTP_LOCKED (this code is burned; also every later attempt on it) → AUTH_OTP_LOCKED; anything else → AUTH_OTP_FAILED.
+   * Failed attempts are audited only after the transaction has rolled back and released its main-pool
+   * connection, as an own autocommit write that survives the rollback. Writing it from inside the open
+   * transaction would hold one main-pool connection while waiting for a second: SANCHAY_DB_POOL_MAX
+   * concurrent wrong codes would then exhaust the pool (the B14 pattern), turning 401s into 500s and
+   * stalling every other request. OTP_LOCKED (this code is burned; also every later attempt on it) →
+   * AUTH_OTP_LOCKED; anything else → AUTH_OTP_FAILED.
    */
-  private async verifyOrAudit(tx: Tx, challengeId: string, code: string): Promise<VerifiedOtp> {
-    try {
-      return await this.otp.verify(tx, { challengeId, purpose: 'LOGIN', code });
-    } catch (error) {
-      if (error instanceof AppError) {
-        await this.audit.record(null, {
-          action:
-            error.code === 'OTP_LOCKED'
-              ? AUDIT_ACTIONS.AUTH_OTP_LOCKED
-              : AUDIT_ACTIONS.AUTH_OTP_FAILED,
-          actorType: 'ANONYMOUS',
-          data: { purpose: 'LOGIN', channel: 'SMS', outcome: error.code, challengeId },
-        });
-      }
-      throw error;
-    }
+  private async auditVerifyFailure(error: AppError, challengeId: string): Promise<void> {
+    await this.audit.record(null, {
+      action:
+        error.code === 'OTP_LOCKED' ? AUDIT_ACTIONS.AUTH_OTP_LOCKED : AUDIT_ACTIONS.AUTH_OTP_FAILED,
+      actorType: 'ANONYMOUS',
+      data: { purpose: 'LOGIN', channel: 'SMS', outcome: error.code, challengeId },
+    });
   }
 
   private async inTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
