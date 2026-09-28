@@ -1,0 +1,13 @@
+{
+  "name": "@sanchay/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./biome": "./biome-preset.json",
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/node-lib.json": "./tsconfig/node-lib.json",
+    "./tsconfig/node-lib-build.json": "./tsconfig/node-lib-build.json",
+    "./vitest": "./vitest/base.mjs"
+  }
+}

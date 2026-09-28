@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Clearly fake fixtures in tests only"
+regexes = ['''v1\.payload\.signature''', '''ARN-000000''', '''sanchay_(local|test)_only''']

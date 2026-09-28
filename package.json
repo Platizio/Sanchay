@@ -9,9 +9,15 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "verify": "pnpm lint && pnpm build && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@sanchay/config": "workspace:*",
+    "lefthook": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:"
   }

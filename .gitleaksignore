@@ -1,0 +1,7 @@
+# Known false positives from gitleaks' default `generic-api-key` rule matching
+# ordinary prose in planning docs (not credentials, not fixtures). These
+# predate Task A2 and live in documentation-agent-owned files under docs/,
+# which this task does not edit; git history is never rewritten. See ADR-0001
+# Appended rows / Task A2 report for the deviation record.
+a4917618c06047c436f68e70f63fbe1091ab825f:docs/research/rules-fp-contracts.md:generic-api-key:116
+a4917618c06047c436f68e70f63fbe1091ab825f:docs/superpowers/specs/2026-09-25-sanchay-target-design.md:generic-api-key:1736
