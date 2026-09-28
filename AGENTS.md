@@ -52,7 +52,7 @@ Step 4 see it pass → Step 5 commit.
 ## Naming
 - Packages `@sanchay/*`. Env vars `SANCHAY_*` (exceptions: DATABASE_URL, PORT, HOST, NODE_ENV, APP_VARIANT).
 - Cookies `__Host-sanchay_*`. Client header `x-sanchay-client: web|android`.
-- The legal-entity name appears only in `packages/app-core/src/copy/legal-entity.ts`, legal documents,
+- The legal-entity name appears only in `packages/domain/src/legal-entity.ts` (R-19; re-exported by `@sanchay/app-core/copy`), legal documents,
   the DLT SMS sign-off and `docs/**`.
 
 ## Money

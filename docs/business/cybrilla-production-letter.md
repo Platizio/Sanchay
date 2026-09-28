@@ -19,19 +19,21 @@ I read the MVP spec, the earlier business deliverable, the final critic and the 
 | 7 | Out-of-scope questions (switch, STP, SWP, SIP management, CAS, tax, new KYC, iOS) | Removed. The questionnaire covers only the four MVP groups |
 | 8 | Missing items: first-push authorisation, Investor Charter, AMFI data terms, npm org | Added as PB-51, PB-60, PB-24 and PB-54 |
 
-### 0.2 New issues found while writing (the lead must decide)
+### 0.2 New issues found while writing (now decided by the controller rulings, `docs/delivery/rulings.md`)
 
-1. **H-6 defines only two DLT templates, but the MVP needs four.**
+0. **The domain comes first (R-22).** On Mon 09-28 the PO checks `sanchay.in` availability and registers it (PB-40) **before** this letter is sent. If registration is not complete when the letter goes out, the URL table is marked "final by 09-30" (see the sender note above the table).
+1. **Four DLT templates (R-10, decided).**
    - The consent template reads "to {ACTION} Rs {amount} in {scheme}". That wording cannot express redeem-by-units, redeem-all or the onboarding attestation.
-   - PB-32 proposes `SANCHAY_CONSENT_UNITS_OTP_V1` and `SANCHAY_ATTEST_OTP_V1`, with the same three-line layout and the WebOTP line last.
-   - DEV-A adds both to H-6 and to its unit test.
-2. **The SMS Retriever hash should be a DLT variable (`{#var#}`), not fixed text.** This removes the dependency of DLT approval (Fri 10-23) on the Play App Signing key (Fri 11-06), and lets debug and internal builds use the same template.
-3. **Nonprod hostnames are undefined in the spec.** The letter promises the sandbox callback URLs by Fri 10-23. PB-41 proposes a delegated `dev.sanchay.in` zone. Confirm this in ADR-0014 before those URLs are sent.
-4. **The founders' test SIP is tight.**
+   - The MVP files four templates: `SANCHAY_LOGIN_OTP_V1`, `SANCHAY_CONSENT_OTP_V1`, `SANCHAY_CONSENT_UNITS_OTP_V1` (redeem by units / redeem all) and `SANCHAY_ATTEST_OTP_V1`, each with three lines and the WebOTP line `@app.sanchay.in #{code}` always last.
+   - Plan-01 B12 implements and unit-tests all four; counsel signs the texts off before the Mon 10-12 filing (PB-32a).
+2. **The SMS Retriever hash is a DLT variable (`{#var#}`) (R-10, decided).** This removes the dependency of DLT approval (Fri 10-23) on the Play App Signing key (Fri 11-06, R-21). The API refuses to boot outside local/test without `SANCHAY_SMS_RETRIEVER_HASH`, so every production SMS has three lines.
+3. **Nonprod hostnames (R-05).** The letter promises the sandbox callback URLs by Fri 10-23. The dev AWS stack is protected in S2, so they are on `api.dev.sanchay.in` (delegated `dev.sanchay.in` zone, ADR-0014); the fallback is a fixed-hostname tunnel to the local API on the same name.
+4. **The founders' test SIP is tight: the gate is tiered (R-06).**
    - SIP and redemption can only be demonstrated to Cybrilla by about Wed 11-18 (demo part 2).
-   - Tue 11-24 is a bank holiday.
-   - PB-82 therefore picks an instalment day of 25 or 26 and accepts that the allotment may arrive only on 11-27. The G-E7(b) reconciliation would then be "registration + mandate + debit", with the allotment added on the gate day.
-5. **Production credentials are the one external item with zero float.** Target Fri 11-13, absolute latest Mon 11-16, because the first founders' test order is Tue 11-17. If they slip, G-E7 slips day for day. The go/no-go then moves to Fri 12-04, per the spec's NO-GO fallback.
+   - Tue 11-24 is a bank holiday, so PB-82 picks an instalment day of 25 or 26.
+   - **GO-1 on Fri 11-27** covers onboarding, lumpsum and redemption. **GO-2** enables SIP once the canary shows mandate APPROVED + plan ACTIVE + first-instalment date recorded; the debit and allotment are evidenced when they land. No scope is removed.
+5. **Production credentials are the one external item with zero float (R-21).** Target Fri 11-13, **no later than Mon 11-16**, because the first founders' test order is Tue 11-17. If they slip past 11-16, GO-1 moves to Fri 12-04, per the spec's NO-GO fallback.
+6. **SIP cancel (R-08).** The MVP adds an investor-initiated SIP cancel (consent-first, then the FP plan cancel from our worker). Question 28a asks Cybrilla for the cancel operation on ONDC plans.
 
 ---
 
@@ -45,7 +47,7 @@ Dear Cybrilla / FintechPrimitives team,
 
 Platizio is an AMFI-registered Mutual Fund Distributor and holds the ARN. We are building **Sanchay**, a self-directed mutual-fund app for retail investors in India. It runs on your FP and POA APIs, through the **cybrillapoa (ONDC) gateway**, under tenant **`platizio`**.
 
-We are asking for **production access** for a **closed, invite-only, real-money pilot**. The go/no-go is **Friday 27 November 2026**. Before that, our founders will place small real test orders in production from **Tuesday 17 November 2026**. The pilot is small; the investors are founders, colleagues and invited friends.
+We are asking for **production access** for a **closed, invite-only, real-money pilot**. The go/no-go for onboarding, lumpsum and redemption is **Friday 27 November 2026**; monthly SIP is switched on shortly after, once our founders' test SIP shows the mandate approved and the plan active. Before that, our founders will place small real test orders in production from **Tuesday 17 November 2026**. The pilot is small; the investors are founders, colleagues and invited friends.
 
 **Pilot scope**
 
@@ -56,8 +58,9 @@ We are asking for **production access** for a **closed, invite-only, real-money 
 - **Transactions:**
   - lumpsum purchase by UPI or netbanking, through your payment gateway;
   - **monthly** SIP only, on a UPI Autopay (₹1,00,000) or eNACH mandate;
-  - redemption by amount, by units (only if supported) or "redeem all".
-  - No switch, STP, SWP or SIP modification in the pilot.
+  - redemption by amount, by units (only if supported) or "redeem all";
+  - investor-initiated SIP cancellation, confirmed by OTP.
+  - No switch, STP, SWP or SIP modification (amount change, pause) in the pilot.
 - **2FA.** We send the SEBI 2FA OTP ourselves, and we make no FP order, plan or mandate write before the investor completes it.
 - **Pilot caps.** ₹1,00,000 per order and ₹2,00,000 per investor per day.
 - **Channels.** Web at `app.sanchay.in`, and an Android app distributed through Google Play internal testing.
@@ -88,6 +91,8 @@ We are asking for **production access** for a **closed, invite-only, real-money 
 | R19 | Production escalation matrix, 24x7 incident contact, status page, and your standard DPA / processor terms | Fri 20 Nov 2026 |
 
 ### Our URLs (production)
+
+<!-- Sender note (R-22, internal; delete before sending): send this letter only after sanchay.in is registered (PB-40, Mon 09-28). If registration is not complete when you send it, add this sentence under the heading: "These URLs are final by Wed 30 Sep 2026; we will confirm them in writing." -->
 
 | Purpose | Where it is used at FP | URL |
 |---|---|---|
@@ -329,6 +334,13 @@ Questions:
 - Which event reports a mandate the investor cancels at their bank or UPI app, and what happens to the linked SIPs?
 - *If there is no event:* we detect it through daily mandate polling and ask the investor to set up a new mandate.
 
+**28a. [Priority] Investor-initiated SIP cancellation.**
+- Which endpoint and fields cancel an active `mf_purchase_plan` on ONDC (cybrillapoa), and does it need the `consent` object like the plan PATCH?
+- How quickly does the cancellation take effect at the RTA, and which state/event confirms it? (SEBI expects a SIP cancellation to be effective within 2 working days.)
+- Does cancelling the plan leave the mandate active for reuse?
+- *Why:* the investor cancels in our app after an OTP; our worker then calls your cancel. We never cancel on an investor's behalf without that OTP.
+- *If not available on production:* we tell the investor in writing how to cancel at the AMC/RTA, and the SIP stays switched off in production until it is.
+
 ### F. Redemption
 
 **29. [Priority] Redeem by units.**
@@ -536,7 +548,8 @@ Platizio - Sanchay product team
 | 18 | H-2 / ADR-0015 | lumpsum adapter |
 | 19b | **old Q26** (payment-retry beta) | `fp.lumpsumFlow=PAYMENT_AFTER_SUBMIT` |
 | 24 | **OX-17** | trim T6 inverse |
-| 27 | P-09b | extension E1 |
+| 27 | P-09b; GO-2 instalment timing (R-06, Q27 by 10-16) | extension E1; canary instalment day |
+| 28a | R-08 | Plan 04 F28 `plans.cancel` (FP cancel operation) |
 | 29 | **OX-10**, P-09 | trim T5 / PO-2 |
 | 34 | **OX-12**, P-07 | UNITS_PENDING |
 | 36 | **OX-13** | refund status |
@@ -546,6 +559,7 @@ Platizio - Sanchay product team
 | 49, R18 | **OX-18** | G-C4 |
 
 **Pre-send checks (PO, Mon 09-28)**
+- **`sanchay.in` availability checked and the domain registered first (R-22, PB-40).** If registration is not complete, apply the sender note above the URL table ("final by 09-30").
 - R6 and R7 need Platizio's legal name and ARN exactly as on the certificate.
 - The letter goes from a platizio.com mailbox.
 - No credentials are requested or sent in plain email.

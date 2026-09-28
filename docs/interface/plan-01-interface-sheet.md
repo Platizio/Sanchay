@@ -656,7 +656,7 @@ API prefix: `app.setGlobalPrefix('api/v1')`. The constant `API_PREFIX = 'api/v1'
 | `SANCHAY_PROVIDER_MODE_SMS` | `capture\|mailpit` (Plan 02 adds `msg91`) | `capture` | `mailpit` |
 | `SANCHAY_PROVIDER_MODE_EMAIL` | `capture\|mailpit` (Plan 02 adds `ses`) | `capture` | `mailpit` |
 | `SANCHAY_MAILPIT_URL` | url | `http://localhost:8025` | `http://localhost:8025` |
-| `SANCHAY_SMS_RETRIEVER_HASH` | `^[A-Za-z0-9+/]{11}$`, optional | — | — |
+| `SANCHAY_SMS_RETRIEVER_HASH` | `^[A-Za-z0-9+/]{11}$`; optional in local/test, required elsewhere (invariant 7, R-10) | — | — |
 | `SANCHAY_THROTTLE_PER_MINUTE` | int 1..10000 | 120 | `120` |
 | `SANCHAY_OTP_PER_IP_PER_HOUR` | int > 0 (X-11) | 20 | `1000` (local only; all web traffic arrives from 127.0.0.1 through the Next rewrite) |
 
@@ -666,6 +666,7 @@ API prefix: `app.setGlobalPrefix('api/v1')`. The constant `API_PREFIX = 'api/v1'
 3. `SANCHAY_KEY_SERVICE=kms` → "SANCHAY_KEY_SERVICE=kms is not available in this build".
 4. Missing local keys → "SANCHAY_KEY_SERVICE=local requires SANCHAY_…".
 5. **New:** `SANCHAY_OTP_PER_IP_PER_HOUR !== 20` when `SANCHAY_APP_ENV` ∉ {local, test} → "SANCHAY_OTP_PER_IP_PER_HOUR must be 20 outside local/test".
+6. and 7. See the delta half §5.2 (6: `SANCHAY_CLIENT_IP_SOURCE` must be alb; 7, R-10: `SANCHAY_SMS_RETRIEVER_HASH` is required outside local/test). The delta half overrides this list.
 
 `main.ts` and `cli/migrate.ts` call `process.loadEnvFile('.env')` only if `.env` exists, and process env must win. The implementer verifies Node's no-override behaviour. If Node does override, load the file into a temporary object and fill only the missing keys.
 
@@ -861,11 +862,11 @@ apps/api/
 | `platform/orpc.ts` | `buildOrpcConfig(cls, logger)` (RequestHeadersPlugin, ResponseHeadersPlugin, onError → normalizeOrpcError) |
 | `platform/audit.service.ts` | `AUDIT_DATA_ALLOWLIST = ['platform','purpose','channel','reason','sessionId','deviceId','outcome','isNewInvestor','stepUp','revokedCount','status']`, `allowListed(data)`, `AuditEventInput {action; actorType; actorId?; entityType?; entityId?; data?; reason?}`, `AuditService.record(exec: DbExecutor\|null, input)` |
 | `platform/cookies.ts` | `SESSION_COOKIE='__Host-sanchay_sid'`, `DEVICE_COOKIE='__Host-sanchay_dev'`, `SESSION_INDICATOR_COOKIE='sanchay_si'`, `DEVICE_COOKIE_MAX_AGE_S = 34_560_000` (400 days), `readCookie`, `writeSessionCookies(resHeaders, {token, absoluteExpiresAt}, now)`, `clearSessionCookies(resHeaders)` |
-| `platform/http-decorators.ts` | `IS_PUBLIC='sanchay:isPublic'`, `SKIP_CLIENT_CHECK='sanchay:skipClientCheck'`, `Public()`, `SkipClientCheck()` |
+| `platform/http-decorators.ts` | `IS_PUBLIC='sanchay:isPublic'`, `SKIP_CLIENT_CHECK='sanchay:skipClientCheck'`, `Public()`, `SkipClientCheck()`, `INFRA_ROUTE='sanchay:infraRoute'`, `type InfraRouteHosts = 'API_HOST' \| 'APP_AND_API_HOSTS'`, `InfraRoute(hosts)` (R-11: Public + SkipClientCheck + SkipThrottle + host scope for HostGuard) |
 | `platform/client.guard.ts` | `resolveClient(headers, method, appOrigin): ClientInfo`, `ClientGuard` |
 | `platform/throttle.ts` | `throttleTracker(req)` → `s:<sessionId>` or `ip:<ip>`; `throttleKey(ctx, tracker, name)` → `${name}:${tracker}` |
-| `platform/health.router.ts` | `HealthRouter`, decorated `@Public() @SkipClientCheck() @SkipThrottle()` |
-| `identity/otp.service.ts` | `OTP_POLICY {ttlMs 5 min, maxAttempts 5, cooldownMs 30 s, perDestinationPerHour 5, perDestinationPerDay 15, perIpPerHour 20 (default; enforced value read from env), perDevicePerHour 10}`, `OtpSent`, `OTP_SENT = {sent:true, expiresInSeconds:300, resendAfterSeconds:30}`, `generateOtpCode()`, `OtpDestination`, `IssueOtpInput {purpose; destination; referenceId?; ip; deviceRefHash?}`, `IssuedOtp {otpId; expiresAt; resendAfterSeconds; destinationMasked}`, `VerifyOtpInput`, `VerifiedOtp {otpId; channel}`, `OtpService.issue(input)`, `OtpService.verify(exec, input)` (HMAC `sha256(pepper, purpose\|destBidxHex\|ref\|code)`, timingSafeEqual; attempt increment auto-commits; consume uses `exec`) |
+| `platform/health.router.ts` | `HealthRouter`, decorated `@InfraRoute('APP_AND_API_HOSTS')` (R-11; includes Public, SkipClientCheck and SkipThrottle) |
+| `identity/otp.service.ts` | `OTP_POLICY {ttlMs 5 min, maxAttempts 5, cooldownMs 30 s, perDestinationPerHour 5, perDestinationPerDay 15, perIpPerHour 20 (default; enforced value read from env), perDevicePerHour 10}`, `OtpSent`, `OTP_SENT = {sent:true, expiresInSeconds:300, resendAfterSeconds:30}`, `generateOtpCode()`, `OtpDestination`, `IssueOtpInput {purpose|destBidxHex|otpRowId|code; R-14; destination; referenceId?; ip; deviceRefHash?}`, `IssuedOtp {otpId; expiresAt; resendAfterSeconds; destinationMasked}`, `VerifyOtpInput`, `VerifiedOtp {otpId; channel}`, `OtpService.issue(input)`, `OtpService.verify(exec, input)` (HMAC `sha256(pepper, purpose\|destBidxHex\|otpRowId\|code)` pinned by R-14, timingSafeEqual; attempt increment auto-commits; consume uses `exec`) |
 | `identity/investor-accounts.service.ts` | `InvestorRow`, `InvestorAccounts.findByMobile`, `findById`, `createWithVerifiedMobile`, `decryptMobile`, `decryptEmail`, `assertEmailAvailable`, `setVerifiedEmail → {emailMasked; emailVerifiedAt}` |
 | `identity/device-trust.service.ts` | `DeviceRow`, `DeviceTrust.findTrusted(exec, investorId, refHash)`, `trust(exec, investorId, {platform, refHash, appVersion})` |
 | `identity/session.service.ts` | `SESSION_POLICY` (WEB idle 30 min / abs 12 h; ANDROID and IOS idle 30 d / abs 90 d), `SESSION_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/`, `IssuedSession {sessionId; token; idleExpiresAt; absoluteExpiresAt}`, `ResolvedSession`, `SessionRow`, `SessionService.create/resolve/revoke/revokeAll/list` (idle slide at most once per minute; blocked statuses CLOSED, SUSPENDED, FRAUD_HOLD) |
@@ -1472,9 +1473,9 @@ Hours are lean ideal hours including the modifications. Owner A = Dev A (backend
 | A10 | IFSC/pincode/OTP schemas | MERGE → A9 | as above | A9 | (incl.) | — |
 | A11 | Amount and wire schemas | KEEP | — | A10 | 2.5 | B, S1 |
 | A12 | `@sanchay/domain` enums | MODIFY | Enum pins in §5.7. `NOMINEE_ID_TYPES` without Aadhaar (H-12). OTP purposes per H-4. Add `LAUNCH_PLAN_FREQUENCIES` (H-15) and `LAUNCH_CLIENT_PLATFORMS`. Verify `CONSENT_SUBJECT_TYPES` and `LEGAL_DOCUMENT_KEYS` contain the MVP values (§5.7). | A11 | 4 | B, S1 |
-| A13 | CI | MODIFY | Top-level `permissions: {}`, job `contents: read`, four actions pinned to commit SHAs (resolve with `git ls-remote`, add a version comment). Steps: install `--frozen-lockfile`, lint, `pnpm check-brand`, build, typecheck, test (env `SANCHAY_PLATFORM_ARN=ARN-000000`, `SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31`), gitleaks (digest-pinned Docker image `gitleaks git --redact`), `pnpm audit --prod --audit-level=high`. Creates `scripts/check-brand.ts` with the H-17 allowlist, `scripts/check-brand.test.ts` (`node --test`), and root script `check-brand`. | A12 | 5 | B, S1 |
+| A13 | CI | MODIFY | Top-level `permissions: {}`, job `contents: read`, four actions pinned to commit SHAs (resolve with `git ls-remote`, add a version comment). Steps: install `--frozen-lockfile`, lint, `pnpm check-brand`, build, typecheck, test (env `SANCHAY_PLATFORM_ARN=ARN-000000`, `SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31`), gitleaks (digest-pinned Docker image `gitleaks git --redact`), `pnpm audit --prod --audit-level=high`. Creates `scripts/check-brand.ts` with the R-19 allowlist, `scripts/check-brand.test.ts` (`node --test`), and root script `check-brand`. | A12 | 5 | B, S1 |
 | B1 | api scaffold, ids, clock | KEEP | Renames only. | B1 | 3 | A, S1 |
-| B2 | Env and boot guards | MODIFY | H-8 names (§5.2). Remove `SANCHAY_TRUST_EDGE_HEADERS`. Add `SANCHAY_CLIENT_IP_SOURCE` (socket\|alb, default socket), `SANCHAY_KEY_SERVICE` (local\|secrets), `SANCHAY_KEYRING_JSON`. Invariants 1–6 in §5.2. | B2 | 3.5 | A, S1 |
+| B2 | Env and boot guards | MODIFY | H-8 names (§5.2). Remove `SANCHAY_TRUST_EDGE_HEADERS`. Add `SANCHAY_CLIENT_IP_SOURCE` (socket\|alb, default socket), `SANCHAY_KEY_SERVICE` (local\|secrets), `SANCHAY_KEYRING_JSON`. Invariants 1–7 in §5.2 (7 = `SANCHAY_SMS_RETRIEVER_HASH` required outside local/test, R-10). | B2 | 3.5 | A, S1 |
 | B3 | KeyService and Crypto | MODIFY (keep, cheap) | Add `SecretsKeyService.fromEnv(env)`, which parses `SANCHAY_KEYRING_JSON` (§5.2). `KeyService.otpPepper(kid)` and `currentOtpPepperKid`. Errors never echo key material. +3 tests. | B3 | 5 | A, S1 |
 | B4 | pino redaction | MODIFY (small) | `REDACT_KEY_PATTERNS` must cover code, otp, smsCode, token, authorization, cookie, set-cookie, pan, dob, mobile, email, account, ifsc, name, address, nominee, keyring. +2 tests. | B4 | 2 | A, S1 |
 | B5 | contract errors, common, health, openapi | MODIFY | Catalogue 62 → **66** (§5.6). `PlatformSchema = z.enum(LAUNCH_CLIENT_PLATFORMS)`. Prerequisites fixed (A9, A11, B1). Adds `@sanchay/contract` **and**, if absent, `@sanchay/domain` to apps/api. State in the file header: append-only; every addition regenerates `openapi.json`. | B5 | 4 | **B**, S1 |
@@ -1485,8 +1486,8 @@ Hours are lean ideal hours including the modifications. Owner A = Dev A (backend
 | B10 | Bootstrap, health | MODIFY | `clientIpFrom(req, source)`: socket (unmap `::ffff:`, `::1` → 127.0.0.1) or alb (rightmost X-Forwarded-For entry). Non-IPv4 → 422 `CLIENT_IP_UNSUPPORTED` (fail closed). Delete `parseViewerAddress` and its tests. `bodyLimit` 100 KiB. | B9 | 5 | A, S1 |
 | B11 | OpenAPI drift | MODIFY | turbo edit only (add `openapi` key). | B10 | 2 | A, S1 |
 | B12 | AuditService | MODIFY (small) | Allowlist adds `isNewDevice`, `challengeId`, `platform`. Action `AUTH_OTP_LOCKOUT`. | B11 | 2.5 | A, S1 |
-| B13 | SMS/email ports, fakes, templates | MODIFY | H-6 texts. Move SMS templates to `apps/api/src/integrations/sms/templates.ts` (H-17 path) and email templates to `integrations/email/templates.ts`. Add `consentSmsText`. Emit `docs/dlt/sms-templates.md` with the exact bodies for G-B4. | B12 | 4 | A, S1 |
-| B14 | `OtpService.issue` | MODIFY | H-3 and H-5 (§5.4): `challengeId` = otp row id, `destination_enc`, `pepper_kid`, lockout, 2,000/day global SMS cap. | B13 | 7 | A, **S2** |
+| B13 | SMS/email ports, fakes, templates | MODIFY | H-6 texts. Move SMS templates to `apps/api/src/integrations/sms/templates.ts` (H-17 path) and email templates to `integrations/email/templates.ts`. Add `consentSmsText`, `consentUnitsSmsText`, `attestSmsText` and `renderConsentSms` (four DLT templates, R-10). Emit `docs/dlt/sms-templates.md` with the exact bodies for G-B4. | B12 | 4 | A, S1 |
+| B14 | `OtpService.issue` | MODIFY | H-3 and H-5 (§5.4): `challengeId` = otp row id, HMAC input `purpose‖dest_bidx‖otp_row_id‖code` (R-14), 5 s send timeout (D-17, R-07), `destination_enc`, `pepper_kid`, lockout, 2,000/day global SMS cap. | B13 | 7 | A, **S2** |
 | B15 | `OtpService.verify` | MODIFY | Verify by `{challengeId, purpose, code}`. Returns the decrypted destination. Lockout bookkeeping. | B14 | 5 | A, S2 |
 | B16 | InvestorAccounts, DeviceTrust | MODIFY | `DeviceTrust` → `DeviceRegistry.upsert(exec, investorId, {platform, refHash, appVersion}) → {device, isNew}`. Remove findTrusted/trust. | B15 | 3 | A, S2 |
 | B17 | SessionService | MODIFY | Remove `list`. `SESSION_POLICY` keys WEB and ANDROID only. Keep create/resolve/revoke/revokeAll. | B16 | 5 | A, S2 |
@@ -1504,7 +1505,7 @@ Hours are lean ideal hours including the modifications. Owner A = Dev A (backend
 | C3 | api-client transports | MODIFY | Native `platform: 'android'` only. | C3 | 3.5 | B, **S2** |
 | C4 | ui batch 1 | KEEP | Adds a stub for ADR-0002 (RN StyleSheet plus tokens; Uniwind deferred). | C4 | 5 | B, S1 |
 | C5 | ui inputs | KEEP | — | C5 | 4 | B, S1 |
-| C6 | app-core | MODIFY | `copy/` folder with `legal-entity.ts` (H-17). Copy for all 66 codes, enforced by a test. | C6 | 3.5 | B, S2 |
+| C6 | app-core | MODIFY | `copy/` folder; the single legal-entity module is `packages/domain/src/legal-entity.ts` (R-19), re-exported by `@sanchay/app-core/copy`. Copy for all 66 codes, enforced by a test. | C6 | 3.5 | B, S2 |
 | C7 | useOtpLogin | MODIFY (lean) | PHONE → SMS_OTP → DONE with `challengeId`. EMAIL_OTP removed (P2-3). | C7 | 3 | B, S2 |
 | C8 | Contexts, Login, Welcome | MODIFY | Email step and "Start again" removed. | C8 | 4 | B, S2 |
 | C9 | Home, AppShell, useSignOut | MODIFY | 4-destination nav (H-14). AccountScreen with Log out and Sign out everywhere. Placeholders for Explore and Portfolio. | C9 | 5 | B, S2 |
@@ -1725,6 +1726,11 @@ No task creates one. pnpm 11 reads registry and auth only from it. A1 git-ignore
 | 4 | local mode missing any of its 4 keys, or secrets mode with a keyring JSON that is invalid or has wrong-length keys → refused |
 | 5 | `SANCHAY_OTP_PER_IP_PER_HOUR ≠ 20` outside local/test → refused |
 | 6 (new) | `SANCHAY_CLIENT_IP_SOURCE ≠ alb` outside local/test → refused |
+| 7 (R-10) | `SANCHAY_SMS_RETRIEVER_HASH` unset outside local/test → refused |
+
+**H-8 addendum (R-19).** Every new variable and its owning container: `SANCHAY_KEYRING_JSON` (api, worker), `SANCHAY_LOG_LEVEL` (api, worker, migrate), `SANCHAY_DB_POOL_MAX` (api, worker), `SANCHAY_THROTTLE_PER_MINUTE` (api), `SANCHAY_SMS_RETRIEVER_HASH` (api) are declared by B2; `SANCHAY_MSG91_CREDENTIALS_JSON` (api, worker), `SANCHAY_SES_FROM` (api, worker), `SANCHAY_FP_BASE_URL` and `SANCHAY_FP_CREDENTIALS_JSON` (worker only), `SANCHAY_FP_WEBHOOK_SECRET` (api) are declared by the Plan-02 kernel.
+
+**Guard exemptions (R-11).** `GET /api/v1/health`, `POST /api/v1/webhooks/fp` and `GET|POST /api/v1/pg/return/*` skip ClientGuard, SessionGuard and the throttler through B18's `InfraRoute(hosts)` decorator (`INFRA_ROUTE` metadata) and are restricted only by HostGuard (webhook and returns on `api.sanchay.in`, health on both hosts).
 
 ### 5.3 Transport
 - API prefix `/api/v1` on every host: `API_PREFIX='api/v1'` in `bootstrap.ts` and `'/api/v1'` in the api-client.
@@ -1748,29 +1754,36 @@ No task creates one. pnpm 11 reads registry and auth only from it. A1 git-ignore
 - Active in the MVP: LOGIN (SMS), VERIFY_EMAIL (email), CONSENT (SMS and email; S3).
 - Any other purpose → plain `Error` (INTERNAL).
 
-**Storage and HMAC**
-- `code_hmac = HMAC-SHA256(pepper[pepper_kid], `${purpose}|${destBidxHex}|${otpId}|${code}`)`, compared with `timingSafeEqual`.
-- For LOGIN and VERIFY_EMAIL, `challengeId` **is** `otp_codes.id`. CONSENT rows carry `reference_id = consent_challenges.id` (S3).
+**Storage and HMAC (pinned by R-14)**
+- `code_hmac = HMAC-SHA256(pepper[pepper_kid], `${purpose}|${destBidxHex}|${otpRowId}|${code}`)`, i.e. `purpose‖dest_bidx‖otp_row_id‖code`, compared with `timingSafeEqual`. The same input is used by B13 (issue), B14 (verify) and the consent engine.
+- For LOGIN and VERIFY_EMAIL, `challengeId` **is** `otp_codes.id`. CONSENT rows carry `reference_id = consent_challenges.id` (S3), and their HMAC still binds the otp row id, never the consent challenge id.
 
 **Shape**
 - `POST /auth/otp {mobile}` → **200** `{challengeId: uuid, expiresInSeconds: 300, resendAfterSeconds: 30}`, identical for every mobile.
 - `POST /auth/otp/verify {challengeId, code}` → `SignedIn`.
-- The send is synchronous. On provider failure the row is deleted and the call returns 503 (deviation D-17).
+- The send is synchronous (accepted deviation D-17, ruling R-07): the provider gets at most 5 s (`OTP_POLICY.sendTimeoutMs`). On provider failure or timeout the row is deleted and the call returns 503 `SMS_UNAVAILABLE` (email: 503 `PROVIDER_UNAVAILABLE`). Phase 2 may move the send to pg-boss with the same 200 shape.
 
-**SMS templates** (`apps/api/src/integrations/sms/templates.ts`)
+**SMS templates** (`apps/api/src/integrations/sms/templates.ts`; four DLT templates per R-10)
 ```ts
 export const WEBOTP_DOMAIN = 'app.sanchay.in';
-export const SMS_TEMPLATE_IDS = { LOGIN: 'SANCHAY_LOGIN_OTP_V1', CONSENT: 'SANCHAY_CONSENT_OTP_V1' } as const;
-export function loginSmsText(code: string, retrieverHash?: string): string {
-  const lines = [`${code} is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio`];
-  if (retrieverHash) lines.push(retrieverHash);
-  lines.push(`@${WEBOTP_DOMAIN} #${code}`);   // WebOTP line ALWAYS last
-  return lines.join('\n');
-}
-// consentSmsText({code, action, amount, schemeShort}, hash?) — first line:
-// `${code} is your OTP to ${action} Rs ${amount} in ${schemeShort} on Sanchay. Valid 5 min. Never share it. -Platizio`, then optional hash, then `@app.sanchay.in #${code}`
+export const SMS_TEMPLATE_IDS = {
+  LOGIN: 'SANCHAY_LOGIN_OTP_V1',
+  CONSENT: 'SANCHAY_CONSENT_OTP_V1',
+  CONSENT_UNITS: 'SANCHAY_CONSENT_UNITS_OTP_V1',
+  ATTEST: 'SANCHAY_ATTEST_OTP_V1',
+} as const;
+// Every template: line 1 text, line 2 the SMS Retriever hash ({#var#}; required outside local/test by
+// B2 invariant 7), line 3 `@app.sanchay.in #${code}` (WebOTP line ALWAYS last).
+// loginSmsText(code, hash?):          `${code} is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio`
+// consentSmsText({code, action, amount, schemeShort}, hash?):
+//                                     `${code} is your OTP to ${action} Rs ${amount} in ${schemeShort} on Sanchay. Valid 5 min. Never share it. -Platizio`
+// consentUnitsSmsText({code, units, schemeShort}, hash?)  (units '12.345' or 'all'):
+//                                     `${code} is your OTP to redeem ${units} units of ${schemeShort} on Sanchay. Valid 5 min. Never share it. -Platizio`
+// attestSmsText(code, hash?):         `${code} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio`
+// renderConsentSms(sms: ConsentSms, code, hash?) → {templateId, text}; B13 uses it for purpose CONSENT over SMS.
 ```
-- Test: the last line matches `/^@app\.sanchay\.in #\d{6}$/` with and without a hash.
+- Tests: for all four templates the last line matches `/^@app\.sanchay\.in #\d{6}$/` with and without a hash, and with a hash the body has exactly three lines with the hash penultimate.
+- Counsel/CO sign-off of the four texts before the Mon 10-12 filing (PB-32a).
 
 **Email templates** (`integrations/email/templates.ts`)
 - `EMAIL_TEMPLATE_IDS.OTP = 'SANCHAY_EMAIL_OTP_V1'`.
@@ -1839,14 +1852,14 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 - Navigation: Home · Explore · Portfolio · Account. Web routes `/`, `/explore`, `/portfolio`, `/account`. Native uses `(tabs)`.
 - App lock: `coldStartDecision` → SIGN_OUT when no device auth is enrolled (D-18). Otherwise `authenticateAsync({biometricsSecurityLevel:'strong', disableDeviceFallback:false, promptMessage:'Unlock Sanchay'})` on cold start and after 5 min in the background. No PIN.
 
-### 5.10 Brand lint (H-17)
+### 5.10 Brand lint (H-17, allowlist replaced by R-19)
 - `check-brand` fails on `plz`, `PLZ_`, `@plz/`, `platizio.in`, `platizio://`, or "Platizio".
-- Allowed only in:
+- Allowed only in (R-19, exactly):
   - `docs/**`
-  - `packages/app-core/src/copy/legal-entity.ts`
-  - `apps/api/src/modules/legal-consent/documents/**`
-  - `apps/api/src/integrations/sms/templates.ts` (the `-Platizio` sign-off only)
-  - lines containing `platizio.com`, `/v2/auth/platizio/`, or the tenant id `platizio`
+  - `scripts/check-brand*.ts`
+  - `apps/api/src/integrations/sms/templates*.ts`
+  - the single `packages/domain/src/legal-entity.ts` (`LEGAL_ENTITY_NAME`, `dsc02`; C6 creates it, app-core, web, email and SMS import it)
+  - lines containing `platizio.com`, `/v2/auth/platizio/`, or the quoted tenant id `'platizio'`; the retired identifiers are checked first, so such a line can never carry `platizio.in` or `platizio://`
 
 ### 5.11 Register updates to carry in the plan header
 
@@ -1859,7 +1872,8 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 | D-6 | Obsolete (step-up dropped) |
 | D-11 | EdgeGuard replaced by HostGuard in the S2 kernel |
 | Escalations | ESC-1 closed by H-1; ESC-2 by H-13; ESC-5 by H-12. ESC-3 accepted. ESC-4 goes to ADR-0002. There is no ESC-6. |
-| New env name | `SANCHAY_KEYRING_JSON` needs the lead's acknowledgement, because H-8 does not list it |
+| New env name | `SANCHAY_KEYRING_JSON` is acknowledged by the H-8 addendum (R-19) |
+| D-17 (R-07) | Synchronous OTP send accepted by the owner; 5 s provider timeout, 503 `SMS_UNAVAILABLE` |
 
 ---
 
@@ -1888,7 +1902,7 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 
 **Chunk B1 (B1–B5) → B1–B5.**
 - B1: renames; `TableName` unchanged.
-- B2: §5.2 schema and invariants 1–6. Tests: the 9 existing plus invariant 6, secrets-mode parse and the TRUST_EDGE removal (about 12).
+- B2: §5.2 schema and invariants 1–7 (7 from R-10). Tests: the 9 existing plus invariant 6, secrets-mode parse and the TRUST_EDGE removal (about 12).
 - B3: add SecretsKeyService and the pepper kid.
 - B4: the redaction key list.
 - B5: prerequisites A9, A11, B1; 66 codes; `LAUNCH_CLIENT_PLATFORMS`; append-only header note; owner Dev B.
@@ -1902,7 +1916,7 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 **Chunk B3 (B11–B15) → B10 (old B11), B11 (old B12), B12 (old B13), B13 (old B14), B14 (old B15).**
 - B10: a turbo key edit adds `openapi`.
 - B11: allowlist and actions.
-- B12: the §5.4 templates in the H-17 paths, `consentSmsText`, `docs/dlt/sms-templates.md`, Mailpit subject `SMS [SANCHAY_LOGIN_OTP_V1]`, and tests for last-line order and byte-exact golden strings.
+- B12: the §5.4 four DLT templates (R-10) in the H-17 paths, `consentSmsText`, `consentUnitsSmsText`, `attestSmsText`, `renderConsentSms`, `docs/dlt/sms-templates.md`, Mailpit subject `SMS [SANCHAY_LOGIN_OTP_V1]`, and tests for last-line order and byte-exact golden strings.
 - B13: §5.4. Check order: lockout, cooldown, per-destination hour/day, per-IP, per-device, global SMS cap. Then the tx (supersede and insert with `destination_enc`/`pepper_kid`), then send, then record the provider. Returns `IssuedOtp {challengeId, expiresAt, resendAfterSeconds, destinationMasked}`. Tests: the existing set plus lockout, the 2,001st SMS, and an email of purpose VERIFY_EMAIL.
 - B14: `verify(exec, {challengeId, purpose, code}) → {otpId, channel, destination, destinationBidx}`. New tests: wrong purpose → OTP_INVALID; a superseded challenge → OTP_INVALID. The attempt counter still auto-commits.
 
@@ -1939,7 +1953,7 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 - C5: unchanged.
 - C6:
   - `exports["./copy"]` → `./src/copy/index.ts`.
-  - `src/copy/legal-entity.ts` exports `LEGAL_ENTITY_NAME`, and `dsc02(arn, validTill)` builds "Sanchay is operated by ${LEGAL_ENTITY_NAME}, an AMFI-registered Mutual Fund Distributor, ${arn} (valid till ${formatIsoDate(validTill)}). We are a distributor, not an investment adviser." Mark it as a counsel placeholder (G-C1).
+  - `packages/domain/src/legal-entity.ts` (R-19: the single legal-entity module, re-exported by `src/copy/index.ts`) exports `LEGAL_ENTITY_NAME`, and `dsc02(arn, validTill)` builds "Sanchay is operated by ${LEGAL_ENTITY_NAME}, an AMFI-registered Mutual Fund Distributor, ${arn} (valid till ${formatIsoDate(validTill)}). We are a distributor, not an investment adviser." Mark it as a counsel placeholder (G-C1).
   - `REGULAR_PLAN_NOTICE` interpolates `LEGAL_ENTITY_NAME`.
   - Add `@sanchay/money` as a dependency.
   - Copy for all 66 codes, including PILOT_INVITE_REQUIRED ("Sanchay is invite-only right now…").

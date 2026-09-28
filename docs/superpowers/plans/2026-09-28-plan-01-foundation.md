@@ -93,9 +93,9 @@ Hours are lean ideal hours including the modifications. Owner A = Dev A (backend
 | A10 | IFSC/pincode/OTP schemas | MERGE → A9 | as above | A9 | (incl.) | — |
 | A11 | Amount and wire schemas | KEEP | — | A10 | 2.5 | B, S1 |
 | A12 | `@sanchay/domain` enums | MODIFY | Enum pins in §5.7. `NOMINEE_ID_TYPES` without Aadhaar (H-12). OTP purposes per H-4. Add `LAUNCH_PLAN_FREQUENCIES` (H-15) and `LAUNCH_CLIENT_PLATFORMS`. Verify `CONSENT_SUBJECT_TYPES` and `LEGAL_DOCUMENT_KEYS` contain the MVP values (§5.7). | A11 | 4 | B, S1 |
-| A13 | CI | MODIFY | Top-level `permissions: {}`, job `contents: read`, four actions pinned to commit SHAs (resolve with `git ls-remote`, add a version comment). Steps: install `--frozen-lockfile`, lint, `pnpm check-brand`, build, typecheck, test (env `SANCHAY_PLATFORM_ARN=ARN-000000`, `SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31`), gitleaks (digest-pinned Docker image `gitleaks git --redact`), `pnpm audit --prod --audit-level=high`. Creates `scripts/check-brand.ts` with the H-17 allowlist, `scripts/check-brand.test.ts` (`node --test`), and root script `check-brand`. | A12 | 5 | B, S1 |
+| A13 | CI | MODIFY | Top-level `permissions: {}`, job `contents: read`, four actions pinned to commit SHAs (resolve with `git ls-remote`, add a version comment). Steps: install `--frozen-lockfile`, lint, `pnpm check-brand`, build, typecheck, test (env `SANCHAY_PLATFORM_ARN=ARN-000000`, `SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31`), gitleaks (digest-pinned Docker image `gitleaks git --redact`), `pnpm audit --prod --audit-level=high`. Creates `scripts/check-brand.ts` with the R-19 allowlist, `scripts/check-brand.test.ts` (`node --test`), and root script `check-brand`. | A12 | 5 | B, S1 |
 | B1 | api scaffold, ids, clock | KEEP | Renames only. | B1 | 3 | A, S1 |
-| B2 | Env and boot guards | MODIFY | H-8 names (§5.2). Remove `SANCHAY_TRUST_EDGE_HEADERS`. Add `SANCHAY_CLIENT_IP_SOURCE` (socket\|alb, default socket), `SANCHAY_KEY_SERVICE` (local\|secrets), `SANCHAY_KEYRING_JSON`. Invariants 1–6 in §5.2. | B2 | 3.5 | A, S1 |
+| B2 | Env and boot guards | MODIFY | H-8 names (§5.2). Remove `SANCHAY_TRUST_EDGE_HEADERS`. Add `SANCHAY_CLIENT_IP_SOURCE` (socket\|alb, default socket), `SANCHAY_KEY_SERVICE` (local\|secrets), `SANCHAY_KEYRING_JSON`. Invariants 1–7 in §5.2 (7 = `SANCHAY_SMS_RETRIEVER_HASH` required outside local/test, R-10). | B2 | 3.5 | A, S1 |
 | B3 | KeyService and Crypto | MODIFY (keep, cheap) | Add `SecretsKeyService.fromEnv(env)`, which parses `SANCHAY_KEYRING_JSON` (§5.2). `KeyService.otpPepper(kid)` and `currentOtpPepperKid`. Errors never echo key material. +3 tests. | B3 | 5 | A, S1 |
 | B4 | pino redaction | MODIFY (small) | `REDACT_KEY_PATTERNS` must cover code, otp, smsCode, token, authorization, cookie, set-cookie, pan, dob, mobile, email, account, ifsc, name, address, nominee, keyring. +2 tests. | B4 | 2 | A, S1 |
 | B5 | contract errors, common, health, openapi | MODIFY | Catalogue 62 → **66** (§5.6). `PlatformSchema = z.enum(LAUNCH_CLIENT_PLATFORMS)`. Prerequisites fixed (A9, A11, B1). Adds `@sanchay/contract` **and**, if absent, `@sanchay/domain` to apps/api. State in the file header: append-only; every addition regenerates `openapi.json`. | B5 | 4 | **B**, S1 |
@@ -106,8 +106,8 @@ Hours are lean ideal hours including the modifications. Owner A = Dev A (backend
 | B10 | Bootstrap, health | MODIFY | `clientIpFrom(req, source)`: socket (unmap `::ffff:`, `::1` → 127.0.0.1) or alb (rightmost X-Forwarded-For entry). Non-IPv4 → 422 `CLIENT_IP_UNSUPPORTED` (fail closed). Delete `parseViewerAddress` and its tests. `bodyLimit` 100 KiB. | B9 | 5 | A, S1 |
 | B11 | OpenAPI drift | MODIFY | turbo edit only (add `openapi` key). | B10 | 2 | A, S1 |
 | B12 | AuditService | MODIFY (small) | Allowlist adds `isNewDevice`, `challengeId`, `platform`. Action `AUTH_OTP_LOCKOUT`. | B11 | 2.5 | A, S1 |
-| B13 | SMS/email ports, fakes, templates | MODIFY | H-6 texts. Move SMS templates to `apps/api/src/integrations/sms/templates.ts` (H-17 path) and email templates to `integrations/email/templates.ts`. Add `consentSmsText`. Emit `docs/dlt/sms-templates.md` with the exact bodies for G-B4. | B12 | 4 | A, S1 |
-| B14 | `OtpService.issue` | MODIFY | H-3 and H-5 (§5.4): `challengeId` = otp row id, `destination_enc`, `pepper_kid`, lockout, 2,000/day global SMS cap. | B13 | 7 | A, **S2** |
+| B13 | SMS/email ports, fakes, templates | MODIFY | H-6 texts. Move SMS templates to `apps/api/src/integrations/sms/templates.ts` (H-17 path) and email templates to `integrations/email/templates.ts`. Add `consentSmsText`, `consentUnitsSmsText`, `attestSmsText` and `renderConsentSms` (four DLT templates, R-10). Emit `docs/dlt/sms-templates.md` with the exact bodies for G-B4. | B12 | 4 | A, S1 |
+| B14 | `OtpService.issue` | MODIFY | H-3 and H-5 (§5.4): `challengeId` = otp row id, HMAC input `purpose‖dest_bidx‖otp_row_id‖code` (R-14), 5 s send timeout (D-17, R-07), `destination_enc`, `pepper_kid`, lockout, 2,000/day global SMS cap. | B13 | 7 | A, **S2** |
 | B15 | `OtpService.verify` | MODIFY | Verify by `{challengeId, purpose, code}`. Returns the decrypted destination. Lockout bookkeeping. | B14 | 5 | A, S2 |
 | B16 | InvestorAccounts, DeviceTrust | MODIFY | `DeviceTrust` → `DeviceRegistry.upsert(exec, investorId, {platform, refHash, appVersion}) → {device, isNew}`. Remove findTrusted/trust. | B15 | 3 | A, S2 |
 | B17 | SessionService | MODIFY | Remove `list`. `SESSION_POLICY` keys WEB and ANDROID only. Keep create/resolve/revoke/revokeAll. | B16 | 5 | A, S2 |
@@ -125,7 +125,7 @@ Hours are lean ideal hours including the modifications. Owner A = Dev A (backend
 | C3 | api-client transports | MODIFY | Native `platform: 'android'` only. | C3 | 3.5 | B, **S2** |
 | C4 | ui batch 1 | KEEP | Adds a stub for ADR-0002 (RN StyleSheet plus tokens; Uniwind deferred). | C4 | 5 | B, S1 |
 | C5 | ui inputs | KEEP | — | C5 | 4 | B, S1 |
-| C6 | app-core | MODIFY | `copy/` folder with `legal-entity.ts` (H-17). Copy for all 66 codes, enforced by a test. | C6 | 3.5 | B, S2 |
+| C6 | app-core | MODIFY | `copy/` folder; the single legal-entity module is `packages/domain/src/legal-entity.ts` (R-19), re-exported by `@sanchay/app-core/copy`. Copy for all 66 codes, enforced by a test. | C6 | 3.5 | B, S2 |
 | C7 | useOtpLogin | MODIFY (lean) | PHONE → SMS_OTP → DONE with `challengeId`. EMAIL_OTP removed (P2-3). | C7 | 3 | B, S2 |
 | C8 | Contexts, Login, Welcome | MODIFY | Email step and "Start again" removed. | C8 | 4 | B, S2 |
 | C9 | Home, AppShell, useSignOut | MODIFY | 4-destination nav (H-14). AccountScreen with Log out and Sign out everywhere. Placeholders for Explore and Portfolio. | C9 | 5 | B, S2 |
@@ -346,6 +346,9 @@ No task creates one. pnpm 11 reads registry and auth only from it. A1 git-ignore
 | 4 | local mode missing any of its 4 keys, or secrets mode with a keyring JSON that is invalid or has wrong-length keys → refused |
 | 5 | `SANCHAY_OTP_PER_IP_PER_HOUR ≠ 20` outside local/test → refused |
 | 6 (new) | `SANCHAY_CLIENT_IP_SOURCE ≠ alb` outside local/test → refused |
+| 7 (R-10) | `SANCHAY_SMS_RETRIEVER_HASH` unset outside local/test → refused |
+
+**H-8 addendum (R-19).** Every new variable and its owning container: `SANCHAY_KEYRING_JSON` (api, worker), `SANCHAY_LOG_LEVEL` (api, worker, migrate), `SANCHAY_DB_POOL_MAX` (api, worker), `SANCHAY_THROTTLE_PER_MINUTE` (api), `SANCHAY_SMS_RETRIEVER_HASH` (api) are declared by B2; `SANCHAY_MSG91_CREDENTIALS_JSON` (api, worker), `SANCHAY_SES_FROM` (api, worker), `SANCHAY_FP_BASE_URL` and `SANCHAY_FP_CREDENTIALS_JSON` (worker only), `SANCHAY_FP_WEBHOOK_SECRET` (api) are declared by the Plan-02 kernel.
 
 ### 5.3 Transport
 - API prefix `/api/v1` on every host: `API_PREFIX='api/v1'` in `bootstrap.ts` and `'/api/v1'` in the api-client.
@@ -369,29 +372,36 @@ No task creates one. pnpm 11 reads registry and auth only from it. A1 git-ignore
 - Active in the MVP: LOGIN (SMS), VERIFY_EMAIL (email), CONSENT (SMS and email; S3).
 - Any other purpose → plain `Error` (INTERNAL).
 
-**Storage and HMAC**
-- `code_hmac = HMAC-SHA256(pepper[pepper_kid], `${purpose}|${destBidxHex}|${otpId}|${code}`)`, compared with `timingSafeEqual`.
-- For LOGIN and VERIFY_EMAIL, `challengeId` **is** `otp_codes.id`. CONSENT rows carry `reference_id = consent_challenges.id` (S3).
+**Storage and HMAC (pinned by R-14)**
+- `code_hmac = HMAC-SHA256(pepper[pepper_kid], `${purpose}|${destBidxHex}|${otpRowId}|${code}`)`, i.e. `purpose‖dest_bidx‖otp_row_id‖code`, compared with `timingSafeEqual`. The same input is used by B13 (issue), B14 (verify) and the consent engine.
+- For LOGIN and VERIFY_EMAIL, `challengeId` **is** `otp_codes.id`. CONSENT rows carry `reference_id = consent_challenges.id` (S3), and their HMAC still binds the otp row id, never the consent challenge id.
 
 **Shape**
 - `POST /auth/otp {mobile}` → **200** `{challengeId: uuid, expiresInSeconds: 300, resendAfterSeconds: 30}`, identical for every mobile.
 - `POST /auth/otp/verify {challengeId, code}` → `SignedIn`.
-- The send is synchronous. On provider failure the row is deleted and the call returns 503 (deviation D-17).
+- The send is synchronous (accepted deviation D-17, ruling R-07): the provider gets at most 5 s (`OTP_POLICY.sendTimeoutMs`). On provider failure or timeout the row is deleted and the call returns 503 `SMS_UNAVAILABLE` (email: 503 `PROVIDER_UNAVAILABLE`). Phase 2 may move the send to pg-boss with the same 200 shape.
 
-**SMS templates** (`apps/api/src/integrations/sms/templates.ts`)
+**SMS templates** (`apps/api/src/integrations/sms/templates.ts`; four DLT templates per R-10)
 ```ts
 export const WEBOTP_DOMAIN = 'app.sanchay.in';
-export const SMS_TEMPLATE_IDS = { LOGIN: 'SANCHAY_LOGIN_OTP_V1', CONSENT: 'SANCHAY_CONSENT_OTP_V1' } as const;
-export function loginSmsText(code: string, retrieverHash?: string): string {
-  const lines = [`${code} is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio`];
-  if (retrieverHash) lines.push(retrieverHash);
-  lines.push(`@${WEBOTP_DOMAIN} #${code}`);   // WebOTP line ALWAYS last
-  return lines.join('\n');
-}
-// consentSmsText({code, action, amount, schemeShort}, hash?) — first line:
-// `${code} is your OTP to ${action} Rs ${amount} in ${schemeShort} on Sanchay. Valid 5 min. Never share it. -Platizio`, then optional hash, then `@app.sanchay.in #${code}`
+export const SMS_TEMPLATE_IDS = {
+  LOGIN: 'SANCHAY_LOGIN_OTP_V1',
+  CONSENT: 'SANCHAY_CONSENT_OTP_V1',
+  CONSENT_UNITS: 'SANCHAY_CONSENT_UNITS_OTP_V1',
+  ATTEST: 'SANCHAY_ATTEST_OTP_V1',
+} as const;
+// Every template: line 1 text, line 2 the SMS Retriever hash ({#var#}; required outside local/test by
+// B2 invariant 7), line 3 `@app.sanchay.in #${code}` (WebOTP line ALWAYS last).
+// loginSmsText(code, hash?):          `${code} is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio`
+// consentSmsText({code, action, amount, schemeShort}, hash?):
+//                                     `${code} is your OTP to ${action} Rs ${amount} in ${schemeShort} on Sanchay. Valid 5 min. Never share it. -Platizio`
+// consentUnitsSmsText({code, units, schemeShort}, hash?)  (units '12.345' or 'all'):
+//                                     `${code} is your OTP to redeem ${units} units of ${schemeShort} on Sanchay. Valid 5 min. Never share it. -Platizio`
+// attestSmsText(code, hash?):         `${code} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio`
+// renderConsentSms(sms: ConsentSms, code, hash?) → {templateId, text}; B13 uses it for purpose CONSENT over SMS.
 ```
-- Test: the last line matches `/^@app\.sanchay\.in #\d{6}$/` with and without a hash.
+- Tests: for all four templates the last line matches `/^@app\.sanchay\.in #\d{6}$/` with and without a hash, and with a hash the body has exactly three lines with the hash penultimate.
+- Counsel/CO sign-off of the four texts before the Mon 10-12 filing (PB-32a).
 
 **Email templates** (`integrations/email/templates.ts`)
 - `EMAIL_TEMPLATE_IDS.OTP = 'SANCHAY_EMAIL_OTP_V1'`.
@@ -460,14 +470,14 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 - Navigation: Home · Explore · Portfolio · Account. Web routes `/`, `/explore`, `/portfolio`, `/account`. Native uses `(tabs)`.
 - App lock: `coldStartDecision` → SIGN_OUT when no device auth is enrolled (D-18). Otherwise `authenticateAsync({biometricsSecurityLevel:'strong', disableDeviceFallback:false, promptMessage:'Unlock Sanchay'})` on cold start and after 5 min in the background. No PIN.
 
-### 5.10 Brand lint (H-17)
+### 5.10 Brand lint (H-17, allowlist replaced by R-19)
 - `check-brand` fails on `plz`, `PLZ_`, `@plz/`, `platizio.in`, `platizio://`, or "Platizio".
-- Allowed only in:
+- Allowed only in (R-19, exactly):
   - `docs/**`
-  - `packages/app-core/src/copy/legal-entity.ts`
-  - `apps/api/src/modules/legal-consent/documents/**`
-  - `apps/api/src/integrations/sms/templates.ts` (the `-Platizio` sign-off only)
-  - lines containing `platizio.com`, `/v2/auth/platizio/`, or the tenant id `platizio`
+  - `scripts/check-brand*.ts`
+  - `apps/api/src/integrations/sms/templates*.ts`
+  - the single `packages/domain/src/legal-entity.ts` (`LEGAL_ENTITY_NAME`, `dsc02`; C6 creates it, app-core, web, email and SMS import it)
+  - lines containing `platizio.com`, `/v2/auth/platizio/`, or the quoted tenant id `'platizio'`; the retired identifiers are checked first, so such a line can never carry `platizio.in` or `platizio://`
 
 ### 5.11 Register updates to carry in the plan header
 
@@ -480,7 +490,8 @@ Everything else follows sheet §5.5. Roles: `sanchay_migrator`, `sanchay_app`, `
 | D-6 | Obsolete (step-up dropped) |
 | D-11 | EdgeGuard replaced by HostGuard in the S2 kernel |
 | Escalations | ESC-1 closed by H-1; ESC-2 by H-13; ESC-5 by H-12. ESC-3 accepted. ESC-4 goes to ADR-0002. There is no ESC-6. |
-| New env name | `SANCHAY_KEYRING_JSON` needs the lead's acknowledgement, because H-8 does not list it |
+| New env name | `SANCHAY_KEYRING_JSON` is acknowledged by the H-8 addendum (R-19) |
+| D-17 (R-07) | Synchronous OTP send accepted by the owner; 5 s provider timeout, 503 `SMS_UNAVAILABLE` |
 
 ---
 
@@ -1129,8 +1140,8 @@ Run every command one per line from `C:/Users/pc/Desktop/sanchay`. They work unc
   ## Naming
   - Packages `@sanchay/*`. Env vars `SANCHAY_*` (exceptions: DATABASE_URL, PORT, HOST, NODE_ENV, APP_VARIANT).
   - Cookies `__Host-sanchay_*`. Client header `x-sanchay-client: web|android`.
-  - The legal-entity name appears only in `packages/app-core/src/copy/legal-entity.ts`, legal documents,
-    the DLT SMS sign-off and `docs/**`.
+  - The legal-entity name appears only in `packages/domain/src/legal-entity.ts`,
+    `apps/api/src/integrations/sms/templates*.ts` (DLT sign-off) and `docs/**` (R-19).
 
   ## Money
   - Money, units and NAV use `@sanchay/money` and decimal strings, never JavaScript numbers.
@@ -5726,6 +5737,8 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
 
 (was A13. Owner Dev B, S1, wave W3. Budget 5 h.)
 
+Amended 2026-09-28 by ruling R-19 (`docs/delivery/rulings.md`): the `check-brand` allowlist is exactly `scripts/check-brand*.ts`, `apps/api/src/integrations/sms/templates*.ts`, the single `packages/domain/src/legal-entity.ts`, `docs/**`, and lines containing `platizio.com`, `/v2/auth/platizio/` or the quoted tenant id `'platizio'`. Retired identifiers (`@plz/`, `PLZ_`, `plz`, `platizio://`, `platizio.in`) are checked before the line allowlist, so an allowlisted line can never carry them.
+
 **Files:**
 - Create: `C:/Users/pc/Desktop/sanchay/.github/workflows/ci.yml`
 - Create: `C:/Users/pc/Desktop/sanchay/scripts/check-brand.ts`
@@ -5769,23 +5782,21 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
   - Root script `check-brand` = `node scripts/check-brand.ts`. It runs on Node 24 type stripping, with no build step.
   - `scripts/check-brand.ts` exports:
     - `BRAND_RULES`, `BrandRule`, `BrandViolation`
-    - `EXEMPT_PATH_PREFIXES`, `EXEMPT_FILES`, `DLT_TEMPLATES_FILE`, `EXEMPT_LINE_PATTERNS`
-    - `isPathExempt(path): boolean`
+    - `ALLOWLIST_GLOBS`, `ALLOWLIST_LINE_PATTERNS`, `SKIPPED_FILES`
+    - `globToRegExp(glob): RegExp`, `isAllowlistedPath(path): boolean`, `isPathExempt(path): boolean`
     - `findViolationsInText(path, text): BrandViolation[]`
     - `listRepoFiles(cwd): string[]`
     - `checkRepo(cwd): { scanned: number; violations: BrandViolation[] }`
-  - H-17 rules:
+  - H-17 rules, with the R-19 allowlist:
     - The lint fails on `@plz/`, `PLZ_`, `plz`, `platizio://`, `platizio.in`, or `Platizio`/`PLATIZIO`.
-    - It allows:
+    - Path allowlist (`ALLOWLIST_GLOBS`, exactly R-19; `*` stays inside one path segment, `**` crosses segments):
       - `docs/**`
-      - `packages/app-core/src/copy/legal-entity.ts`
-      - `apps/api/src/modules/legal-consent/documents/**`
-      - the `-Platizio` DLT sign-off, only inside `apps/api/src/integrations/sms/templates.ts`
-      - lines containing `platizio.com`, `/v2/auth/platizio/`, or the quoted tenant id `'platizio'`
-    - Technical exemptions beyond the H-17 list:
-      - the lint's own two files, which must spell the tokens;
-      - the generated `pnpm-lock.yaml`, whose random base64 hashes can contain `plz` by chance;
-      - binary assets.
+      - `scripts/check-brand*.ts` (the lint and its tests must spell the tokens)
+      - `apps/api/src/integrations/sms/templates*.ts` (the DLT sign-off in `templates.ts` and its golden tests)
+      - `packages/domain/src/legal-entity.ts` (the single shared `LEGAL_ENTITY_NAME` module, imported by the web, email and SMS code; created by C6)
+    - Line allowlist (`ALLOWLIST_LINE_PATTERNS`, exactly R-19): lines containing `platizio.com`, `/v2/auth/platizio/`, or the quoted tenant id `'platizio'`. It suppresses only the `Platizio` name rule; the five retired-identifier rules are checked first and always report.
+    - Nothing else is allowlisted. In particular `packages/app-core/src/copy/**`, `apps/api/src/integrations/email/**` and the Plan-02 msg91 adapter and its golden-bytes tests must import `LEGAL_ENTITY_NAME` or `DLT_SIGNOFF` instead of spelling the name. Counsel-approved legal-document texts are kept under `docs/legal/**` (PB-60/61) and seeded from there, so `apps/api/src/modules/legal-consent/documents/**` is no longer an exemption.
+    - Not scanned (`SKIPPED_FILES` and binaries; these are not brand allowlist entries): the generated `pnpm-lock.yaml`, whose random base64 hashes can contain `plz` by chance, and binary assets.
   - Workflow-shape check (Step 1). It is written as invariants, not fixed counts, so it stays green after the later key-level edits below:
     - every `uses:` line is SHA-pinned with a version comment, and there are at least 4 of them;
     - there are at least 3 fake-ARN lines, each with a matching valid-till line.
@@ -5801,7 +5812,13 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
   ```ts
   import assert from 'node:assert/strict';
   import { describe, it } from 'node:test';
-  import { BRAND_RULES, findViolationsInText, isPathExempt } from './check-brand.ts';
+  import {
+    ALLOWLIST_GLOBS,
+    BRAND_RULES,
+    findViolationsInText,
+    isAllowlistedPath,
+    isPathExempt,
+  } from './check-brand.ts';
 
   const rulesOf = (path: string, text: string): string[] =>
     findViolationsInText(path, text).map((v) => v.rule);
@@ -5850,27 +5867,52 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
     });
   });
 
-  describe('allowlist (H-17)', () => {
-    it('exempts docs, legal-entity copy, legal documents, the lockfile, the lint itself and binaries', () => {
+  describe('allowlist (H-17 as amended by R-19)', () => {
+    it('pins the path allowlist to exactly the R-19 list', () => {
+      assert.deepEqual(ALLOWLIST_GLOBS, [
+        'docs/**',
+        'scripts/check-brand*.ts',
+        'apps/api/src/integrations/sms/templates*.ts',
+        'packages/domain/src/legal-entity.ts',
+      ]);
+    });
+
+    it('allowlists every path the R-19 globs cover', () => {
       for (const path of [
         'docs/specs/mvp/MVP-SPEC.md',
         'docs/adr/0001-versions.md',
-        'packages/app-core/src/copy/legal-entity.ts',
-        'apps/api/src/modules/legal-consent/documents/tnc.md',
-        'pnpm-lock.yaml',
+        'docs/legal/drafts/tnc.md',
         'scripts/check-brand.ts',
         'scripts/check-brand.test.ts',
-        'apps/mobile/assets/icon.png',
+        'apps/api/src/integrations/sms/templates.ts',
+        'apps/api/src/integrations/sms/templates.test.ts',
+        'packages/domain/src/legal-entity.ts',
       ]) {
+        assert.equal(isAllowlistedPath(path), true, path);
+        assert.equal(isPathExempt(path), true, path);
+      }
+    });
+
+    it('skips the lockfile and binaries without allowlisting them', () => {
+      for (const path of ['pnpm-lock.yaml', 'apps/mobile/assets/icon.png']) {
+        assert.equal(isAllowlistedPath(path), false, path);
         assert.equal(isPathExempt(path), true, path);
       }
     });
 
     it('does not exempt anything else', () => {
       for (const path of [
+        'packages/app-core/src/copy/legal-entity.ts',
         'packages/app-core/src/copy/index.ts',
+        'packages/domain/src/legal-entity.test.ts',
+        'packages/domain/src/index.ts',
+        'apps/api/src/modules/legal-consent/documents/tnc.md',
+        'apps/api/src/integrations/email/templates.ts',
+        'apps/api/src/integrations/sms/msg91.ts',
+        'apps/api/src/integrations/sms/nested/templates.ts',
         'apps/web/src/app/site/page.tsx',
-        'apps/api/src/integrations/sms/templates.ts',
+        'scripts/other.ts',
+        'scripts/check-brand.js',
         'AGENTS.md',
         'docsx/readme.md',
       ]) {
@@ -5878,21 +5920,29 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
       }
     });
 
-    it('returns no violations for an exempt path', () => {
+    it('returns no violations for an allowlisted path', () => {
       assert.deepEqual(rulesOf('docs/specs/regulatory-sources.md', 'Platizio, ARN holder'), []);
+      assert.deepEqual(
+        rulesOf('apps/api/src/integrations/sms/templates.test.ts', "expect(text).toContain('-Platizio');"),
+        [],
+      );
     });
 
-    it('allows the DLT sign-off -Platizio only in the SMS templates file', () => {
+    it('flags the DLT sign-off outside the SMS templates files', () => {
       const body =
         "  '123456 is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio',";
       assert.deepEqual(rulesOf('apps/api/src/integrations/sms/templates.ts', body), []);
       assert.deepEqual(rulesOf('apps/api/src/integrations/email/templates.ts', body), ['Platizio']);
+      assert.deepEqual(rulesOf('apps/api/src/integrations/sms/msg91.test.ts', body), ['Platizio']);
     });
 
-    it('still flags other brand text inside the SMS templates file', () => {
-      const file = 'apps/api/src/integrations/sms/templates.ts';
-      assert.deepEqual(rulesOf(file, "const ENTITY = 'Platizio';"), ['Platizio']);
-      assert.deepEqual(rulesOf(file, '// -Platizio sign-off, see https://platizio.in'), ['platizio.in']);
+    it('checks retired identifiers before the line allowlist', () => {
+      const file = 'apps/api/src/integrations/fp/config.ts';
+      assert.deepEqual(rulesOf(file, "tenant: 'platizio', home: 'https://platizio.in'"), ['platizio.in']);
+      assert.deepEqual(rulesOf(file, "const pay = 'platizio://pay'; // grievance@platizio.com"), [
+        'platizio://',
+      ]);
+      assert.deepEqual(rulesOf(file, "const url = '/v2/auth/platizio/token'; // PLZ_ legacy"), ['PLZ_']);
     });
 
     it('exempts lines with the corporate email domain or the FP auth path', () => {
@@ -5943,8 +5993,8 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
   `scripts/check-brand.ts`
   ```ts
   /**
-   * Brand lint (H-17, D-PLATFORM-004). Fails when a tracked or new, non-ignored file contains a
-   * retired identifier or the legal-entity name outside the allowlist.
+   * Brand lint (H-17 as amended by ruling R-19, D-PLATFORM-004). Fails when a tracked or new,
+   * non-ignored file contains a retired identifier or the legal-entity name outside the allowlist.
    * Run with plain Node 24 (type stripping): `node scripts/check-brand.ts` or `pnpm check-brand`.
    */
   import { execFileSync } from 'node:child_process';
@@ -5964,7 +6014,10 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
     readonly text: string;
   }
 
-  /** Checked in this order; the first matching rule is reported for a line. */
+  /**
+   * Checked in this order; the first matching rule is reported for a line. The five retired
+   * identifiers come first, so the line allowlist below can never hide them (R-19).
+   */
   export const BRAND_RULES: readonly BrandRule[] = [
     { id: '@plz/', pattern: /@plz\//i },
     { id: 'PLZ_', pattern: /PLZ_/i },
@@ -5974,53 +6027,69 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
     { id: 'Platizio', pattern: /Platizio|PLATIZIO/ },
   ];
 
-  /** H-17 directory allowlist (repo-relative, forward slashes). */
-  export const EXEMPT_PATH_PREFIXES: readonly string[] = [
-    'docs/',
-    'apps/api/src/modules/legal-consent/documents/',
+  /** The only rule an allowlisted line may break: the legal-entity name itself. */
+  const NAME_RULE_ID = 'Platizio';
+
+  /**
+   * R-19 path allowlist, exactly. Repo-relative, forward slashes. `*` matches inside one path
+   * segment and `**` matches across segments.
+   */
+  export const ALLOWLIST_GLOBS: readonly string[] = [
+    'docs/**',
+    'scripts/check-brand*.ts',
+    'apps/api/src/integrations/sms/templates*.ts',
+    'packages/domain/src/legal-entity.ts',
   ];
 
-  export const EXEMPT_FILES: readonly string[] = [
-    // H-17: LEGAL_ENTITY_NAME and dsc02() live here.
-    'packages/app-core/src/copy/legal-entity.ts',
-    // The lint's own source and tests necessarily spell the forbidden tokens.
-    'scripts/check-brand.ts',
-    'scripts/check-brand.test.ts',
-    // Generated; integrity hashes are random base64 and can contain "plz" by chance.
-    'pnpm-lock.yaml',
-  ];
-
-  /** The only file where the DLT sign-off "-Platizio" may appear (H-6, H-17). */
-  export const DLT_TEMPLATES_FILE = 'apps/api/src/integrations/sms/templates.ts';
-  const DLT_SIGN_OFF = /-Platizio\b/g;
-
-  /** Lines mentioning these are exempt: corporate email domain, FP auth path, quoted FP tenant id. */
-  export const EXEMPT_LINE_PATTERNS: readonly RegExp[] = [
+  /** R-19 line allowlist: corporate email domain, FP auth path, quoted lower-case FP tenant id. */
+  export const ALLOWLIST_LINE_PATTERNS: readonly RegExp[] = [
     /platizio\.com/i,
     /\/v2\/auth\/platizio\//,
     /(['"`])platizio\1/,
   ];
 
+  /** Not scanned (and not part of the brand allowlist): generated lockfile hashes can contain "plz". */
+  export const SKIPPED_FILES: readonly string[] = ['pnpm-lock.yaml'];
+
   const BINARY_EXTENSIONS = /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|jar|jks|keystore|aab|apk|ttf|otf|woff2?)$/i;
 
+  export function globToRegExp(glob: string): RegExp {
+    let source = '';
+    for (let i = 0; i < glob.length; i += 1) {
+      const ch = glob.charAt(i);
+      if (ch === '*' && glob.charAt(i + 1) === '*') {
+        source += '.*';
+        i += 1;
+      } else if (ch === '*') {
+        source += '[^/]*';
+      } else {
+        source += ch.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+      }
+    }
+    return new RegExp(`^${source}$`);
+  }
+
+  const ALLOWLIST_REGEXPS: readonly RegExp[] = ALLOWLIST_GLOBS.map(globToRegExp);
+
+  export function isAllowlistedPath(path: string): boolean {
+    return ALLOWLIST_REGEXPS.some((pattern) => pattern.test(path));
+  }
+
+  /** True for every path the lint does not scan: the R-19 allowlist plus skipped and binary files. */
   export function isPathExempt(path: string): boolean {
-    return (
-      EXEMPT_FILES.includes(path) ||
-      EXEMPT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)) ||
-      BINARY_EXTENSIONS.test(path)
-    );
+    return isAllowlistedPath(path) || SKIPPED_FILES.includes(path) || BINARY_EXTENSIONS.test(path);
   }
 
   export function findViolationsInText(path: string, text: string): BrandViolation[] {
     if (isPathExempt(path)) return [];
     const violations: BrandViolation[] = [];
     for (const [index, raw] of text.split(/\r?\n/).entries()) {
-      if (EXEMPT_LINE_PATTERNS.some((pattern) => pattern.test(raw))) continue;
-      const line = path === DLT_TEMPLATES_FILE ? raw.replace(DLT_SIGN_OFF, '') : raw;
-      const rule = BRAND_RULES.find((candidate) => candidate.pattern.test(line));
-      if (rule !== undefined) {
-        violations.push({ path, line: index + 1, rule: rule.id, text: raw.trim().slice(0, 160) });
+      const rule = BRAND_RULES.find((candidate) => candidate.pattern.test(raw));
+      if (rule === undefined) continue;
+      if (rule.id === NAME_RULE_ID && ALLOWLIST_LINE_PATTERNS.some((pattern) => pattern.test(raw))) {
+        continue;
       }
+      violations.push({ path, line: index + 1, rule: rule.id, text: raw.trim().slice(0, 160) });
     }
     return violations;
   }
@@ -6056,7 +6125,7 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
     }
     if (violations.length > 0) {
       process.stderr.write(
-        `check-brand: ${violations.length} violation(s). Use Sanchay names; the legal entity belongs only in the H-17 allowlist.\n`,
+        `check-brand: ${violations.length} violation(s). Use Sanchay names; import LEGAL_ENTITY_NAME from packages/domain/src/legal-entity.ts (R-19 allowlist).\n`,
       );
       process.exitCode = 1;
     } else {
@@ -6181,7 +6250,7 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
      ```
      node --test scripts/check-brand.test.ts
      ```
-     Expected: the summary reports `tests 18`, `pass 18`, `fail 0`, and the exit code is 0.
+     Expected: the summary reports `tests 20`, `pass 20`, `fail 0`, and the exit code is 0.
 
   2. Brand lint over the repo:
      ```
@@ -6189,7 +6258,7 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
      ```
      Expected: `check-brand: <n> files scanned, no violations`, exit 0.
      - A violation can be reported in a file an earlier task created, such as `AGENTS.md`. Fix it by rewording that line to use Sanchay names, or by moving the legal-entity mention into `docs/`.
-     - Never widen the allowlist in this task.
+     - Never widen the allowlist in this task or any later one. It is exactly the R-19 list; changing it needs a new controller ruling.
 
   3. Workflow-shape check (the Step 1 command). Expected output at this point, with exit 0:
      `{"arn":3,"validTill":3,"validTillValue":3,"uses":4,"pinned":4,"topLevelPermissionsEmpty":true,"checkBrand":true,"gitleaksDigest":true,"audit":true}`
@@ -6319,7 +6388,7 @@ The test file goes in `packages/money/test/`, so the unchanged money `vitest.con
 - C:/Users/pc/Desktop/sanchay/packages/domain/src/transactions.ts (the H-15 `LAUNCH_PLAN_FREQUENCIES`; `PAYOUT_STATUSES` aligned to D-MONEY-053)
 - C:/Users/pc/Desktop/sanchay/packages/validation/src/amount.ts and C:/Users/pc/Desktop/sanchay/packages/validation/src/identity.ts
 - C:/Users/pc/Desktop/sanchay/package.json (the key-level `check-brand` merge must keep B6's `test:int` and `db:up`)
-- C:/Users/pc/Desktop/sanchay/.github/workflows/ci.yml and C:/Users/pc/Desktop/sanchay/scripts/check-brand.ts (SHA pins, the invariant-based shape check, the gitleaks digest, the H-17 allowlist)
+- C:/Users/pc/Desktop/sanchay/.github/workflows/ci.yml and C:/Users/pc/Desktop/sanchay/scripts/check-brand.ts (SHA pins, the invariant-based shape check, the gitleaks digest, the R-19 allowlist)
 
 ---
 
@@ -6774,6 +6843,8 @@ git commit -m "feat(api): scaffold NestJS SWC/Vitest app with app-minted uuidv7 
 
 (Was B2. Owner: Dev A. Sprint S1, wave W1. Prerequisite: B1.)
 
+Amended 2026-09-28 by rulings R-10 and R-19 (`docs/delivery/rulings.md`): boot invariant 7 makes `SANCHAY_SMS_RETRIEVER_HASH` required outside local/test, and a test pins the Plan-01 variable set of the H-8 addendum.
+
 **Files:**
 - Create: `C:/Users/pc/Desktop/sanchay/apps/api/src/config/env.ts`
 - Create: `C:/Users/pc/Desktop/sanchay/apps/api/src/config/app-config.ts`
@@ -6806,15 +6877,28 @@ git commit -m "feat(api): scaffold NestJS SWC/Vitest app with app-minted uuidv7 
 | `SANCHAY_CLIENT_IP_SOURCE` | `socket\|alb` | `socket` |
 | `SANCHAY_KEY_SERVICE` | `local\|secrets`. `kms` is accepted by the schema only so that invariant 3 can refuse it by name. | `local` |
 | `SANCHAY_LOCAL_PII_KEY`, `SANCHAY_LOCAL_BIDX_KEY`, `SANCHAY_OTP_PEPPER`, `SANCHAY_AUTH_TOKEN_KEY` | base64 of exactly 32 bytes; optional | — |
-| `SANCHAY_KEYRING_JSON` | string holding `{"currentKid":1,"pii":{"1":b64},"bidx":b64,"otpPepper":{"1":b64},"authToken":b64}`; optional. **New name: the lead must acknowledge it because H-8 does not list it.** | — |
+| `SANCHAY_KEYRING_JSON` | string holding `{"currentKid":1,"pii":{"1":b64},"bidx":b64,"otpPepper":{"1":b64},"authToken":b64}`; optional. Listed in the H-8 addendum (R-19). | — |
 | `SANCHAY_PROVIDER_MODE_SMS` | `capture\|mailpit`. The `msg91` mode arrives with plan-02-mvp-kernel. | `capture` |
 | `SANCHAY_PROVIDER_MODE_EMAIL` | `capture\|mailpit`. The `ses` mode arrives with plan-02-mvp-kernel. | `capture` |
 | `SANCHAY_MAILPIT_URL` | http(s) URL | `http://localhost:8025` |
-| `SANCHAY_SMS_RETRIEVER_HASH` | `^[A-Za-z0-9+/]{11}$`; optional | — |
+| `SANCHAY_SMS_RETRIEVER_HASH` | `^[A-Za-z0-9+/]{11}$`; optional in local/test, **required everywhere else** (invariant 7, R-10) | — |
 | `SANCHAY_THROTTLE_PER_MINUTE` | int 1..10000 | `120` |
 | `SANCHAY_OTP_PER_IP_PER_HOUR` | int > 0 | `20` |
 
-- plan-02-mvp-kernel declares these later; Plan 01 does not: `SANCHAY_PROVIDER_MODE_FP`, `SANCHAY_FP_WEBHOOK_AUTH`, `SANCHAY_PILOT_INVITE_ONLY`, `SANCHAY_API_ORIGIN`. `SANCHAY_PLATFORM_ARN` and `SANCHAY_PLATFORM_ARN_VALID_TILL` are read by the web app, not the API.
+- plan-02-mvp-kernel declares these later; Plan 01 does not: `SANCHAY_PROVIDER_MODE_FP`, `SANCHAY_FP_WEBHOOK_AUTH`, `SANCHAY_PILOT_INVITE_ONLY`, `SANCHAY_API_ORIGIN`, and the R-19 provider variables `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON`, `SANCHAY_FP_WEBHOOK_SECRET`, `SANCHAY_MSG91_CREDENTIALS_JSON`, `SANCHAY_SES_FROM`. `SANCHAY_PLATFORM_ARN` and `SANCHAY_PLATFORM_ARN_VALID_TILL` are read by the web app, not the API.
+- H-8 addendum (R-19): owning container of every new variable. Plan 01 declares the first five; the Step 1 test pins the Plan-01 set so that Plan 02 adds the rest deliberately.
+
+  | Variable | Owning container(s) | Declared by |
+  |---|---|---|
+  | `SANCHAY_KEYRING_JSON` | api, worker (Secrets Manager `sanchay/{env}/keyring`) | B2 |
+  | `SANCHAY_LOG_LEVEL` | api, worker, migrate | B2 |
+  | `SANCHAY_DB_POOL_MAX` | api, worker | B2 |
+  | `SANCHAY_THROTTLE_PER_MINUTE` | api | B2 |
+  | `SANCHAY_SMS_RETRIEVER_HASH` | api (synchronous OTP send, D-17) | B2 |
+  | `SANCHAY_MSG91_CREDENTIALS_JSON` | api (OTP send), worker (delivery-report job) | Plan 02 kernel |
+  | `SANCHAY_SES_FROM` | api (email OTP), worker (notifications) | Plan 02 kernel |
+  | `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON` | worker only (the api role never calls FP) | Plan 02 kernel |
+  | `SANCHAY_FP_WEBHOOK_SECRET` | api (webhook signature check) | Plan 02 kernel |
 - Boot invariants. The tests match the messages by regex, so keep the wording exact.
 
 | # | Rule | Message |
@@ -6826,11 +6910,12 @@ git commit -m "feat(api): scaffold NestJS SWC/Vitest app with app-minted uuidv7 
 | 4b | `secrets` mode with a keyring that is missing, not JSON, or has the wrong shape, kid or key length | `SANCHAY_KEY_SERVICE=secrets requires a valid SANCHAY_KEYRING_JSON (missing \| not valid JSON \| wrong shape, kid or key length)` |
 | 5 | `SANCHAY_OTP_PER_IP_PER_HOUR` ≠ 20 outside local/test | `SANCHAY_OTP_PER_IP_PER_HOUR must be 20 outside local/test` |
 | 6 | `SANCHAY_CLIENT_IP_SOURCE` ≠ `alb` outside local/test | `SANCHAY_CLIENT_IP_SOURCE must be alb outside local/test` |
+| 7 (R-10) | `SANCHAY_SMS_RETRIEVER_HASH` unset outside local/test | `SANCHAY_SMS_RETRIEVER_HASH is required outside local/test` |
 
 - Downstream consumers:
   - B3: `parseKeyringJson` and `Keyring`.
   - B9: `ClientIpSource`, plus `testEnv`, which sets `SANCHAY_CLIENT_IP_SOURCE: 'socket'`.
-  - B13: `SANCHAY_OTP_PER_IP_PER_HOUR` and `SANCHAY_SMS_RETRIEVER_HASH`.
+  - B12/B13: `SANCHAY_SMS_RETRIEVER_HASH` (always set outside local/test, so every non-local OTP SMS has the three DLT lines) and `SANCHAY_OTP_PER_IP_PER_HOUR`.
   - B21: `SANCHAY_THROTTLE_PER_MINUTE`.
   - B23: `.env.example`.
 
@@ -6875,13 +6960,14 @@ function keyringJson(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-/** A configuration that boots outside local/test: secrets keyring, ALB client IP, OTP IP limit 20. */
+/** A configuration that boots outside local/test: secrets keyring, ALB client IP, OTP IP limit 20, retriever hash. */
 const devSecrets: Record<string, string> = {
   ...omit(base, ...LOCAL_KEYS),
   SANCHAY_APP_ENV: 'dev',
   SANCHAY_KEY_SERVICE: 'secrets',
   SANCHAY_KEYRING_JSON: keyringJson(),
   SANCHAY_CLIENT_IP_SOURCE: 'alb',
+  SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
 };
 
 function errorMessage(fn: () => unknown): string {
@@ -6919,6 +7005,51 @@ describe('parseEnv', () => {
     expect(
       errorMessage(() => parseEnv({ ...base, SANCHAY_CLIENT_IP_SOURCE: 'cloudfront' })),
     ).toContain('SANCHAY_CLIENT_IP_SOURCE');
+  });
+
+  it('declares exactly the Plan-01 variables of the H-8 addendum (R-19); FP, MSG91 and SES arrive with Plan 02', () => {
+    expect(Object.keys(EnvSchema.shape).sort()).toEqual([
+      'DATABASE_URL',
+      'HOST',
+      'PORT',
+      'SANCHAY_APP_ENV',
+      'SANCHAY_APP_ORIGIN',
+      'SANCHAY_APP_ROLE',
+      'SANCHAY_AUTH_TOKEN_KEY',
+      'SANCHAY_CLIENT_IP_SOURCE',
+      'SANCHAY_DB_POOL_MAX',
+      'SANCHAY_KEYRING_JSON',
+      'SANCHAY_KEY_SERVICE',
+      'SANCHAY_LOCAL_BIDX_KEY',
+      'SANCHAY_LOCAL_PII_KEY',
+      'SANCHAY_LOG_LEVEL',
+      'SANCHAY_MAILPIT_URL',
+      'SANCHAY_OTP_PEPPER',
+      'SANCHAY_OTP_PER_IP_PER_HOUR',
+      'SANCHAY_PROVIDER_MODE_EMAIL',
+      'SANCHAY_PROVIDER_MODE_SMS',
+      'SANCHAY_SMS_RETRIEVER_HASH',
+      'SANCHAY_THROTTLE_PER_MINUTE',
+    ]);
+  });
+
+  it('requires SANCHAY_SMS_RETRIEVER_HASH outside local/test (invariant 7, R-10)', () => {
+    for (const appEnv of ['dev', 'staging', 'prod']) {
+      expect(
+        errorMessage(() =>
+          parseEnv({ ...omit(devSecrets, 'SANCHAY_SMS_RETRIEVER_HASH'), SANCHAY_APP_ENV: appEnv }),
+        ),
+      ).toMatch(/SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/);
+    }
+    expect(errorMessage(() => parseEnv({ ...devSecrets, SANCHAY_SMS_RETRIEVER_HASH: '' }))).toMatch(
+      /SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/,
+    );
+    expect(errorMessage(() => parseEnv({ ...devSecrets, SANCHAY_SMS_RETRIEVER_HASH: 'short' }))).toContain(
+      'SANCHAY_SMS_RETRIEVER_HASH',
+    );
+    expect(parseEnv(base).SANCHAY_SMS_RETRIEVER_HASH).toBeUndefined();
+    expect(parseEnv({ ...base, SANCHAY_APP_ENV: 'test' }).SANCHAY_SMS_RETRIEVER_HASH).toBeUndefined();
+    expect(parseEnv(devSecrets).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
   });
 
   it('no longer knows SANCHAY_TRUST_EDGE_HEADERS (replaced by SANCHAY_CLIENT_IP_SOURCE)', () => {
@@ -7150,8 +7281,9 @@ const FAKE_PROVIDER_MODES: ReadonlySet<string> = new Set(['capture', 'mailpit'])
 const PROD_OTP_PER_IP_PER_HOUR = 20;
 
 /**
- * Fail-closed boot guard (design §K; delta sheet §5.2 invariants 1–6). Every violation is reported
- * at once. staging and prod cannot boot until plan-02-mvp-kernel adds the msg91/ses provider modes.
+ * Fail-closed boot guard (design §K; delta sheet §5.2 invariants 1–6; invariant 7 from ruling R-10).
+ * Every violation is reported at once. staging and prod cannot boot until plan-02-mvp-kernel adds
+ * the msg91/ses provider modes.
  */
 export function assertBootInvariants(env: Env): void {
   const problems: string[] = [];
@@ -7203,6 +7335,12 @@ export function assertBootInvariants(env: Env): void {
       'SANCHAY_CLIENT_IP_SOURCE must be alb outside local/test (the ALB appends the client IP to X-Forwarded-For)',
     );
   }
+  // 7 (R-10): every registered DLT OTP template has three lines, so the hash line must always be filled.
+  if (!localOrTest && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
+    problems.push(
+      'SANCHAY_SMS_RETRIEVER_HASH is required outside local/test (every DLT OTP template has three lines, R-10)',
+    );
+  }
 
   if (problems.length > 0) {
     throw new EnvError(`Boot guard refused this configuration:\n- ${problems.join('\n- ')}`);
@@ -7238,7 +7376,7 @@ export class AppConfig {
 pnpm --filter=@sanchay/api exec vitest run src/config/env.test.ts
 pnpm --filter=@sanchay/api typecheck
 ```
-Expected: `Test Files  1 passed (1)` and `Tests  13 passed (13)`. `tsc` exits 0 and prints nothing.
+Expected: `Test Files  1 passed (1)` and `Tests  15 passed (15)`. `tsc` exits 0 and prints nothing.
 
 - [ ] **Step 5: Commit**
 ```
@@ -10478,7 +10616,7 @@ git commit -m "feat(api): oRPC-native error envelope, validation mapping and Nes
   - `HealthRouter`:
     - `GET /api/v1/health` returns `{status:'ok'}`.
     - `GET /api/v1/health/ready` returns `{status:'ok', checks:[{name:'database', ok, durationMs}]}`.
-    - B18 and B21 add the `@Public() @SkipClientCheck() @SkipThrottle()` decorators.
+    - B18 adds `@InfraRoute('APP_AND_API_HOSTS')` (R-11), which applies `@Public() @SkipClientCheck() @SkipThrottle()` in one decorator.
   - `AppModule.forRoot(env)`:
     - B9 imports ConfigModule, LoggerModule, ClsModule (`middleware.mount: true`), ORPCModule and PlatformModule.
     - Controllers: `[HealthRouter]`. Providers: `APP_FILTER` → `ApiExceptionFilter`.
@@ -11644,6 +11782,11 @@ git commit -m "feat(api): add audit service with request context, allow-listed d
 - `docs/dlt/sms-templates.md` holds the exact DLT bodies for G-B4.
 - `app.module.ts` and `test/int/app.ts` get key-level edits.
 
+Amended 2026-09-28 by ruling R-10 (`docs/delivery/rulings.md`):
+- **Four DLT templates:** `SANCHAY_LOGIN_OTP_V1`, `SANCHAY_CONSENT_OTP_V1` (amount), `SANCHAY_CONSENT_UNITS_OTP_V1` (redeem by units, or redeem all with units `all`) and `SANCHAY_ATTEST_OTP_V1` (onboarding attest). `consentUnitsSmsText`, `attestSmsText` and the dispatcher `renderConsentSms` are added.
+- **Three lines each:** text line, then the SMS Retriever hash as the `{#var#}` penultimate line, then `@app.sanchay.in #<code>` **always last**. B2 invariant 7 makes the hash mandatory outside local/test, so every non-local SMS has three lines; local/test may omit the hash line, and the WebOTP line is still last. Tests assert the last line with and without a hash for all four templates, and exactly three lines with the hash penultimate.
+- Counsel/CO sign-off of the four texts is due before the Mon 10-12 DLT filing (PB-32a); a wording change after sign-off changes the golden strings and `docs/dlt/sms-templates.md` together.
+
 **Files:**
 - Create:
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/integrations/sms/port.ts`
@@ -11690,14 +11833,20 @@ git commit -m "feat(api): add audit service with request context, allow-listed d
   - `email/fake.ts`:
     - `CaptureEmailSender { outbox; failNext; latestCode(to) }`
     - `MailpitEmailSender(baseUrl, fetchImpl?)`, which sends from `noreply@sanchay.local` ("Sanchay (local)").
-  - `sms/templates.ts` (H-6, delta §5.4):
+  - `sms/templates.ts` (H-6 as amended by R-10, delta §5.4):
     - `WEBOTP_DOMAIN = 'app.sanchay.in'`
-    - `SMS_TEMPLATE_IDS = { LOGIN: 'SANCHAY_LOGIN_OTP_V1', CONSENT: 'SANCHAY_CONSENT_OTP_V1' }`
-    - `DLT_SIGNOFF` (the single H-17 brand exception)
+    - `SMS_TEMPLATE_IDS = { LOGIN: 'SANCHAY_LOGIN_OTP_V1', CONSENT: 'SANCHAY_CONSENT_OTP_V1', CONSENT_UNITS: 'SANCHAY_CONSENT_UNITS_OTP_V1', ATTEST: 'SANCHAY_ATTEST_OTP_V1' }`
+    - `DLT_SIGNOFF` (the DLT sign-off; this file is on the R-19 allowlist)
     - `DLT_VAR_MAX_LENGTH = 30`
     - `interface ConsentSmsParams { action: string; amount: string; schemeShort: string }`
+    - `interface ConsentUnitsSmsParams { units: string; schemeShort: string }` (`units` is a platform 3-dp string such as `12.345`, or `all` for redeem-all)
+    - `type ConsentSms = ({ template: 'CONSENT' } & ConsentSmsParams) | ({ template: 'CONSENT_UNITS' } & ConsentUnitsSmsParams) | { template: 'ATTEST' }`
     - `loginSmsText(code, retrieverHash?)`
-    - `consentSmsText({code, action, amount, schemeShort}, retrieverHash?)`. It throws `RangeError` when a variable is longer than 30 characters.
+    - `consentSmsText({code, action, amount, schemeShort}, retrieverHash?)`
+    - `consentUnitsSmsText({code, units, schemeShort}, retrieverHash?)`
+    - `attestSmsText(code, retrieverHash?)`
+    - `renderConsentSms(sms: ConsentSms, code, retrieverHash?): { templateId; text }`, which B13 calls for purpose CONSENT over SMS.
+    - `consentSmsText` and `consentUnitsSmsText` throw `RangeError` when a variable is longer than 30 characters.
   - `email/templates.ts`:
     - `EMAIL_TEMPLATE_IDS = { OTP: 'SANCHAY_EMAIL_OTP_V1' }`
     - `type EmailOtpPurpose = 'VERIFY_EMAIL' | 'CONSENT'`
@@ -11842,15 +11991,18 @@ describe('IntegrationsModule.forRoot', () => {
 });
 ```
 
-`apps/api/src/integrations/sms/templates.test.ts`. The golden strings interpolate `DLT_SIGNOFF`, so this file never contains the legal-entity name (H-17). The doc test pins the literal value against `docs/dlt/sms-templates.md`, which sits in `docs/**` and is allowed to contain it.
+`apps/api/src/integrations/sms/templates.test.ts`. The golden strings interpolate `DLT_SIGNOFF`, and the file is also covered by the R-19 allowlist glob `apps/api/src/integrations/sms/templates*.ts`. The doc test pins the literal value against `docs/dlt/sms-templates.md`, which sits in `docs/**`.
 ```ts
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  attestSmsText,
   consentSmsText,
+  consentUnitsSmsText,
   DLT_SIGNOFF,
   DLT_VAR_MAX_LENGTH,
   loginSmsText,
+  renderConsentSms,
   SMS_TEMPLATE_IDS,
   WEBOTP_DOMAIN,
 } from './templates.js';
@@ -11859,13 +12011,24 @@ const HASH = 'FA+9qCX9VSu';
 const VAR = '{#var#}';
 const WEBOTP_LAST_LINE = /^@app\.sanchay\.in #\d{6}$/;
 const EXAMPLE = { code: '123456', action: 'invest', amount: '5,000.00', schemeShort: 'HDFC Flexi Cap' };
+const UNITS_EXAMPLE = { code: '123456', units: '12.345', schemeShort: 'HDFC Flexi Cap' };
 const lastLine = (text: string): string => text.split('\n').at(-1) ?? '';
 
-describe('SMS templates (H-6, DLT)', () => {
-  it('pins the template ids, WebOTP domain, sign-off shape and DLT variable limit', () => {
+/** All four R-10 templates, rendered with an optional retriever hash. */
+const RENDERERS: ReadonlyArray<readonly [string, (hash?: string) => string]> = [
+  ['LOGIN', (hash) => loginSmsText('123456', hash)],
+  ['CONSENT', (hash) => consentSmsText(EXAMPLE, hash)],
+  ['CONSENT_UNITS', (hash) => consentUnitsSmsText(UNITS_EXAMPLE, hash)],
+  ['ATTEST', (hash) => attestSmsText('123456', hash)],
+];
+
+describe('SMS templates (H-6 as amended by R-10, DLT)', () => {
+  it('pins the four template ids, WebOTP domain, sign-off shape and DLT variable limit', () => {
     expect(SMS_TEMPLATE_IDS).toEqual({
       LOGIN: 'SANCHAY_LOGIN_OTP_V1',
       CONSENT: 'SANCHAY_CONSENT_OTP_V1',
+      CONSENT_UNITS: 'SANCHAY_CONSENT_UNITS_OTP_V1',
+      ATTEST: 'SANCHAY_ATTEST_OTP_V1',
     });
     expect(WEBOTP_DOMAIN).toBe('app.sanchay.in');
     expect(DLT_SIGNOFF).toMatch(/^-[A-Z][a-z]+$/);
@@ -11885,14 +12048,21 @@ describe('SMS templates (H-6, DLT)', () => {
     expect(loginSmsText('123456', '')).toBe(loginSmsText('123456'));
   });
 
-  it('keeps the WebOTP line last with and without a hash', () => {
-    for (const text of [
-      loginSmsText('123456'),
-      loginSmsText('123456', HASH),
-      consentSmsText(EXAMPLE),
-      consentSmsText(EXAMPLE, HASH),
-    ]) {
-      expect(lastLine(text)).toMatch(WEBOTP_LAST_LINE);
+  it('keeps the WebOTP line last with and without a hash, for all four templates', () => {
+    for (const [name, render] of RENDERERS) {
+      expect(lastLine(render()), `${name} without hash`).toMatch(WEBOTP_LAST_LINE);
+      expect(lastLine(render(HASH)), `${name} with hash`).toMatch(WEBOTP_LAST_LINE);
+      expect(lastLine(render(HASH)), name).toBe('@app.sanchay.in #123456');
+    }
+  });
+
+  it('renders exactly three lines with the hash penultimate for all four templates (every non-local SMS, B2 invariant 7)', () => {
+    for (const [name, render] of RENDERERS) {
+      const lines = render(HASH).split('\n');
+      expect(lines, name).toHaveLength(3);
+      expect(lines[1], name).toBe(HASH);
+      expect(lines[0]?.startsWith('123456 '), name).toBe(true);
+      expect(lines[0]?.endsWith(` ${DLT_SIGNOFF}`), name).toBe(true);
     }
   });
 
@@ -11909,14 +12079,48 @@ describe('SMS templates (H-6, DLT)', () => {
     );
   });
 
+  it('renders the redeem-by-units and redeem-all SMS byte-for-byte', () => {
+    expect(consentUnitsSmsText(UNITS_EXAMPLE, HASH)).toBe(
+      `123456 is your OTP to redeem 12.345 units of HDFC Flexi Cap on Sanchay. Valid 5 min. Never share it. ${DLT_SIGNOFF}\nFA+9qCX9VSu\n@app.sanchay.in #123456`,
+    );
+    expect(consentUnitsSmsText({ ...UNITS_EXAMPLE, units: 'all' })).toBe(
+      `123456 is your OTP to redeem all units of HDFC Flexi Cap on Sanchay. Valid 5 min. Never share it. ${DLT_SIGNOFF}\n@app.sanchay.in #123456`,
+    );
+  });
+
+  it('renders the onboarding attest SMS byte-for-byte', () => {
+    expect(attestSmsText('123456', HASH)).toBe(
+      `123456 is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. ${DLT_SIGNOFF}\nFA+9qCX9VSu\n@app.sanchay.in #123456`,
+    );
+  });
+
+  it('maps each consent variant to its DLT template id', () => {
+    expect(renderConsentSms({ template: 'CONSENT', ...EXAMPLE }, '123456', HASH)).toEqual({
+      templateId: 'SANCHAY_CONSENT_OTP_V1',
+      text: consentSmsText(EXAMPLE, HASH),
+    });
+    expect(
+      renderConsentSms({ template: 'CONSENT_UNITS', units: 'all', schemeShort: 'HDFC Flexi Cap' }, '123456'),
+    ).toEqual({
+      templateId: 'SANCHAY_CONSENT_UNITS_OTP_V1',
+      text: consentUnitsSmsText({ ...UNITS_EXAMPLE, units: 'all' }),
+    });
+    expect(renderConsentSms({ template: 'ATTEST' }, '123456', HASH)).toEqual({
+      templateId: 'SANCHAY_ATTEST_OTP_V1',
+      text: attestSmsText('123456', HASH),
+    });
+  });
+
   it('refuses consent variables longer than one DLT variable', () => {
     expect(() => consentSmsText({ ...EXAMPLE, schemeShort: 'x'.repeat(31) })).toThrow(RangeError);
     expect(() => consentSmsText({ ...EXAMPLE, action: 'x'.repeat(31) })).toThrow(RangeError);
     expect(() => consentSmsText({ ...EXAMPLE, amount: '9'.repeat(31) })).toThrow(RangeError);
     expect(() => consentSmsText({ ...EXAMPLE, schemeShort: 'x'.repeat(30) })).not.toThrow();
+    expect(() => consentUnitsSmsText({ ...UNITS_EXAMPLE, units: '9'.repeat(31) })).toThrow(RangeError);
+    expect(() => consentUnitsSmsText({ ...UNITS_EXAMPLE, schemeShort: 'x'.repeat(31) })).toThrow(RangeError);
   });
 
-  it('matches docs/dlt/sms-templates.md exactly (G-B4 registration text)', () => {
+  it('matches docs/dlt/sms-templates.md exactly for all four templates (G-B4 registration text)', () => {
     const doc = readFileSync(
       new URL('../../../../../docs/dlt/sms-templates.md', import.meta.url),
       'utf8',
@@ -11925,8 +12129,13 @@ describe('SMS templates (H-6, DLT)', () => {
     expect(doc).toContain(
       consentSmsText({ code: VAR, action: VAR, amount: VAR, schemeShort: VAR }, VAR),
     );
+    expect(doc).toContain(consentUnitsSmsText({ code: VAR, units: VAR, schemeShort: VAR }, VAR));
+    expect(doc).toContain(attestSmsText(VAR, VAR));
     expect(doc).toContain(loginSmsText('123456', HASH));
     expect(doc).toContain(consentSmsText(EXAMPLE, HASH));
+    expect(doc).toContain(consentUnitsSmsText(UNITS_EXAMPLE, HASH));
+    expect(doc).toContain(consentUnitsSmsText({ ...UNITS_EXAMPLE, units: 'all' }, HASH));
+    expect(doc).toContain(attestSmsText('123456', HASH));
   });
 });
 ```
@@ -12155,30 +12364,56 @@ export class MailpitEmailSender implements EmailSender {
 }
 ```
 
-`apps/api/src/integrations/sms/templates.ts`. This is the only file in `apps/api/src` allowed to carry the sign-off (H-17). Do not mention the entity name anywhere else in it.
+`apps/api/src/integrations/sms/templates.ts`. This is the only source file in `apps/api/src` that carries the sign-off; `templates*.ts` is on the R-19 allowlist. Everything else (the Plan-02 msg91 adapter and its golden-bytes tests included) imports `DLT_SIGNOFF` or a renderer.
 ```ts
-/** WebOTP origin binding (`@domain #code`). Always the LAST line of every OTP SMS (H-6). */
+/** WebOTP origin binding (`@domain #code`). Always the LAST line of every OTP SMS (H-6, R-10). */
 export const WEBOTP_DOMAIN = 'app.sanchay.in';
 
-/** DLT template keys registered under G-B4. Bodies: docs/dlt/sms-templates.md. */
+/** The four DLT template keys registered under G-B4 (R-10). Bodies: docs/dlt/sms-templates.md. */
 export const SMS_TEMPLATE_IDS = {
   LOGIN: 'SANCHAY_LOGIN_OTP_V1',
   CONSENT: 'SANCHAY_CONSENT_OTP_V1',
+  CONSENT_UNITS: 'SANCHAY_CONSENT_UNITS_OTP_V1',
+  ATTEST: 'SANCHAY_ATTEST_OTP_V1',
 } as const;
 
-/** DLT sign-off of the principal entity (H-17 allow-listed line). */
+/** DLT sign-off of the principal entity (this file is on the R-19 allowlist). */
 export const DLT_SIGNOFF = '-Platizio';
 
 /** One DLT `{#var#}` holds at most 30 characters. */
 export const DLT_VAR_MAX_LENGTH = 30;
 
+/** Purchase and SIP/mandate consent: an amount in rupees. */
 export interface ConsentSmsParams {
   action: string;
   amount: string;
   schemeShort: string;
 }
 
-/** Line 1 = DLT text; optional line 2 = Android SMS Retriever hash; last line = WebOTP binding. */
+/** Redemption by units: a platform 3-dp units string such as '12.345', or 'all' for redeem-all. */
+export interface ConsentUnitsSmsParams {
+  units: string;
+  schemeShort: string;
+}
+
+/** What the consent engine hands to OtpService for purpose CONSENT over SMS (R-10). */
+export type ConsentSms =
+  | ({ template: 'CONSENT' } & ConsentSmsParams)
+  | ({ template: 'CONSENT_UNITS' } & ConsentUnitsSmsParams)
+  | { template: 'ATTEST' };
+
+function assertDltVariables(renderer: string, variables: ReadonlyArray<readonly [string, string]>): void {
+  for (const [name, value] of variables) {
+    if (value.length > DLT_VAR_MAX_LENGTH) {
+      throw new RangeError(`${renderer}: ${name} exceeds ${DLT_VAR_MAX_LENGTH} characters`);
+    }
+  }
+}
+
+/**
+ * Line 1 = DLT text; line 2 = Android SMS Retriever hash (the `{#var#}` penultimate line, always set
+ * outside local/test by B2 invariant 7); last line = WebOTP binding. Local/test may omit line 2.
+ */
 function withOtpLines(first: string, code: string, retrieverHash?: string): string {
   const lines = [first];
   if (retrieverHash !== undefined && retrieverHash !== '') lines.push(retrieverHash);
@@ -12195,21 +12430,64 @@ export function loginSmsText(code: string, retrieverHash?: string): string {
 }
 
 export function consentSmsText(input: ConsentSmsParams & { code: string }, retrieverHash?: string): string {
-  const variables: Array<[string, string]> = [
+  assertDltVariables('consentSmsText', [
     ['action', input.action],
     ['amount', input.amount],
     ['schemeShort', input.schemeShort],
-  ];
-  for (const [name, value] of variables) {
-    if (value.length > DLT_VAR_MAX_LENGTH) {
-      throw new RangeError(`consentSmsText: ${name} exceeds ${DLT_VAR_MAX_LENGTH} characters`);
-    }
-  }
+  ]);
   return withOtpLines(
     `${input.code} is your OTP to ${input.action} Rs ${input.amount} in ${input.schemeShort} on Sanchay. Valid 5 min. Never share it. ${DLT_SIGNOFF}`,
     input.code,
     retrieverHash,
   );
+}
+
+export function consentUnitsSmsText(
+  input: ConsentUnitsSmsParams & { code: string },
+  retrieverHash?: string,
+): string {
+  assertDltVariables('consentUnitsSmsText', [
+    ['units', input.units],
+    ['schemeShort', input.schemeShort],
+  ]);
+  return withOtpLines(
+    `${input.code} is your OTP to redeem ${input.units} units of ${input.schemeShort} on Sanchay. Valid 5 min. Never share it. ${DLT_SIGNOFF}`,
+    input.code,
+    retrieverHash,
+  );
+}
+
+export function attestSmsText(code: string, retrieverHash?: string): string {
+  return withOtpLines(
+    `${code} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. ${DLT_SIGNOFF}`,
+    code,
+    retrieverHash,
+  );
+}
+
+/** Picks the R-10 template for a consent SMS. */
+export function renderConsentSms(
+  sms: ConsentSms,
+  code: string,
+  retrieverHash?: string,
+): { templateId: string; text: string } {
+  switch (sms.template) {
+    case 'CONSENT':
+      return {
+        templateId: SMS_TEMPLATE_IDS.CONSENT,
+        text: consentSmsText(
+          { code, action: sms.action, amount: sms.amount, schemeShort: sms.schemeShort },
+          retrieverHash,
+        ),
+      };
+    case 'CONSENT_UNITS':
+      return {
+        templateId: SMS_TEMPLATE_IDS.CONSENT_UNITS,
+        text: consentUnitsSmsText({ code, units: sms.units, schemeShort: sms.schemeShort }, retrieverHash),
+      };
+    case 'ATTEST':
+      return { templateId: SMS_TEMPLATE_IDS.ATTEST, text: attestSmsText(code, retrieverHash) };
+  }
 }
 ```
 
@@ -12299,8 +12577,9 @@ The unit test `apps/api/src/integrations/sms/templates.test.ts` fails if this fi
 - Brand in the message text: Sanchay
 - Variable marker: `{#var#}`, at most 30 characters per variable
 - Template type: Transactional (OTP), submitted through MSG91
-- Production always sets `SANCHAY_SMS_RETRIEVER_HASH` (from the Play App Signing certificate of the internal-testing build), so every production SMS has three lines. Local and test builds may omit the middle line.
-- The WebOTP line `@app.sanchay.in #<code>` is always the last line. The Android SMS Retriever hash is always the penultimate line.
+- Four templates (ruling R-10): LOGIN, CONSENT (amount), CONSENT_UNITS (redeem by units, or redeem all with the units variable `all`) and ATTEST (onboarding attest). The CO and counsel sign off all four texts before the Mon 10-12 filing (PB-32a).
+- Every environment outside local/test must set `SANCHAY_SMS_RETRIEVER_HASH` (API boot invariant 7; the value comes from the Play App Signing certificate of the internal-testing build), so every non-local SMS has exactly three lines. Local and test builds may omit the middle line.
+- The WebOTP line `@app.sanchay.in #<code>` is always the last line. The Android SMS Retriever hash is always the penultimate line, registered as a `{#var#}` so DLT approval does not depend on Play App Signing.
 
 ## SANCHAY_LOGIN_OTP_V1
 
@@ -12338,6 +12617,54 @@ Rendered example (code 123456, action invest, amount 5,000.00, scheme HDFC Flexi
 
 ```text
 123456 is your OTP to invest Rs 5,000.00 in HDFC Flexi Cap on Sanchay. Valid 5 min. Never share it. -Platizio
+FA+9qCX9VSu
+@app.sanchay.in #123456
+```
+
+## SANCHAY_CONSENT_UNITS_OTP_V1
+
+Template body:
+
+```text
+{#var#} is your OTP to redeem {#var#} units of {#var#} on Sanchay. Valid 5 min. Never share it. -Platizio
+{#var#}
+@app.sanchay.in #{#var#}
+```
+
+Variables: 1 = 6-digit code; 2 = units with 3 decimals, or the word `all` for redeem-all; 3 = short scheme name; 4 = Android SMS Retriever hash; 5 = the same 6-digit code.
+
+Rendered example (code 123456, units 12.345, scheme HDFC Flexi Cap, hash FA+9qCX9VSu):
+
+```text
+123456 is your OTP to redeem 12.345 units of HDFC Flexi Cap on Sanchay. Valid 5 min. Never share it. -Platizio
+FA+9qCX9VSu
+@app.sanchay.in #123456
+```
+
+Rendered example (redeem all):
+
+```text
+123456 is your OTP to redeem all units of HDFC Flexi Cap on Sanchay. Valid 5 min. Never share it. -Platizio
+FA+9qCX9VSu
+@app.sanchay.in #123456
+```
+
+## SANCHAY_ATTEST_OTP_V1
+
+Template body:
+
+```text
+{#var#} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio
+{#var#}
+@app.sanchay.in #{#var#}
+```
+
+Variables: 1 = 6-digit code; 2 = Android SMS Retriever hash; 3 = the same 6-digit code.
+
+Rendered example (code 123456, hash FA+9qCX9VSu):
+
+```text
+123456 is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio
 FA+9qCX9VSu
 @app.sanchay.in #123456
 ```
@@ -12382,10 +12709,10 @@ pnpm --filter=@sanchay/api typecheck
 pnpm check-brand
 ```
 Expected:
-- `Test Files  5 passed (5)` and `Tests  19 passed (19)`: senders 5, integrations.module 2, sms/templates 8, email/templates 2, masking 2.
+- `Test Files  5 passed (5)` and `Tests  23 passed (23)`: senders 5, integrations.module 2, sms/templates 12, email/templates 2, masking 2.
 - `health.int.test.ts` passes, which proves the app boots with `IntegrationsModule`.
 - `tsc` exits 0.
-- `check-brand` exits 0. The sign-off appears only in `integrations/sms/templates.ts` and in `docs/**`.
+- `check-brand` exits 0. The sign-off appears only in `integrations/sms/templates.ts` and in `docs/**`, both on the R-19 allowlist.
 
 - [ ] **Step 5: Commit**
 
@@ -12408,6 +12735,11 @@ git commit -m "feat(api): add SMS/email ports with capture and Mailpit senders, 
 - A global cap of 2,000 SMS per IST day.
 - The purposes are LOGIN (SMS), VERIFY_EMAIL (email) and CONSENT (SMS and email).
 
+Amended 2026-09-28 by rulings R-07, R-10 and R-14 (`docs/delivery/rulings.md`):
+- **HMAC input pinned (R-14):** `HMAC-SHA256(pepper[pepper_kid], purpose|dest_bidx_hex|otp_row_id|code)`. For CONSENT rows the otp row id is used, never the consent challenge id (`reference_id`). This amends the H-3 wording that said challengeId; B14 and the consent engine use the same input.
+- **Synchronous send is accepted deviation D-17 (R-07):** the "providers only from worker jobs" non-negotiable covers FP/POA money and provisioning providers. OTP delivery through the SMS/email sender is synchronous in the request, outside any DB transaction, with a **5 s provider timeout** (`OTP_POLICY.sendTimeoutMs`). A failure or a timeout deletes the row and returns **503 `SMS_UNAVAILABLE`** (email: 503 `PROVIDER_UNAVAILABLE`). Phase 2 may move the send to pg-boss with the same 200 response shape.
+- **Four DLT templates (R-10):** CONSENT over SMS takes a `ConsentSms` variant and renders it with B12 `renderConsentSms` (CONSENT, CONSENT_UNITS or ATTEST).
+
 **Files:**
 - Create: `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/identity/otp.service.ts`
 - Create: `C:/Users/pc/Desktop/sanchay/apps/api/test/int/otp-fixture.ts`
@@ -12427,22 +12759,24 @@ git commit -m "feat(api): add SMS/email ports with capture and Mailpit senders, 
   - From B7: `otpCodes`, including `destinationEnc: bytea NOT NULL`, `pepperKid: smallint NOT NULL`, `consumedReason` (`'VERIFIED'|'EXPIRED'|'LOCKED'|'SUPERSEDED'`) and the partial unique index `otp_codes_live_scope_uq`. Also `type OtpPurpose` (the H-4 enum) and `type OtpChannel`.
   - From B8: `AppError(code, {retryable?, retryAfterSeconds?, cause?})` and `pgErrorCodeOf`.
   - From B11: `AuditService.record(null, …)` and `AUDIT_ACTIONS.AUTH_OTP_LOCKOUT`.
-  - From B12: `SMS_SENDER`, `SmsSender`, `SendResult`, `EMAIL_SENDER`, `EmailSender`, `loginSmsText`, `consentSmsText`, `ConsentSmsParams`, `SMS_TEMPLATE_IDS`, `emailOtpMessage`, `EMAIL_TEMPLATE_IDS`, `maskMobile` and `maskEmail`.
+  - From B12: `SMS_SENDER`, `SmsSender`, `SendResult`, `SenderUnavailableError`, `EMAIL_SENDER`, `EmailSender`, `loginSmsText`, `renderConsentSms`, `ConsentSms`, `SMS_TEMPLATE_IDS`, `emailOtpMessage`, `EMAIL_TEMPLATE_IDS`, `maskMobile` and `maskEmail`.
   - Test side:
     - `testEnv(url, overrides?)` and `testKeyService(env)` (B9).
     - `type SanchayClsStore` (B9).
     - `createTestDatabase` (B6).
     - `CaptureSmsSender` and `CaptureEmailSender` (B12).
 - Produces:
-  - `OTP_POLICY = { ttlMs: 300_000, maxAttempts: 5, cooldownMs: 30_000, perDestinationPerHour: 5, perDestinationPerDay: 15, perIpPerHour: 20, perDevicePerHour: 10, lockoutBurns: 3, lockoutWindowMs: 3_600_000, lockoutMs: 1_800_000, smsPerIstDay: 2_000 }`. `perIpPerHour` is only the documented default. The enforced value is `env.SANCHAY_OTP_PER_IP_PER_HOUR`.
+  - `OTP_POLICY = { ttlMs: 300_000, maxAttempts: 5, cooldownMs: 30_000, perDestinationPerHour: 5, perDestinationPerDay: 15, perIpPerHour: 20, perDevicePerHour: 10, lockoutBurns: 3, lockoutWindowMs: 3_600_000, lockoutMs: 1_800_000, smsPerIstDay: 2_000, sendTimeoutMs: 5_000 }`. `perIpPerHour` is only the documented default. The enforced value is `env.SANCHAY_OTP_PER_IP_PER_HOUR`.
   - `istDayStart(at: Date): Date`, the start of the UTC+05:30 calendar day.
   - `lockoutEndsAt(burnsNewestFirst: readonly Date[], now: Date): Date | null`.
   - `generateOtpCode(): string` (6 digits, `crypto.randomInt`).
+  - `withSendTimeout<T>(send: Promise<T>, timeoutMs: number): Promise<T>`: rejects with `SenderUnavailableError` once `timeoutMs` passes (D-17, R-07).
   - `interface OtpDestination { channel: OtpChannel; value: string }`
-  - `interface IssueOtpInput { purpose: OtpPurpose; destination: OtpDestination; referenceId?: string | null; ip: string | null; deviceRefHash?: Buffer | null; consentSms?: ConsentSmsParams }`
+  - `interface IssueOtpInput { purpose: OtpPurpose; destination: OtpDestination; referenceId?: string | null; ip: string | null; deviceRefHash?: Buffer | null; consentSms?: ConsentSms }`
   - `interface IssuedOtp { challengeId: string; expiresAt: Date; resendAfterSeconds: number; destinationMasked: string }`
+  - `OtpService.sendTimeoutMs: number` (default `OTP_POLICY.sendTimeoutMs`). It is a test seam only; production never changes it.
   - `OtpService.issue(input): Promise<IssuedOtp>`. The order is fixed:
-    0. **Render.** Rendering happens first. It is a pure step, and any pair other than LOGIN/SMS, CONSENT/SMS (with `consentSms`), VERIFY_EMAIL/EMAIL or CONSENT/EMAIL throws a plain `Error('OtpService: cannot render <purpose> over <channel>')`, which surfaces as INTERNAL.
+    0. **Render.** Rendering happens first. It is a pure step, and any pair other than LOGIN/SMS, CONSENT/SMS (with `consentSms`, rendered by `renderConsentSms` into one of the three consent templates), VERIFY_EMAIL/EMAIL or CONSENT/EMAIL throws a plain `Error('OtpService: cannot render <purpose> over <channel>')`, which surfaces as INTERNAL.
     1. **Lockout.** 3 LOCKED burns for the same (purpose, destination) within 60 min lock that pair until 30 min after the newest burn. A request during that time gets 429 `RATE_LIMITED` with `retryAfterSeconds`, and an audit row `AUTH_OTP_LOCKOUT` is written (actor `ANONYMOUS`, entity `otp_destination`/`<bidx hex>`, data `{purpose, channel, outcome:'REFUSED'}`).
     2. **Cooldown.** 30 s per scope (purpose + destination bidx + referenceId), otherwise 429 `OTP_COOLDOWN` with `retryAfterSeconds`.
     3. **Per-destination quotas.** 5 per hour and 15 per day, otherwise `RATE_LIMITED`.
@@ -12452,13 +12786,13 @@ git commit -m "feat(api): add SMS/email ports with capture and Mailpit senders, 
     7. **Transaction.** One transaction supersedes the live code in the scope (`consumed_reason 'SUPERSEDED'`) and inserts the new row with:
        - `destination_enc`, encrypted with AAD `otp_codes.destination_enc:<id>`;
        - `pepper_kid = currentOtpPepperKid`;
-       - `code_hmac = HMAC-SHA256(pepper[kid], purpose|destBidxHex|otpId|code)`.
+       - `code_hmac = HMAC-SHA256(pepper[kid], purpose|destBidxHex|otpRowId|code)` (R-14: the otp row id, also for CONSENT rows).
        A 23505 race maps to `OTP_COOLDOWN`.
-    8. **Send (synchronous, D-17).** On failure the row is deleted and the call throws `SMS_UNAVAILABLE` for SMS or `PROVIDER_UNAVAILABLE` for email.
+    8. **Send (synchronous, deviation D-17 accepted by R-07).** The transaction has already committed, so no provider call happens inside a DB transaction. The provider gets at most `sendTimeoutMs` (5 s). On failure or timeout the row is deleted and the call throws 503 `SMS_UNAVAILABLE` for SMS or 503 `PROVIDER_UNAVAILABLE` for email.
     9. **Record the provider.** `provider` and `provider_message_id` are written to the row.
   - `OtpService.verify` is added in B14.
   - Test side: `otpFixture(t, envOverrides?: Record<string,string>) → {otp, crypto, keys, clock, sms, email, env}`. This is a superset of the sheet's `{otp, crypto, clock, sms, email}`.
-  - Test counts: `otp-issue.int.test.ts` has 12 tests. `otp-cap.int.test.ts` has 3: two under `policy helpers` ("computes the start of the IST day" and "ends a lockout 30 min after the third burn…") and one under `global SMS cap`. The total is 15.
+  - Test counts: `otp-issue.int.test.ts` has 13 tests. `otp-cap.int.test.ts` has 3: two under `policy helpers` ("computes the start of the IST day" and "ends a lockout 30 min after the third burn…", which also pins `sendTimeoutMs`) and one under `global SMS cap`. The total is 16.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -12496,9 +12830,10 @@ export function otpFixture(t: TestDatabase, envOverrides: Record<string, string>
 ```ts
 import { createHmac } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { auditEvents, otpCodes } from '../../src/db/schema.js';
-import { consentSmsText, loginSmsText } from '../../src/integrations/sms/templates.js';
+import type { SendResult } from '../../src/integrations/sms/port.js';
+import { type ConsentSms, loginSmsText, renderConsentSms } from '../../src/integrations/sms/templates.js';
 import type { IssueOtpInput } from '../../src/modules/identity/otp.service.js';
 import { HOUR, MINUTE, SECOND } from '../../src/modules/platform/clock.js';
 import { AppError } from '../../src/modules/platform/errors.js';
@@ -12659,6 +12994,19 @@ describe('OtpService.issue', () => {
     expect((await outcome(f.otp.issue(sms(mobile)))).code).toBe('OK');
   });
 
+  it('gives up on a hanging provider after sendTimeoutMs, deletes the row and reports SMS_UNAVAILABLE (D-17, R-07)', async () => {
+    const mobile = nextMobile();
+    const send = vi.spyOn(f.sms, 'send').mockImplementationOnce(() => new Promise<SendResult>(() => undefined));
+    f.otp.sendTimeoutMs = 50;
+    expect(await outcome(f.otp.issue(sms(mobile)))).toEqual({ code: 'SMS_UNAVAILABLE' });
+    expect(send).toHaveBeenCalledTimes(1);
+    const rows = await t.db
+      .select()
+      .from(otpCodes)
+      .where(eq(otpCodes.destinationBidx, f.crypto.blindIndex('mobile', mobile)));
+    expect(rows).toEqual([]);
+  });
+
   it('sends VERIFY_EMAIL codes by email with a masked destination', async () => {
     const issued = await f.otp.issue({
       purpose: 'VERIFY_EMAIL',
@@ -12726,23 +13074,38 @@ describe('OtpService.issue', () => {
     expect(rows).toEqual([]);
   });
 
-  it('renders CONSENT over SMS with the consent DLT template', async () => {
-    const mobile = nextMobile();
-    const params = { action: 'invest', amount: '5,000.00', schemeShort: 'HDFC Flexi Cap' };
-    const issued = await f.otp.issue({
-      purpose: 'CONSENT',
-      destination: { channel: 'SMS', value: mobile },
-      referenceId: REFERENCE,
-      ip: null,
-      consentSms: params,
-    });
-    const code = f.sms.latestCode(mobile);
-    expect(must(f.sms.outbox.at(-1))).toMatchObject({
-      to: mobile,
-      templateId: 'SANCHAY_CONSENT_OTP_V1',
-      text: consentSmsText({ code, ...params }, f.env.SANCHAY_SMS_RETRIEVER_HASH),
-    });
-    expect((await rowById(issued.challengeId)).referenceId).toBe(REFERENCE);
+  it('renders CONSENT over SMS with the R-10 template the engine picks and binds the HMAC to the otp row id (R-14)', async () => {
+    const variants: ReadonlyArray<readonly [ConsentSms, string]> = [
+      [
+        { template: 'CONSENT', action: 'invest', amount: '5,000.00', schemeShort: 'HDFC Flexi Cap' },
+        'SANCHAY_CONSENT_OTP_V1',
+      ],
+      [{ template: 'CONSENT_UNITS', units: 'all', schemeShort: 'HDFC Flexi Cap' }, 'SANCHAY_CONSENT_UNITS_OTP_V1'],
+      [{ template: 'ATTEST' }, 'SANCHAY_ATTEST_OTP_V1'],
+    ];
+    for (const [consentSms, templateId] of variants) {
+      const mobile = nextMobile();
+      const issued = await f.otp.issue({
+        purpose: 'CONSENT',
+        destination: { channel: 'SMS', value: mobile },
+        referenceId: REFERENCE,
+        ip: null,
+        consentSms,
+      });
+      const code = f.sms.latestCode(mobile);
+      expect(must(f.sms.outbox.at(-1))).toMatchObject({
+        to: mobile,
+        templateId,
+        text: renderConsentSms(consentSms, code, f.env.SANCHAY_SMS_RETRIEVER_HASH).text,
+      });
+      const row = await rowById(issued.challengeId);
+      expect(row).toMatchObject({ referenceId: REFERENCE, templateId });
+      const bidxHex = f.crypto.blindIndex('mobile', mobile).toString('hex');
+      const hmacOver = (id: string): Buffer =>
+        createHmac('sha256', f.keys.otpPepper(row.pepperKid)).update(`CONSENT|${bidxHex}|${id}|${code}`).digest();
+      expect(row.codeHmac.equals(hmacOver(issued.challengeId))).toBe(true);
+      expect(row.codeHmac.equals(hmacOver(REFERENCE))).toBe(false);
+    }
   });
 });
 ```
@@ -12814,6 +13177,7 @@ describe('policy helpers', () => {
       lockoutWindowMs: 60 * MINUTE,
       lockoutMs: 30 * MINUTE,
       smsPerIstDay: 2_000,
+      sendTimeoutMs: 5_000,
     });
   });
 });
@@ -12868,11 +13232,16 @@ import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbHandle } from '../../db/client.js';
 import { EMAIL_SENDER, type EmailSender } from '../../integrations/email/port.js';
 import { EMAIL_TEMPLATE_IDS, emailOtpMessage } from '../../integrations/email/templates.js';
-import { SMS_SENDER, type SendResult, type SmsSender } from '../../integrations/sms/port.js';
 import {
-  type ConsentSmsParams,
-  consentSmsText,
+  SMS_SENDER,
+  type SendResult,
+  SenderUnavailableError,
+  type SmsSender,
+} from '../../integrations/sms/port.js';
+import {
+  type ConsentSms,
   loginSmsText,
+  renderConsentSms,
   SMS_TEMPLATE_IDS,
 } from '../../integrations/sms/templates.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
@@ -12899,9 +13268,27 @@ export const OTP_POLICY = {
   lockoutWindowMs: HOUR,
   lockoutMs: 30 * MINUTE,
   smsPerIstDay: 2_000,
+  /** D-17 (R-07): the synchronous OTP send waits at most 5 s for the provider, then 503. */
+  sendTimeoutMs: 5 * SECOND,
 } as const;
 
 const IST_OFFSET_MS = 330 * MINUTE;
+
+/** D-17 (R-07): rejects with SenderUnavailableError when the provider has not answered within `timeoutMs`. */
+export async function withSendTimeout<T>(send: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new SenderUnavailableError(`otp send timed out after ${timeoutMs} ms`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([send, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Start of the Indian calendar day (UTC+05:30) that contains `at`. */
 export function istDayStart(at: Date): Date {
@@ -12932,8 +13319,8 @@ export interface IssueOtpInput {
   referenceId?: string | null;
   ip: string | null;
   deviceRefHash?: Buffer | null;
-  /** Required for purpose CONSENT over SMS (consent engine, plan-05). */
-  consentSms?: ConsentSmsParams;
+  /** Required for purpose CONSENT over SMS (consent engine, Plan 03): picks one of the three R-10 consent templates. */
+  consentSms?: ConsentSms;
 }
 
 export interface IssuedOtp {
@@ -12957,6 +13344,9 @@ export function generateOtpCode(): string {
 export class OtpService {
   private readonly log = new Logger(OtpService.name);
 
+  /** D-17 (R-07) provider timeout. A test seam only: production always uses OTP_POLICY.sendTimeoutMs (5 s). */
+  sendTimeoutMs: number = OTP_POLICY.sendTimeoutMs;
+
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(Crypto) private readonly crypto: Crypto,
@@ -12968,7 +13358,10 @@ export class OtpService {
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
-  /** The challengeId returned here IS otp_codes.id (H-5). The send is synchronous (D-17). */
+  /**
+   * The challengeId returned here IS otp_codes.id (H-5). The send is synchronous (deviation D-17, R-07):
+   * it runs after the transaction has committed and waits at most `sendTimeoutMs`.
+   */
   async issue(input: IssueOtpInput): Promise<IssuedOtp> {
     const now = this.clock.now();
     const id = newId('otp_codes');
@@ -13026,17 +13419,18 @@ export class OtpService {
 
     let result: SendResult;
     try {
-      result =
+      const send =
         input.destination.channel === 'SMS'
-          ? await this.sms.send({ to: input.destination.value, text: message.text, templateId: message.templateId })
-          : await this.email.send({
+          ? this.sms.send({ to: input.destination.value, text: message.text, templateId: message.templateId })
+          : this.email.send({
               to: input.destination.value,
               subject: message.subject,
               text: message.text,
               templateId: message.templateId,
             });
+      result = await withSendTimeout(send, this.sendTimeoutMs);
     } catch (cause) {
-      // An undelivered code must not burn cooldown or quota.
+      // An undelivered (or timed-out) code must not burn cooldown or quota.
       await this.dbh.db.delete(otpCodes).where(eq(otpCodes.id, id));
       throw new AppError(input.destination.channel === 'SMS' ? 'SMS_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE', {
         retryable: true,
@@ -13062,7 +13456,10 @@ export class OtpService {
     );
   }
 
-  /** HMAC-SHA256(pepper[kid], purpose|dest_bidx_hex|otpId|code), H-3. */
+  /**
+   * HMAC-SHA256(pepper[kid], purpose|dest_bidx_hex|otp_row_id|code), pinned by R-14 (amends H-3). The otp
+   * row id is used for every purpose, including CONSENT rows whose reference_id is the consent challenge.
+   */
   private codeHmac(kid: number, purpose: OtpPurpose, destinationBidx: Buffer, otpId: string, code: string): Buffer {
     return createHmac('sha256', this.keys.otpPepper(kid))
       .update(`${purpose}|${destinationBidx.toString('hex')}|${otpId}|${code}`)
@@ -13076,11 +13473,7 @@ export class OtpService {
       return { templateId: SMS_TEMPLATE_IDS.LOGIN, subject: '', text: loginSmsText(code, hash) };
     }
     if (destination.channel === 'SMS' && purpose === 'CONSENT' && input.consentSms !== undefined) {
-      return {
-        templateId: SMS_TEMPLATE_IDS.CONSENT,
-        subject: '',
-        text: consentSmsText({ code, ...input.consentSms }, hash),
-      };
+      return { subject: '', ...renderConsentSms(input.consentSms, code, hash) };
     }
     if (destination.channel === 'EMAIL' && (purpose === 'VERIFY_EMAIL' || purpose === 'CONSENT')) {
       return { templateId: EMAIL_TEMPLATE_IDS.OTP, ...emailOtpMessage(code, purpose) };
@@ -13206,7 +13599,7 @@ pnpm --filter=@sanchay/api test:int otp-issue otp-cap
 pnpm --filter=@sanchay/api typecheck
 ```
 Expected:
-- `Test Files  2 passed (2)` and `Tests  15 passed (15)`: `otp-issue` 12 and `otp-cap` 3 (the two `policy helpers` tests plus the global-cap test).
+- `Test Files  2 passed (2)` and `Tests  16 passed (16)`: `otp-issue` 13 and `otp-cap` 3 (the two `policy helpers` tests plus the global-cap test).
 - `tsc` exits 0.
 
 - [ ] **Step 5: Commit**
@@ -13251,7 +13644,7 @@ git commit -m "feat(api): issue OTPs by challengeId with peppered HMAC, lockout,
        - on any earlier attempt it throws `OTP_INVALID`.
     6. The consume step (`VERIFIED`, guarded by `consumed_at IS NULL`) runs on `exec`. It rolls back with the caller's transaction, and only one concurrent verifier can win.
     7. The destination is decrypted with AAD `otp_codes.destination_enc:<id>`.
-  - Test counts: `otp-verify.int.test.ts` has 11 tests. With B13's files, the `test:int otp` run totals 26 (otp-verify 11, otp-issue 12, otp-cap 3).
+  - Test counts: `otp-verify.int.test.ts` has 11 tests. With B13's files, the `test:int otp` run totals 27 (otp-verify 11, otp-issue 13, otp-cap 3).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -13455,11 +13848,16 @@ import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { EMAIL_SENDER, type EmailSender } from '../../integrations/email/port.js';
 import { EMAIL_TEMPLATE_IDS, emailOtpMessage } from '../../integrations/email/templates.js';
-import { SMS_SENDER, type SendResult, type SmsSender } from '../../integrations/sms/port.js';
 import {
-  type ConsentSmsParams,
-  consentSmsText,
+  SMS_SENDER,
+  type SendResult,
+  SenderUnavailableError,
+  type SmsSender,
+} from '../../integrations/sms/port.js';
+import {
+  type ConsentSms,
   loginSmsText,
+  renderConsentSms,
   SMS_TEMPLATE_IDS,
 } from '../../integrations/sms/templates.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
@@ -13486,9 +13884,27 @@ export const OTP_POLICY = {
   lockoutWindowMs: HOUR,
   lockoutMs: 30 * MINUTE,
   smsPerIstDay: 2_000,
+  /** D-17 (R-07): the synchronous OTP send waits at most 5 s for the provider, then 503. */
+  sendTimeoutMs: 5 * SECOND,
 } as const;
 
 const IST_OFFSET_MS = 330 * MINUTE;
+
+/** D-17 (R-07): rejects with SenderUnavailableError when the provider has not answered within `timeoutMs`. */
+export async function withSendTimeout<T>(send: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new SenderUnavailableError(`otp send timed out after ${timeoutMs} ms`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([send, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Start of the Indian calendar day (UTC+05:30) that contains `at`. */
 export function istDayStart(at: Date): Date {
@@ -13519,8 +13935,8 @@ export interface IssueOtpInput {
   referenceId?: string | null;
   ip: string | null;
   deviceRefHash?: Buffer | null;
-  /** Required for purpose CONSENT over SMS (consent engine, plan-05). */
-  consentSms?: ConsentSmsParams;
+  /** Required for purpose CONSENT over SMS (consent engine, Plan 03): picks one of the three R-10 consent templates. */
+  consentSms?: ConsentSms;
 }
 
 export interface IssuedOtp {
@@ -13563,6 +13979,9 @@ function consumedError(reason: string | null): AppError {
 export class OtpService {
   private readonly log = new Logger(OtpService.name);
 
+  /** D-17 (R-07) provider timeout. A test seam only: production always uses OTP_POLICY.sendTimeoutMs (5 s). */
+  sendTimeoutMs: number = OTP_POLICY.sendTimeoutMs;
+
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(Crypto) private readonly crypto: Crypto,
@@ -13574,7 +13993,10 @@ export class OtpService {
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
-  /** The challengeId returned here IS otp_codes.id (H-5). The send is synchronous (D-17). */
+  /**
+   * The challengeId returned here IS otp_codes.id (H-5). The send is synchronous (deviation D-17, R-07):
+   * it runs after the transaction has committed and waits at most `sendTimeoutMs`.
+   */
   async issue(input: IssueOtpInput): Promise<IssuedOtp> {
     const now = this.clock.now();
     const id = newId('otp_codes');
@@ -13632,17 +14054,18 @@ export class OtpService {
 
     let result: SendResult;
     try {
-      result =
+      const send =
         input.destination.channel === 'SMS'
-          ? await this.sms.send({ to: input.destination.value, text: message.text, templateId: message.templateId })
-          : await this.email.send({
+          ? this.sms.send({ to: input.destination.value, text: message.text, templateId: message.templateId })
+          : this.email.send({
               to: input.destination.value,
               subject: message.subject,
               text: message.text,
               templateId: message.templateId,
             });
+      result = await withSendTimeout(send, this.sendTimeoutMs);
     } catch (cause) {
-      // An undelivered code must not burn cooldown or quota.
+      // An undelivered (or timed-out) code must not burn cooldown or quota.
       await this.dbh.db.delete(otpCodes).where(eq(otpCodes.id, id));
       throw new AppError(input.destination.channel === 'SMS' ? 'SMS_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE', {
         retryable: true,
@@ -13766,7 +14189,10 @@ export class OtpService {
     );
   }
 
-  /** HMAC-SHA256(pepper[kid], purpose|dest_bidx_hex|otpId|code), H-3. */
+  /**
+   * HMAC-SHA256(pepper[kid], purpose|dest_bidx_hex|otp_row_id|code), pinned by R-14 (amends H-3). The otp
+   * row id is used for every purpose, including CONSENT rows whose reference_id is the consent challenge.
+   */
   private codeHmac(kid: number, purpose: OtpPurpose, destinationBidx: Buffer, otpId: string, code: string): Buffer {
     return createHmac('sha256', this.keys.otpPepper(kid))
       .update(`${purpose}|${destinationBidx.toString('hex')}|${otpId}|${code}`)
@@ -13780,11 +14206,7 @@ export class OtpService {
       return { templateId: SMS_TEMPLATE_IDS.LOGIN, subject: '', text: loginSmsText(code, hash) };
     }
     if (destination.channel === 'SMS' && purpose === 'CONSENT' && input.consentSms !== undefined) {
-      return {
-        templateId: SMS_TEMPLATE_IDS.CONSENT,
-        subject: '',
-        text: consentSmsText({ code, ...input.consentSms }, hash),
-      };
+      return { subject: '', ...renderConsentSms(input.consentSms, code, hash) };
     }
     if (destination.channel === 'EMAIL' && (purpose === 'VERIFY_EMAIL' || purpose === 'CONSENT')) {
       return { templateId: EMAIL_TEMPLATE_IDS.OTP, ...emailOtpMessage(code, purpose) };
@@ -13911,7 +14333,7 @@ pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test
 ```
 Expected:
-- `Test Files  3 passed (3)` and `Tests  26 passed (26)`: `otp-verify` 11, `otp-issue` 12 and `otp-cap` 3.
+- `Test Files  3 passed (3)` and `Tests  27 passed (27)`: `otp-verify` 11, `otp-issue` 13 and `otp-cap` 3.
 - `tsc` exits 0.
 - The unit suite passes, including `src/openapi.test.ts` and the B12 template tests.
 
@@ -15201,6 +15623,11 @@ HostGuard is not part of this task. It lands in the S2 kernel (D-11). HostGuard 
 - Bearer tokens, webhooks and returns are accepted only on `api.sanchay.in`.
 - A host mismatch returns 404.
 
+Amended 2026-09-28 by ruling R-11 (`docs/delivery/rulings.md`), **guard exemptions**:
+- `GET /api/v1/health`, `POST /api/v1/webhooks/fp` and `GET|POST /api/v1/pg/return/*` skip `ClientGuard`, `SessionGuard` and the throttler, and are restricted **only by HostGuard**: the webhook and the returns on `api.sanchay.in`, health on both hosts. Without this, ALB health checks, FP webhooks and bank redirects get a 403.
+- The mechanism is one route-metadata decorator, `InfraRoute(hosts)` in `http-decorators.ts`. It sets `IS_PUBLIC`, `SKIP_CLIENT_CHECK`, the `@nestjs/throttler` skip metadata (inert until B21 registers `ThrottlerGuard`) and `INFRA_ROUTE = hosts`, which the Plan-02 HostGuard reads.
+- `HealthRouter` gets `@InfraRoute('APP_AND_API_HOSTS')`. The webhook receiver and the payment-return routes do not exist in Plan 01: **Plan 02 registers the real routes** (kernel E1 webhooks, E21 returns) with `@InfraRoute('API_HOST')`. Here a test-only module (`test/int/infra-routes.ts`) registers stand-ins at the same paths, and tests cover each exemption. B21 adds the throttler-skip behaviour test.
+
 **Files:**
 - Create:
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/cookies.ts`
@@ -15212,9 +15639,11 @@ HostGuard is not part of this task. It lands in the S2 kernel (D-11). HostGuard 
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/identity/session.router.ts`
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/identity/identity.module.ts`
   - `C:/Users/pc/Desktop/sanchay/apps/api/test/int/http.ts`
+  - `C:/Users/pc/Desktop/sanchay/apps/api/test/int/infra-routes.ts` (test-only stand-ins for the R-11 routes)
 - Modify (key edits, below):
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/app.module.ts`
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/health.router.ts`
+  - `C:/Users/pc/Desktop/sanchay/apps/api/test/int/app.ts` (`bootTestApp` gains a `testModules` option)
 - Modify (append only, always):
   - `C:/Users/pc/Desktop/sanchay/docs/adr/0001-versions.md`. Step 0 appends one row recording which `cookies.ts` was used.
 - Modify (conditional, only when Step 4a applies):
@@ -15224,7 +15653,9 @@ HostGuard is not part of this task. It lands in the S2 kernel (D-11). HostGuard 
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/cookies.test.ts`
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/client.guard.test.ts`
   - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/identity/request-auth.test.ts`
+  - `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/http-decorators.test.ts`
   - `C:/Users/pc/Desktop/sanchay/apps/api/test/int/session-endpoint.int.test.ts`
+  - `C:/Users/pc/Desktop/sanchay/apps/api/test/int/infra-routes.int.test.ts`
 
 **Interfaces:**
 - Prerequisites (delta sheet §3, recheck fix): **B11, B13, B15, B16, B17**.
@@ -15256,7 +15687,10 @@ HostGuard is not part of this task. It lands in the S2 kernel (D-11). HostGuard 
     - `clearSessionCookies(resHeaders: Headers | undefined): void`
     - `writeDeviceCookie(resHeaders: Headers | undefined, value: string): void`
     - Every cookie is Secure, has Path=/ and has no Domain, as the `__Host-` prefix requires.
-  - `platform/http-decorators.ts`: `IS_PUBLIC = 'sanchay:isPublic'`, `SKIP_CLIENT_CHECK = 'sanchay:skipClientCheck'`, `Public()`, `SkipClientCheck()`.
+  - `platform/http-decorators.ts`:
+    - `IS_PUBLIC = 'sanchay:isPublic'`, `SKIP_CLIENT_CHECK = 'sanchay:skipClientCheck'`, `Public()`, `SkipClientCheck()`
+    - `INFRA_ROUTE = 'sanchay:infraRoute'`, `type InfraRouteHosts = 'API_HOST' | 'APP_AND_API_HOSTS'`
+    - `InfraRoute(hosts: InfraRouteHosts)` (R-11): `Public()` + `SkipClientCheck()` + `SkipThrottle()` + `INFRA_ROUTE = hosts`. Usable on a controller class or a single handler.
   - `platform/client.guard.ts`:
     - `resolveClient(headers: IncomingHttpHeaders, method: string, appOrigin: string): ClientInfo`
     - `ClientGuard`
@@ -15279,7 +15713,9 @@ HostGuard is not part of this task. It lands in the S2 kernel (D-11). HostGuard 
   - `AppModule` global guards, in order: `ClientGuard`, then `SessionGuard`.
     - With Step 4a fallback 2, `ClsGuard` comes first.
     - B21 appends `ThrottlerGuard` last.
-  - `HealthRouter` is decorated `@Public() @SkipClientCheck()`. B21 adds `@SkipThrottle()`.
+  - `HealthRouter` is decorated `@InfraRoute('APP_AND_API_HOSTS')` (R-11). B21 no longer edits it.
+  - Test side, `test/int/app.ts`: `bootTestApp({ env?, clock?, testModules? })`. `testModules` (default `[]`) is appended to the testing module's `imports`; global guards from `AppModule` apply to their routes.
+  - Test side, `test/int/infra-routes.ts`: `InfraRoutesTestController` (`POST webhooks/fp`, `GET pg/return/:ref`, `POST pg/return/:ref`, each `@InfraRoute('API_HOST')`) and `InfraRoutesTestModule`. Plan 02 replaces the stand-ins with the real routes; B21 reuses the module for the throttler-skip test.
   - Test side, `test/int/http.ts`:
     - `TEST_IP = '127.0.0.1'`. This is light-my-request's default `remoteAddress`, and it is the client IP the API records in socket mode.
     - `fromIp(ip) → { remoteAddress: ip }`
@@ -15726,19 +16162,164 @@ describe('GET /api/v1/auth/session', () => {
 });
 ```
 
+`C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/http-decorators.test.ts`
+```ts
+import 'reflect-metadata';
+import { Reflector } from '@nestjs/core';
+import { SkipThrottle } from '@nestjs/throttler';
+import { describe, expect, it } from 'vitest';
+import { INFRA_ROUTE, InfraRoute, IS_PUBLIC, SKIP_CLIENT_CHECK } from './http-decorators.js';
+
+const reflector = new Reflector();
+
+describe('InfraRoute (R-11 guard exemptions)', () => {
+  it('marks a controller public and exempt from the client check, and records the HostGuard scope', () => {
+    class Webhooks {}
+    InfraRoute('API_HOST')(Webhooks);
+    class Health {}
+    InfraRoute('APP_AND_API_HOSTS')(Health);
+    expect(reflector.get(IS_PUBLIC, Webhooks)).toBe(true);
+    expect(reflector.get(SKIP_CLIENT_CHECK, Webhooks)).toBe(true);
+    expect(reflector.get(INFRA_ROUTE, Webhooks)).toBe('API_HOST');
+    expect(reflector.get(INFRA_ROUTE, Health)).toBe('APP_AND_API_HOSTS');
+  });
+
+  it('carries exactly the metadata @SkipThrottle() sets, so the B21 ThrottlerGuard skips the route', () => {
+    class Skipped {}
+    SkipThrottle()(Skipped);
+    class Infra {}
+    InfraRoute('API_HOST')(Infra);
+    const keys = Reflect.getMetadataKeys(Skipped);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(Reflect.getMetadata(key, Infra)).toEqual(Reflect.getMetadata(key, Skipped));
+    }
+  });
+
+  it('works on a single handler as well as on a controller class', () => {
+    class Routes {
+      handler(): string {
+        return 'ok';
+      }
+    }
+    InfraRoute('API_HOST')(Routes.prototype, 'handler', Object.getOwnPropertyDescriptor(Routes.prototype, 'handler'));
+    expect(reflector.get(INFRA_ROUTE, Routes.prototype.handler)).toBe('API_HOST');
+    expect(reflector.get(IS_PUBLIC, Routes.prototype.handler)).toBe(true);
+    expect(reflector.get(SKIP_CLIENT_CHECK, Routes.prototype.handler)).toBe(true);
+  });
+});
+```
+
+`C:/Users/pc/Desktop/sanchay/apps/api/test/int/infra-routes.ts`. Test-only stand-ins at the real paths; Plan 02 registers the real webhook receiver and payment-return routes with the same decorator.
+```ts
+import { Controller, Get, HttpCode, Module, Param, Post } from '@nestjs/common';
+import { InfraRoute } from '../../src/modules/platform/http-decorators.js';
+
+/** R-11 stand-ins: same paths and decorator as the Plan-02 routes (E1 webhook receiver, E21 payment returns). */
+@Controller()
+export class InfraRoutesTestController {
+  @InfraRoute('API_HOST')
+  @Post('webhooks/fp')
+  @HttpCode(200)
+  fpWebhook(): { received: true } {
+    return { received: true };
+  }
+
+  @InfraRoute('API_HOST')
+  @Get('pg/return/:ref')
+  pgReturnGet(@Param('ref') ref: string): { ref: string } {
+    return { ref };
+  }
+
+  @InfraRoute('API_HOST')
+  @Post('pg/return/:ref')
+  @HttpCode(200)
+  pgReturnPost(@Param('ref') ref: string): { ref: string } {
+    return { ref };
+  }
+}
+
+@Module({ controllers: [InfraRoutesTestController] })
+export class InfraRoutesTestModule {}
+```
+
+`C:/Users/pc/Desktop/sanchay/apps/api/test/int/infra-routes.int.test.ts`
+```ts
+import { randomUUID } from 'node:crypto';
+import { Reflector } from '@nestjs/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { HealthRouter } from '../../src/modules/platform/health.router.js';
+import { INFRA_ROUTE } from '../../src/modules/platform/http-decorators.js';
+import { bootTestApp, type TestApp } from './app.js';
+import { nativeHeaders, webHeaders } from './http.js';
+import { InfraRoutesTestController, InfraRoutesTestModule } from './infra-routes.js';
+
+let t: TestApp;
+
+beforeAll(async () => {
+  t = await bootTestApp({ testModules: [InfraRoutesTestModule] });
+});
+
+afterAll(async () => {
+  await t.close();
+});
+
+const REF = 'r7Qx2mV9pL4sN8wK1cZ5bA';
+const INFRA_ROUTES: Array<[string, 'GET' | 'POST', string]> = [
+  ['GET /api/v1/health', 'GET', '/api/v1/health'],
+  ['POST /api/v1/webhooks/fp', 'POST', '/api/v1/webhooks/fp'],
+  ['GET /api/v1/pg/return/:ref', 'GET', `/api/v1/pg/return/${REF}`],
+  ['POST /api/v1/pg/return/:ref', 'POST', `/api/v1/pg/return/${REF}`],
+];
+
+describe('R-11 guard exemptions (restricted only by HostGuard, which arrives with the Plan-02 kernel)', () => {
+  it.each(INFRA_ROUTES)('%s skips ClientGuard and SessionGuard: no client header, no session, 200', async (_name, method, url) => {
+    const res = await t.app.inject({ method, url });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it.each(INFRA_ROUTES)('%s ignores a client value ClientGuard rejects (ios) and an unknown bearer', async (_name, method, url) => {
+    const res = await t.app.inject({
+      method,
+      url,
+      headers: nativeHeaders({ installationId: randomUUID(), platform: 'ios', token: 'x'.repeat(43) }),
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('keeps both guards on every other route (control)', async () => {
+    const bare = await t.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+    expect([bare.statusCode, bare.json().code]).toEqual([403, 'ORIGIN_REJECTED']);
+    const anonymous = await t.app.inject({ method: 'GET', url: '/api/v1/auth/session', headers: webHeaders() });
+    expect([anonymous.statusCode, anonymous.json().code]).toEqual([401, 'AUTH_REQUIRED']);
+  });
+
+  it('records the HostGuard scope: webhook and returns on the api host only, health on both hosts', () => {
+    const reflector = new Reflector();
+    expect(reflector.get(INFRA_ROUTE, HealthRouter)).toBe('APP_AND_API_HOSTS');
+    const proto = InfraRoutesTestController.prototype;
+    for (const handler of [proto.fpWebhook, proto.pgReturnGet, proto.pgReturnPost]) {
+      expect(reflector.get(INFRA_ROUTE, handler)).toBe('API_HOST');
+    }
+  });
+});
+```
+
 - [ ] **Step 2: Run them to confirm they fail**
 ```
-pnpm --filter=@sanchay/api exec vitest run src/modules/platform/cookies.test.ts src/modules/platform/client.guard.test.ts src/modules/identity/request-auth.test.ts
-pnpm --filter=@sanchay/api test:int session-endpoint
+pnpm --filter=@sanchay/api exec vitest run src/modules/platform/cookies.test.ts src/modules/platform/client.guard.test.ts src/modules/identity/request-auth.test.ts src/modules/platform/http-decorators.test.ts
+pnpm --filter=@sanchay/api test:int session-endpoint infra-routes
 ```
 Expected:
 - Each unit file fails to load its module, each with an error ending `... Does the file exist?`:
   - `cookies.test.ts`: `Error: Failed to load url ./cookies.js`
   - `client.guard.test.ts`: `Error: Failed to load url ./client.guard.js`
   - `request-auth.test.ts`: `Error: Failed to load url ./request-auth.js`
-- The integration file loads, because B15 and B16 exist and Step 1 created `http.ts`. It reports `Tests  7 failed | 1 passed (8)`:
+  - `http-decorators.test.ts`: `Error: Failed to load url ./http-decorators.js`
+- `session-endpoint.int.test.ts` loads, because B15 and B16 exist and Step 1 created `http.ts`. It reports `Tests  7 failed | 1 passed (8)`:
   - The 7 non-health tests get 404 `NOT_FOUND`, because `SessionRouter` is not registered.
   - The health test passes.
+- `infra-routes.int.test.ts` fails to load: `Error: Failed to load url ../../src/modules/platform/http-decorators.js` (imported by `infra-routes.ts`).
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -15784,15 +16365,29 @@ export function writeDeviceCookie(resHeaders: Headers | undefined, value: string
 
 `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/http-decorators.ts`
 ```ts
-import { SetMetadata } from '@nestjs/common';
+import { applyDecorators, SetMetadata } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 
 export const IS_PUBLIC = 'sanchay:isPublic';
 export const SKIP_CLIENT_CHECK = 'sanchay:skipClientCheck';
+/** R-11: marks an infrastructure route; the value is the host scope HostGuard (Plan-02 kernel) enforces. */
+export const INFRA_ROUTE = 'sanchay:infraRoute';
+
+/** `API_HOST`: api.sanchay.in only (FP webhook, payment returns). `APP_AND_API_HOSTS`: both (health). */
+export type InfraRouteHosts = 'API_HOST' | 'APP_AND_API_HOSTS';
 
 /** Deny by default (design §O.4): only routes marked @Public() skip the session guard. */
 export const Public = () => SetMetadata(IS_PUBLIC, true);
-/** Only for infrastructure routes (health) that carry no x-sanchay-client header. */
+/** Only for routes that carry no x-sanchay-client header; use InfraRoute for infrastructure routes. */
 export const SkipClientCheck = () => SetMetadata(SKIP_CLIENT_CHECK, true);
+
+/**
+ * R-11 guard exemption for infrastructure routes: `GET /api/v1/health`, `POST /api/v1/webhooks/fp` and
+ * `/api/v1/pg/return/*`. They skip ClientGuard, SessionGuard and the throttler (the SkipThrottle metadata
+ * is inert until B21 registers ThrottlerGuard) and are restricted only by HostGuard, which reads INFRA_ROUTE.
+ */
+export const InfraRoute = (hosts: InfraRouteHosts) =>
+  applyDecorators(SetMetadata(INFRA_ROUTE, hosts), Public(), SkipClientCheck(), SkipThrottle());
 ```
 
 `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/client.guard.ts`
@@ -16049,13 +16644,34 @@ export class IdentityModule {}
 `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/health.router.ts`: make exactly two edits.
 1. Add this import next to the other `./` imports:
    ```ts
-   import { Public, SkipClientCheck } from './http-decorators.js';
+   import { InfraRoute } from './http-decorators.js';
    ```
-2. Directly above the existing `@Controller()` line of `HealthRouter`, add:
+2. Directly above the existing `@Controller()` line of `HealthRouter`, add (R-11: liveness on both hosts, no client header, no session, never throttled):
    ```ts
-   @Public()
-   @SkipClientCheck()
+   @InfraRoute('APP_AND_API_HOSTS')
    ```
+
+`C:/Users/pc/Desktop/sanchay/apps/api/test/int/app.ts`: make exactly three key-level edits. Do not replace the file (B9 owns it; B12 added `sms` and `email`).
+1. Add this import next to the other package imports:
+   ```ts
+   import type { DynamicModule, Type } from '@nestjs/common';
+   ```
+2. Replace the `bootTestApp` options type so the signature reads:
+   ```ts
+   export async function bootTestApp(
+     options: {
+       env?: Record<string, string>;
+       clock?: FakeClock;
+       /** Extra test-only modules (for example InfraRoutesTestModule); AppModule's global guards apply to them. */
+       testModules?: Array<Type<unknown> | DynamicModule>;
+     } = {},
+   ): Promise<TestApp> {
+   ```
+3. Replace the `Test.createTestingModule({ imports: [AppModule.forRoot(env)] })` call with:
+   ```ts
+   Test.createTestingModule({ imports: [AppModule.forRoot(env), ...(options.testModules ?? [])] })
+   ```
+Every existing caller (`bootTestApp()` and `bootTestApp({ env })`) keeps working unchanged.
 
 `C:/Users/pc/Desktop/sanchay/apps/api/src/app.module.ts`: make exactly four edits. Do not touch the ClsModule block that B9 wrote here. Step 4a changes it only if the CLS context is lost.
 1. Extend the existing `@nestjs/core` import so it reads:
@@ -16133,14 +16749,15 @@ export function writeDeviceCookie(resHeaders: Headers | undefined, value: string
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
-pnpm --filter=@sanchay/api exec vitest run src/modules/platform/cookies.test.ts src/modules/platform/client.guard.test.ts src/modules/identity/request-auth.test.ts
-pnpm --filter=@sanchay/api test:int session-endpoint health
+pnpm --filter=@sanchay/api exec vitest run src/modules/platform/cookies.test.ts src/modules/platform/client.guard.test.ts src/modules/identity/request-auth.test.ts src/modules/platform/http-decorators.test.ts
+pnpm --filter=@sanchay/api test:int session-endpoint infra-routes health
 pnpm --filter=@sanchay/api test
 pnpm --filter=@sanchay/api typecheck
 ```
 Expected:
-- Unit tests: `cookies.test.ts` 5 passed, `client.guard.test.ts` 13 passed, `request-auth.test.ts` 5 passed.
+- Unit tests: `cookies.test.ts` 5 passed, `client.guard.test.ts` 13 passed, `request-auth.test.ts` 5 passed, `http-decorators.test.ts` 3 passed.
 - `session-endpoint.int.test.ts`: `Tests  8 passed (8)`.
+- `infra-routes.int.test.ts`: `Tests  10 passed (10)` (4 routes × 2 exemption tests, the control and the host-scope test).
 - `health.int.test.ts` passes with the same count as after B9. An unknown route still returns the 404 `NOT_FOUND` envelope, because Nest guards do not run for unmatched routes.
 - The full unit suite passes with no failures.
 - `tsc` exits 0.
@@ -16255,15 +16872,16 @@ Expected: a line that starts with `| 2026-` and contains `| B18 | nestjs-cls fal
 
 `apps/api/src/app.module.ts` and `docs/adr/0001-versions.md` are already in the `git add` list. They carry any Step 0 and Step 4a edits.
 ```
-pnpm exec biome check --write apps/api/src apps/api/test/int/http.ts apps/api/test/int/session-endpoint.int.test.ts
+pnpm exec biome check --write apps/api/src apps/api/test/int/http.ts apps/api/test/int/app.ts apps/api/test/int/infra-routes.ts apps/api/test/int/session-endpoint.int.test.ts apps/api/test/int/infra-routes.int.test.ts
 pnpm lint
-git add apps/api/src/app.module.ts apps/api/src/modules/platform/cookies.ts apps/api/src/modules/platform/cookies.test.ts apps/api/src/modules/platform/http-decorators.ts apps/api/src/modules/platform/client.guard.ts apps/api/src/modules/platform/client.guard.test.ts apps/api/src/modules/platform/health.router.ts apps/api/src/modules/identity/request-auth.ts apps/api/src/modules/identity/request-auth.test.ts apps/api/src/modules/identity/session.guard.ts apps/api/src/modules/identity/account-sessions.service.ts apps/api/src/modules/identity/session.router.ts apps/api/src/modules/identity/identity.module.ts apps/api/test/int/http.ts apps/api/test/int/session-endpoint.int.test.ts docs/adr/0001-versions.md
-git commit -m "feat(api): client/CSRF and session guards, __Host- cookie helpers, GET /auth/session" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add apps/api/src/app.module.ts apps/api/src/modules/platform/cookies.ts apps/api/src/modules/platform/cookies.test.ts apps/api/src/modules/platform/http-decorators.ts apps/api/src/modules/platform/http-decorators.test.ts apps/api/src/modules/platform/client.guard.ts apps/api/src/modules/platform/client.guard.test.ts apps/api/src/modules/platform/health.router.ts apps/api/src/modules/identity/request-auth.ts apps/api/src/modules/identity/request-auth.test.ts apps/api/src/modules/identity/session.guard.ts apps/api/src/modules/identity/account-sessions.service.ts apps/api/src/modules/identity/session.router.ts apps/api/src/modules/identity/identity.module.ts apps/api/test/int/http.ts apps/api/test/int/app.ts apps/api/test/int/infra-routes.ts apps/api/test/int/session-endpoint.int.test.ts apps/api/test/int/infra-routes.int.test.ts docs/adr/0001-versions.md
+git commit -m "feat(api): client/CSRF and session guards, R-11 infra-route exemptions, __Host- cookie helpers, GET /auth/session" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
 **Notes for the lead (cross-chunk interface changes this rewrite introduces):**
+- **R-11 exemptions.** `InfraRoute(hosts)` is the only way to exempt a route from ClientGuard, SessionGuard and the throttler. Plan 02 must decorate the real `POST /api/v1/webhooks/fp` (E1) and `GET|POST /api/v1/pg/return/:ref` (E21) with `@InfraRoute('API_HOST')`, and its HostGuard (E2) must read `INFRA_ROUTE` and allow those routes only on `api.sanchay.in` (health on both hosts). The ALB listener rules (E25) route host + `/api/v1/*` to the api target group, and the ALB health check uses `/api/v1/health` (liveness, R-12).
 - **Old B18 (step-up token) is dropped.** `step-up-token.ts`, its test and the `STEP_UP_REQUIRED` usage are gone. The code stays in the catalogue as reserved.
 - **`test/int/http.ts` has no `ip` option.** `TEST_IP` is now `'127.0.0.1'`. Two later tests must spread `fromIp(ip)` into `app.inject`:
   - the B19 rewrite (`signInWeb`/`signInNative` with an `ip`)
@@ -17577,26 +18195,27 @@ git commit -m "feat(api): add-and-verify email by challengeId with a BOLA-safe c
 **Owner:** Dev A · S2 (W5) · 2 h
 **Prerequisites (delta §3):** B19.
 
+Amended 2026-09-28 by ruling R-11: B18's `InfraRoute` already carries the `SkipThrottle` metadata, so this task no longer edits `health.router.ts`; its test proves that health, the FP webhook and the payment returns are never throttled.
+
 **Files:**
 - Create: `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/throttle.ts`
 - Modify (key-level edit, fragments below): `C:/Users/pc/Desktop/sanchay/apps/api/src/app.module.ts`
-- Modify (key-level edit, fragments below): `C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/health.router.ts`
 - Test: `C:/Users/pc/Desktop/sanchay/apps/api/test/int/throttle.int.test.ts`
 
 **Interfaces:**
 - Consumes:
   - `env.SANCHAY_THROTTLE_PER_MINUTE` (B2).
   - `type SanchayClsStore`, where the CLS setup resolves `ip` with `clientIpFrom(req, env.SANCHAY_CLIENT_IP_SOURCE)` (B9).
-  - `AppModule` with global guards `ClientGuard` then `SessionGuard`, and `HealthRouter` decorated `@Public() @SkipClientCheck()` (B18).
+  - `AppModule` with global guards `ClientGuard` then `SessionGuard`, and `HealthRouter` decorated `@InfraRoute('APP_AND_API_HOSTS')` (B18, R-11).
   - `mapException`, which turns a Nest `ThrottlerException` into 429 `RATE_LIMITED` with `retryable: true` (B8).
   - `@nestjs/throttler` 6.7.1, which B1 already declared in `apps/api/package.json`.
-  - Test side: `bootTestApp({ env })` (B12), `signInNative` (B19) and `nativeHeaders` (B18).
+  - Test side: `bootTestApp({ env, testModules })` and `InfraRoutesTestModule` (B18), `signInNative` (B19) and `nativeHeaders` (B18).
 - Produces:
   - `throttleTracker(req: Record<string, unknown>): string`. Authenticated requests get `s:<sessionId>`. Anonymous requests get `ip:<client ip>`.
   - `throttleKey(ctx: ExecutionContext, tracker: string, name: string): string`. It returns `${name}:${tracker}`, so each tracker has one bucket across all routes.
   - `ThrottlerModule.forRoot({ throttlers: [{ name: 'default', ttl: 60_000, limit: env.SANCHAY_THROTTLE_PER_MINUTE }], getTracker: throttleTracker, generateKey: throttleKey })`.
   - Global guard order: `ClientGuard`, then `SessionGuard`, then `ThrottlerGuard`.
-  - `HealthRouter` gains `@SkipThrottle()`.
+  - Every `@InfraRoute` route (health now; the Plan-02 webhook and returns later) is skipped by `ThrottlerGuard` through the metadata B18 already set (R-11).
 - MVP note:
   - There is no WAF (DEF P2-2). This app throttle, the persisted OTP quotas (B13) and the invite gate (S2) are the only abuse controls.
   - The client IP is the socket address locally. In dev/prod it is the ALB's rightmost `X-Forwarded-For` entry (H-1).
@@ -17609,10 +18228,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
 import { nativeHeaders } from './http.js';
+import { InfraRoutesTestModule } from './infra-routes.js';
 
 let t: TestApp;
 beforeAll(async () => {
-  t = await bootTestApp({ env: { SANCHAY_THROTTLE_PER_MINUTE: '3' } });
+  t = await bootTestApp({ env: { SANCHAY_THROTTLE_PER_MINUTE: '3' }, testModules: [InfraRoutesTestModule] });
 });
 afterAll(async () => {
   await t.close();
@@ -17645,10 +18265,18 @@ describe('throttler (per session, across routes)', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('never throttles health', async () => {
-    for (let i = 0; i < 10; i++) {
-      const res = await t.app.inject({ method: 'GET', url: '/api/v1/health' });
-      expect(res.statusCode).toBe(200);
+  it('never throttles the R-11 infra routes (health, FP webhook, payment returns)', async () => {
+    const routes: Array<['GET' | 'POST', string]> = [
+      ['GET', '/api/v1/health'],
+      ['POST', '/api/v1/webhooks/fp'],
+      ['GET', '/api/v1/pg/return/r7Qx2mV9pL4sN8wK1cZ5bA'],
+      ['POST', '/api/v1/pg/return/r7Qx2mV9pL4sN8wK1cZ5bA'],
+    ];
+    for (const [method, url] of routes) {
+      for (let i = 0; i < 10; i++) {
+        const res = await t.app.inject({ method, url, remoteAddress: '198.51.100.33' });
+        expect(res.statusCode, `${method} ${url} #${i + 1}`).toBe(200);
+      }
     }
   });
 });
@@ -17706,13 +18334,11 @@ import { throttleKey, throttleTracker } from './modules/platform/throttle.js';
         { provide: APP_GUARD, useClass: ThrottlerGuard },
 ```
 
-`C:/Users/pc/Desktop/sanchay/apps/api/src/modules/platform/health.router.ts` gets two key-level edits:
-1. Add `import { SkipThrottle } from '@nestjs/throttler';` to the import block.
-2. Add the line `@SkipThrottle()` directly above `@Controller()`, below B18's `@Public()` and `@SkipClientCheck()`.
+`health.router.ts` is not edited: B18's `@InfraRoute('APP_AND_API_HOSTS')` already carries the `SkipThrottle` metadata (R-11).
 
-Check that both files received additions only. In each `git diff --numstat` line, the second column (deletions) must be 0:
+Check that `app.module.ts` received additions only. In the `git diff --numstat` line, the second column (deletions) must be 0:
 ```
-git diff --numstat apps/api/src/app.module.ts apps/api/src/modules/platform/health.router.ts
+git diff --numstat apps/api/src/app.module.ts
 ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
@@ -17730,7 +18356,7 @@ Expected:
 ```
 pnpm exec biome check --write apps/api
 pnpm lint
-git add apps/api/src/modules/platform/throttle.ts apps/api/src/app.module.ts apps/api/src/modules/platform/health.router.ts apps/api/test/int/throttle.int.test.ts
+git add apps/api/src/modules/platform/throttle.ts apps/api/src/app.module.ts apps/api/test/int/throttle.int.test.ts
 git commit -m "feat(api): per-session/per-IP throttling across routes with the shared error envelope" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -20458,8 +21084,8 @@ git commit -m "feat(ui): add TextField, OtpInput and Banner with accessible erro
 What this task changes and why:
 - **Form schemas (X-02(5)).** They are built from `@sanchay/validation`, not from names that belong to the contract.
 - **Error copy (H-10).** `messageForError` has investor copy for every code in `ERROR_CATALOGUE`: 66 codes, including `PILOT_INVITE_REQUIRED`, `SUITABILITY_CHANGED`, `RISK_PROFILE_EXPIRED` and `RISK_PROFILE_STALE`. It also covers the client-only code `NETWORK_ERROR`. A test checks coverage in both directions.
-- **Legal copy (H-17).** It lives under `src/copy/`. Only `src/copy/legal-entity.ts` may contain the legal-entity name, because the `check-brand` allowlist names exactly that file. `REGULAR_PLAN_NOTICE` and the DSC-02 line interpolate `LEGAL_ENTITY_NAME`.
-- **Single ARN pattern.** `ARN_REGEX = /^ARN-\d{1,9}$/` is exported from `src/copy/legal-entity.ts`, and `dsc02` validates with it.
+- **Legal copy (H-17, allowlist replaced by R-19).** The single shared legal-entity module is **`packages/domain/src/legal-entity.ts`** (created by this task and exported from `@sanchay/domain`), so the web, email and SMS code can all import it. It is the only non-docs source file allowed to contain the legal-entity name, because the R-19 `check-brand` allowlist names exactly that file. App-core's `src/copy/` re-exports it and never spells the name. `REGULAR_PLAN_NOTICE` and the DSC-02 line interpolate `LEGAL_ENTITY_NAME`.
+- **Single ARN pattern.** `ARN_REGEX = /^ARN-\d{1,9}$/` is exported from `packages/domain/src/legal-entity.ts` (re-exported by `@sanchay/app-core/copy`), and `dsc02` validates with it.
   - C10's `readSiteConfig` must use this same pattern. C10 depends only on A2, so it cannot import `@sanchay/app-core`. It copies the identical literal `/^ARN-\d{1,9}$/` and adds its own 9-digit test.
   - The test below pins `ARN_REGEX.source`, so any change to the width here has to be copied to C10.
   - If counsel later confirms a different ARN width, both literals change in one commit.
@@ -20476,10 +21102,12 @@ What this task changes and why:
 - Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/auth/loginForms.ts`
 - Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/format/countdown.ts`
 - Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/query/createQueryClient.ts`
-- Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/legal-entity.ts`
+- Create `C:/Users/pc/Desktop/sanchay/packages/domain/src/legal-entity.ts` (R-19: the single legal-entity module)
+- Modify `C:/Users/pc/Desktop/sanchay/packages/domain/src/index.ts` (append one export line; A11 owns the file)
 - Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/regulatory.ts`
 - Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/index.ts`
 - Create `C:/Users/pc/Desktop/sanchay/packages/app-core/src/index.ts`
+- Test `C:/Users/pc/Desktop/sanchay/packages/domain/test/legal-entity.test.ts`
 - Test `C:/Users/pc/Desktop/sanchay/packages/app-core/src/foundation.test.ts`
 - Test `C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/copy.test.ts`
 - Modify `C:/Users/pc/Desktop/sanchay/pnpm-lock.yaml` (changed only by `pnpm install`)
@@ -20491,13 +21119,15 @@ What this task changes and why:
     - `mobileSchema`: trims, matches `^[6-9][0-9]{9}$`, and rejects a number made of one repeated digit.
     - `otpCodeSchema`: trims, then requires exactly 6 digits.
   - From A7 `@sanchay/money`: `formatIsoDate(value: string | null): string`. `'2099-12-31'` gives `'31 Dec 2099'`, and a non-date throws `RangeError`.
+  - From A11 `@sanchay/domain` (dist; it already depends on `@sanchay/money`): the package itself, to which this task adds `src/legal-entity.ts`. Its 95% coverage threshold then includes the new file, which `test/legal-entity.test.ts` covers completely.
   - From B5 `@sanchay/contract`: `ERROR_CATALOGUE`, a `{ [code]: httpStatus } as const` object with 66 codes (H-10). Only the tests use it.
   - From C2 `@sanchay/api-client`:
     - `toApiError(e: unknown): ApiError`, where `ApiError.retryable: boolean`. An `ORPCError` takes `retryable` from `data.retryable === true`. A `TypeError` becomes `NETWORK_ERROR` with `retryable: true`.
     - `NETWORK_ERROR = 'NETWORK_ERROR'`.
 - **Produces** the `@sanchay/app-core` package (TS/TSX source, no build):
   - `exports`: `"."` → `./src/index.ts`, and `"./copy"` → `./src/copy/index.ts`. The `./copy` entry holds only pure string constants and functions, so React Server Components can import it safely.
-  - Dependencies: `@sanchay/api-client`, `@sanchay/contract`, `@sanchay/money`, `@sanchay/validation`, `zod`. Peers: `@tanstack/react-query ^5.103.2`, `react ^19.2.0`.
+  - Dependencies: `@sanchay/api-client`, `@sanchay/contract`, `@sanchay/domain`, `@sanchay/money`, `@sanchay/validation`, `zod`. Peers: `@tanstack/react-query ^5.103.2`, `react ^19.2.0`.
+- **Produces in `@sanchay/domain`** (`packages/domain/src/legal-entity.ts`, R-19): `LEGAL_ENTITY_NAME`, `type LegalCopyStatus`, `LEGAL_COPY_STATUS`, `ARN_REGEX`, `dsc02(arn, validTill)`. The Plan-02 email templates and any later SMS/web code import these from `@sanchay/domain`.
 - Exports from `"."`:
   - `messageForError(code?: string | null): string`
   - `DEFAULT_ERROR_MESSAGE = 'Something went wrong. Please try again.'`
@@ -20509,7 +21139,7 @@ What this task changes and why:
     - `refetchOnWindowFocus: false`
     - a query retries only when `failureCount < 2` and `toApiError(e).retryable`
     - mutations never retry
-- Exports from `"./copy"`:
+- Exports from `"./copy"` (the first four re-exported unchanged from `@sanchay/domain`):
   - `LEGAL_ENTITY_NAME` (a counsel placeholder)
   - `type LegalCopyStatus = 'COUNSEL_PLACEHOLDER' | 'APPROVED'` and `LEGAL_COPY_STATUS: LegalCopyStatus = 'COUNSEL_PLACEHOLDER'`
   - `ARN_REGEX: RegExp = /^ARN-\d{1,9}$/`, with no flags so `.test()` is stateless. This is the single ARN pattern; C10's `readSiteConfig` copies the same literal.
@@ -20540,6 +21170,7 @@ What this task changes and why:
   "dependencies": {
     "@sanchay/api-client": "workspace:*",
     "@sanchay/contract": "workspace:*",
+    "@sanchay/domain": "workspace:*",
     "@sanchay/money": "workspace:*",
     "@sanchay/validation": "workspace:*",
     "zod": "catalog:"
@@ -20740,8 +21371,9 @@ describe('createQueryClient', () => {
 });
 ```
 
-`C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/copy.test.ts`. The legal-entity name is never spelled out in this file, because `check-brand` (H-17) allows it only in `legal-entity.ts`.
+`C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/copy.test.ts`. The legal-entity name is never spelled out in this file, because the R-19 `check-brand` allowlist allows it only in `packages/domain/src/legal-entity.ts`.
 ```ts
+import * as domain from '@sanchay/domain';
 import { describe, expect, it } from 'vitest';
 import {
   ARN_REGEX,
@@ -20759,13 +21391,26 @@ describe('regulatory copy', () => {
     );
   });
 
-  it('discloses Regular plans and names the distributor from legal-entity.ts', () => {
+  it('discloses Regular plans and names the distributor from the domain legal-entity module', () => {
     expect(LEGAL_ENTITY_NAME.trim().length).toBeGreaterThan(0);
     expect(REGULAR_PLAN_NOTICE).toBe(
       `Sanchay offers Regular plans of mutual funds; ${LEGAL_ENTITY_NAME}, the distributor, earns a commission from the fund house.`,
     );
   });
+
+  it('re-exports the single R-19 legal-entity module from @sanchay/domain unchanged', () => {
+    expect(LEGAL_ENTITY_NAME).toBe(domain.LEGAL_ENTITY_NAME);
+    expect(LEGAL_COPY_STATUS).toBe(domain.LEGAL_COPY_STATUS);
+    expect(ARN_REGEX).toBe(domain.ARN_REGEX);
+    expect(dsc02).toBe(domain.dsc02);
+  });
 });
+```
+
+`C:/Users/pc/Desktop/sanchay/packages/domain/test/legal-entity.test.ts`. It covers `src/legal-entity.ts` completely (the domain package keeps its 95% threshold) and never spells the entity name.
+```ts
+import { describe, expect, it } from 'vitest';
+import { ARN_REGEX, dsc02, LEGAL_COPY_STATUS, LEGAL_ENTITY_NAME } from '../src/index.js';
 
 describe('dsc02 (DSC-02 entity line, D-MONEY-091)', () => {
   it('builds the entity line with ARN and valid-till date', () => {
@@ -20806,15 +21451,16 @@ describe('dsc02 (DSC-02 entity line, D-MONEY-091)', () => {
 
 ```
 pnpm install
+pnpm turbo run test --filter=@sanchay/domain
 pnpm turbo run test --filter=@sanchay/app-core
 ```
 Expected:
 - `pnpm install` completes. If `ERR_PNPM_IGNORED_BUILDS` or a release-age refusal appears, handle it only under the A1 rule described in C4 Step 2.
-- Because of `^build`, turbo first builds `@sanchay/money`, `@sanchay/validation`, `@sanchay/domain`, `@sanchay/contract` and `@sanchay/api-client`.
-- Both test files fail:
+- `@sanchay/domain`: `test/legal-entity.test.ts` fails with `SyntaxError: The requested module '../src/index.js' does not provide an export named 'ARN_REGEX'`; the other two domain files still pass (`Test Files  1 failed | 2 passed (3)`).
+- `@sanchay/app-core`: because of `^build`, turbo first builds `@sanchay/money`, `@sanchay/validation`, `@sanchay/domain`, `@sanchay/contract` and `@sanchay/api-client`. Both test files fail:
   - `src/foundation.test.ts` with `Error: Failed to resolve import "./index" from "src/foundation.test.ts". Does the file exist?`
   - `src/copy/copy.test.ts` with `Error: Failed to resolve import "./index" from "src/copy/copy.test.ts". Does the file exist?`
-- The summary reads `Test Files  2 failed (2)`.
+- The app-core summary reads `Test Files  2 failed (2)`.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -20985,13 +21631,13 @@ export function createQueryClient(): QueryClient {
 }
 ```
 
-`C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/legal-entity.ts`. This is the only non-docs source file allowed to contain the legal-entity name (H-17):
+`C:/Users/pc/Desktop/sanchay/packages/domain/src/legal-entity.ts`. This is the only non-docs source file allowed to contain the legal-entity name (R-19 allowlist). The web (through `@sanchay/app-core/copy`), the email templates and any SMS code import it from `@sanchay/domain`:
 ```ts
 import { formatIsoDate } from '@sanchay/money';
 
 /**
  * Legal entity that holds the ARN and operates Sanchay. Sanchay is the brand; Platizio appears only
- * as the legal entity / ARN holder.
+ * as the legal entity / ARN holder, and only in this file (R-19).
  * COUNSEL PLACEHOLDER: gate G-C1 replaces this with the registered name including its legal
  * suffix, and sets LEGAL_COPY_STATUS to 'APPROVED' in the same commit.
  */
@@ -21003,8 +21649,8 @@ export const LEGAL_COPY_STATUS: LegalCopyStatus = 'COUNSEL_PLACEHOLDER';
 /**
  * The single ARN pattern: 'ARN-' followed by 1 to 9 digits. No flags, so .test() is stateless.
  * C10's readSiteConfig (apps/web) copies this exact literal, because apps/web site-config does not
- * depend on app-core; copy.test.ts pins ARN_REGEX.source. If counsel confirms a different width,
- * change both literals in one commit.
+ * depend on this package; test/legal-entity.test.ts pins ARN_REGEX.source. If counsel confirms a
+ * different width, change both literals in one commit.
  */
 export const ARN_REGEX = /^ARN-\d{1,9}$/;
 
@@ -21022,9 +21668,14 @@ export function dsc02(arn: string, validTill: string): string {
 }
 ```
 
+`C:/Users/pc/Desktop/sanchay/packages/domain/src/index.ts`: a key-level edit (A11 owns the file). Append exactly this line after the last `export`:
+```ts
+export * from './legal-entity.js';
+```
+
 `C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/regulatory.ts`:
 ```ts
-import { LEGAL_ENTITY_NAME } from './legal-entity';
+import { LEGAL_ENTITY_NAME } from '@sanchay/domain';
 
 /** DSC-01, the standard AMFI market-risk line, verbatim. */
 export const MARKET_RISK_WARNING =
@@ -21037,13 +21688,14 @@ export const REGULAR_PLAN_NOTICE = `Sanchay offers Regular plans of mutual funds
 `C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/index.ts`:
 ```ts
 // Pure constants and functions, so React Server Components can import them via '@sanchay/app-core/copy'.
+// The legal-entity symbols come from the single R-19 module packages/domain/src/legal-entity.ts.
 export {
   ARN_REGEX,
   dsc02,
   LEGAL_COPY_STATUS,
   LEGAL_ENTITY_NAME,
   type LegalCopyStatus,
-} from './legal-entity';
+} from '@sanchay/domain';
 export { MARKET_RISK_WARNING, REGULAR_PLAN_NOTICE } from './regulatory';
 ```
 
@@ -21063,25 +21715,27 @@ export { createQueryClient } from './query/createQueryClient';
 - [ ] **Step 4: Run the tests to confirm they pass**
 
 ```
+pnpm turbo run test build typecheck --filter=@sanchay/domain
 pnpm turbo run test typecheck --filter=@sanchay/app-core
 pnpm check-brand
 ```
 Expected:
-- The test task reports `Test Files  2 passed (2)` and `Tests  20 passed (20)`:
+- `@sanchay/domain`: `Test Files  3 passed (3)` and `Tests  131 passed (131)` (the 127 A11 tests plus `legal-entity.test.ts` 4: dsc02 builds the line, the 9-digit ARN, the refusals, the placeholder status). Coverage stays at least 95%; build and typecheck exit 0.
+- `@sanchay/app-core`: `Test Files  2 passed (2)` and `Tests  17 passed (17)`:
   - `foundation.test.ts` has 14 tests: messageForError 5, schemas 2, formatCountdown 5, createQueryClient 2.
-  - `copy/copy.test.ts` has 6 tests: regulatory copy 2, dsc02 4 (including the 9-digit ARN test).
+  - `copy/copy.test.ts` has 3 tests: regulatory copy 2 and the re-export identity test.
 - The typecheck task exits 0.
-- `pnpm check-brand` exits 0. The legal-entity name appears only in `packages/app-core/src/copy/legal-entity.ts`, which is on the H-17 allowlist.
+- `pnpm check-brand` exits 0. The legal-entity name appears only in `packages/domain/src/legal-entity.ts`, which is on the R-19 allowlist.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write packages/app-core
-pnpm turbo run test typecheck --filter=@sanchay/app-core
+pnpm exec biome check --write packages/app-core packages/domain/src/legal-entity.ts packages/domain/src/index.ts packages/domain/test/legal-entity.test.ts
+pnpm turbo run test typecheck --filter=@sanchay/domain --filter=@sanchay/app-core
 pnpm check-brand
 pnpm lint
-git add packages/app-core pnpm-lock.yaml
-git commit -m "feat(app-core): add error copy for all 66 codes, login schemas, query client and legal-entity copy" -m "REGULAR_PLAN_NOTICE and dsc02 interpolate LEGAL_ENTITY_NAME from copy/legal-entity.ts (H-17); ARN_REGEX /^ARN-\d{1,9}$/ is the single ARN pattern mirrored by C10 readSiteConfig; texts are counsel placeholders until G-C1." -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add packages/app-core packages/domain/src/legal-entity.ts packages/domain/src/index.ts packages/domain/test/legal-entity.test.ts pnpm-lock.yaml
+git commit -m "feat(app-core): add error copy for all 66 codes, login schemas, query client and legal-entity copy" -m "LEGAL_ENTITY_NAME, dsc02 and ARN_REGEX live in the single R-19 module packages/domain/src/legal-entity.ts and are re-exported by @sanchay/app-core/copy; ARN_REGEX /^ARN-\d{1,9}$/ is mirrored by C10 readSiteConfig; texts are counsel placeholders until G-C1." -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -21102,7 +21756,7 @@ git commit -m "feat(app-core): add error copy for all 66 codes, login schemas, q
 - C:/Users/pc/Desktop/sanchay/packages/ui/vitest.config.ts
 - C:/Users/pc/Desktop/sanchay/packages/ui/src/OtpInput.tsx
 - C:/Users/pc/Desktop/sanchay/packages/app-core/src/errors/messages.ts
-- C:/Users/pc/Desktop/sanchay/packages/app-core/src/copy/legal-entity.ts
+- C:/Users/pc/Desktop/sanchay/packages/domain/src/legal-entity.ts (R-19 single legal-entity module)
 - C:/Users/pc/Desktop/sanchay/docs/adr/README.md
 
 ---
@@ -23889,7 +24543,7 @@ import { z } from 'zod';
 import { SITE_PREFIX } from './routing';
 
 /**
- * Must stay identical to ARN_PATTERN in packages/app-core/src/copy/legal-entity.ts (C6), which dsc02
+ * Must stay identical to ARN_REGEX in packages/domain/src/legal-entity.ts (C6, R-19), which dsc02
  * enforces. It is repeated here because C10 does not depend on C6. site-config.test.ts pins the
  * 7-digit limit, and C11's /site build fails if the two ever disagree.
  */
@@ -24180,7 +24834,7 @@ git commit -m "feat(web): add H-1 host routing, /site rewrite, App Link fallback
   - The label "Mobile number" and the button "Get OTP".
   - The field error "Enter a valid 10-digit Indian mobile number".
   - The landing heading "Mutual fund investing, made clear."
-- **Brand lint (H-17):** no file in this task contains the legal-entity name. The landing reaches it only through `dsc02` and `REGULAR_PLAN_NOTICE` from `legal-entity.ts`.
+- **Brand lint (H-17):** no file in this task contains the legal-entity name. The landing reaches it only through `dsc02` and `REGULAR_PLAN_NOTICE` from `@sanchay/app-core/copy`, which re-exports `packages/domain/src/legal-entity.ts` (R-19).
 - **PowerShell note:** a `$env:X=...` assignment lasts for the whole session. Every PowerShell block that sets `SANCHAY_*` ends with a `Remove-Item Env:...` line.
 
 - [ ] **Step 1: Update the manifest, then write the failing unit test, the Playwright config and the failing e2e specs**

@@ -2,15 +2,15 @@
 
 # Sanchay MVP task outlines: Plan 02 (S2), Plan 03 (S3), Plan 04 (S4 and pilot week)
 
-This was planned read-only. Nothing was created or changed. It is based on the MVP spec (§0–§8, H-1..H-21), the sprint plans, and the Plan-01 delta sheet (new ids A1–A12, B1–B23, C1–C15). I also checked the Plan-01 interface sheet (§5 API layout and symbols) and the v1 test sources (`XirrCalculatorTest`, `AmfiNavParserTest`, `RedemptionAvailability`, and the research:rules-money vectors).
+This was planned read-only. Nothing was created or changed. It is based on the MVP spec (§0–§8, H-1..H-21), the sprint plans, and the Plan-01 delta sheet (new ids A1–A12, B1–B23, C1–C15). **Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`); where this text and a ruling differ, the ruling wins.** I also checked the Plan-01 interface sheet (§5 API layout and symbols) and the v1 test sources (`XirrCalculatorTest`, `AmfiNavParserTest`, `RedemptionAvailability`, and the research:rules-money vectors).
 
 ## 0. Conventions, capacity ledger and rulings these outlines depend on
 
 ### 0.1 Conventions (every task in every plan)
-- **IDs.** Plan 02 uses D1..D10, Plan 03 uses E1..E25, Plan 04 uses F1..F27. Tasks that can be trimmed are tagged `[T#]` using the spec §6 numbering: T1 www, T2 filters, T3 allocation chart, T4 NAV chart, T5 redeem by units, T6 eNACH, T7 Android native, T8 SIP.
+- **IDs.** Plan 02 uses D1..D10, Plan 03 uses E1..E25, Plan 04 uses F1..F28. Tasks that can be trimmed are tagged `[T#]` using the spec §6 numbering: T1 www, T2 filters, T3 allocation chart, T4 NAV chart, T5 redeem by units, T6 eNACH, T7 Android native, T8 SIP. The design tactics are named **LOOKUP-ADOPT** (list by `source_ref_id` and adopt) and **SHORTFALL-BREAK** (ledger shortfall → CRITICAL break) (R-04); they are never trimmed.
 - **Estimates** are in ideal hours at human pace (1 ideal day = 8 h), the same unit as the delta sheet.
 - **Plan files** go in `C:/Users/pc/Desktop/sanchay/docs/superpowers/plans/`:
-  - `2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data.md`
+  - `2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md` (E25 dev AWS runs in the Plan-02 window, R-05)
   - `2026-10-26-plan-03-mvp-consent-onboarding-catalogue-lumpsum.md`
   - `2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md`
   
@@ -48,49 +48,56 @@ This was planned read-only. Nothing was created or changed. It is based on the M
 - **Providers only from worker jobs.**
   - `FpModule` is imported **only** when `SANCHAY_APP_ROLE=worker`.
   - `FpGateway` throws `ProviderCallInTransactionError` if the CLS flag `db.inTx` is set; `Db.tx` sets that flag.
-  - OTP senders are the documented exception (H-5 synchronous send, D-17).
+  - OTP senders are the **accepted deviation D-17 (R-07)**: the non-negotiable covers FP/POA money and provisioning providers; OTP delivery through MSG91/SES is synchronous in the request, outside any transaction, with a 5 s timeout and 503 `SMS_UNAVAILABLE` (Plan-01 B13 `withSendTimeout`). A test asserts no provider client is resolvable inside `Db.tx`.
+- **Guard exemptions (R-11).** Every infrastructure route uses Plan-01 B18's `@InfraRoute(hosts)`: `GET /api/v1/health` (`APP_AND_API_HOSTS`), `POST /api/v1/webhooks/fp` and `GET|POST /api/v1/pg/return/*` (`API_HOST`). They skip ClientGuard, SessionGuard and the throttler and are restricted only by HostGuard (E2). Each route's task has the exemption tests.
+- **Idempotency and audit (R-20).** `consents.cancel` requires `Idempotency-Key`. Every money task (approve, submit, settle, redemption, refund UTR, SIP cancel) asserts that an `audit_events` row is written.
 
-### 0.2 Env additions (H-8 addendum; the lead must acknowledge, like `SANCHAY_KEYRING_JSON`)
+### 0.2 Env additions (H-8 addendum, acknowledged by R-19)
 - **Already listed in H-8:** `SANCHAY_PROVIDER_MODE_FP` (fake|sandbox|production), `SANCHAY_FP_WEBHOOK_AUTH` (hmac|shared_secret), `SANCHAY_PILOT_INVITE_ONLY` (stringbool), `SANCHAY_API_ORIGIN`. `SANCHAY_PROVIDER_MODE_SMS` gains `msg91`; `SANCHAY_PROVIDER_MODE_EMAIL` gains `ses`.
-- **New, needing acknowledgement:**
-  - `SANCHAY_FP_BASE_URL`
-  - `SANCHAY_FP_CREDENTIALS_JSON`: `{fp:{clientId,clientSecret},poa:{…},pg:{…}}`. Worker container only, from Secrets Manager `sanchay/{env}/fp`.
-  - `SANCHAY_FP_WEBHOOK_SECRET`: api container only.
-  - `SANCHAY_MSG91_CREDENTIALS_JSON`: `{authKey, senderId, peId, templateIds:{LOGIN,CONSENT}}`.
-  - `SANCHAY_SES_FROM`.
-- **New B2 boot invariants:**
-  - 7: `SANCHAY_PROVIDER_MODE_FP=fake` outside local/test → refused.
-  - 8: `SANCHAY_PROVIDER_MODE_FP=production` with `SANCHAY_APP_ENV≠prod` → refused.
-  - 9: `SANCHAY_PILOT_INVITE_ONLY=false` in prod → refused until P2.
+- **R-19 addendum variables declared here (owning container in brackets):**
+  - `SANCHAY_FP_BASE_URL` (worker)
+  - `SANCHAY_FP_CREDENTIALS_JSON`: `{fp:{clientId,clientSecret},poa:{…},pg:{…}}` (worker only, from Secrets Manager `sanchay/{env}/fp`).
+  - `SANCHAY_FP_WEBHOOK_SECRET` (api only).
+  - `SANCHAY_MSG91_CREDENTIALS_JSON`: `{authKey, senderId, peId, templateIds:{LOGIN, CONSENT, CONSENT_UNITS, ATTEST}}` (api for the OTP send, worker for the delivery-report job; four templates per R-10).
+  - `SANCHAY_SES_FROM` (api, worker).
+  - Plan-01 B2 already declares `SANCHAY_KEYRING_JSON`, `SANCHAY_LOG_LEVEL`, `SANCHAY_DB_POOL_MAX`, `SANCHAY_THROTTLE_PER_MINUTE` and `SANCHAY_SMS_RETRIEVER_HASH`; its test pins that set, so D6 updates the pin when it adds these.
+  - `SANCHAY_APP_ROLE` gains `ops` (R-16; DB user `sanchay_app`, no DDL; F7).
+- **New B2 boot invariants** (7 is taken by Plan-01's R-10 invariant: `SANCHAY_SMS_RETRIEVER_HASH` required outside local/test):
+  - 8: `SANCHAY_PROVIDER_MODE_FP=fake` outside local/test → refused.
+  - 9: `SANCHAY_PROVIDER_MODE_FP=production` with `SANCHAY_APP_ENV≠prod` → refused.
+  - 10: `SANCHAY_PILOT_INVITE_ONLY=false` in prod → refused until P2.
 
 ### 0.3 Capacity ledger (ideal hours; factor 1.6 in S2–S4; overheads already deducted)
 
 | Sprint | Net capacity | Committed before this plan | Available | Plan demand (after T1–T6) | Result |
 |---|---|---|---|---|---|
-| S2 | 172.3 | Plan-01 tail 92.0 (delta §7: B13–B23, C3, C6–C15) | **80.0** (A 42 / B 38) | Plan 02: 80.0 | fits (0 slack) |
-| S3 | 192.8 | — | 192.8 (A 96.4 / B 96.4) | Plan 03: 234 (A 116 / B 118) | **over by ≈ 41 h**, carried into S4 in the order given in Plan 03 |
-| S4 | 152.0 | S3 carry ≈ 37 h (after CDK consolidation) | 115 | Plan 04: 136 | **over by ≈ 21 h (2.6 d)** |
+| S2 | 172.3 | Plan-01 tail 92.0 (delta §7: B13–B23, C3, C6–C15) | **80.0** (A 42 / B 38) | Plan 02: 80.0 **+ E25 CDK dev 12 h (Dev A, week 2, protected by R-05)** | Dev A over by 12 h: D4 (10 h) and the last 2 h of D3 move to S3 week 1 |
+| S3 | 192.8 | S2 carry 12 h | 180.8 | Plan 03: 234 (already without E18/E19) − E25 12 (now in S2) + R-18 4 (E13 `legal.pending`, E24 SYS-01) = 226 | **over by ≈ 45 h**, carried into S4 in the order given in Plan 03 |
+| S4 | 152.0 | S3 carry ≈ 45 h | 107 | Plan 04: 136 (already without T3/T5/T6) + F28 `plans.cancel` 8 (R-08) + R-18 2 (F14 AccountScreen v2) = 146 | **over by ≈ 39 h (4.9 d)** |
+
+The R-05 funding (E18, E19) and the R-08 funding (T3, T5) are real relative to the untrimmed plan, but these after-T1–T6 figures had already excluded those tasks, so the protected dev stack, `plans.cancel` and the R-18 screens add ≈ 26 h here. This is why the break-even factor sits at ≈ 1.67 even with T1–T6.
 | Pilot week | 51.2 (factor 1.0) | — | 51.2 | F20–F27: 51 | not a sprint; F26 fix budget is the last absorber |
 
-**How these figures were reached:**
-- **Remaining MVP at spec budgets:** 480 h (60.0 d). The trims-tagged tasks sum to 32 h (T1 2, T2 6, T3 2, T4 8, T5 4, T6 10), matching the spec's 4.0 d.
-- **Break-even measured factor for S2–S4:** **1.77** without trims; **1.68** with T1–T6 acknowledged. This is consistent with the delta sheet's 1.74 / 1.65.
-- **Recommendations:**
-  - (a) Take the PO's one-line acknowledgement for T1–T6 on **Fri 10-09**, as the delta sheet recommends.
-  - (b) At the **Fri 10-23** re-baseline, if f₂ < 1.68, apply in order:
+**How these figures were reached (one capacity model, R-01):**
+- The basis is days × 0.8 × factor minus overheads; it drops the roadmap's 0.75 focus factor and planned leave (on the roadmap basis the assumed 1.6 ≈ 2.1).
+- **Remaining MVP after Plan 01 at spec budgets:** 480 h (60.0 d), i.e. MVP demand **86.4 d against 80.4**. The trims-tagged tasks sum to 32 h (T1 2, T2 6, T3 2, T4 8, T5 4, T6 10), matching the spec's 4.0 d.
+- **Break-even measured factor for S2–S4 (R-01): ≈ 1.75** without trims; **≈ 1.67** with T1–T6.
+- **Decision points (R-02):**
+  - (a) **Fri 10-09:** T1–T6 are pre-acknowledged by the owner (master-plan approval, 2026-09-25) and are applied in order if the S1 factor is short.
+  - (b) **Fri 10-23:** the owner decides T7 and T8 explicitly. If f₂ < 1.67, in order:
     1. C15 → manual G-E6 checklist (3 h).
-    2. **T7** (saves ≈ 13–20 h: F18, plus the Android return glue in E24/F12/F16).
-    3. T8 (PO sign-off, 34 h).
-    4. Otherwise move GO/NO-GO to Fri 12-04.
-  - (c) Milestone consequence: at f = 1.6, **lumpsum screens end to end land Wed 11-11 to Thu 11-12, not Fri 11-06**. Plan 03 flags this. The PO should ask Cybrilla for the product demo on **Thu 11-12**, or accept an API-driven lumpsum demo on 11-06 (onboarding shown end to end in the UI).
+    2. **T7** (owner decision; saves ≈ 13–20 h, i.e. ≈ 2.0–2.5 d after 10-23: F18, plus the Android return glue in E24/F12/F16).
+    3. T8 (owner decision, 34 h) if f₂ < 1.45.
+    4. Otherwise move GO-1 to Fri 12-04.
+  - (c) Milestone consequence (R-03: lumpsum E2E on Fri 11-06): protect the lumpsum UI (E23/E24) and the E21 remainder ahead of E13 polish, E17 and E14, and agree an API-driven lumpsum demo with Cybrilla for 11-06 as the fallback (onboarding shown end to end in the UI).
 
-### 0.4 Rulings and conflicts I resolved (lead to confirm)
+### 0.4 Rulings and conflicts (items 2 and 3 are now closed by controller rulings)
 1. **Onboarding screens batch 1 moves from S2 to Plan 03 (E12).** The Plan-01 tail consumes S2, and the screens need the S3 backend anyway.
-2. **The CDK dev stack moves from S2 to Plan 03 (E25)** and is the first thing to overflow. If it slides, F1 deploys dev and prod in one pass (16 h instead of 12 + 8). The 10-23 milestone becomes: login end to end (Wed 10-21), the kernel green on Testcontainers + FakeFp, the KRA pre-verification probe green, and NAV sync plus catalogue seed running locally.
-3. **Redemption quote vs "providers only in the worker".** Spec §4.4 has the quote calling the FP holdings report, but the api role has no FP credentials. Ruling:
+2. **Superseded by R-05: the CDK dev stack (E25) is protected in S2** (Dev A, week 2, ≈ 12 h). It is out of the overflow ranking and is funded by taking E18 [T2] and E19 [T4] out of the committed S3 load. Fallback: a fixed-hostname tunnel to the local API for sandbox webhooks and payment returns, recorded in ADR-0014. Milestones are per R-03: Fri 10-09 packages/platform/OTP senders green; **Wed 10-21** login E2E; Fri 10-23 existing-KYC onboarding E2E in the FP sandbox and catalogue data on dev AWS; Fri 11-06 lumpsum E2E. **Open point for the controller:** onboarding E2E needs E3/E4/E6/E11 (consent engine, KRA, attest, provisioning), which these outlines schedule in S3, so the 10-23 onboarding milestone is not met by this sequence.
+3. **Redemption quote vs "providers only in the worker" — ruled by R-09.** Spec §4.4 now matches:
    - `folio.sync` (worker) stores `folios.fp_holdings_snapshot jsonb` and `fp_holdings_synced_at`. These are additive columns and need acknowledgement.
    - The quote reads the snapshot and returns `REFRESHING` (enqueueing `folio.sync`) when it is older than 24 h.
-   - `orders.redemption.submit` re-checks holdings live in the worker before `POST /v2/mf_redemptions`.
+   - `orders.redemption.submit` re-runs the MISMATCH, ALL-refusal and AMOUNT-cap checks live in the worker before `POST /v2/mf_redemptions`; a failure → REJECTED before any M write, challenge CONSUMED_UNUSED, reservation RELEASED.
 4. **KYC pre-verification (class K) runs before attest.** It requires a `consent_records` row for KYC_CONSENT (ONB-02 checkbox, no OTP), so E6 depends on E3.
 5. **The `trg_consent_guard` function is created in E4.** Each subject table's migration attaches it: orders in E20, plans and mandates in F2.
 6. **XIRR bug B-01** (a zero-amount flow extends the date span, so v1 returns 0.1). The port **fixes** this so v2 returns null. The golden JSON records both the v1 and v2 values, and `docs/specs/money/xirr.md` notes the deviation. Q-1 (the unbounded 1.4678e12 result) stays covered by the PO-5 display rule (A7 `formatXirr`).
@@ -100,11 +107,11 @@ This was planned read-only. Nothing was created or changed. It is based on the M
 
 ## 1. PLAN 02 (S2, after the Plan-01 tail): platform kernel, FP gateway, FakeFp, catalogue data
 
-**Goal.** By Fri 10-23 the money kernel runs under Testcontainers:
+**Goal.** By Fri 10-23 the money kernel runs under Testcontainers and the dev AWS stack (E25, R-05) is up with the catalogue data on it:
 - idempotency;
 - the pg-boss worker role;
 - FpGateway with lossless-json and `provider_calls`;
-- a stateful FakeFp plus the sandbox contract-smoke harness;
+- a stateful FakeFp plus the sandbox contract-smoke harness (D4; starts S3 week 1 because of E25, R-05);
 - domain state machines;
 - MSG91/SES adapters and `Notify`;
 - the pilot invite gate;
@@ -112,16 +119,16 @@ This was planned read-only. Nothing was created or changed. It is based on the M
 
 Everything Plan 03 consumes exists with the exact names below.
 
-**Window:** Dev A from about Mon 10-19, Dev B from about Mon 10-19, both after their Plan-01 tails (Tue 10-20 is a holiday). Budget 80 h: Dev A 42, Dev B 38.
+**Window:** Dev A from about Mon 10-19, Dev B from about Mon 10-19, both after their Plan-01 tails (Tue 10-20 is a holiday; login E2E is Wed 10-21, R-03). Budget 80 h: Dev A 42, Dev B 38, plus **E25 CDK dev (12 h, Dev A, week 2) protected in this window (R-05)**; D4 and the last 2 h of D3 therefore start S3 week 1.
 
 **Prerequisites from Plan 01 (new ids):**
 
 | Area | Names |
 |---|---|
 | Packages | `@sanchay/money` (A3–A8: `Money`, `Units`, `Nav`, `formatXirr`, `allocatePercentages`, `holdingMoney`); `@sanchay/validation` (A9, A10: `panSchema`, `ifscSchema`, `pincodeSchema`, `moneyWireSchema`, `unitsWireSchema`, `navWireSchema`, `amountSchema`); `@sanchay/domain` (A11: `defineEnum`, `ORDER_TYPES`, `ORDER_ORIGINS`, `ORDER_MODES`, `MANDATE_RAILS`, `PAYMENT_METHODS`, `LAUNCH_PLAN_FREQUENCIES`, `LAUNCH_CLIENT_PLATFORMS`, `OTP_PURPOSES`, `CONSENT_SUBJECT_TYPES`, `LEGAL_DOCUMENT_KEYS`, `CUTOFF_CLASSES`, `ASSET_CLASSES`, `NOMINEE_ID_TYPES`, `MAX_NOMINEES`, `LAUNCH_SCHEME_OPTIONS`, `Isin`, `IsoDate`) |
-| Platform, API | B1 `newId`, `TableName`, `Clock`/`FakeClock`; B2 `parseEnv`, `assertBootInvariants` (invariants 1–6); B3 `Crypto.encrypt/decrypt/blindIndex`, `KeyService`, `SecretsKeyService.fromEnv`; B4 `scrub`, `REDACT_KEY_PATTERNS`; B6 `createDb`, `DbExecutor`, `Tx`, Testcontainers harness; B7 identity schema (`investors`, `otp_codes.destination_enc`/`pepper_kid`), roles `sanchay_app`, `sanchay_readonly`, `sanchay_migrator`, `sanchay_retention` |
-| Platform, API (continued) | B8 `AppError`, `normalizeOrpcError`; B9 `clientIpFrom(req, source)`, `API_PREFIX`; B10 OpenAPI drift test; B11 `AuditService.record`, `AUDIT_DATA_ALLOWLIST`; B12 `SmsSender`/`EmailSender`, `SMS_SENDER`/`EMAIL_SENDER`, `loginSmsText`, `consentSmsText`, `SMS_TEMPLATE_IDS`, `emailOtpMessage`, `SenderUnavailableError`, `IntegrationsModule.forRoot`; B13/B14 `OtpService.issue/verify`; B15 `DeviceRegistry.upsert → {device, isNew}`; B16 `SessionService`; B18 `ClientGuard`, `SessionGuard`, `writeSessionCookies`, `SESSION_INDICATOR_COOKIE`; B19 `AuthService.verifyLoginOtp`; B20 `ContactEmailService`; B21 throttler; B23 `.env.example`, `db:migrate`, worker role stub |
-| Contract, clients | B5 `ERROR_CATALOGUE` (66 codes), `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`; B17 `contract.auth`, `contract.me`; C2/C3 `@sanchay/api-client` (cookie and bearer transports, Idempotency-Key); C6 `messageForError`, `legal-entity.ts`; C9 `AppNav`, `ComingSoonScreen`; C10/C11 web routing; C13/C14 Expo shell; C12 Playwright CI job |
+| Platform, API | B1 `newId`, `TableName`, `Clock`/`FakeClock`; B2 `parseEnv`, `assertBootInvariants` (invariants 1–7; 7 = `SANCHAY_SMS_RETRIEVER_HASH` required outside local/test, R-10); B3 `Crypto.encrypt/decrypt/blindIndex`, `KeyService`, `SecretsKeyService.fromEnv`; B4 `scrub`, `REDACT_KEY_PATTERNS`; B6 `createDb`, `DbExecutor`, `Tx`, Testcontainers harness; B7 identity schema (`investors`, `otp_codes.destination_enc`/`pepper_kid`), roles `sanchay_app`, `sanchay_readonly`, `sanchay_migrator`, `sanchay_retention` |
+| Platform, API (continued) | B8 `AppError`, `normalizeOrpcError`; B9 `clientIpFrom(req, source)`, `API_PREFIX`; B10 OpenAPI drift test; B11 `AuditService.record`, `AUDIT_DATA_ALLOWLIST`; B12 `SmsSender`/`EmailSender`, `SMS_SENDER`/`EMAIL_SENDER`, `loginSmsText`, `consentSmsText`, `consentUnitsSmsText`, `attestSmsText`, `renderConsentSms`, `ConsentSms`, `DLT_SIGNOFF`, `SMS_TEMPLATE_IDS` (four DLT templates, R-10), `emailOtpMessage`, `SenderUnavailableError`, `IntegrationsModule.forRoot`; B13/B14 `OtpService.issue/verify` (HMAC input `purpose‖dest_bidx‖otp_row_id‖code`, R-14; 5 s send timeout, D-17); B15 `DeviceRegistry.upsert → {device, isNew}`; B16 `SessionService`; B18 `ClientGuard`, `SessionGuard`, `InfraRoute`, `INFRA_ROUTE` (R-11), `bootTestApp({testModules})`, `writeSessionCookies`, `SESSION_INDICATOR_COOKIE`; B19 `AuthService.verifyLoginOtp`; B20 `ContactEmailService`; B21 throttler; B23 `.env.example`, `db:migrate`, worker role stub |
+| Contract, clients | B5 `ERROR_CATALOGUE` (66 codes), `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`; B17 `contract.auth`, `contract.me`; C2/C3 `@sanchay/api-client` (cookie and bearer transports, Idempotency-Key); C6 `messageForError`, the single legal-entity module `packages/domain/src/legal-entity.ts` (`LEGAL_ENTITY_NAME`, `dsc02`; R-19, re-exported by `@sanchay/app-core/copy`); C9 `AppNav`, `ComingSoonScreen`; C10/C11 web routing; C13/C14 Expo shell; C12 Playwright CI job |
 
 ### D1. Platform kernel tables and the idempotency interceptor (Dev A, 8 h)
 - **Files (create):** `apps/api/src/modules/platform/{kernel.schema.ts, idempotency.service.ts, idempotency.middleware.ts, runtime-config.ts}`; migration `platform_kernel`.
@@ -137,7 +144,7 @@ Everything Plan 03 consumes exists with the exact names below.
     - In flight → 409 `IDEMPOTENCY_IN_PROGRESS`.
     - Replay → stored response plus header `idempotent-replayed: true`.
     - A 5xx releases the key.
-  - `RuntimeConfig.get<K extends RuntimeConfigKey>(exec, key)`. Typed keys: `orders.enabled`, `fp.lumpsumFlow` (`CUSTOM_CHECKOUT` \| `PAYMENT_AFTER_SUBMIT`, default CUSTOM_CHECKOUT per H-2), `fp.sendPartner=false`, `features.redeemByUnits=false`, `pilot.caps.perOrder='100000.00'`, `pilot.caps.perInvestorPerDay='200000.00'`, `money_params_version`, `minAppVersion.android`.
+  - `RuntimeConfig.get<K extends RuntimeConfigKey>(exec, key)`. Typed keys: `orders.enabled`, `plans.sip.enabled` (default false; true only after GO-2, R-06), `fp.lumpsumFlow` (`CUSTOM_CHECKOUT` \| `PAYMENT_AFTER_SUBMIT`, default CUSTOM_CHECKOUT per H-2), `fp.sendPartner=false`, `features.redeemByUnits=false`, `pilot.caps.perOrder='100000.00'`, `pilot.caps.perInvestorPerDay='200000.00'`, `money_params_version`, `minAppVersion.android`.
   - `ReconBreaks.open(tx, {kind, entityType, entityId, severity, detail})`.
 - **Tests:**
   - `returns 428 without key on [K] route`
@@ -160,8 +167,8 @@ Everything Plan 03 consumes exists with the exact names below.
   - `JOB_NAMES` (a closed union of every MVP job in spec §1).
   - `schedule(name, cron, {tz:'Asia/Kolkata'})`.
   - Table `worker_heartbeats (task_id PK, last_beat_at)`, beat every 30 s.
-  - `/health/ready` checks the DB, pg-boss, and a heartbeat under 2 min.
-  - Job `identity.cleanup` (hourly: expire and delete otp_codes older than 24 h, and sessions past absolute expiry + 7 d).
+  - `/health` stays **liveness only** (process up + DB reachable), the only ALB/ECS health check (R-12). `/health/ready` is diagnostic: the DB, pg-boss, and a heartbeat under 2 min; it never checks NAV age.
+  - Job `identity.cleanup` (hourly): deletes otp_codes older than 24 h **only for purposes LOGIN and VERIFY_EMAIL** (R-13); CONSENT rows are kept under the retention policy with `code_hmac` nulled after expiry; sessions past absolute expiry + 7 d are deleted.
   - The worker drains on SIGTERM.
 - **Tests:**
   - `enqueue inside rolled-back tx leaves no job`
@@ -170,8 +177,10 @@ Everything Plan 03 consumes exists with the exact names below.
   - `worker role does not listen on HTTP`
   - `api role does not start job processing`
   - `health.ready is 503 when heartbeat older than 2 min`
+  - `health (liveness) stays 200 when the newest NAV is 10 days old (R-12)`
   - `schedules register with Asia/Kolkata tz`
-  - `identity.cleanup deletes expired otp rows only`
+  - `identity.cleanup deletes expired LOGIN and VERIFY_EMAIL otp rows only`
+  - `CONSENT evidence survives cleanup (R-13)`
   - `unknown job name is a type error (tsd)`
 
 ### D3. FpGateway base: undici, per-audience tokens, lossless-json, provider_calls, ConsumedConsent brand (Dev A, 14 h)
@@ -213,7 +222,7 @@ Everything Plan 03 consumes exists with the exact names below.
   - `pnpm --filter=@sanchay/fp-probes smoke -- --chain=<onboarding|lumpsum|sip|redemption> --env=sandbox`, which writes `docs/probes/smoke-<date>-<chain>.md` (run evidence for G-E4).
 - **Tests:**
   - `FakeFp records class per call`
-  - `list-by-source_ref_id finds object created before a scripted timeout (T6)`
+  - `list-by-source_ref_id finds object created before a scripted timeout (LOOKUP-ADOPT)`
   - `H-2 lumpsum state path under_review→pending→submitted→successful`
   - `payment create twice on same order is rejected (H-2 "no multiple payments")`
   - `rejects any M payload containing partner or euin keys (H-11)`
@@ -223,7 +232,7 @@ Everything Plan 03 consumes exists with the exact names below.
 - **Files (create):** `packages/domain/src/states/{order.ts, plan.ts, mandate.ts, payment-attempt.ts, onboarding.ts, consent-challenge.ts, index.ts}`, `packages/domain/test/states.test.ts`, `scripts/gen-states.ts`, `docs/specs/states.md` (generated).
 - **Files (modify):** root package.json (script `gen:states`), `.github/workflows/ci.yml` (step "states drift": `pnpm gen:states` then `git diff --exit-code docs/specs/states.md`).
 - **Produces:**
-  - `ORDER_STATUSES` (spec §4.2 and §4.4, incl. RECONCILING, UNITS_PENDING, CONSENT_EXPIRED, SKIPPED for instalments), `PLAN_STATUSES` (§4.3), `MANDATE_STATUSES` (CANCEL_SUBMITTING reserved), `PAYMENT_ATTEMPT_STATUSES` (CREATING, REDIRECTED, PENDING, SUCCESS, FAILED, EXPIRED), `CHALLENGE_STATUSES` (PENDING, APPROVED, CONSUMED, CONSUMED_UNUSED, SUPERSEDED, EXPIRED, CANCELLED), `ONBOARDING_STAGES`.
+  - `ORDER_STATUSES` (spec §4.2 and §4.4, incl. RECONCILING, UNITS_PENDING, CONSENT_EXPIRED, SKIPPED for instalments), `PLAN_STATUSES` (§4.3, including CANCEL_PENDING for the R-08 investor cancel), `MANDATE_STATUSES` (CANCEL_SUBMITTING reserved), `PAYMENT_ATTEMPT_STATUSES` (CREATING, REDIRECTED, PENDING, SUCCESS, FAILED, EXPIRED), `CHALLENGE_STATUSES` (PENDING, APPROVED, CONSUMED, CONSUMED_UNUSED, SUPERSEDED, EXPIRED, CANCELLED), `ONBOARDING_STAGES`.
   - `canTransition(machine, from, to, trigger): boolean`, `TERMINAL[machine]`.
   - `fpStateToOrderStatus(fpState, ctx)` mapping tables.
 - **Tests:**
@@ -236,15 +245,18 @@ Everything Plan 03 consumes exists with the exact names below.
 
 ### D6. MSG91 (DLT) and SES v2 adapters, `Notify`, `notifications.send`, "new sign-in" email (Dev B, 6 h)
 - **Files (create):** `apps/api/src/integrations/sms/msg91.sender.ts`, `apps/api/src/integrations/email/ses.sender.ts`, `apps/api/src/modules/notifications/{notifications.schema.ts, notify.service.ts, notifications.job.ts, templates.ts, notifications.module.ts}`; migration `notifications`.
-- **Files (modify):** `integrations.module.ts` (modes `msg91`, `ses`), `config/env.ts` (§0.2 keys), `identity/auth.service.ts` (on `isNewDevice`, `Notify.enqueue(tx, 'SECURITY_NEW_SIGN_IN')`).
+- **Files (modify):** `integrations.module.ts` (modes `msg91`, `ses`), `config/env.ts` (§0.2 keys; update B2's variable-set pin test), `identity/auth.service.ts` (on `isNewDevice`, `Notify.enqueue(tx, 'SECURITY_NEW_SIGN_IN')`).
 - **Produces:**
-  - `Msg91SmsSender` (DLT template id per `SMS_TEMPLATE_IDS`, PE id, sender).
+  - `Msg91SmsSender` (DLT template id per `SMS_TEMPLATE_IDS` for all four R-10 templates, PE id, sender), with the 5 s timeout of D-17 (R-07).
+  - Job `sms.dlr.sync` (worker): updates `otp_codes.dlr_status` and, for CONSENT rows, `consent_records.delivery_evidence` (R-13).
+  - Email templates import `LEGAL_ENTITY_NAME` from `@sanchay/domain` when they need the DSC-02 entity line; no file here spells it (R-19).
   - `SesEmailSender` (ap-south-1, task-role credentials).
   - Tables `notifications (investor_id, category, template_key, dedupe_key UNIQUE, payload_enc, status)` and `notification_deliveries (notification_id, channel EMAIL, provider_message_id, status, attempts)`.
   - `Notify.enqueue(tx, templateKey, {investorId, data, dedupeKey})` → job `notifications.send`.
   - Template keys: `SECURITY_NEW_SIGN_IN`, `ORDER_PLACED`, `ORDER_ALLOTTED`, `ORDER_FAILED`, `REFUND_IN_PROGRESS`, `REDEMPTION_PROCESSED`, `PAYOUT_DELAYED`, `SIP_ACTIVE`, `SIP_INSTALMENT_MISSED_WARNING`, `MANDATE_STATUS`, `MANDATE_REVOKED`, `SUITABILITY_WARNING_COPY`, `ONBOARDING_BLOCKED_PILOT`.
 - **Tests:**
-  - `msg91 request carries DLT template id and exact H-6 body (golden bytes)`
+  - `msg91 request carries DLT template id and exact H-6 body for all four templates (golden bytes built from B12's renderers and DLT_SIGNOFF, so the test file never spells the entity name, R-19)`
+  - `dlr sync updates consent_records.delivery_evidence for CONSENT rows`
   - `ses sends from SANCHAY_SES_FROM`
   - `prod boot refuses capture/mailpit (existing inv. 1) and accepts msg91/ses`
   - `Notify dedupes by dedupeKey`
@@ -258,7 +270,7 @@ Everything Plan 03 consumes exists with the exact names below.
 - **Produces:**
   - Table `pilot_invites (mobile_bidx UNIQUE, invited_by, note, expires_at, used_at)`.
   - `PilotInvites.assertInvited(tx, mobileBidx)` → 403 `PILOT_INVITE_REQUIRED`. It applies only to **new** mobiles and only when `SANCHAY_PILOT_INVITE_ONLY=true`, and it runs **after** OTP verification (anti-enumeration).
-  - `pnpm ops:invite --mobile <m> --note <n> --by <founder>` (role migrate; writes audit_events `PILOT_INVITE_ADDED`).
+  - `pnpm ops:invite --mobile <m> --note <n> --by <founder>` (run with `SANCHAY_APP_ROLE=ops`, DB user `sanchay_app`, R-16; writes audit_events `PILOT_INVITE_ADDED`).
 - **Tests:**
   - `uninvited new mobile gets PILOT_INVITE_REQUIRED after correct OTP`
   - `existing investor unaffected`
@@ -318,19 +330,19 @@ Everything Plan 03 consumes exists with the exact names below.
 
 ## 2. PLAN 03 (S3, Mon 10-26 → Fri 11-06): consent engine, existing-KYC onboarding, catalogue, lumpsum
 
-**Goal.** A KRA-verified invitee onboards end to end in the FP sandbox on web and Android. They browse the curated catalogue and fund pages. They complete a consent-first lumpsum (UPI and netbanking) under H-2. At f = 1.6 the lumpsum screens end to end slip to Wed 11-11 to Thu 11-12 (§0.3); the backend chain is green in the sandbox by 11-06.
+**Goal.** A KRA-verified invitee onboards end to end in the FP sandbox on web and Android. They browse the curated catalogue and fund pages. They complete a consent-first lumpsum (UPI and netbanking) under H-2. **Lumpsum E2E is the Fri 11-06 milestone (R-03)**: the lumpsum UI and the E21 core are protected in the overflow order; the fallback is an API-driven lumpsum demo agreed with Cybrilla.
 
-**Budget:** 192.8 h (A 96.4, B 96.4). Demand after T1/T2/T4 is 234 h, so the overflow order is given at the end.
+**Budget:** 192.8 h (A 96.4, B 96.4), less the 12 h S2 carry (D4 and the end of D3, R-05). Demand after T1/T2/T4 is 226 h (E25 now runs in S2; R-18 adds 4 h), so the overflow order is given at the end.
 
 **Prerequisites:**
 - **Plan 02:** `requireIdempotency`, `RuntimeConfig`, `ReconBreaks`, `Jobs.enqueue`, `@JobHandler`, `JOB_NAMES`, `FpTransport`, `FpRead`, `FpKyc`, `ConsumedConsent`, `assertConsumed`, `FpAmbiguousError`, `FpRejectedError`, `FakeFp` (`calls`, `advance`, `script`, `emitWebhook`), `canTransition` with the ORDER/PAYMENT_ATTEMPT/CHALLENGE/ONBOARDING machines, `Notify.enqueue`, `PilotInvites`, the catalogue tables, `NavService.latest`, `catalogue.listSchemes`.
-- **Plan 01:** `OtpService.issue/verify` (purpose CONSENT, `reference_id`), `consentSmsText`, `emailOtpMessage(code,'CONSENT')`, `Crypto`, `AuditService`, `SessionGuard`, `DeviceRegistry`.
+- **Plan 01:** `OtpService.issue/verify` (purpose CONSENT, `reference_id`), `renderConsentSms` (CONSENT, CONSENT_UNITS, ATTEST templates; R-10), `emailOtpMessage(code,'CONSENT')`, `Crypto`, `AuditService`, `SessionGuard`, `DeviceRegistry`.
 - **Business:** legal drafts (G-C1 drafts, due 10-23), GAP-03 questionnaire text (G-C2, due 10-30), probe P-07 results.
 
 ### E1. FP webhooks: raw route, auth, dedupe, `fp.event.process` (Dev A, 8 h)
 - **Files (create):** `apps/api/src/integrations/fp/webhooks/{fp-webhook.controller.ts, fp-signature.ts, inbound-webhook.schema.ts, fp-event.job.ts, fp-event-handlers.ts}`; migration `inbound_webhook_events`.
 - **Produces:**
-  - Raw Nest/Fastify route POST `/api/v1/webhooks/fp` (api host only via E2 HostGuard; raw body via a route-scoped content-type parser; 100 KiB).
+  - Raw Nest/Fastify route POST `/api/v1/webhooks/fp`, decorated `@InfraRoute('API_HOST')` (Plan-01 B18, R-11): it skips ClientGuard, SessionGuard and the throttler and is restricted only by E2 HostGuard (api host only). Raw body via a route-scoped content-type parser; 100 KiB. This replaces B18's test-only stand-in for the path.
   - `verifyFpSignature(raw, header, secret)`: `FP-Signature: id:b64(HMAC-SHA256)` over the raw body, falling back to re-serialised JSON. Shared-secret mode per `SANCHAY_FP_WEBHOOK_AUTH`. Constant-time compare; fail closed.
   - Table `inbound_webhook_events` (UNIQUE(provider, event_id); `signature_mode` CHECK (HMAC, SHARED_SECRET, NONE only when local); `payload_enc`; `payload_sha256`; `status`; `attempts`).
   - Valid events → `INSERT … ON CONFLICT DO NOTHING` + enqueue `fp.event.process` in the same tx → 200.
@@ -342,29 +354,31 @@ Everything Plan 03 consumes exists with the exact names below.
   - `event.time never used for ordering (out-of-order events converge)`
   - `re-fetch wins over webhook payload`
   - `cookie-authenticated app host → 404`
+  - `R-11: no x-sanchay-client header and no session → still 200 on the api host; a burst of 50 events is never throttled`
   - `NONE mode refused outside local (boot)`
 
-### E2. HostGuard, ALB client IP, `meta.appConfig` and 426, NAV-age readiness (Dev B, 4 h)
+### E2. HostGuard (with the R-11 exemptions), ALB client IP, `meta.appConfig` and 426, NAV-age alarm (Dev B, 4 h)
 - **Files (create):** `apps/api/src/modules/platform/{host.guard.ts, app-config.router.ts}`, `packages/contract/src/meta.ts`.
-- **Files (modify):** `app.module.ts` (guard order: HostGuard → ClientGuard → SessionGuard → Throttler), `health.router.ts`, `request-context.ts`.
+- **Files (modify):** `app.module.ts` (guard order: HostGuard → ClientGuard → SessionGuard → Throttler), `request-context.ts`.
 - **Produces:**
   - `HostGuard`:
     - Cookie auth only on `app` host; bearer only on `api` host.
-    - `/webhooks/fp` and `/pg/return/*` only on `api` host.
+    - Routes carrying `INFRA_ROUTE` metadata (B18 `@InfraRoute`, R-11): `API_HOST` routes (`/webhooks/fp`, `/pg/return/*`) only on the `api` host; `APP_AND_API_HOSTS` (`/health`) on both. HostGuard is the only guard these routes pass through.
     - Any mismatch → 404.
     - Host classification from `SANCHAY_APP_ORIGIN` / `SANCHAY_API_ORIGIN`.
   - `meta.appConfig` GET `/app/config` (P): `minAppVersion.android`, flags, cut-off display times, limits, ARN tagline, support.
-  - `x-app-version` below the minimum → 426 `APP_VERSION_UNSUPPORTED`.
-  - `/health/ready` adds a NAV-age check (≤ 4 days).
+  - `x-app-version` below the minimum → 426 `APP_VERSION_UNSUPPORTED` (the client side, SYS-01, is E24).
+  - **No NAV-age readiness (R-12).** `/health` stays liveness only. NAV age becomes the CloudWatch metric `nav.newest_age_days` (alarm in E25/F1) and the per-scheme AGED grade from `NavService.latest`, which blocks new purchases (E22 quote) and AMOUNT redemptions (F5 quote) in the affected schemes only.
 - **Tests:**
   - HostGuard cross-host matrix (8 rows: {app, api} × {cookie, bearer, webhook, return})
+  - `INFRA_ROUTE API_HOST routes → 404 on the app host; health 200 on both hosts (R-11)`
   - `rightmost XFF used in alb mode`
   - `IPv6 → 422 CLIENT_IP_UNSUPPORTED`
   - `426 below minAppVersion`
-  - `health.ready 503 when newest NAV older than 4 days`
+  - `health 200 while the newest NAV is 5 days old; AGED scheme refuses a purchase quote (R-12)`
 
 ### E3. Legal documents, consent tables, `sanchay.consent.v2` snapshot and JCS (Dev A, 12 h)
-- **Files (create):** `packages/domain/src/consent/{jcs.ts, snapshot-v2.ts, required-factors.ts}`, `packages/domain/test/{jcs.test.ts, snapshot-v2.test.ts}`, `apps/api/src/modules/legal-consent/{legal-consent.schema.ts, legal-docs.service.ts, snapshot-builders.ts, legal-consent.module.ts}`, `apps/api/src/modules/legal-consent/documents/*.md` (placeholders, one per `LEGAL_DOCUMENT_KEYS` entry), `apps/api/src/cli/ops-legal-seed.ts`; migration `legal_consent`.
+- **Files (create):** `packages/domain/src/consent/{jcs.ts, snapshot-v2.ts, required-factors.ts}`, `packages/domain/test/{jcs.test.ts, snapshot-v2.test.ts}`, `apps/api/src/modules/legal-consent/{legal-consent.schema.ts, legal-docs.service.ts, snapshot-builders.ts, legal-consent.module.ts}`, `docs/legal/documents/*.md` (placeholders, one per `LEGAL_DOCUMENT_KEYS` entry; kept under `docs/**` because counsel texts name the legal entity and `docs/**` is on the R-19 allowlist; the E25 Dockerfile copies `docs/legal/` into the image for the seed), `apps/api/src/cli/ops-legal-seed.ts`; migration `legal_consent`.
 - **Produces:**
   - `canonicalize(value): string` (RFC 8785).
   - `ConsentSnapshotV2Schema` (zod; fields per spec §4.1; decimals as fixed-scale strings; no timestamps).
@@ -387,18 +401,18 @@ Everything Plan 03 consumes exists with the exact names below.
   - `ConsentEngine.create(tx, {investorId, subjectType, subjects, templateKey, folioId|null})`. It builds the snapshot via `SNAPSHOT_BUILDERS`, renders `TPL_*`, and sets `expires_at`=10 min.
   - `sendOtp(challengeId, channel)`:
     - ≤ 3 sends, 30 s cooldown, ≤ 10 per investor per hour.
-    - OTP via `OtpService.issue({purpose:'CONSENT', referenceId: challengeId})`; the OTP never outlives the challenge.
+    - OTP via `OtpService.issue({purpose:'CONSENT', referenceId: challengeId, consentSms})`, where `consentSms` picks one of the three consent DLT templates (R-10): `CONSENT` (purchase, SIP/mandate, SIP cancel), `CONSENT_UNITS` (redeem by units or all), `ATTEST` (onboarding). The OTP never outlives the challenge; the code HMAC binds the otp row id, not the challenge id (R-14).
   - `approve(challengeId, {smsCode?, emailCode?})`, implementing D-MONEY-004 steps 1–7:
     1. lock;
     2. verify codes (attempt counter committed separately);
     3. re-run suitability via the `SuitabilityHook` interface, filled by E9 → 409 `SUITABILITY_CHANGED`;
     4. DB recompute + `timingSafeEqual` → mismatch: SUPERSEDED + audit + commit → `CONSENT_MISMATCH`;
     5. re-render the NAV-date line;
-    6. insert `consent_record`;
-    7. CONSUMED + `execute_before` 10 min + `saga_expires_at` (60 min, or 7 d for a SIP with a new mandate) + subjects CONSENTED + enqueue `*.submit`.
+    6. insert `consent_record`, copying the CONSENT otp rows' delivery evidence (template id, provider message id, DLR status, timestamps, masked destination) into `delivery_evidence` (R-13; D6's `sms.dlr.sync` updates it later);
+    7. CONSUMED + `execute_before` 10 min + `saga_expires_at` (60 min, or 7 d for a SIP with a new mandate) + subjects CONSENTED + enqueue `*.submit` + `audit_events` row (R-20).
   - `useConsumed(challengeId, fn: (c: ConsumedConsent) => Promise<T>)`: worker only; refuses after `execute_before` for the first write and after `saga_expires_at` for any write.
   - `ConsentDestinationResolver.resolve(tx, investorId, folioId)` (H-21; empty → 409 `CONSENT_DESTINATION_UNAVAILABLE` + alert).
-  - Procedures: `consents.getChallenge` GET `/consents/challenges/{id}`; `consents.sendOtp` POST `…/{id}/otp` [K]; `consents.approve` POST `…/{id}/approve` [K]; `consents.cancel` POST `…/{id}/cancel`.
+  - Procedures: `consents.getChallenge` GET `/consents/challenges/{id}`; `consents.sendOtp` POST `…/{id}/otp` [K]; `consents.approve` POST `…/{id}/approve` [K]; `consents.cancel` POST `…/{id}/cancel` **[K]** (R-20).
   - Jobs: `consent.expiry.sweep` (*/5; missed `execute_before` → CONSUMED_UNUSED + subject CONSENT_EXPIRED); `drafts.abandon` (hourly, 24 h).
   - Helpers `expectNoPmWritesBeforeConsumed`, `expectBola`.
 - **Tests:**
@@ -408,7 +422,9 @@ Everything Plan 03 consumes exists with the exact names below.
   - `approve after 10 min → expired`
   - `4th send refused`
   - `30 s cooldown`
-  - `consent SMS body matches H-6 consent template and last line /^@app\.sanchay\.in #\d{6}$/`
+  - `consent SMS body matches the R-10 template for each subject (CONSENT, CONSENT_UNITS, ATTEST) and last line /^@app\.sanchay\.in #\d{6}$/`
+  - `approve writes consent_records.delivery_evidence and an audit_events row (R-13, R-20)`
+  - `consents.cancel without Idempotency-Key → 428 (R-20)`
   - `destinations = CURRENT verified contacts (new folio)`
   - `execute_before missed → CONSUMED_UNUSED and FakeFp has zero P/M writes`
   - `useConsumed rejects in api role`
@@ -525,6 +541,7 @@ Everything Plan 03 consumes exists with the exact names below.
     8. PATCH `folio_defaults`.
   - Error handling: 5xx/429 backoff ×5; 4xx → FAILED + ops alert.
   - After `saga_expires_at`: reads and adoption only.
+  - **Re-attest path (R-17):** `onboarding.attest` on a PROVISIONING_FAILED or window-expired application creates a new ONBOARDING_ATTEST challenge whose snapshot includes the FP ids already created (adoption list). On CONSUMED, provisioning resumes from `provisioning_step`, list-and-match before every write. Stage-table row `REATTEST_REQUIRED`; runbook `provisioning-failed.md` describes it.
   - `trg_investor_readiness` sets `can_purchase` / `can_exit`.
 - **Tests:**
   - **FakeFp has zero P/M writes before CONSUMED (onboarding)**
@@ -532,6 +549,8 @@ Everything Plan 03 consumes exists with the exact names below.
   - `existing FP profile adopted by exact PAN`
   - `4xx → FAILED + recon break + v_onboarding_blocked row`
   - `after saga window only GET calls`
+  - `re-attest snapshot lists the adopted FP ids; resume creates no duplicate profile or bank (R-17)`
+  - `attest SMS uses SANCHAY_ATTEST_OTP_V1 (R-10)`
   - readiness truth table (8 rows)
   - `nominee OPTED_OUT sends no related_parties`
   - `H-11: no partner/euin in any payload`
@@ -549,10 +568,11 @@ Everything Plan 03 consumes exists with the exact names below.
   - Playwright `onboarding.smoke.spec.ts` (identity → profile, FakeFp)
   - `expo-screen-capture active on ONB-01`
 
-### E13. Onboarding screens batch 2 and CNF-01 (Dev B, 17 h)
-- **Files (create):** `packages/features/src/onboarding/{BankScreen.tsx (ONB-08/09), NomineesScreen.tsx (ONB-12/13/14), RiskQuestionnaireScreen.tsx (ONB-21/22), DeclarationsScreen.tsx (ONB-15), ReviewAttestScreen.tsx (ONB-16), ProvisioningStatusScreen.tsx (ONB-17/20)}`, `packages/features/src/consent/{ConsentOtpSheet.tsx (CNF-01), useConsentChallenge.ts}`.
+### E13. Onboarding screens batch 2, CNF-01 and the `legal.pending` re-accept UI (Dev B, 17 h + 2 h for R-18)
+- **Files (create):** `packages/features/src/onboarding/{BankScreen.tsx (ONB-08/09), NomineesScreen.tsx (ONB-12/13/14), RiskQuestionnaireScreen.tsx (ONB-21/22), DeclarationsScreen.tsx (ONB-15), ReviewAttestScreen.tsx (ONB-16), ProvisioningStatusScreen.tsx (ONB-17/20)}`, `packages/features/src/consent/{ConsentOtpSheet.tsx (CNF-01), useConsentChallenge.ts}`, `packages/features/src/legal/{LegalPendingBanner.tsx, ReacceptSheet.tsx}` (R-18: shown in the app shell whenever `legal.pending` is non-empty, for example after the 11-13 swap from drafts to approved texts).
 - **Tests:**
   - RTL: `nominee split defaults 34/33/33 editable`, `4th nominee button hidden`, `minor requires guardian`, `risk result shows level + expiry`, `CNF-01 requires both SMS and email codes for attest`, `resend countdown 30 s`, `FLAG_SECURE (usePreventScreenCapture) on CNF-01 and bank screens`
+  - RTL: `legal.pending banner appears for a new document version and the re-accept sheet stages the acceptance (R-18)`
   - Playwright continues `onboarding.smoke` through attest → provisioning DONE (FakeFp autoAdvance)
 
 ### E14. Catalogue API core (Dev B, 4 h)
@@ -598,11 +618,11 @@ Everything Plan 03 consumes exists with the exact names below.
   - Playwright `explore.smoke.spec.ts` (search → fund page)
   - www pages static (no client JS on `/site/legal/*`)
 
-### E18. [T2] Explore filters and user sorts (Dev B, 6 h). Dropped once T2 is acknowledged.
+### E18. [T2] Explore filters and user sorts (Dev B, 6 h). **Not committed: funds the protected dev stack (R-05); built only as an extension if f₂ allows.**
 - Filters: riskometer, AMC, `minSipMax`; sorts 1Y/3Y/5Y with DSC-26.
 - **Tests:** `sort by 3Y shows DSC-26 caption`, `filter combination query string round-trip`.
 
-### E19. [T4] NAV chart and `catalogue.navHistory` (Dev B, 8 h). Dropped once T4 is acknowledged.
+### E19. [T4] NAV chart and `catalogue.navHistory` (Dev B, 8 h). **Not committed: funds the protected dev stack (R-05); extension only.**
 - `catalogue.navHistory` GET `/catalogue/schemes/{slug}/nav-history?range=1Y|3Y|5Y|MAX` (≤ 260 points, downsampled). Chart built with react-native-svg.
 - **Tests:** `downsample keeps first/last/min/max`, `≤260 points`.
 
@@ -614,9 +634,11 @@ Everything Plan 03 consumes exists with the exact names below.
   - Order row fields: `arn = SANCHAY_PLATFORM_ARN`, `euin NULL`, `execution_only=true`, `initiated_via`.
   - Job `orders.purchase.submit`: tx1 `submit_attempts+1`, then `POST /v2/mf_purchases {…, source_ref_id: orders.id, gateway:"ondc", initiated_by:"investor"}` under `useConsumed`, then polls 2 s for 30 s.
   - Job `orders.purchase.advance`: `pending` → `PATCH {id, consent}` → payment (E21) → `PATCH {state:"confirmed"}`.
-  - Ambiguous → RECONCILING → T6 list by `source_ref_id` and adopt.
+  - Ambiguous → RECONCILING → LOOKUP-ADOPT (list by `source_ref_id` and adopt).
   - Job `fp.reconcile.nonfinal` (*/5; orders only in S3): absent twice 10 min apart → FAILED `PROVIDER_OBJECT_ABSENT`.
   - `SNAPSHOT_BUILDERS.PURCHASE`, with the payment method included in the snapshot.
+  - **Saga edge (R-17):** UNDER_REVIEW when `saga_expires_at` passes → CONSENT_EXPIRED: no further FP writes (the consent PATCH is forbidden), the FP order is left to expire, challenge CONSUMED_UNUSED, "Try again" = a new order with new consent.
+  - `audit_events` rows on create, submit and settle (R-20).
   - Alerts: RECONCILING > 2 h WARN, > 24 h CRITICAL.
 - **Tests:**
   - **FakeFp has zero P/M writes before CONSUMED (lumpsum)**
@@ -624,6 +646,8 @@ Everything Plan 03 consumes exists with the exact names below.
   - `execute_before missed → CONSENT_EXPIRED zero FP writes`
   - `FP review fail after consume → REJECTED, CONSUMED_UNUSED, retry needs new consent`
   - `timeout on POST → RECONCILING → adopt existing by source_ref_id (no duplicate)`
+  - `saga expires while UNDER_REVIEW → CONSENT_EXPIRED, no consent PATCH, FakeFp shows no further writes (R-17)`
+  - `create, submit and settle each write an audit_events row (R-20)`
   - `absent twice 10 min apart → FAILED`
   - `pilot cap 100000.01 → AMOUNT_ABOVE_MAX(PILOT_CAP)`
   - `kill switch → ORDERS_DISABLED` (existing catalogue code; verify at expansion)
@@ -636,7 +660,7 @@ Everything Plan 03 consumes exists with the exact names below.
 - **Files (create):** `apps/api/src/modules/payments/{payments.schema.ts (payment_attempts), payments.service.ts, pg-return.controller.ts, payments-poll.job.ts, payments.router.ts}`, `packages/contract/src/payments.ts`; migration `payment_attempts`.
 - **Produces:**
   - `POST /api/pg/payments/netbanking {amc_order_ids:[fp_old_id], method, bank_account_id: fp_bank_old_id, payment_postback_url, provider_name:"ONDC", upi?}`.
-  - Raw route GET|POST `/api/v1/pg/return/{ref}` (api host). `ref` is 128-bit, single use, valid 24 h. It enqueues a re-fetch and 303s to `https://app.sanchay.in/r/payment?ref=` or, for `return_channel=APP`, `/app/r/payment?ref=`.
+  - Raw route GET|POST `/api/v1/pg/return/{ref}`, decorated `@InfraRoute('API_HOST')` (R-11: no client header or session is needed for a bank/UPI browser redirect; HostGuard keeps it on the api host). `ref` is 128-bit, single use, valid 24 h. It enqueues a re-fetch and 303s to `https://app.sanchay.in/r/payment?ref=` or, for `return_channel=APP`, `/app/r/payment?ref=`. This replaces B18's test-only stand-in for the path.
   - `payments.get` GET `/payments/{attemptId}`.
   - Job `payments.poll` (30 s, 1 m, 2 m, 5 m, 15 m).
   - `fp.event.process` handlers for `payment.updated` and `mf_purchase.*`.
@@ -649,6 +673,8 @@ Everything Plan 03 consumes exists with the exact names below.
   - `attempt FAILED keeps order AWAITING_PAYMENT ("Try again" = new order)`
   - `late success after attempt EXPIRED moves order to PROCESSING`
   - `return 303 targets per channel`
+  - `return works with no x-sanchay-client header and no cookie (R-11); 404 on the app host`
+  - `refund_status transitions write audit_events rows (R-20)`
   - `no token/PII in redirect URL`
   - BOLA on `payments.get`
 
@@ -671,36 +697,40 @@ Everything Plan 03 consumes exists with the exact names below.
   - `mismatch checkbox required`
   - `CNF-02 copy per state (UNDER_REVIEW "With the fund house for review")`
 
-### E24. PAY-01, returns, result, ORD-01/02 (Dev B, 12 h)
-- **Files (create):** `packages/features/src/pay/{PayScreen.tsx (PAY-01 with TPV line and "shows as Cybrilla"), ResultScreen.tsx}`, `packages/features/src/orders/{OrdersListScreen.tsx, OrderDetailScreen.tsx}`, web `/pay/[orderId]`, `/result/[orderId]`, `/r/[kind]/page.tsx` ("Open Sanchay" fallback), `/portfolio/orders[/orderId]`, mobile `app/+native-intent.tsx` (zod allowlist; strips `/app`), `app/r/[kind].tsx`.
+### E24. PAY-01, returns, result, ORD-01/02, SYS-01 (Dev B, 12 h + 2 h for R-18)
+- **Files (create):** `packages/features/src/pay/{PayScreen.tsx (PAY-01 with TPV line and "shows as Cybrilla"), ResultScreen.tsx}`, `packages/features/src/orders/{OrdersListScreen.tsx, OrderDetailScreen.tsx}`, `packages/features/src/system/UpdateRequiredScreen.tsx` (SYS-01, R-18), web `/pay/[orderId]`, `/result/[orderId]`, `/r/[kind]/page.tsx` ("Open Sanchay" fallback), `/portfolio/orders[/orderId]`, mobile `app/+native-intent.tsx` (zod allowlist; strips `/app`), `app/r/[kind].tsx`.
+- **Files (modify):** `packages/api-client` transports (C2/C3): a 426 `APP_VERSION_UNSUPPORTED` interceptor that routes to SYS-01 (R-18).
 - **Produces:**
   - Web: same-tab redirect, UPI intent on mobile web, QR on desktop.
   - Android: `WebBrowser.openAuthSessionAsync(url, 'https://app.sanchay.in/app/r/payment')`, poll on AppState resume, `Linking.openURL(upiUri)`. The dev variant uses `sanchay://`.
 - **Tests:**
-  - RTL `unknown deep-link params dropped`, `safeNext rejects //evil`
+  - RTL `unknown deep-link params dropped`, `safeNext rejects //evil`, `426 from any call shows SYS-01 with the store link (R-18)`
   - Playwright `lumpsum.smoke.spec.ts` (explore → quote → consent (Mailpit OTP) → FakeFp payment → result SETTLED)
   - Maestro local `lumpsum-return.yaml`
 
-### E25. CDK `SanchayMvpStack-dev` (Dev A, 12 h). Overflow rank 1.
-- **Files (create):** `infra/{package.json, bin/sanchay.ts, lib/sanchay-mvp-stack.ts, lib/config.ts, test/sanchay-mvp-stack.test.ts}`, `.github/workflows/deploy.yml` (GitHub OIDC; manual dispatch), `apps/api/Dockerfile`, `apps/web/Dockerfile`, `docs/adr/0014-minimal-aws-topology.md`.
+### E25. CDK `SanchayMvpStack-dev` (Dev A, 12 h). **Protected; runs in S2 week 2 (R-05)**, not in the overflow ranking.
+- **Why S2:** FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06 demo all need a public dev host. Funded by taking E18 [T2] and E19 [T4] out of the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1. **Fallback:** a fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the local API, recorded in ADR-0014 and registered with Cybrilla by 10-23. E20/E21 and D4's lumpsum smoke depend on a public dev API host.
+- **Files (create):** `infra/{package.json, bin/sanchay.ts, lib/sanchay-mvp-stack.ts, lib/config.ts, test/sanchay-mvp-stack.test.ts}`, `.github/workflows/deploy.yml` (GitHub OIDC; manual dispatch), `apps/api/Dockerfile` (bakes in the RDS CA bundle and copies `docs/legal/` for the seed), `apps/web/Dockerfile`, `docs/adr/0014-minimal-aws-topology.md` (also records the dev hosts and the tunnel fallback).
 - **Produces** (spec §2.4):
   - VPC with 2 AZs and 1 NAT with an EIP.
   - ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `xff_header_processing.mode=append`.
-  - One ECS arm64 service with containers `web`, `api` and `worker`. FP secrets go only into `worker`; `SANCHAY_KEYRING_JSON` into api and worker.
-  - The one-off `migrate` task. RDS PG 18 with `rds.force_ssl=1`. S3, ECR, Secrets Manager, log groups with 400-day retention, Route 53 records for the dev hosts (`www.dev`, `app.dev`, `api.dev`; noindex).
+  - **Listener rules (R-11):** host `app` + path `/api/v1/*` → api target group (3000); host `api` → api; `www` and the rest of `app` → web (3001). One ECS service registers both target groups. The ALB and ECS health checks use `/api/v1/health` (liveness, R-12).
+  - One ECS arm64 service with containers `web`, `api` and `worker`. FP secrets go only into `worker`; `SANCHAY_KEYRING_JSON` into api and worker (R-19 owning containers). ECS Exec enabled with logging to CloudWatch (R-16).
+  - The one-off `migrate` task. RDS PG 18 with `rds.force_ssl=1`, and the app connects with **`sslmode=verify-full` against the baked-in RDS CA bundle (R-15)**. S3, ECR, Secrets Manager, log groups with 400-day retention, Route 53 records for the dev hosts (`www.dev`, `app.dev`, `api.dev`; noindex).
+  - CloudWatch alarm on NAV age (R-12).
 - **Tests:**
-  - CDK assertions: `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `SG: RDS reachable only from service`, `log retention 400`
-  - deploy to dev and `/health/ready` 200
+  - CDK assertions: `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `health check path /api/v1/health`, `SG: RDS reachable only from service`, `log retention 400`, `ECS Exec logging configured`
+  - `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`
+  - deploy to dev: `/api/v1/health` 200 on `app.dev` and `api.dev`; `POST /api/v1/webhooks/fp` reaches the api container from the internet; `https://app.dev.sanchay.in/.well-known/assetlinks.json` returns 200 `application/json` without auth
 
-**Plan 03 overflow order at f = 1.6** (≈ 41 h; these carry into the first days of Plan 04 in this order):
-1. E25, which is folded into F1 as dev+prod (−4 h).
-2. The E24 ORD-01/02 list and detail (4 h).
-3. The remainder of E24 (8 h).
-4. The remainder of E21 (≈ 8 h).
-5. The remainder of E23 (≈ 8 h).
-6. `onboarding.smoke` Android Maestro (local; 2 h).
+**Plan 03 overflow order at f = 1.6** (≈ 45 h after the R-05/R-18 changes, §0.3; these carry into the first days of Plan 04 in this order):
+1. The E24 ORD-01/02 list and detail (4 h).
+2. `onboarding.smoke` Android Maestro (local; 2 h).
+3. E13 polish beyond the functional screens, E17 www extras and E14 extras (≈ 12 h).
+4. The remainder of E23 (≈ 8 h) and of E24 (≈ 8 h), only if the lumpsum UI is already green on web for the 11-06 milestone (R-03).
+5. The remainder of E21 (≈ 8 h).
 
-Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E23 in Dev B's order (E2, E5, E8, E9, E10, E12, E13, E14, E15, E16, E17, E22) is protected.
+The lumpsum UI (E23/E24 core) and the E21 core are protected ahead of E13 polish, E17 and E14 so that lumpsum E2E holds on Fri 11-06 (R-03); otherwise an API-driven lumpsum demo (Playwright against the sandbox) is agreed with Cybrilla. Everything in Dev A's order E1, E3, E4, E6, E7, E11, E20 and in Dev B's order E2, E5, E8, E9, E10, E12, E15, E16, E22 is protected.
 
 **Plan 03 DoD.**
 - Consent-first and tamper tests pass for onboarding and lumpsum.
@@ -715,26 +745,27 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 
 **Goal.**
 - **Fri 11-13:** the prod stack is up.
-- **Tue 11-17 → Thu 11-19:** canaries (a) and (b) run.
-- **Fri 11-20 (feature freeze):** SIP (UPI Autopay), the ledger, the dashboard and holdings, and redemption (amount and all) work in the sandbox on web and on the Play-internal Android build.
-- **Fri 11-27:** every G-item has evidence.
+- **Tue 11-17 → Thu 11-19:** canaries (a) and (b) run; **Wed 11-18** Cybrilla demo part 2 (SIP and redemption).
+- **Fri 11-20 (feature freeze):** SIP (UPI Autopay) with the investor cancel (R-08), the ledger, the dashboard and holdings, and redemption (amount and all) work in the sandbox on web and on the Play-internal Android build.
+- **Wed 11-25:** G-E4 sandbox smoke evidence (3 runs on 3 days from 11-16, R-21).
+- **Fri 11-27:** **GO-1** (onboarding, lumpsum, redemption) has evidence for every item; **GO-2** (SIP) follows once mandate APPROVED + plan ACTIVE + first-instalment date are recorded (R-06).
 
-**Budget.** S4 has 152 h (76 per dev). With the Plan 03 carry (≈ 37 h) plus 136 h of its own, S4 is ≈ 21 h over at f = 1.6 (§0.3). The pilot week has 51.2 h (F20–F27).
+**Budget.** S4 has 152 h (76 per dev). With the Plan 03 carry (≈ 45 h) plus 146 h of its own (136 + F28 8 + F14 AccountScreen v2 2), S4 is ≈ 39 h over at f = 1.6 (§0.3). The pilot week has 51.2 h (F20–F27).
 
 **Prerequisites:**
 - **Plan 03:** `ConsentEngine` (`useConsumed`, `SNAPSHOT_BUILDERS`, `requiredFactorsFor`), `expectNoPmWritesBeforeConsumed`, `expectBola`, `orders`/`order_events`/`folios`/`payment_attempts`, `fp.event.process` handler registry, `fp.reconcile.nonfinal`, `Suitability.check`, `expectedNavDate`, `readiness` (`can_purchase`/`can_exit`), HostGuard, the returns route pattern `/api/v1/pg/return/{ref}`, `infra/lib/sanchay-mvp-stack.ts` (or its carry).
 - **Plan 02:** `Notify`, `ReconBreaks`, `RuntimeConfig`, `FakeFp`, `NavService`, `canTransition` (PLAN, MANDATE).
 - **Plan 01:** `@sanchay/money` (`marketValue`, `unitsForAmount`, `formatXirr` PO-5, `holdingMoney`, `allocatePercentages`).
-- **Business:** G-B7 prod credentials (11-13), G-B9 Play Console (10-30), G-B10 curated list v1 (11-06), probe P-09 (units, SIP).
+- **Business:** G-B7 prod credentials (11-13; latest Mon 11-16, R-21), G-B9 Play Console (10-30) and app/signing key (11-06), G-B10 curated list v1 (11-06), probe P-09 (units, SIP).
 
-### F1. CDK prod (plus dev if carried), alarms (Dev A, 8 h; 16 h with the E25 carry)
+### F1. CDK prod, alarms (Dev A, 8 h; E25 dev already ran in S2, R-05)
 - **Files (modify):** `infra/lib/{sanchay-mvp-stack.ts, config.ts}`; create `infra/lib/alarms.ts`, `docs/runbooks/credential-rotation.md`.
 - **Produces:**
-  - `SanchayMvpStack-prod`: Multi-AZ, PITR 14 days, deletion protection, 2 tasks, NAT EIP output for Cybrilla allowlisting.
-  - Alarms routed to SNS email and SMS for both developers: 5xx, worker heartbeat, queue age > 2 min, RECONCILING SLA, M1/M3/M4, webhook signature failures, OTP send failure > 5%, SMS cap.
-  - Prod deploys with `orders.enabled=false`.
+  - `SanchayMvpStack-prod`: Multi-AZ, PITR 14 days, deletion protection, 2 tasks, NAT EIP output for Cybrilla allowlisting; the same R-11 listener rules, liveness health check (R-12), `sslmode=verify-full` (R-15) and ECS Exec logging (R-16) as E25.
+  - Alarms routed to SNS email and SMS for both developers: 5xx, worker heartbeat, queue age > 2 min, RECONCILING SLA, M1/M3/M4, webhook signature failures, OTP send failure > 5%, SMS cap, NAV age (R-12).
+  - Prod deploys with `orders.enabled=false` and `plans.sip.enabled=false` (SIP waits for GO-2, R-06).
 - **Tests:**
-  - CDK assertions: `prod MultiAz true`, `BackupRetention 14`, `DeletionProtection`, `alarm count 9 with SNS actions`
+  - CDK assertions: `prod MultiAz true`, `BackupRetention 14`, `DeletionProtection`, `alarm count 10 with SNS actions`
   - one PITR restore test into a scratch instance (G-E5)
   - alarm test page on Wed 11-18
 
@@ -752,6 +783,8 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
   - Job `plans.instalments.sync` (08:30, 20:30) upserts `orders(origin=SIP_INSTALMENT)`.
   - Emails: 2 consecutive misses → `SIP_INSTALMENT_MISSED_WARNING`; mandate cancelled externally → MANDATE_REVOKED email.
   - Saga 7 days with a new mandate.
+  - `plans.createSip` refuses with `FEATURE_DISABLED` while `plans.sip.enabled=false` (GO-2 gate, R-06).
+  - `audit_events` rows on approve, submit and ACTIVE (R-20).
 - **Tests:**
   - **FakeFp has zero P/M writes before CONSUMED (SIP, UPI mandate)**
   - `reused mandate: no mandate write, plan write only after CONSUMED`
@@ -773,11 +806,11 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 - **Tests:** ML-01..ML-08 (boundaries 66,666.67 → 1L; 66,666.68 → 2L), `E_MANDATE token_url flow`.
 
 ### F4. Ledger: `applyAllotment`/`applyExit` (FIFO), folio upsert, `folio.sync`, `orders.units.reconcile` (Dev A, 12 h)
-- **Files (create):** `packages/domain/src/rules/{fifo.ts, elss-lock.ts}`, golden `fifo.json`, `elss-lock.json`, `apps/api/src/modules/portfolio/{portfolio.schema.ts (lots, lot_consumptions, ledger_exceptions, redemption_reservations), ledger.service.ts, folio-sync.job.ts, units-reconcile.job.ts}`; migration `ledger` (adds `folios.fp_holdings_snapshot jsonb` and `fp_holdings_synced_at` per §0.4 item 3).
+- **Files (create):** `packages/domain/src/rules/{fifo.ts, elss-lock.ts}`, golden `fifo.json`, `elss-lock.json`, `apps/api/src/modules/portfolio/{portfolio.schema.ts (lots, lot_consumptions, ledger_exceptions, redemption_reservations), ledger.service.ts, folio-sync.job.ts, units-reconcile.job.ts}`; migration `ledger` (adds `folios.fp_holdings_snapshot jsonb` and `fp_holdings_synced_at`, ruled by R-09 and listed in spec §2.3).
 - **Produces:**
   - `Ledger.applyAllotment(tx, order)`: lot with `allotment_date = allotted_nav_date`, `stamp_duty = amount − purchased_amount`, `lock_in_until` for ELSS, folio upsert, `ORDER_ALLOTTED` email.
-  - `Ledger.applyExit(tx, order, redeemedUnits)`: FIFO over unlocked lots. A shortfall is never rolled back: `ledger_exceptions(UNITS_SHORTFALL)` + folio MISMATCH + CRITICAL break (T7).
-  - `folio.sync` (05:00, and on demand): folio number, registered contacts (bidx), masked payout bank, holdings snapshot.
+  - `Ledger.applyExit(tx, order, redeemedUnits)`: FIFO over unlocked lots. A shortfall is never rolled back: `ledger_exceptions(UNITS_SHORTFALL)` + folio MISMATCH + CRITICAL break (SHORTFALL-BREAK).
+  - `folio.sync` (worker; 05:00, and on demand when a quote finds the snapshot > 24 h old): folio number, registered contacts (bidx), masked payout bank, and the FP holdings snapshot `fp_holdings_snapshot` / `fp_holdings_synced_at` from `GET /api/oms/reports/holdings` (R-09; the only writer).
   - `orders.units.reconcile` (every 2 h): UNITS_PENDING > T+3 WARN, > T+5 CRITICAL.
   - Units come from the provider only.
 - **Tests:**
@@ -791,11 +824,12 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 ### F5. Redemption backend (AMOUNT, ALL) (Dev A, 16 h)
 - **Files (create):** `packages/domain/src/rules/{redemption-availability.ts, redemption-buffer.ts}`, golden `redemption-availability.json`, `apps/api/src/modules/orders/{redemption.service.ts, redemption-submit.job.ts, payout-watch.job.ts}`, `packages/contract/src/orders.ts` (extend).
 - **Produces:**
-  - `orders.quoteRedemption` POST `/orders/redemptions/quote` (IX; reads the holdings snapshot, else REFRESHING; per §0.4 item 3).
-  - `orders.createRedemption` POST `/orders/redemptions` [K] (IX). The draft tx takes `pg_advisory_xact_lock(folio‖scheme)`, recomputes, and creates an ACTIVE reservation `ceil3(amount / NAV × (1 + buffer))` plus a REDEMPTION challenge (SMS + email).
+  - `orders.quoteRedemption` POST `/orders/redemptions/quote` (IX; api role, never calls FP; reads `folios.fp_holdings_snapshot`, else REFRESHING and enqueues `folio.sync`; R-09). MISMATCH, ALL refusal and the AMOUNT cap are computed on the snapshot here.
+  - `orders.createRedemption` POST `/orders/redemptions` [K] (IX). The draft tx takes `pg_advisory_xact_lock(folio‖scheme)`, recomputes, and creates an ACTIVE reservation `ceil3(amount / NAV × (1 + buffer))` plus a REDEMPTION challenge (SMS + email; SMS template `SANCHAY_CONSENT_OTP_V1` for AMOUNT, `SANCHAY_CONSENT_UNITS_OTP_V1` for UNITS and ALL, R-10).
   - Formulas: `available = Σ unlocked units_remaining − Σ ACTIVE reservations`; buffer `min(10%, max(2%, 3σ√n))`; max `floor2(available × NAV × (1 − buffer))`.
   - ALL is allowed only with no locked lots, no other reservation, and the folio MATCHED within 24 h. Otherwise it sends the `floor2` amount with a residual note, then "Redeem remaining" appears once the residual exceeds 0.001.
-  - Job `orders.redemption.submit`: live holdings re-check, then `POST /v2/mf_redemptions {…, source_ref_id, gateway:"ondc"}` → single `PATCH {state:"confirmed", consent}`.
+  - Job `orders.redemption.submit`: **re-runs the MISMATCH, ALL-refusal and AMOUNT-cap checks live** against `GET /api/oms/reports/holdings` (R-09); a failure → REJECTED before any M write, challenge CONSUMED_UNUSED, reservation RELEASED. Otherwise `POST /v2/mf_redemptions {…, source_ref_id, gateway:"ondc"}` → single `PATCH {state:"confirmed", consent}`.
+  - `audit_events` rows on approve, submit, settle and payout status changes (R-20).
   - SETTLED → `applyExit` + reservation SETTLED + `payout_expected_on` T+1 (liquid/debt) or T+2 (equity/hybrid/ELSS). Terminal failure → RELEASED with evidence.
   - `payout.watch` (10:00): past T+3 → DELAYED + investor copy + alert.
 - **Tests:**
@@ -803,7 +837,10 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
   - golden RA-01..RA-12 (NAV −3%, 0, +3%; reservation blocks a concurrent draft; ELSS strict 29-Feb, month-end, holiday)
   - `concurrent drafts serialised by advisory lock`
   - `nothing released while RECONCILING`
-  - `FP redeemable < ledger → MISMATCH, ALL refused, AMOUNT capped`
+  - `FP redeemable < ledger → MISMATCH, ALL refused, AMOUNT capped (snapshot at quote)`
+  - `quote makes no FP call and returns REFRESHING when the snapshot is > 24 h old (R-09)`
+  - `live re-check failure in submit → REJECTED, zero M writes, reservation RELEASED (R-09)`
+  - `settle writes an audit_events row (R-20)`
   - `payout DELAYED after regulatory max`
   - BOLA on quote and create (foreign folio → 404)
   - sandbox smoke `--chain=redemption`
@@ -814,8 +851,10 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 - **Tests:** `UNITS mode sends units`, `flag off → VALIDATION_FAILED`.
 
 ### F7. Lean reconciliation, invariants, ops CLIs and views (Dev A, 12 h)
-- **Files (create):** `apps/api/src/modules/platform/recon/{recon-fp-daily.job.ts, integrity-invariants.job.ts}`, `apps/api/src/cli/{ops-sync.ts, ops-kill-switch.ts, ops-refund-utr.ts}`; migration `ops_views` (`v_reconciling_orders`, `v_units_pending`, `v_recon_breaks_open`, `v_payouts_due` for `sanchay_readonly`; no `*_enc`).
+- **Files (create):** `apps/api/src/modules/platform/recon/{recon-fp-daily.job.ts, integrity-invariants.job.ts}`, `apps/api/src/cli/{ops-sync.ts, ops-kill-switch.ts, ops-refund-utr.ts}`, `docs/runbooks/ops-cli.md` (the `aws ecs run-task --overrides` commands in PowerShell and Git Bash forms); migration `ops_views` (`v_reconciling_orders`, `v_units_pending`, `v_recon_breaks_open`, `v_payouts_due` for `sanchay_readonly`; no `*_enc`).
+- **Files (modify):** `config/env.ts` (`SANCHAY_APP_ROLE` gains `ops`), `main.ts` (the ops role runs a CLI and exits; no HTTP, no job processing).
 - **Produces:**
+  - **`SANCHAY_APP_ROLE=ops` (R-16)** for every ops CLI: DB user `sanchay_app` (no DDL), run as one-off tasks with `aws ecs run-task --overrides`; ECS Exec sessions log to CloudWatch.
   - `fp.reconcile.nonfinal` extended to plans, mandates and redemptions.
   - `recon.fp.daily` (02:00): orders, plans and holdings per investor.
   - `integrity.invariants` (hourly):
@@ -826,7 +865,8 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 - **Tests:**
   - `M1 fires on injected orphan fp_order_id`
   - `ops:sync enqueues fp.event.process only (no status change)`
-  - `ops:refund-utr needs two distinct approvers`
+  - `ops:refund-utr needs two distinct approvers and writes an audit_events row (R-20)`
+  - `ops role connects as sanchay_app and cannot run DDL (R-16)`
   - `views exclude *_enc columns (information_schema check)`
   - `sanchay_readonly cannot SELECT base tables with *_enc`
 
@@ -891,11 +931,12 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 ### F13. [T6] eNACH UI (Dev B, 4 h). `token_url` flow and ladder limit display.
 
 ### F14. HOME-01/02, PORT-01/02, allocation as a list (Dev B, 14 h)
-- **Files (create):** `packages/features/src/home/{HomeScreen.tsx, ThingsToDo.tsx}`, `packages/features/src/portfolio/{PortfolioScreen.tsx (segments Holdings · Orders · SIPs, H-14), HoldingDetailScreen.tsx, AllocationList.tsx}`; web `/`, `/portfolio`, `/portfolio/holdings/[folioId]/[isin]`; mobile `(tabs)/index.tsx`, `(tabs)/portfolio.tsx`.
+- **Files (create):** `packages/features/src/home/{HomeScreen.tsx, ThingsToDo.tsx}`, `packages/features/src/portfolio/{PortfolioScreen.tsx (segments Holdings · Orders · SIPs, H-14), HoldingDetailScreen.tsx, AllocationList.tsx}`, `packages/features/src/account/AccountScreenV2.tsx` (R-18, +2 h: read-only profile, bank, nominees, risk profile, legal versions, support/grievance contact from `me.get`; keeps C9's Log out and Sign out everywhere); web `/`, `/portfolio`, `/portfolio/holdings/[folioId]/[isin]`, `/account`; mobile `(tabs)/index.tsx`, `(tabs)/portfolio.tsx`, `(tabs)/account.tsx`.
 - **Tests:**
   - RTL `current value DASH when null`
   - `XIRR label per PO-5`
   - `locked units shown for ELSS`
+  - RTL `AccountScreen v2 shows masked PAN/account only, legal versions and the grievance contact (R-18)`
   - Playwright `portfolio.smoke.spec.ts`
 
 ### F15. [T3] Allocation bar chart (Dev B, 2 h)
@@ -929,6 +970,24 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 - Curated v1 import (G-B10), empty and error states, basic a11y labels.
 - **Tests:** `publish gate report printed by ops:catalogue:seed`, `no PUBLISHED scheme fails R1–R7`.
 
+### F28. Investor SIP cancel, `plans.cancel` (R-08) (Dev A 6 h / Dev B 2 h; funded by T3 + T5)
+- **Why:** a real-money SIP needs an investor-initiated cancel; SEBI requires SIP cancellation within 2 working days; ops may not make FP writes.
+- **Files (create):** `apps/api/src/modules/orders/{sip-cancel.service.ts, sip-cancel-submit.job.ts}`, `packages/features/src/sip/CancelSipSheet.tsx`; `docs/legal/documents/TPL_SIP_CANCELLATION.md` (placeholder until counsel approves it under G-C1).
+- **Files (modify):** `packages/contract/src/plans.ts` (`plans.cancel`), `plans.router.ts`, `SipDetailScreen.tsx` (SIPM-02 "Cancel SIP" action), `@sanchay/domain` enums (append `SIP_CANCELLATION` to `CONSENT_SUBJECT_TYPES` and `TPL_SIP_CANCELLATION` to `LEGAL_DOCUMENT_KEYS` if absent; append-only), `FP_OPERATIONS` (the FP purchase-plan cancel operation, class M; the exact endpoint is pinned against the FP docs when F28 is expanded).
+- **Produces:**
+  - `plans.cancel` POST `/plans/{id}/cancel` [K] (I) → `{challengeId}`. Only an ACTIVE plan; the plan moves to CANCEL_PENDING.
+  - One SIP_CANCELLATION challenge through the existing consent engine: **SMS code** (template `SANCHAY_CONSENT_OTP_V1`, action "cancel SIP of", amount = the SIP amount), snapshot = plan id, scheme, amount, mandate (kept), `TPL_SIP_CANCELLATION` version.
+  - Job `plans.cancel.submit`: FP plan cancel under `useConsumed`; ambiguous → RECONCILING (LOOKUP-ADOPT by re-fetching the plan); FP cancelled → CANCELLED, `cancelled_by='INVESTOR'`, `audit_events` row (R-20), `Notify` email. The mandate stays APPROVED for reuse.
+- **Tests:**
+  - **FakeFp has zero P/M writes before CONSUMED (SIP cancel)**
+  - `cancel needs Idempotency-Key; replay returns the same challenge`
+  - `only ACTIVE plans can be cancelled; CANCEL_PENDING blocks a second request`
+  - `timeout → RECONCILING → re-fetch shows cancelled → CANCELLED`
+  - `CANCELLED writes an audit_events row (R-20)`
+  - `SMS body uses SANCHAY_CONSENT_OTP_V1 with action "cancel SIP of"`
+  - BOLA on `plans.cancel`
+  - sandbox smoke `--chain=sip` extended with a cancel
+
 **Pilot week (hardening at factor 1.0; 51.2 h)**
 
 | ID | Task | Owner | h | Evidence |
@@ -936,17 +995,17 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 | F20 | Canary (c): partial redemption Mon 11-23; reconciliation report `docs/probes/canary-2026-11.md` (units to 0.001, ARN present, EUIN blank, bank debit and payout, one signed prod webhook) | A 8 / B 4 | 12 | G-E7, G-B8 prod |
 | F21 | G-E3 checklist: ASVS basics, gitleaks, `pnpm audit --prod`, PII log scan of e2e logs, TLS, RDS encryption and `force_ssl`, remaining suites | A | 4 | `docs/security/g-e3-checklist.md` |
 | F22 | ZAP baseline on prod-like dev stack; cross-sign G-E3 | B | 4 | ZAP report |
-| F23 | Gate evidence pack linking G-E1/E2/E4/E5 CI runs and smoke logs (3 runs on 3 days) | A | 4 | `docs/probes/gate-2026-11-27.md` |
+| F23 | Gate evidence pack for GO-1 linking G-E1/E2/E4/E5 CI runs and smoke logs (3 runs on 3 days, runs from Mon 11-16, due **Wed 11-25**, R-21); a separate GO-2 section for SIP (mandate APPROVED + plan ACTIVE + first-instalment date; debit and allotment when they land, R-06) | A | 4 | `docs/probes/gate-2026-11-27.md` |
 | F24 | G-E8 runbooks consolidated (13 listed in spec §7) from sprint stubs | B | 7 | `docs/runbooks/*.md` |
 | F25 | G-E6 adb and screenshot evidence | B | 2 | — |
 | F26 | Fix budget for canary and gate defects (not pre-planned) | A 10 / B 6 | 16 | — |
 | F27 | Invitee dry run: `ops:invite` seed, `app_config` caps, kill-switch drill | B | 2 | drill log |
 
 **Plan 04 DoD.**
-- The G-E1 consent-first suite passes for lumpsum, SIP (UPI, plus eNACH unless T6 was taken), mandate, redemption and onboarding, including the `execute_before`-missed and review-fail-after-consume tests.
+- The G-E1 consent-first suite passes for lumpsum, SIP (UPI, plus eNACH unless T6 was taken), mandate, SIP cancel (F28), redemption and onboarding, including the `execute_before`-missed, review-fail-after-consume and saga-expired-while-UNDER_REVIEW tests; every money task asserts an `audit_events` row (R-20).
 - The G-E2 golden vectors pass (the list below).
-- G-E4 has three sandbox runs.
-- Prod runs behind the kill switch until the canary.
+- G-E4 has three sandbox runs on three days by Wed 11-25 (R-21).
+- Prod runs behind the kill switch until the canary; SIP stays behind `plans.sip.enabled=false` until GO-2 (R-06).
 - M1, M3 and M4 have been green for 72 h.
 - Runbook stubs are written: refund, payout delayed, UNITS_PENDING, kill switch.
 
@@ -972,26 +1031,26 @@ Everything above E21 in Dev A's order (E1, E3, E4, E6, E7, E11, E20) and above E
 
 Money/format vectors already exist from A3–A8.
 
-**G-E1 consent-first tests:** E11 (onboarding), E20 (lumpsum, tamper, `execute_before`, review-fail), F2 (SIP and mandate), F3 (eNACH), F5 (redemption). All use `expectNoPmWritesBeforeConsumed`.
+**G-E1 consent-first tests:** E11 (onboarding, re-attest), E20 (lumpsum, tamper, `execute_before`, review-fail, saga expired while UNDER_REVIEW), F2 (SIP and mandate), F3 (eNACH), F5 (redemption), F28 (SIP cancel). All use `expectNoPmWritesBeforeConsumed`; the money tasks also assert `audit_events` rows (R-20).
 
 **Trim to task map:**
 
 | Trim | Tasks |
 |---|---|
 | T1 | E17 www minimal (applied) |
-| T2 | E18 |
-| T3 | F15 |
-| T4 | E19 |
-| T5 | F6, F17 |
+| T2 | E18 (not committed; funds E25 in S2, R-05) |
+| T3 | F15 (its hours fund F28 `plans.cancel`, R-08) |
+| T4 | E19 (not committed; funds E25 in S2, R-05) |
+| T5 | F6, F17 (their hours fund F28 `plans.cancel`, R-08) |
 | T6 | F3, F13 |
 | T7 | F18, plus the Android parts of E24, F12 and F16 |
-| T8 | F2, F3, F10, F12, F13 |
+| T8 | F2, F3, F10, F12, F13, F28 |
 
 **Totals** (ideal hours):
-- **Plan 02:** 80.
-- **Plan 03:** 248 (234 after T2/T4).
-- **Plan 04:** 150 in S4 (136 after T3/T5/T6), plus 51 in the pilot week.
-- **Remaining MVP after Plan 01:** 478 h, against 424.8 h of S2-remaining to S4 capacity at f = 1.6. With T1–T6 acknowledged, the break-even factor is **1.68**.
+- **Plan 02:** 80, plus E25 CDK dev 12 run in the Plan-02 window (R-05).
+- **Plan 03:** 248 (234 after T2/T4; E25's 12 now counted in S2), plus R-18 4 (E13, E24).
+- **Plan 04:** 152 in S4 (136 after T3/T5/T6), plus F28 `plans.cancel` 8 (R-08) and F14 AccountScreen v2 2 (R-18), plus 51 in the pilot week.
+- **Remaining MVP after Plan 01:** 480 h (60.0 d) at spec budgets, against 424.8 h of S2-remaining to S4 capacity at f = 1.6; MVP-wide **86.4 d against 80.4** (R-01). Break-even measured factor **≈ 1.75** without trims, **≈ 1.67** with T1–T6 (R-01). The ruling additions (R-05 dev stack, R-08, R-18) add ≈ 26 h on top of the after-trim figures (§0.3).
 
 ### Critical Files for Implementation
 - C:/Users/pc/AppData/Local/Temp/claude/C--Users-pc-Desktop-sanchay/2f00d411-382c-43a6-bd67-ecaf60c67db1/tasks/wk14xlx18.output (`result.interfaceSheet` §5.7–§5.8 platform symbols and layout; `result.planChunks`; `result.registerMoney` D-MONEY-004/041/109 for the class list and approve steps)

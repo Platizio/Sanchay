@@ -13,7 +13,9 @@
 
 **Holidays** (no due date falls on these): Fri 10-02, Tue 10-20, Mon 11-09, Tue 11-10, Tue 11-24.
 
-**Gate** refers to MVP spec §7.
+**Gate** refers to MVP spec §7, which is **tiered (R-06)**: GO-1 on Fri 11-27 covers onboarding, lumpsum and redemption; GO-2 enables SIP after its canary evidence.
+
+**Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`).** Where this text and a ruling differ, the ruling wins.
 
 ### 1. Governance
 
@@ -22,24 +24,25 @@
 | PB-01 | Freeze the MVP calendar (S1–S4, buffer week) and both developers' leave | PO | Mon 09-28 | none | Calendar in `docs/specs/mvp/MVP-SPEC.md` §0 | H-19 |
 | PB-02 | Engage external counsel with a fixed pilot scope and turnaround dates: legal texts (PB-60/61), EUIN opinion (PB-23), OX-18 letter (PB-19f), Cybrilla POA agreement and DPA review | OWNER/PO | Wed 09-30 | none | Engagement letter listing each item and date | G-C1, C3, C4 |
 | PB-03 | Name the Compliance Officer, who signs off legal texts, the risk questionnaire and the curated list | OWNER | Fri 10-09 | none | Appointment note | G-C1, C2 |
-| PB-05 | Velocity re-baseline. Apply trims T1..T8 in order (one-line PO acknowledgement each) | PO | Fri 10-23 | S1 and S2 actuals; Cybrilla priority answers (PB-13) | Signed re-baseline note | §6 |
-| PB-06 | Real-money GO/NO-GO meeting. NO-GO keeps orders disabled and re-runs the gate on Fri 12-04 or Fri 12-11 | PO + OWNER | Fri 11-27 | all MUST items | Signed gate record | §7 |
+| PB-04 | Trim checkpoint (R-02). Trims T1–T6 are **pre-acknowledged by the owner** (master-plan approval, 2026-09-25) and are applied in spec §6 order if the S1 factor is short | PO records; no new decision | Fri 10-09 | S1 actuals | Checkpoint note listing any trims applied | §6 |
+| PB-05 | Velocity re-baseline. **T7 (web only) and T8 (no SIP) need an explicit owner decision** (R-02) | OWNER (decides T7/T8), PO | Fri 10-23 | S1 and S2 actuals; Cybrilla priority answers (PB-13) | Signed re-baseline note with the owner's T7/T8 decision | §6 |
+| PB-06 | Real-money gate, tiered (R-06). **GO-1 (Fri 11-27): onboarding, lumpsum, redemption.** **GO-2: SIP**, after its canary evidence (mandate APPROVED + plan ACTIVE + first-instalment date recorded; debit and allotment evidenced when they land). NO-GO keeps orders disabled and re-runs the gate on Fri 12-04 or Fri 12-11 | PO + OWNER | GO-1 Fri 11-27; GO-2 after PB-82(b) | all MUST items of the tier | Signed gate record per tier | §7 |
 
 ### 2. Cybrilla production
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
-| PB-10 | Send Deliverable 1 (without the internal appendix) | PO | Mon 09-28 | PB-40 (domain named in the letter) | Sent mail plus Cybrilla ticket number | G-B1 |
+| PB-10 | Send Deliverable 1 (without the internal appendix) **after** PB-40 has registered the domain (R-22). If registration is not complete, the letter's URL table is marked "final by 09-30" | PO | Mon 09-28 (after PB-40) | PB-40 (domain named in the letter) | Sent mail plus Cybrilla ticket number | G-B1 |
 | PB-11 | R3 sandbox readiness: both tokens, pre-verification access, UPI Autopay in sandbox, sandbox webhook secret | DEV-A (PO chases) | Wed 10-07 | PB-10 | Token calls in the probe log; secret in nonprod Secrets Manager (name only recorded) | S1 |
 | PB-12 | Sandbox probes: P-04 (EUIN blank, no partner), P-05 (ARN visible), P-07 (allotted units), P-09 (units / first instalment), lumpsum custom-checkout order | DEV-A | Fri 10-09 (P-07 and P-09 may run to Fri 10-16) | PB-11 | `docs/probes/*.md` with run ids | G-B8 |
 | PB-13 | Written answers: [Priority] by Fri 10-16; the rest by Fri 10-30; everything by Fri 11-13. Chase every Monday. Map each answer to its flag (`fp.sendPartner`, `fp.lumpsumFlow`, `features.redeemByUnits`, UPI Autopay on/off) | PO; DEV-A maps flags | 10-16 / 10-30 / 11-13 | PB-10 | `docs/probes/cybrilla-answers.md` with mail references | G-B6 |
 | PB-14 | ONDC portal signup with Platizio's ARN (legal name and address exactly as on the ARN certificate) | OWNER + PO | Submit Fri 10-16; activation Fri 10-30 | PB-20, R2 | ONDC confirmation naming Platizio and the ARN | G-B7 |
 | PB-15 | Execute the POA agreement (counsel review first) | OWNER / COUNSEL | Fri 10-23 | R2, PB-02 | Executed agreement filed | G-B7 |
 | PB-16 | CAMS and KFintech mailback subscriptions for the ARN | PO/OPS | Request Fri 10-16; confirmed Fri 11-06 | PB-20 | RTA confirmations | G-B7 |
-| PB-17 | Cybrilla demo part 1 (sandbox): existing-KYC onboarding, lumpsum by UPI and netbanking, returns, webhooks | PO + DEV-A + DEV-B | Fri 11-06 | lumpsum end to end in sandbox | Cybrilla's written sign-off | G-B7 |
-| PB-18 | Cybrilla demo part 2: SIP with UPI Autopay/eNACH, redemption (live or recorded runs) | PO + DEV-A + DEV-B | Wed 11-18 | S4 sandbox build | Written sign-off | G-B7 |
+| PB-17 | Cybrilla demo part 1 (sandbox): existing-KYC onboarding, lumpsum by UPI and netbanking, returns, webhooks (on the dev AWS host, protected in S2 by R-05). Fallback agreed in writing now: an API-driven lumpsum demo (Playwright against the sandbox) | PO + DEV-A + DEV-B | Fri 11-06 | lumpsum end to end in sandbox (R-03) | Cybrilla's written sign-off | G-B7 |
+| PB-18 | Cybrilla demo part 2: SIP with UPI Autopay/eNACH (including the investor cancel, R-08), redemption (live or recorded runs) | PO + DEV-A + DEV-B | Wed 11-18 | S4 sandbox build | Written sign-off | G-B7 |
 | PB-19 | Allocate the prod NAT Elastic IP (retained, referenced by the CDK stack) and send it for allowlisting | DEV-A | Fri 11-06 | PB-45 | EIP in CDK context; Cybrilla acknowledgement | G-B7 |
-| PB-19a | Receive production credentials (FP and POA) **only** through Cybrilla's secure channel. Store in `sanchay/prod/*`, injected only into the `worker` container. Never in email, chat or GitHub | PO → DEV-A | **Fri 11-13** (latest Mon 11-16) | PB-14–17 | Secret names listed; token call from the prod worker logged | G-B7 |
+| PB-19a | Receive production credentials (FP and POA) **only** through Cybrilla's secure channel. Store in `sanchay/prod/*`, injected only into the `worker` container. Never in email, chat or GitHub | PO → DEV-A | **Fri 11-13** (latest **Mon 11-16**, R-21; later ⇒ GO-1 moves to Fri 12-04) | PB-14–17 | Secret names listed; token call from the prod worker logged | G-B7 |
 | PB-19b | Register prod webhooks at `https://api.sanchay.in/api/v1/webhooks/fp` for every MVP event; store the signing secret; verify one signed prod event | DEV-A | Mon 11-16 (verified by Thu 11-26) | PB-19a, PB-47 | `GET /v2/notification_webhooks` output; verified event id | G-B7, G-E7 |
 | PB-19c | UPI Autopay enabled on the production tenant | PO | Fri 11-13 | Q24 | Cybrilla mail, plus the canary mandate APPROVED | OX-17 |
 | PB-19d | Cybrilla escalation matrix and 24x7 incident contact put in the runbooks | PO | Fri 11-20 | R19 | `docs/runbooks/escalation.md` | G-B12 |
@@ -62,12 +65,13 @@
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
 | PB-30 | Contract MSG91: India data residency, DPA, DLR webhook; API key in nonprod Secrets Manager | PO | Fri 10-09 | none | Order form, DPA | G-B3 |
-| PB-31 | DLT Principal Entity registration for Platizio on one operator portal; bind MSG91 as telemarketer; 6-character service header (candidates `SNCHAY`, `SANCHY`); **whitelist `app.sanchay.in` for URLs** (it appears in the WebOTP line) | OWNER/PO | Submit Tue 09-29; entity and header approved Fri 10-09 | PB-40 | Entity id, header id, URL whitelist screenshot | G-B4 |
-| PB-32 | Register Service-Implicit templates (details below). Submit Mon 10-12; **approved Fri 10-23** | CO (wording) + DEV-A | Fri 10-23 | PB-31 | Four template ids mapped in `apps/api/src/integrations/sms/templates.ts`; H-6 unit test extended | G-B4 |
+| PB-31 | DLT Principal Entity registration for Platizio on one operator portal; bind MSG91 as telemarketer; 6-character service header (candidates `SNCHAY`, `SANCHY`), with brand-ownership documents linking "Sanchay" to Platizio if the portal asks; **whitelist `app.sanchay.in` for URLs** (it appears in the WebOTP line) | OWNER/PO | Submit Tue 09-29; entity and header approved Fri 10-09 | PB-40 | Entity id, header id, URL whitelist screenshot | G-B4 |
+| PB-32a | CO and counsel sign off the **four** SMS texts below (R-10) before filing; a later wording change means refiling | CO + COUNSEL | **Thu 10-08** | PB-02, PB-03 | Signed texts filed in `docs/legal/` | G-B4, G-C1 |
+| PB-32 | Register the **four** Service-Implicit templates (details below; R-10). Submit Mon 10-12; **approved Fri 10-23** | CO (wording) + DEV-A | Fri 10-23 | PB-31, PB-32a | Four template ids mapped in `apps/api/src/integrations/sms/templates.ts` (Plan-01 B12; its tests assert the WebOTP last line with and without a hash for all four) | G-B4 |
 | PB-33 | Prod SMS controls: 2,000 per day cap, MSG91 low-balance alert, DLR capture | DEV-A | Fri 11-13 | PB-30 | Alarm test | G-E5 |
 | PB-34 | Real-handset test on Jio, Airtel, Vi and BSNL: delivery; WebOTP autofill in Android Chrome on `app.sanchay.in`; hash line with the Play-signed build | DEV-B | Fri 11-20 | PB-32, PB-57 | Screenshots | G-E6 |
 
-**PB-32 templates.** Each is three lines: the text line, then the hash variable, then the WebOTP line last.
+**PB-32 templates (R-10: all four are decided).** Each is three lines: the text line, then the hash variable, then the WebOTP line last.
 
 ```
 SANCHAY_LOGIN_OTP_V1:
@@ -75,23 +79,23 @@ SANCHAY_LOGIN_OTP_V1:
 {#var#}
 @app.sanchay.in #{#var#}
 
-SANCHAY_CONSENT_OTP_V1:
+SANCHAY_CONSENT_OTP_V1 (amount: purchase, SIP/mandate, SIP cancel):
 {#var#} is your OTP to {#var#} Rs {#var#} in {#var#} on Sanchay. Valid 5 min. Never share it. -Platizio
 {#var#}
 @app.sanchay.in #{#var#}
 
-SANCHAY_CONSENT_UNITS_OTP_V1 (proposed):
+SANCHAY_CONSENT_UNITS_OTP_V1 (redeem by units; "all" for redeem-all):
 {#var#} is your OTP to redeem {#var#} units of {#var#} on Sanchay. Valid 5 min. Never share it. -Platizio
 {#var#}
 @app.sanchay.in #{#var#}
 
-SANCHAY_ATTEST_OTP_V1 (proposed):
+SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 {#var#} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio
 {#var#}
 @app.sanchay.in #{#var#}
 ```
 
-- Line 2 is always filled with the 11-character SMS Retriever hash.
+- Line 2 is always filled with the 11-character SMS Retriever hash: the API refuses to boot outside local/test without `SANCHAY_SMS_RETRIEVER_HASH` (Plan-01 B2 invariant 7). The hash is registered as a `{#var#}`, so DLT approval does not wait for Play App Signing (11-06).
 - Variables are at most 30 characters, so scheme names use their short form.
 - Confirm with MSG91 that `#` directly before a variable is accepted.
 - In the units template, "all" is a valid value for the units variable.
@@ -108,7 +112,7 @@ SANCHAY_ATTEST_OTP_V1 (proposed):
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
-| PB-40 | Register `sanchay.in` in Platizio's name: registrar lock, 2FA, auto-renew, at least 2 years. **Check availability today.** If it is taken, the PO names an alternative within 3 working days (DLT, SES, Play and the letter all depend on it) | PO | Wed 09-30 | none | Registrar record | G-B3 |
+| PB-40 | **First action on Mon 09-28 (R-22):** check `sanchay.in` availability and register it in Platizio's name (registrar lock, 2FA, auto-renew, at least 2 years) **before** PB-10 sends the letter. If registration is not complete at sending, the letter's URL table is marked "final by 09-30". If the name is taken, the PO names an alternative within 3 working days (DLT, SES, Play and the letter all depend on it) | PO | **Mon 09-28** (registration complete by Wed 09-30 at the latest) | none | Registrar record | G-B3 |
 | PB-41 | Route 53 zone `sanchay.in` in the prod account, plus delegation (details below) | DEV-A (DNS), DEV-B (assetlinks) | Zone Fri 10-09; dev records Fri 10-23; prod records Fri 11-13 | PB-40, PB-45 | `nslookup` / `Resolve-DnsName` outputs; ACM certificates issued | G-B3 |
 
 **PB-41 records**
@@ -142,7 +146,7 @@ SANCHAY_ATTEST_OTP_V1 (proposed):
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
 | PB-50 | GitHub organisation owned by Platizio (Team plan): two owners (OWNER, DEV-A), 2FA enforced, empty private repo `sanchay` | OWNER/DEV-B | Tue 09-29 | none | Org settings screenshot | none |
-| PB-51 | **Owner authorises the first push of `main`** after Plan-01 A13 is green locally | OWNER | Fri 10-09 | PB-50, A1–A13 | Written instruction filed in `docs/decisions/` | G-B2 |
+| PB-51 | **Owner authorises the first push of `main`** after Plan-01 A12 (was A13; CI) is green locally | OWNER | Fri 10-09 | PB-50, A1–A12 | Written instruction filed in `docs/decisions/` | G-B2 |
 | PB-52 | `main` ruleset (details below) | DEV-B | Mon 10-12 | PB-51 | `gh api repos/<org>/sanchay/rulesets` JSON exported | H-16 |
 | PB-53 | GitHub Actions OIDC deploy role to AWS (no long-lived keys); `dev` and `prod` environments with a required reviewer on prod. FP, MSG91 and SES secrets never go into GitHub | DEV-A | Fri 10-23 | PB-45, PB-52 | IAM trust policy; environment settings | none |
 | PB-54 | Reserve the npm org `sanchay` (never publish) against dependency confusion | DEV-B | Fri 10-09 | none | npm org page | critic |
@@ -160,7 +164,7 @@ SANCHAY_ATTEST_OTP_V1 (proposed):
 |---|---|---|---|---|---|---|
 | PB-55 | D-U-N-S number for Platizio, with legal name and address identical to MCA, GST and the ARN certificate | OWNER | Request Tue 09-29; received Fri 10-23 | none | D-U-N-S letter | G-B9 |
 | PB-56 | Play Console **organisation** account: developer name = Platizio's legal name; owned via appstores@ with security-key 2-step; one-time fee; organisation verification | OWNER/PO | Fri 10-30 | PB-55, PB-37 | "Verified" status | G-B9 |
-| PB-57 | App `in.sanchay.app` (details below) | DEV-B | Fri 11-06 | PB-56 | Console screenshots; hash recorded (not a secret) | G-B9, G-E6 |
+| PB-57 | App `in.sanchay.app` (details below) | DEV-B | Fri 11-06 (app and signing key, R-21) | PB-56 | Console screenshots; hash recorded (not a secret) | G-B9, G-E6 |
 | PB-58 | App-content declarations (details below) | CO + DEV-B | Fri 11-13 | PB-57, PB-61 | Completed-form screenshots; CO sign-off | G-E6 |
 | PB-59 | Fallback decision: if Play verification is late, a signed APK through Firebase App Distribution | DEV-B/PO | Decide Fri 10-30 | PB-56 | Decision recorded | G-B9 |
 | PB-59a | Pilot internal-testing build on prod config; App Links verified (`adb shell pm get-app-links in.sanchay.app` shows `verified`); FLAG_SECURE; app lock | DEV-B | Mon 11-23 | PB-57, PB-58, PB-41 | adb output, screenshots | G-E6 |
@@ -192,7 +196,7 @@ SANCHAY_ATTEST_OTP_V1 (proposed):
 
 **PB-60 texts for counsel to draft**
 - Terms and Conditions, including: execution-only service; Regular plans and commission; payments shown as "Cybrilla"; the TPV rule.
-- Pilot terms addendum: invite-only status, caps, SIP changes through support, and what happens on NO-GO.
+- Pilot terms addendum: invite-only status, caps, SIP cancellation in the app (R-08; amount changes and pauses through support as "cancel and start a new SIP"), SIP enabled only after GO-2 (R-06), and what happens on NO-GO.
 - Privacy notice: SPDI Rules now, written in the DPDP Rules notice format. It must list:
   - purposes and data items;
   - processors: Cybrilla/POA, KRAs, AMCs/RTAs, MSG91, AWS;
@@ -208,8 +212,8 @@ SANCHAY_ATTEST_OTP_V1 (proposed):
 - KYC consent.
 - FATCA/CRS India-only declaration.
 - Investor Charter.
-- Consent templates: TPL_PURCHASE, TPL_REDEMPTION, TPL_SIP_REGISTRATION, TPL_MANDATE_REGISTRATION, TPL_ONBOARDING_ATTEST, TPL_NOMINATION_OPT_OUT.
-- The four SMS texts in PB-32.
+- Consent templates: TPL_PURCHASE, TPL_REDEMPTION, TPL_SIP_REGISTRATION, TPL_MANDATE_REGISTRATION, TPL_ONBOARDING_ATTEST, TPL_NOMINATION_OPT_OUT, TPL_SIP_CANCELLATION (R-08).
+- The four SMS texts in PB-32 (signed early, by Thu 10-08, under PB-32a).
 
 ### 11. Grievance, support and incident response
 
@@ -259,9 +263,9 @@ The list must include at least one liquid or debt fund for the canary.
 - Caps in `app_config`: ₹1,00,000 per order and ₹2,00,000 per investor per day.
 
 **PB-82 founders' canary schedule**
-- (a) Tue 11-17: lumpsum of ₹500–1,000 into a liquid or debt fund, once by UPI and once by netbanking.
-- (b) Wed 11-18 or Thu 11-19: UPI Autopay SIP registered after demo part 2, with instalment day 25 or 26 (11-24 is a bank holiday).
-- (c) Mon 11-23: partial redemption of the units from (a).
+- (a) Tue 11-17: lumpsum of ₹500–1,000 into a liquid or debt fund, once by UPI and once by netbanking. (GO-1 evidence.)
+- (b) Wed 11-18 or Thu 11-19: UPI Autopay SIP registered after demo part 2, with instalment day 25 or 26 (11-24 is a bank holiday), in a canary scheme whose `sip_dates` contain that day; FP's minimum registration-to-instalment gap confirmed in Q27 by 10-16. **GO-2 evidence (R-06):** mandate APPROVED + plan ACTIVE + FP first-instalment date recorded; the debit and allotment are evidenced when they land, after GO-1.
+- (c) Mon 11-23: partial redemption of the units from (a). (GO-1 evidence.)
 - Each item is reconciled against:
   - FP: order, payment, plan and mandate;
   - the RTA: units within 0.001, ARN present, EUIN blank;
@@ -269,12 +273,14 @@ The list must include at least one liquid or debt fund for the canary.
 
 ### 14. Gate evidence map (MVP spec §7 → checklist)
 
+The gate is tiered (R-06): every item below is GO-1 evidence (Fri 11-27) except G-E7(b), which is GO-2 (SIP). G-E4, the engineering sandbox smoke on 3 separate days, is due Wed 11-25 with runs allowed from Mon 11-16 (R-21).
+
 | Gate | Items |
 |---|---|
 | G-B1 letter sent | PB-10 |
 | G-B2 first push | PB-51 |
 | G-B3 domain, AWS, MSG91 | PB-40, PB-41, PB-45, PB-30 |
-| G-B4 DLT | PB-31, PB-32 |
+| G-B4 DLT | PB-31, PB-32a, PB-32 |
 | G-B5 SES | PB-35, PB-36 |
 | G-B6 Cybrilla answers | PB-13 (Q9, 10, 15, 24, 29, 34, 36, 37, 49, 19b) |
 | G-B7 production credentials | PB-14–19b |
@@ -291,23 +297,23 @@ The list must include at least one liquid or debt fund for the canary.
 | G-E3 security | PB-75, PB-76, PB-77 |
 | G-E5 alarms | PB-33, PB-46, PB-72 |
 | G-E6 Android | PB-34, PB-57–59a |
-| G-E7 canary | PB-19b, PB-25, PB-82 |
+| G-E7 canary | PB-19b, PB-25, PB-82 ((a) and (c) for GO-1; (b) for GO-2) |
 | G-E8 runbooks | PB-73, PB-74 |
 
 **Top watch items, in critical-path order**
-1. PB-40: domain availability (Wed 09-30).
-2. PB-31/32: DLT entity and templates (entity 10-09, templates 10-23).
+1. PB-40: domain availability and registration on **Mon 09-28, before the letter** (R-22).
+2. PB-31/32a/32: DLT entity and the four templates (entity 10-09, texts signed 10-08, filed 10-12, approved 10-23).
 3. PB-13: Cybrilla priority answers (10-16), which feed the 10-23 trims.
 4. PB-55/56: D-U-N-S and Play verification (10-30).
 5. PB-14/15/17: ONDC signup, POA agreement and demo, all prerequisites for credentials.
-6. **PB-19a: production credentials on 11-13. This has zero float against the 11-17 canary.**
+6. **PB-19a: production credentials on 11-13, latest Mon 11-16 (R-21). Zero float against the 11-17 canary; later ⇒ GO-1 moves to Fri 12-04.**
 7. PB-61: counsel approval of legal texts (11-13).
 8. PB-82: canary reconciliation (11-26).
 
 ---
 
 ### Critical Files for Implementation
-- C:/Users/pc/Desktop/sanchay/docs/specs/mvp/MVP-SPEC.md (to create; §1 URLs, H-1, H-2, H-6, H-11 and H-21 must match this letter; add the two extra DLT templates to H-6)
+- C:/Users/pc/Desktop/sanchay/docs/specs/mvp/MVP-SPEC.md (to create; §1 URLs, H-1, H-2, H-6, H-11 and H-21 must match this letter; H-6 now carries all four DLT templates per R-10)
 - C:/Users/pc/Desktop/sanchay/docs/probes/cybrilla-answers.md (to create; PB-13 answers mapped to the flags `fp.sendPartner`, `fp.lumpsumFlow`, `features.redeemByUnits`)
 - C:/Users/pc/Desktop/sanchay/apps/api/src/integrations/sms/templates.ts (to create; the four DLT templates byte for byte, with the WebOTP line last)
 - C:/Users/pc/AppData/Local/Temp/claude/C--Users-pc-Desktop-sanchay/2f00d411-382c-43a6-bd67-ecaf60c67db1/tasks/wk14xlx18.output (`result.business` is superseded by this document; the `result.finalCritic` items on calendar, hosts, `/api/v1`, `partner` and missing actions are resolved here)
