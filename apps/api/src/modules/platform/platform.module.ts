@@ -9,6 +9,7 @@ import {
 import { AppConfig } from '../../config/app-config.js';
 import type { Env } from '../../config/env.js';
 import { createDb, DB, type DbHandle } from '../../db/client.js';
+import { AuditService } from './audit.service.js';
 import { CLOCK, SystemClock } from './clock.js';
 import { Crypto } from './crypto.js';
 import { KEY_SERVICE, type KeyService, keyServiceFromEnv } from './key-service.js';
@@ -41,9 +42,10 @@ export class PlatformModule {
           provide: DB,
           useFactory: () => createDb(env.DATABASE_URL, env.SANCHAY_DB_POOL_MAX),
         },
+        AuditService,
         DbLifecycle,
       ],
-      exports: [AppConfig, CLOCK, KEY_SERVICE, Crypto, DB],
+      exports: [AppConfig, CLOCK, KEY_SERVICE, Crypto, DB, AuditService],
     };
   }
 }
