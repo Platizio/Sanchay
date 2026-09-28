@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/money/tsconfig.build.json" },
-    { "path": "packages/domain/tsconfig.build.json" }
+    { "path": "packages/domain/tsconfig.build.json" },
+    { "path": "packages/validation/tsconfig.build.json" }
   ]
 }
