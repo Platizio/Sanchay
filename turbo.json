@@ -29,6 +29,7 @@
     },
     "db:check": {
       "cache": false
-    }
+    },
+    "openapi": { "dependsOn": ["^build"], "outputs": ["openapi.json"] }
   }
 }
