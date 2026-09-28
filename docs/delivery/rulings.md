@@ -62,3 +62,10 @@ All in `docs/superpowers/plans/2026-09-28-plan-01-foundation.md` unless noted (2
 | R-25 | **S4 is ≈ 39 h over at factor 1.6** after R-05/R-08/R-18. There is no silent cut. The Fri 10-23 checkpoint uses the measured factor, and the owner decides between T7 (web-only pilot, ≈ 4 d), T8, or a gate slip. | Scope is an owner decision (PO-2). | None now. |
 | R-26 | The `AGENTS.md` legal-entity note in "Plan-01 amendments applied" is **moot**: A1's merged AGENTS.md no longer names the entity (verified by grep). No A12 change is needed. | Verified. | None. |
 | R-27 | **Doc-fix changes stay uncommitted in the working tree** until the Plan-01 workflow ends; the controller then commits them in one docs commit. A backup copy is kept in the scratchpad. | Committing mid-run would put a 1 MB plan diff into a batch's review package. | Risk of loss if the tree is cleaned; mitigated by the backup. |
+
+## Owner decisions (2026-09-28, after the C1-C4-C5 halt)
+
+| # | Decision | Detail | Cost if wrong |
+|---|---|---|---|
+| R-28 | **Trust-policy exceptions: exact versions only (owner-approved).** | Allow exactly `chokidar@4.0.3` (added during B1–B4; now ratified), `ua-parser-js@1.0.41` (via react-native-web → fbjs) and `semver@6.3.1` (via react-native → metro → @babel/core; downgrading would reintroduce CVE-2022-25883). No ranges and no wildcards; `trustPolicy: no-downgrade` stays on for everything else. Each entry gets an ADR-0001 row with the reason, the dependency path, and a re-check date of 2027-01-15. | Accepting a package whose provenance weakened. Mitigated by the exact pins, `pnpm audit` in CI and the re-check date. |
+| R-29 | **Local Node 24.21.0.** The owner installs Node 24.21.0 locally, matching `.node-version` and CI. | Root `engines` (`>=24.13.1 <25`, R-23) already admits it; no repo change. jsdom 30.x needs ^24.15.0. | None. |
