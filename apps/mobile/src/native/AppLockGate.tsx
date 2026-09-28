@@ -3,12 +3,19 @@ import { AppText, Button, Screen } from '@sanchay/ui';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { type ReactNode, useCallback, useEffect, useReducer, useRef } from 'react';
 import { AppState, StyleSheet, View } from 'react-native';
-import { appLockReducer, coldStartDecision, initialAppLockState } from '../lib/appLock';
+import {
+  appLockReducer,
+  type ClockReading,
+  coldStartDecision,
+  initialAppLockState,
+} from '../lib/appLock';
 import { NativeScreen } from './NativeScreen';
 import { useSession } from './SessionProvider';
 
-// Monotonic clock: changing the device clock cannot skip the 5-minute background lock.
-const monotonicNow = (): number => performance.now();
+// Both clocks (H-13): the monotonic one cannot be skipped by changing the device clock, but on Android it
+// stops in deep sleep; the wall clock keeps counting through deep sleep. The reducer locks if either says
+// 5 minutes, or if the wall clock went backwards.
+const readClocks = (): ClockReading => ({ mono: performance.now(), wall: Date.now() });
 
 async function deviceHasScreenLock(): Promise<boolean> {
   try {
@@ -50,9 +57,9 @@ export function AppLockGate({ children }: { children: ReactNode }): ReactNode {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
-      if (next === 'background') dispatch({ type: 'BACKGROUND', at: monotonicNow() });
+      if (next === 'background') dispatch({ type: 'BACKGROUND', at: readClocks() });
       if (next === 'active') {
-        dispatch({ type: 'FOREGROUND', at: monotonicNow(), hasSession: signedInRef.current });
+        dispatch({ type: 'FOREGROUND', at: readClocks(), hasSession: signedInRef.current });
       }
     });
     return () => subscription.remove();

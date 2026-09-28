@@ -7,6 +7,9 @@ import {
   LOCK_AFTER_BACKGROUND_MS,
 } from './appLock';
 
+/** A reading of both clocks; `wall` defaults to `mono` (no deep sleep, no clock change). */
+const at = (mono: number, wall: number = mono) => ({ mono, wall });
+
 const open: AppLockState = { status: 'OPEN', deviceAuth: true, backgroundedAt: null };
 const locked: AppLockState = { status: 'LOCKED', deviceAuth: true, backgroundedAt: null };
 
@@ -58,11 +61,11 @@ describe('appLockReducer', () => {
   });
 
   it('stays open after less than 5 minutes in the background', () => {
-    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: 1_000 });
+    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: at(1_000) });
     expect(
       appLockReducer(backgrounded, {
         type: 'FOREGROUND',
-        at: 1_000 + LOCK_AFTER_BACKGROUND_MS - 1,
+        at: at(1_000 + LOCK_AFTER_BACKGROUND_MS - 1),
         hasSession: true,
       }),
     ).toEqual(open);
@@ -70,49 +73,86 @@ describe('appLockReducer', () => {
 
   it('locks after 5 minutes in the background when signed in with device auth', () => {
     expect(LOCK_AFTER_BACKGROUND_MS).toBe(300_000);
-    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: 1_000 });
+    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: at(1_000) });
     expect(
       appLockReducer(backgrounded, {
         type: 'FOREGROUND',
-        at: 1_000 + LOCK_AFTER_BACKGROUND_MS,
+        at: at(1_000 + LOCK_AFTER_BACKGROUND_MS),
         hasSession: true,
       }),
     ).toEqual(locked);
   });
 
   it('does not lock without a session or without device auth', () => {
-    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: 0 });
+    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: at(0) });
     expect(
       appLockReducer(backgrounded, {
         type: 'FOREGROUND',
-        at: LOCK_AFTER_BACKGROUND_MS * 2,
+        at: at(LOCK_AFTER_BACKGROUND_MS * 2),
         hasSession: false,
       }).status,
     ).toBe('OPEN');
-    const noAuth = appLockReducer({ ...open, deviceAuth: false }, { type: 'BACKGROUND', at: 0 });
+    const noAuth = appLockReducer(
+      { ...open, deviceAuth: false },
+      { type: 'BACKGROUND', at: at(0) },
+    );
     expect(
       appLockReducer(noAuth, {
         type: 'FOREGROUND',
-        at: LOCK_AFTER_BACKGROUND_MS * 2,
+        at: at(LOCK_AFTER_BACKGROUND_MS * 2),
         hasSession: true,
       }).status,
     ).toBe('OPEN');
   });
 
   it('stays locked across background and foreground', () => {
-    const backgrounded = appLockReducer(locked, { type: 'BACKGROUND', at: 0 });
-    expect(appLockReducer(backgrounded, { type: 'FOREGROUND', at: 10, hasSession: true })).toEqual(
-      locked,
-    );
+    const backgrounded = appLockReducer(locked, { type: 'BACKGROUND', at: at(0) });
+    expect(
+      appLockReducer(backgrounded, { type: 'FOREGROUND', at: at(10), hasSession: true }),
+    ).toEqual(locked);
   });
 
   it('ignores BACKGROUND while CHECKING and UNLOCKED unless LOCKED', () => {
-    expect(appLockReducer(initialAppLockState, { type: 'BACKGROUND', at: 5 })).toBe(
+    expect(appLockReducer(initialAppLockState, { type: 'BACKGROUND', at: at(5) })).toBe(
       initialAppLockState,
     );
     expect(appLockReducer(initialAppLockState, { type: 'UNLOCKED' })).toBe(initialAppLockState);
     expect(appLockReducer(open, { type: 'UNLOCKED' })).toBe(open);
     expect(appLockReducer(locked, { type: 'UNLOCKED' })).toEqual(open);
+  });
+
+  it('locks when deep sleep froze the monotonic clock but the wall clock shows 5+ minutes (H-13)', () => {
+    // Android: performance.now() is CLOCK_MONOTONIC, which stops while the device is suspended.
+    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: at(1_000, 50_000) });
+    expect(
+      appLockReducer(backgrounded, {
+        type: 'FOREGROUND',
+        at: at(1_000 + 60_000, 50_000 + 30 * 60_000),
+        hasSession: true,
+      }),
+    ).toEqual(locked);
+  });
+
+  it('locks when the wall clock went backwards while in the background (clock rolled back)', () => {
+    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: at(1_000, 900_000) });
+    expect(
+      appLockReducer(backgrounded, {
+        type: 'FOREGROUND',
+        at: at(2_000, 800_000),
+        hasSession: true,
+      }),
+    ).toEqual(locked);
+  });
+
+  it('locks when the monotonic clock shows 5+ minutes even if the wall clock was set back by less', () => {
+    const backgrounded = appLockReducer(open, { type: 'BACKGROUND', at: at(0, 10_000_000) });
+    expect(
+      appLockReducer(backgrounded, {
+        type: 'FOREGROUND',
+        at: at(LOCK_AFTER_BACKGROUND_MS, 10_000_000 + 1_000),
+        hasSession: true,
+      }),
+    ).toEqual(locked);
   });
 
   it('opens when the investor logs out from the lock screen', () => {

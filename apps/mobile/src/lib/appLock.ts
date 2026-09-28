@@ -15,16 +15,26 @@ export function coldStartDecision(hasSession: boolean, hasDeviceAuth: boolean): 
 
 export type GateStatus = 'CHECKING' | 'LOCKED' | 'OPEN';
 
+/**
+ * One reading of both clocks, in ms. `mono` is performance.now(): immune to device-clock changes, but on
+ * Android it is CLOCK_MONOTONIC, which stops while the device is suspended (deep sleep). `wall` is
+ * Date.now(): keeps counting through deep sleep, but the investor can change it.
+ */
+export interface ClockReading {
+  mono: number;
+  wall: number;
+}
+
 export interface AppLockState {
   status: GateStatus;
   deviceAuth: boolean;
-  backgroundedAt: number | null;
+  backgroundedAt: ClockReading | null;
 }
 
 export type AppLockEvent =
   | { type: 'COLD_START_RESOLVED'; decision: ColdStartDecision; hasDeviceAuth: boolean }
-  | { type: 'BACKGROUND'; at: number }
-  | { type: 'FOREGROUND'; at: number; hasSession: boolean }
+  | { type: 'BACKGROUND'; at: ClockReading }
+  | { type: 'FOREGROUND'; at: ClockReading; hasSession: boolean }
   | { type: 'UNLOCKED' }
   | { type: 'SIGNED_OUT' };
 
@@ -33,6 +43,19 @@ export const initialAppLockState: AppLockState = {
   deviceAuth: false,
   backgroundedAt: null,
 };
+
+/**
+ * H-13: 5 minutes in the background locks the app. Fails closed: either clock reaching 5 minutes locks
+ * (monotonic misses deep sleep, wall misses nothing unless changed), and a wall clock that went
+ * backwards (rolled back to dodge the lock) locks too.
+ */
+export function backgroundExpired(from: ClockReading, to: ClockReading): boolean {
+  const mono = to.mono - from.mono;
+  const wall = to.wall - from.wall;
+  return (
+    mono >= LOCK_AFTER_BACKGROUND_MS || wall >= LOCK_AFTER_BACKGROUND_MS || wall < 0 || mono < 0
+  );
+}
 
 export function appLockReducer(state: AppLockState, event: AppLockEvent): AppLockState {
   switch (event.type) {
@@ -48,7 +71,7 @@ export function appLockReducer(state: AppLockState, event: AppLockEvent): AppLoc
       if (state.status !== 'OPEN' || state.backgroundedAt === null) {
         return { ...state, backgroundedAt: null };
       }
-      const expired = event.at - state.backgroundedAt >= LOCK_AFTER_BACKGROUND_MS;
+      const expired = backgroundExpired(state.backgroundedAt, event.at);
       return {
         ...state,
         status: expired && event.hasSession && state.deviceAuth ? 'LOCKED' : 'OPEN',
