@@ -1,0 +1,7 @@
+appId: in.sanchay.app
+name: Cold start on a device without a screen lock requires a fresh OTP (H-13, D-18)
+---
+- runFlow: subflows/sign-up.yaml
+- stopApp
+- launchApp
+- assertVisible: "Create account"

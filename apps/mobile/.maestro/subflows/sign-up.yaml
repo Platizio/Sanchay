@@ -1,0 +1,23 @@
+appId: in.sanchay.app
+---
+- launchApp:
+    clearState: true
+- tapOn: "Create account"
+- assertVisible: "Create your Sanchay account"
+- runScript: ../scripts/new-mobile.js
+- tapOn:
+    id: "mobile-input"
+- inputText: ${output.mobile}
+- hideKeyboard
+- tapOn: "Get OTP"
+- assertVisible: "Enter the 6-digit code sent to .*"
+- runScript:
+    file: ../scripts/read-otp.js
+    env:
+      MOBILE: ${output.mobile}
+- tapOn:
+    id: "otp-input"
+- inputText: ${output.otp}
+- extendedWaitUntil:
+    visible: "Signed in as ••••••.*"
+    timeout: 15000

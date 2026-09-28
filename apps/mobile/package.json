@@ -7,6 +7,7 @@
     "start": "expo start",
     "android": "expo run:android",
     "export:android": "expo export --platform android --output-dir dist-export",
+    "e2e:android": "maestro test .maestro",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

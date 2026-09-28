@@ -1,0 +1,7 @@
+appId: in.sanchay.app
+name: New investor signs up with SMS OTP and sees the home tab
+---
+- runFlow: subflows/sign-up.yaml
+- assertVisible: "Welcome to Sanchay"
+- assertVisible: "Home"
+- assertVisible: "Account"
