@@ -8,6 +8,7 @@
     "./tsconfig/base.json": "./tsconfig/base.json",
     "./tsconfig/node-lib.json": "./tsconfig/node-lib.json",
     "./tsconfig/node-lib-build.json": "./tsconfig/node-lib-build.json",
+    "./tsconfig/nest.json": "./tsconfig/nest.json",
     "./vitest": "./vitest/base.mjs"
   },
   "scripts": {

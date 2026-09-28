@@ -12,6 +12,9 @@ minimumReleaseAge: 10080
 minimumReleaseAgeStrict: true
 blockExoticSubdeps: true
 trustPolicy: no-downgrade
+# Exact versions only, each escalated to the lead and recorded in ADR-0001 (never excluded silently).
+trustPolicyExclude:
+  - 'chokidar@4.0.3'
 
 # Exact versions only (never a bare name or a pattern). Every entry has an ADR-0001 row with an expiry.
 minimumReleaseAgeExclude:
@@ -22,10 +25,18 @@ minimumReleaseAgeExclude:
   - '@nestjs/throttler@6.7.1'
   - '@orpc/client@1.15.4'
   - '@orpc/contract@1.15.4'
+  - '@orpc/interop@1.15.4'
   - '@orpc/nest@1.15.4'
   - '@orpc/openapi-client@1.15.4'
   - '@orpc/openapi@1.15.4'
   - '@orpc/server@1.15.4'
+  - '@orpc/shared@1.15.4'
+  - '@orpc/standard-server-aws-lambda@1.15.4'
+  - '@orpc/standard-server-fastify@1.15.4'
+  - '@orpc/standard-server-fetch@1.15.4'
+  - '@orpc/standard-server-node@1.15.4'
+  - '@orpc/standard-server-peer@1.15.4'
+  - '@orpc/standard-server@1.15.4'
   - '@orpc/tanstack-query@1.15.4'
   - '@orpc/zod@1.15.4'
   - '@tanstack/query-core@5.103.2'
@@ -41,6 +52,7 @@ minimumReleaseAgeExclude:
   - 'nestjs-cls@7.0.1'
   - 'next@16.3.6'
   - 'turbo@2.11.4'
+  - 'unplugin-swc@2.0.0'
 
 # pnpm 11 strictDepBuilds: every dependency with an install script needs an explicit entry (replaces onlyBuiltDependencies, X-08).
 allowBuilds:
