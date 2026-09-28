@@ -1,0 +1,31 @@
+/* Mirror of src/tokens.ts. Parity is enforced by src/tokens.test.ts. */
+@theme {
+  --color-bg: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-text: #0b1220;
+  --color-muted: #4a5568;
+  --color-primary: #0b5fff;
+  --color-on-primary: #ffffff;
+  --color-gain: #0a7a3d;
+  --color-loss: #c0262d;
+  --color-warn: #8a5a00;
+  --color-border: #d5dae1;
+  --color-input-border: #6b7280;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-md: 16px;
+  --text-md--line-height: 24px;
+  --text-lg: 20px;
+  --text-lg--line-height: 28px;
+  --text-xl: 24px;
+  --text-xl--line-height: 32px;
+  --text-xxl: 32px;
+  --text-xxl--line-height: 40px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-pill: 999px;
+  --spacing: 4px;
+}
