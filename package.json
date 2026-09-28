@@ -14,7 +14,8 @@
     "format": "biome check --write .",
     "verify": "pnpm lint && pnpm build && pnpm typecheck && pnpm test",
     "test:int": "turbo run test:int",
-    "db:up": "docker compose up -d postgres mailpit"
+    "db:up": "docker compose up -d postgres mailpit",
+    "check-brand": "node scripts/check-brand.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
