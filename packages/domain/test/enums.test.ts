@@ -1,0 +1,337 @@
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import {
+  ADMIN_ROLES,
+  ASSET_CLASSES,
+  type AssetClass,
+  CLIENT_PLATFORMS,
+  CONSENT_SUBJECT_TYPES,
+  CONTACT_KINDS,
+  CUTOFF_CLASSES,
+  EXTERNAL_PLAN_TYPES,
+  FOLIO_RECONCILIATION_STATUSES,
+  FOLIO_SERVICE_REQUEST_KINDS,
+  GAIN_TYPES,
+  GENDERS,
+  INITIATED_VIA,
+  INVESTOR_STATUSES,
+  isOneOf,
+  KYC_PATHS,
+  KYC_STATUSES,
+  LAUNCH_CLIENT_PLATFORMS,
+  LAUNCH_PLAN_FREQUENCIES,
+  LAUNCH_SCHEME_OPTIONS,
+  type LaunchClientPlatform,
+  type LaunchPlanFrequency,
+  LEGAL_DOCUMENT_KEYS,
+  LOT_TYPES,
+  MANDATE_RAILS,
+  MARITAL_STATUSES,
+  MAX_NOMINEES,
+  NAV_GRADES,
+  NOMINATION_DECISIONS,
+  NOMINEE_ID_TYPES,
+  NOTIFICATION_CATEGORIES,
+  type NomineeIdType,
+  ONBOARDING_STEP_STATUSES,
+  ORDER_MODES,
+  ORDER_ORIGINS,
+  ORDER_TYPES,
+  type OrderType,
+  OTP_CHANNELS,
+  OTP_PURPOSES,
+  PAYMENT_METHODS,
+  PAYOUT_STATUSES,
+  PEP_STATUSES,
+  PLAN_FREQUENCIES,
+  PLAN_KINDS,
+  PLAN_MODIFICATION_KINDS,
+  REFUND_STATUSES,
+  REPORT_FORMATS,
+  REPORT_KINDS,
+  SCHEME_OPTIONS,
+  SCHEME_PLAN_TYPES,
+  SECOND_FACTORS,
+  TAX_CLASSES,
+  TAX_STATUSES,
+  UNITS_SOURCES,
+  VOLATILITY_CLASSES,
+} from '../src/index.js';
+
+const PINS: ReadonlyArray<readonly [string, readonly string[], readonly string[]]> = [
+  ['ASSET_CLASSES', ASSET_CLASSES, ['EQUITY', 'DEBT', 'HYBRID', 'LIFE_CYCLE', 'OTHER', 'LEGACY']],
+  ['CUTOFF_CLASSES', CUTOFF_CLASSES, ['STANDARD', 'LIQUID', 'OVERNIGHT', 'INTERNATIONAL']],
+  [
+    'VOLATILITY_CLASSES',
+    VOLATILITY_CLASSES,
+    ['V_HIGH', 'V_EQUITY', 'V_HYBRID', 'V_DEBT', 'V_CASH'],
+  ],
+  ['SCHEME_PLAN_TYPES', SCHEME_PLAN_TYPES, ['REGULAR']],
+  ['SCHEME_OPTIONS', SCHEME_OPTIONS, ['GROWTH', 'IDCW_PAYOUT', 'IDCW_REINVESTMENT']],
+  ['LAUNCH_SCHEME_OPTIONS', LAUNCH_SCHEME_OPTIONS, ['GROWTH']],
+  ['TAX_CLASSES', TAX_CLASSES, ['EQUITY_ORIENTED', 'SPECIFIED_MF', 'OTHER']],
+  ['NAV_GRADES', NAV_GRADES, ['OK', 'STALE', 'UNAVAILABLE']],
+  ['EXTERNAL_PLAN_TYPES', EXTERNAL_PLAN_TYPES, ['DIRECT', 'REGULAR', 'UNKNOWN']],
+  ['ORDER_TYPES', ORDER_TYPES, ['PURCHASE', 'REDEMPTION', 'SWITCH']],
+  [
+    'ORDER_ORIGINS',
+    ORDER_ORIGINS,
+    ['ONE_TIME', 'SIP_INSTALMENT', 'STP_INSTALMENT', 'SWP_INSTALMENT'],
+  ],
+  ['ORDER_MODES', ORDER_MODES, ['AMOUNT', 'UNITS', 'ALL']],
+  ['PLAN_KINDS', PLAN_KINDS, ['SIP', 'STP', 'SWP']],
+  [
+    'PLAN_FREQUENCIES',
+    PLAN_FREQUENCIES,
+    ['MONTHLY', 'QUARTERLY', 'DAILY_BUSINESS', 'DAILY_CALENDAR'],
+  ],
+  ['LAUNCH_PLAN_FREQUENCIES', LAUNCH_PLAN_FREQUENCIES, ['MONTHLY']],
+  [
+    'PLAN_MODIFICATION_KINDS',
+    PLAN_MODIFICATION_KINDS,
+    ['AMOUNT', 'MANDATE', 'PAUSE', 'PAUSE_REVOKE', 'CANCEL'],
+  ],
+  ['MANDATE_RAILS', MANDATE_RAILS, ['ENACH', 'UPI_AUTOPAY']],
+  ['PAYMENT_METHODS', PAYMENT_METHODS, ['UPI_INTENT', 'UPI_COLLECT', 'UPI_QR', 'NETBANKING']],
+  [
+    'PAYOUT_STATUSES',
+    PAYOUT_STATUSES,
+    ['NONE', 'EXPECTED', 'DELAYED', 'CREDITED', 'FAILED', 'REISSUE_PENDING'],
+  ],
+  ['REFUND_STATUSES', REFUND_STATUSES, ['NONE', 'REFUND_PENDING', 'REFUNDED', 'REFUND_FAILED']],
+  ['UNITS_SOURCES', UNITS_SOURCES, ['PROVIDER', 'MANUAL', 'FEED']],
+  ['LOT_TYPES', LOT_TYPES, ['PURCHASE', 'SIP_INSTALMENT', 'SWITCH_IN', 'STP_IN', 'ADJUSTMENT_IN']],
+  ['GAIN_TYPES', GAIN_TYPES, ['STCG', 'LTCG']],
+  [
+    'REPORT_KINDS',
+    REPORT_KINDS,
+    ['CAPITAL_GAINS', 'TRANSACTION_STATEMENT', 'ELSS_SUMMARY', 'CONSENT_EVIDENCE'],
+  ],
+  ['REPORT_FORMATS', REPORT_FORMATS, ['PDF', 'CSV', 'CSV_CLEARTAX', 'CSV_QUICKO']],
+  [
+    'INVESTOR_STATUSES',
+    INVESTOR_STATUSES,
+    ['ACTIVE', 'SUSPENDED', 'FRAUD_HOLD', 'CLOSURE_REQUESTED', 'CLOSED'],
+  ],
+  [
+    'KYC_STATUSES',
+    KYC_STATUSES,
+    [
+      'UNKNOWN',
+      'VALIDATED',
+      'REGISTERED',
+      'UNDER_PROCESS',
+      'ON_HOLD',
+      'REJECTED',
+      'DEACTIVATED',
+      'SUBMITTED',
+    ],
+  ],
+  [
+    'ONBOARDING_STEP_STATUSES',
+    ONBOARDING_STEP_STATUSES,
+    [
+      'NOT_STARTED',
+      'IN_PROGRESS',
+      'ACTION_REQUIRED',
+      'WAITING',
+      'MANUAL_REVIEW',
+      'DONE',
+      'FAILED',
+      'BLOCKED',
+    ],
+  ],
+  ['KYC_PATHS', KYC_PATHS, ['EXISTING_VALID', 'FRESH', 'MODIFY', 'NONE']],
+  ['GENDERS', GENDERS, ['MALE', 'FEMALE', 'TRANSGENDER']],
+  ['MARITAL_STATUSES', MARITAL_STATUSES, ['MARRIED', 'UNMARRIED', 'OTHERS']],
+  ['PEP_STATUSES', PEP_STATUSES, ['NOT_APPLICABLE', 'PEP', 'RELATED_PEP']],
+  ['TAX_STATUSES', TAX_STATUSES, ['RESIDENT_INDIVIDUAL']],
+  ['NOMINATION_DECISIONS', NOMINATION_DECISIONS, ['NOT_ASKED', 'NOMINATED', 'OPTED_OUT']],
+  ['NOMINEE_ID_TYPES', NOMINEE_ID_TYPES, ['PAN', 'DRIVING_LICENCE', 'PASSPORT']],
+  ['CONTACT_KINDS', CONTACT_KINDS, ['MOBILE', 'EMAIL']],
+  [
+    'FOLIO_RECONCILIATION_STATUSES',
+    FOLIO_RECONCILIATION_STATUSES,
+    ['UNRECONCILED', 'MATCHED', 'MISMATCH', 'FEED_UNAVAILABLE'],
+  ],
+  [
+    'FOLIO_SERVICE_REQUEST_KINDS',
+    FOLIO_SERVICE_REQUEST_KINDS,
+    ['NOMINATION_CHANGE', 'BANK_CHANGE', 'CONTACT_CHANGE'],
+  ],
+  ['CLIENT_PLATFORMS', CLIENT_PLATFORMS, ['WEB', 'ANDROID', 'IOS']],
+  ['LAUNCH_CLIENT_PLATFORMS', LAUNCH_CLIENT_PLATFORMS, ['WEB', 'ANDROID']],
+  ['INITIATED_VIA', INITIATED_VIA, ['web', 'mobile_web', 'mobile_app_android', 'mobile_app_ios']],
+  [
+    'OTP_PURPOSES',
+    OTP_PURPOSES,
+    [
+      'LOGIN',
+      'NEW_DEVICE_STEPUP',
+      'EMAIL_FALLBACK_LOGIN',
+      'VERIFY_EMAIL',
+      'CONSENT',
+      'CONTACT_CHANGE_OLD',
+      'CONTACT_CHANGE_NEW',
+      'REAUTH',
+    ],
+  ],
+  ['OTP_CHANNELS', OTP_CHANNELS, ['SMS', 'EMAIL']],
+  ['SECOND_FACTORS', SECOND_FACTORS, ['NONE', 'DEVICE_KEY_BIOMETRIC', 'EMAIL_OTP']],
+  [
+    'CONSENT_SUBJECT_TYPES',
+    CONSENT_SUBJECT_TYPES,
+    [
+      'PURCHASE',
+      'REDEMPTION',
+      'SWITCH',
+      'SIP_REGISTRATION',
+      'SIP_WITH_PURCHASE',
+      'STP_REGISTRATION',
+      'SWP_REGISTRATION',
+      'PLAN_MODIFY',
+      'PLAN_PAUSE',
+      'PLAN_CANCEL',
+      'MANDATE_REGISTRATION',
+      'MANDATE_CANCEL',
+      'CONTACT_CHANGE',
+      'BANK_CHANGE',
+      'FOLIO_SERVICE_REQUEST',
+      'ONBOARDING_ATTEST',
+    ],
+  ],
+  [
+    'ADMIN_ROLES',
+    ADMIN_ROLES,
+    ['SUPER_ADMIN', 'OPS', 'COMPLIANCE', 'SUPPORT', 'CONTENT', 'ENGINEER', 'AUDITOR'],
+  ],
+  [
+    'NOTIFICATION_CATEGORIES',
+    NOTIFICATION_CATEGORIES,
+    ['TRANSACTION', 'SIP', 'KYC', 'SECURITY', 'STATEMENT', 'ACCOUNT', 'SERVICE_REQUEST'],
+  ],
+  [
+    'LEGAL_DOCUMENT_KEYS',
+    LEGAL_DOCUMENT_KEYS,
+    [
+      'TNC',
+      'PRIVACY_NOTICE',
+      'RISK_DISCLOSURE',
+      'REGULAR_PLAN_COMMISSION',
+      'EXECUTION_ONLY_DECLARATION',
+      'FATCA_CRS_DECLARATION',
+      'NOMINATION_OPT_OUT_ANNEX_B',
+      'CAS_IMPORT_NOTICE',
+      'KYC_CONSENT',
+      'INVESTOR_CHARTER',
+      'GRIEVANCE_POLICY',
+      'TPL_PURCHASE',
+      'TPL_REDEMPTION',
+      'TPL_SWITCH',
+      'TPL_SIP_REGISTRATION',
+      'TPL_SIP_WITH_PURCHASE',
+      'TPL_STP_REGISTRATION',
+      'TPL_SWP_REGISTRATION',
+      'TPL_PLAN_MODIFY',
+      'TPL_PLAN_PAUSE',
+      'TPL_PLAN_CANCEL',
+      'TPL_MANDATE_REGISTRATION',
+      'TPL_MANDATE_CANCEL',
+      'TPL_NOMINATION_CHANGE',
+      'TPL_CONTACT_CHANGE',
+      'TPL_BANK_CHANGE',
+      'TPL_FOLIO_SERVICE_REQUEST',
+      'TPL_ONBOARDING_ATTEST',
+      'SUITABILITY_WARNING',
+      'TPL_NOMINATION_OPT_OUT',
+    ],
+  ],
+];
+
+const MVP_CONSENT_SUBJECT_TYPES = [
+  'PURCHASE',
+  'REDEMPTION',
+  'SIP_REGISTRATION',
+  'MANDATE_REGISTRATION',
+  'ONBOARDING_ATTEST',
+];
+
+const MVP_LEGAL_DOCUMENT_KEYS = [
+  'TNC',
+  'PRIVACY_NOTICE',
+  'RISK_DISCLOSURE',
+  'REGULAR_PLAN_COMMISSION',
+  'EXECUTION_ONLY_DECLARATION',
+  'FATCA_CRS_DECLARATION',
+  'KYC_CONSENT',
+  'NOMINATION_OPT_OUT_ANNEX_B',
+  'SUITABILITY_WARNING',
+  'TPL_PURCHASE',
+  'TPL_REDEMPTION',
+  'TPL_SIP_REGISTRATION',
+  'TPL_MANDATE_REGISTRATION',
+  'TPL_ONBOARDING_ATTEST',
+  'TPL_NOMINATION_OPT_OUT',
+];
+
+const REJECTION_VECTORS: ReadonlyArray<readonly [string, readonly string[], string]> = [
+  ['LAUNCH_PLAN_FREQUENCIES', LAUNCH_PLAN_FREQUENCIES, 'QUARTERLY'],
+  ['NOMINEE_ID_TYPES', NOMINEE_ID_TYPES, 'AADHAAR_LAST4'],
+  ['LAUNCH_CLIENT_PLATFORMS', LAUNCH_CLIENT_PLATFORMS, 'IOS'],
+  ['OTP_PURPOSES', OTP_PURPOSES, 'EMAIL_VERIFY'],
+];
+
+describe('domain enums mirror the CHECK lists (design §C + PO, GAP, H-4, H-12, H-15, D-MONEY-053)', () => {
+  it.each(PINS)('%s has exactly the pinned values in order', (_name, actual, expected) => {
+    expect(actual).toEqual(expected);
+  });
+
+  it.each(PINS)('%s is frozen at runtime', (_name, actual) => {
+    expect(Object.isFrozen(actual)).toBe(true);
+  });
+
+  it('derives literal union types from the lists', () => {
+    expectTypeOf<AssetClass>().toEqualTypeOf<
+      'EQUITY' | 'DEBT' | 'HYBRID' | 'LIFE_CYCLE' | 'OTHER' | 'LEGACY'
+    >();
+    expectTypeOf<OrderType>().toEqualTypeOf<'PURCHASE' | 'REDEMPTION' | 'SWITCH'>();
+    expectTypeOf<LaunchPlanFrequency>().toEqualTypeOf<'MONTHLY'>();
+    expectTypeOf<LaunchClientPlatform>().toEqualTypeOf<'WEB' | 'ANDROID'>();
+    expectTypeOf<NomineeIdType>().toEqualTypeOf<'PAN' | 'DRIVING_LICENCE' | 'PASSPORT'>();
+  });
+});
+
+describe('MVP launch pins', () => {
+  it('caps nominees at 3 (PO-7, SEBI circular of 29-May-2026)', () => {
+    expect(MAX_NOMINEES).toBe(3);
+  });
+
+  it('launches only scheme options that exist in SCHEME_OPTIONS (PO-3: Growth only)', () => {
+    for (const option of LAUNCH_SCHEME_OPTIONS) {
+      expect(SCHEME_OPTIONS).toContain(option);
+    }
+  });
+
+  it('launches only plan frequencies that exist in PLAN_FREQUENCIES (H-15: monthly only)', () => {
+    for (const frequency of LAUNCH_PLAN_FREQUENCIES) {
+      expect(PLAN_FREQUENCIES).toContain(frequency);
+    }
+  });
+
+  it('launches only client platforms that exist in CLIENT_PLATFORMS (iOS is P2-10)', () => {
+    for (const platform of LAUNCH_CLIENT_PLATFORMS) {
+      expect(CLIENT_PLATFORMS).toContain(platform);
+    }
+  });
+
+  it('has every consent subject type the MVP creates', () => {
+    expect(CONSENT_SUBJECT_TYPES).toEqual(expect.arrayContaining(MVP_CONSENT_SUBJECT_TYPES));
+  });
+
+  it('has every legal document key the MVP seeds', () => {
+    expect(LEGAL_DOCUMENT_KEYS).toEqual(expect.arrayContaining(MVP_LEGAL_DOCUMENT_KEYS));
+  });
+
+  it.each(REJECTION_VECTORS)('%s rejects %j', (_name, values, rejected) => {
+    expect(isOneOf(values, rejected)).toBe(false);
+  });
+});
