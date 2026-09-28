@@ -4,20 +4,35 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "e2e:web": "playwright test"
   },
   "dependencies": {
+    "@sanchay/api-client": "workspace:*",
+    "@sanchay/app-core": "workspace:*",
+    "@sanchay/features": "workspace:*",
+    "@sanchay/tokens": "workspace:*",
+    "@sanchay/ui": "workspace:*",
+    "@tanstack/react-query": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-native-web": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@sanchay/config": "workspace:*",
+    "@tailwindcss/postcss": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "babel-plugin-react-compiler": "catalog:",
+    "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
