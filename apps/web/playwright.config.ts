@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 const WEB_PORT = 3001;
 const API_ORIGIN = process.env.SANCHAY_API_ORIGIN ?? 'http://localhost:3000';
+const MAILPIT_URL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 const baseEnv = Object.fromEntries(
   Object.entries(process.env).filter(
     (entry): entry is [string, string] => typeof entry[1] === 'string',
@@ -21,6 +22,26 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] }, testMatch: /shell\.spec\.ts/ },
   ],
   webServer: [
+    {
+      command: 'pnpm --filter=@sanchay/api dev',
+      cwd: '../..',
+      url: `${API_ORIGIN}/api/v1/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+      env: {
+        ...baseEnv,
+        PORT: '3000',
+        SANCHAY_APP_ENV: 'local',
+        SANCHAY_APP_ROLE: 'api',
+        SANCHAY_APP_ORIGIN: `http://localhost:${WEB_PORT}`,
+        SANCHAY_CLIENT_IP_SOURCE: 'socket',
+        SANCHAY_KEY_SERVICE: 'local',
+        SANCHAY_PROVIDER_MODE_SMS: 'mailpit',
+        SANCHAY_PROVIDER_MODE_EMAIL: 'mailpit',
+        SANCHAY_MAILPIT_URL: MAILPIT_URL,
+        SANCHAY_OTP_PER_IP_PER_HOUR: '1000',
+      },
+    },
     {
       command: 'pnpm start',
       url: `http://localhost:${WEB_PORT}/login`,

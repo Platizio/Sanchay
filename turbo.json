@@ -30,6 +30,11 @@
     "db:check": {
       "cache": false
     },
-    "openapi": { "dependsOn": ["^build"], "outputs": ["openapi.json"] }
+    "openapi": { "dependsOn": ["^build"], "outputs": ["openapi.json"] },
+    "e2e:web": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "passThroughEnv": ["SANCHAY_*", "MAILPIT_URL", "PLAYWRIGHT_*"]
+    }
   }
 }
