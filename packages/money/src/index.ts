@@ -23,6 +23,7 @@ export {
 } from './holding.js';
 export { Money } from './money.js';
 export { Nav } from './nav.js';
+export { allocatePercentages } from './percentages.js';
 export { Units, type UnitsScale } from './units.js';
 export {
   formatXirr,
