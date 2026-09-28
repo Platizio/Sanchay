@@ -210,3 +210,4 @@ Expo modules are not in the catalog. They are pinned directly in `apps/mobile/pa
 | 2026-09-28 | B1 | `minimumReleaseAgeExclude` gains `'@orpc/standard-server-node@1.15.4'` | transitive dependency of the `@orpc/*@1.15.4` catalog pins, published 2026-09-23; expires 2026-09-30 |
 | 2026-09-28 | B1 | `minimumReleaseAgeExclude` gains `'@orpc/standard-server-peer@1.15.4'` | transitive dependency of the `@orpc/*@1.15.4` catalog pins, published 2026-09-23; expires 2026-09-30 |
 | 2026-09-28 | B1 | `minimumReleaseAgeExclude` gains `'unplugin-swc@2.0.0'` | catalog pin (decorator metadata in Vitest for the API) published 2026-09-21T17:07Z, missed by A1's exclusion list; expires 2026-09-28 |
+| 2026-09-28 | B6 | D-21 spike: no drizzle-kit wrapper; db:generate = drizzle-kit generate | drizzle-kit 0.31.11 (tsx loader) resolves NodeNext .js specifiers to .ts; D-21 dropped |

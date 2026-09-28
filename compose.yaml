@@ -1,0 +1,24 @@
+name: sanchay
+services:
+  postgres:
+    image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    environment:
+      POSTGRES_USER: sanchay
+      POSTGRES_PASSWORD: sanchay_local_only
+      POSTGRES_DB: sanchay
+    ports:
+      - "55432:5432"
+    volumes:
+      - sanchay-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sanchay -d sanchay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  mailpit:
+    image: axllent/mailpit:v1.31.2@sha256:74d609a42ec279aa63c6b4622a6fa9b5408d1ad5b1d76a1c4be40a265ce0863d
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+volumes:
+  sanchay-pg: {}

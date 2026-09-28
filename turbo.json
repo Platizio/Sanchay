@@ -21,6 +21,14 @@
       "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
+    },
+    "test:int": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["DOCKER_*", "TESTCONTAINERS_*"]
+    },
+    "db:check": {
+      "cache": false
     }
   }
 }
