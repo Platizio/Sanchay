@@ -2,8 +2,10 @@ import { Inject, Injectable, Module, type OnApplicationShutdown } from '@nestjs/
 import { AppConfig } from '../../config/app-config.js';
 import { createDb, type DbHandle } from '../../db/client.js';
 import { AccountSessions } from './account-sessions.service.js';
+import { AuthService } from './auth.service.js';
 import { DeviceRegistry } from './device-registry.service.js';
 import { InvestorAccounts } from './investor-accounts.service.js';
+import { LoginRouter } from './login.router.js';
 import { OTP_BOOKKEEPING_DB, OtpService } from './otp.service.js';
 import { SessionGuard } from './session.guard.js';
 import { SessionRouter } from './session.router.js';
@@ -25,12 +27,13 @@ class OtpBookkeepingDbLifecycle implements OnApplicationShutdown {
 }
 
 @Module({
-  controllers: [SessionRouter],
+  controllers: [LoginRouter, SessionRouter],
   providers: [
     OtpService,
     InvestorAccounts,
     DeviceRegistry,
     SessionService,
+    AuthService,
     AccountSessions,
     SessionGuard,
     {
