@@ -7,6 +7,7 @@ import { ClsModule, ClsService } from 'nestjs-cls';
 import { Logger, LoggerModule } from 'nestjs-pino';
 import { v7 as uuidv7 } from 'uuid';
 import type { Env } from './config/env.js';
+import { IntegrationsModule } from './integrations/integrations.module.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
 import { HealthRouter } from './modules/platform/health.router.js';
 import { buildPinoHttpOptions } from './modules/platform/logging.js';
@@ -49,6 +50,7 @@ export class AppModule {
             buildOrpcConfig(cls, logger),
         }),
         PlatformModule.forRoot(env),
+        IntegrationsModule.forRoot(env),
       ],
       controllers: [HealthRouter],
       providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],

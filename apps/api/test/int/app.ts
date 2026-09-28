@@ -3,6 +3,10 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module.js';
 import { buildFastifyAdapter, configureApp } from '../../src/bootstrap.js';
 import type { Env } from '../../src/config/env.js';
+import type { CaptureEmailSender } from '../../src/integrations/email/fake.js';
+import { EMAIL_SENDER } from '../../src/integrations/email/port.js';
+import type { CaptureSmsSender } from '../../src/integrations/sms/fake.js';
+import { SMS_SENDER } from '../../src/integrations/sms/port.js';
 import { CLOCK, FakeClock } from '../../src/modules/platform/clock.js';
 import { createTestDatabase, type TestDatabase } from './db.js';
 import { testEnv } from './env.js';
@@ -12,6 +16,9 @@ export interface TestApp {
   db: TestDatabase;
   clock: FakeClock;
   env: Env;
+  /** Capture senders (testEnv sets SANCHAY_PROVIDER_MODE_*=capture). Read OTPs with sms.latestCode(mobile). */
+  sms: CaptureSmsSender;
+  email: CaptureEmailSender;
   close(): Promise<void>;
 }
 
@@ -36,6 +43,8 @@ export async function bootTestApp(
     db,
     clock,
     env,
+    sms: app.get<CaptureSmsSender>(SMS_SENDER),
+    email: app.get<CaptureEmailSender>(EMAIL_SENDER),
     close: async () => {
       await app.close();
       await db.drop();
