@@ -39,10 +39,16 @@ catalogs:
     '@orpc/nest':
       specifier: 1.15.4
       version: 1.15.4
+    '@orpc/openapi':
+      specifier: 1.15.4
+      version: 1.15.4
     '@orpc/openapi-client':
       specifier: 1.15.4
       version: 1.15.4
     '@orpc/server':
+      specifier: 1.15.4
+      version: 1.15.4
+    '@orpc/zod':
       specifier: 1.15.4
       version: 1.15.4
     '@swc/cli':
@@ -176,6 +182,9 @@ importers:
       '@orpc/server':
         specifier: 'catalog:'
         version: 1.15.4(fastify@5.11.3)
+      '@sanchay/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
       '@sanchay/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -270,6 +279,43 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.1(@types/node@24.13.6)(@vitest/coverage-v8@5.0.1)(vite@7.3.6(@types/node@24.13.6)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/contract:
+    dependencies:
+      '@orpc/contract':
+        specifier: 'catalog:'
+        version: 1.15.4
+      '@orpc/openapi':
+        specifier: 'catalog:'
+        version: 1.15.4(fastify@5.11.3)
+      '@orpc/zod':
+        specifier: 'catalog:'
+        version: 1.15.4(@orpc/contract@1.15.4)(@orpc/server@1.15.4(fastify@5.11.3))(fastify@5.11.3)(zod@4.6.5)
+      '@sanchay/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@sanchay/validation':
+        specifier: workspace:*
+        version: link:../validation
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
+    devDependencies:
+      '@sanchay/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vite:
+        specifier: 'catalog:'
+        version: 7.3.6(@types/node@24.13.6)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: 'catalog:'
         version: 5.0.1(@types/node@24.13.6)(@vitest/coverage-v8@5.0.1)(vite@7.3.6(@types/node@24.13.6)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -1377,6 +1423,9 @@ packages:
   '@orpc/interop@1.15.4':
     resolution: {integrity: sha512-ZCTNPenr1clZ2RBCJxsCsvS3eS8MJIDSx/LH1AIAKj9RjvfOXI/BnjHmgD4jUEIa6FcG+c2LV/1IXVJpC6NoTw==}
 
+  '@orpc/json-schema@1.15.4':
+    resolution: {integrity: sha512-UIPzRBWuSkWejOJwIAGFkW8H0iOvqobGJnVGRbpKOGAw1kiJW2EqHQ+2ZhE2o/cTi/A+HnQj0YG9tmrk5Vytnw==}
+
   '@orpc/nest@1.15.4':
     resolution: {integrity: sha512-O510vYhDQejE0raPDYxdcbrP8971E/TTULs3VESuRRgVo5QvtdIB9rQf1CAhQvqLpTv4UtVn4G1hbquAmgDiIw==}
     peerDependencies:
@@ -1438,6 +1487,13 @@ packages:
 
   '@orpc/standard-server@1.15.4':
     resolution: {integrity: sha512-woaFpUJavYPiqRQ0Eh716jOHRZ7o84mPpmEPS79bBUJNDilGEj2OBSjbHV2ez4FYdVnEnlbg+rYy7sX3PwwENA==}
+
+  '@orpc/zod@1.15.4':
+    resolution: {integrity: sha512-k7W5yvagfcGztACr7qpB7Yyp3iMF9BzCJX9uDH9EEouuM2gt/WzsGtkDw//LTpPPsJQerltdKrdGfaWnbrGBhQ==}
+    peerDependencies:
+      '@orpc/contract': 1.15.4
+      '@orpc/server': 1.15.4
+      zod: '>=3.25.0'
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -2496,6 +2552,10 @@ packages:
   escalade@3.2.0:
     resolution: {integrity: sha512-WUj2qlxaQtO4g6Pq5c29GTcWGDyd8itL8zTlipgECz3JesAiiOKotd8JU6otB3PACgG6xkJUyVhboMS+bje/jA==}
     engines: {node: '>=6'}
+
+  escape-string-regexp@5.0.0:
+    resolution: {integrity: sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw==}
+    engines: {node: '>=12'}
 
   eslint-scope@5.1.1:
     resolution: {integrity: sha512-2NxwbF/hZ0KpepYN0cNbo+FN6XoK7GaHlQhgx/hIZl6Va0bF45RQOOwhLIy8lQDbuCiadSLCBnH2CFYquit5bw==}
@@ -3933,6 +3993,9 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  wildcard-match@5.1.4:
+    resolution: {integrity: sha512-wldeCaczs8XXq7hj+5d/F38JE2r7EXgb6WQDM84RVwxy81T/sxB5e9+uZLK9Q9oNz1mlvjut+QtvgaOQFPVq/g==}
+
   wrap-ansi@6.2.0:
     resolution: {integrity: sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==}
     engines: {node: '>=8'}
@@ -4788,6 +4851,20 @@ snapshots:
 
   '@orpc/interop@1.15.4': {}
 
+  '@orpc/json-schema@1.15.4(fastify@5.11.3)':
+    dependencies:
+      '@orpc/contract': 1.15.4
+      '@orpc/interop': 1.15.4
+      '@orpc/openapi': 1.15.4(fastify@5.11.3)
+      '@orpc/server': 1.15.4(fastify@5.11.3)
+      '@orpc/shared': 1.15.4
+      json-schema-typed: 8.0.2
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - crossws
+      - fastify
+      - ws
+
   '@orpc/nest@1.15.4(@nestjs/common@11.2.6(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@11.2.6(@nestjs/common@11.2.6(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2))(fastify@5.11.3)(rxjs@7.8.2)':
     dependencies:
       '@nestjs/common': 11.2.6(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1)
@@ -4904,6 +4981,22 @@ snapshots:
       '@orpc/shared': 1.15.4
     transitivePeerDependencies:
       - '@opentelemetry/api'
+
+  '@orpc/zod@1.15.4(@orpc/contract@1.15.4)(@orpc/server@1.15.4(fastify@5.11.3))(fastify@5.11.3)(zod@4.6.5)':
+    dependencies:
+      '@orpc/contract': 1.15.4
+      '@orpc/json-schema': 1.15.4(fastify@5.11.3)
+      '@orpc/openapi': 1.15.4(fastify@5.11.3)
+      '@orpc/server': 1.15.4(fastify@5.11.3)
+      '@orpc/shared': 1.15.4
+      escape-string-regexp: 5.0.0
+      wildcard-match: 5.1.4
+      zod: 4.6.5
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - crossws
+      - fastify
+      - ws
 
   '@pinojs/redact@0.4.0': {}
 
@@ -5145,13 +5238,13 @@ snapshots:
 
   '@types/docker-modem@3.0.6':
     dependencies:
-      '@types/node': 24.13.6
+      '@types/node': 26.6.2
       '@types/ssh2': 1.15.6
 
   '@types/dockerode@4.0.1':
     dependencies:
       '@types/docker-modem': 3.0.6
-      '@types/node': 24.13.6
+      '@types/node': 26.6.2
       '@types/ssh2': 1.15.6
 
   '@types/eslint-scope@3.7.7':
@@ -5190,11 +5283,11 @@ snapshots:
 
   '@types/ssh2-streams@0.1.13':
     dependencies:
-      '@types/node': 24.13.6
+      '@types/node': 26.6.2
 
   '@types/ssh2@0.5.52':
     dependencies:
-      '@types/node': 24.13.6
+      '@types/node': 26.6.2
       '@types/ssh2-streams': 0.1.13
 
   '@types/ssh2@1.15.6':
@@ -5911,6 +6004,8 @@ snapshots:
       '@esbuild/win32-x64': 0.28.2
 
   escalade@3.2.0: {}
+
+  escape-string-regexp@5.0.0: {}
 
   eslint-scope@5.1.1:
     dependencies:
@@ -6656,7 +6751,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.2
-      '@types/node': 24.13.6
+      '@types/node': 26.6.2
       long: 5.3.2
 
   pump@3.0.4:
@@ -7296,6 +7391,8 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  wildcard-match@5.1.4: {}
 
   wrap-ansi@6.2.0:
     dependencies:

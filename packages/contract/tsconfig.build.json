@@ -1,0 +1,15 @@
+{
+  "extends": "@sanchay/config/tsconfig/node-lib-build.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    { "path": "../validation/tsconfig.build.json" },
+    { "path": "../domain/tsconfig.build.json" }
+  ]
+}
