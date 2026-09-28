@@ -1,0 +1,9 @@
+{
+  "extends": "@sanchay/config/tsconfig/node-lib.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
