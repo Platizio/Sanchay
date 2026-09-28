@@ -1,0 +1,1083 @@
+{
+  "id": "656a8733-7b8d-4770-989e-9f3832aa981a",
+  "prevId": "6c78e13b-dd96-4b5f-8f19-c4a49fdbbd0a",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "app.auth_sessions": {
+      "name": "auth_sessions",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "investor_id": {
+          "name": "investor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idle_expires_at": {
+          "name": "idle_expires_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "absolute_expires_at": {
+          "name": "absolute_expires_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoke_reason": {
+          "name": "revoke_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "inet",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "auth_sessions_investor_live_idx": {
+          "name": "auth_sessions_investor_live_idx",
+          "columns": [
+            {
+              "expression": "investor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "revoked_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auth_sessions_investor_id_investors_id_fk": {
+          "name": "auth_sessions_investor_id_investors_id_fk",
+          "tableFrom": "auth_sessions",
+          "tableTo": "investors",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "investor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "auth_sessions_device_id_investor_devices_id_fk": {
+          "name": "auth_sessions_device_id_investor_devices_id_fk",
+          "tableFrom": "auth_sessions",
+          "tableTo": "investor_devices",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "auth_sessions_token_hash_uq": {
+          "name": "auth_sessions_token_hash_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "auth_sessions_platform_ck": {
+          "name": "auth_sessions_platform_ck",
+          "value": "platform IN ('WEB', 'ANDROID')"
+        },
+        "auth_sessions_revoke_reason_ck": {
+          "name": "auth_sessions_revoke_reason_ck",
+          "value": "revoke_reason IN ('LOGOUT', 'ADMIN', 'ACCOUNT_CLOSED', 'IDLE', 'CONTACT_CHANGED', 'BANK_CHANGED', 'DEVICE_REVOKED', 'FRAUD_HOLD')"
+        },
+        "auth_sessions_revoked_pair_ck": {
+          "name": "auth_sessions_revoked_pair_ck",
+          "value": "(revoked_at IS NULL) = (revoke_reason IS NULL)"
+        },
+        "auth_sessions_expiry_order_ck": {
+          "name": "auth_sessions_expiry_order_ck",
+          "value": "idle_expires_at <= absolute_expires_at"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.investor_contacts": {
+      "name": "investor_contacts",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "investor_id": {
+          "name": "investor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value_enc": {
+          "name": "value_enc",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value_bidx": {
+          "name": "value_bidx",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "masked": {
+          "name": "masked",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "superseded_at": {
+          "name": "superseded_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "investor_contacts_current_uq": {
+          "name": "investor_contacts_current_uq",
+          "columns": [
+            {
+              "expression": "investor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'CURRENT'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "investor_contacts_investor_id_investors_id_fk": {
+          "name": "investor_contacts_investor_id_investors_id_fk",
+          "tableFrom": "investor_contacts",
+          "tableTo": "investors",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "investor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "investor_contacts_value_uq": {
+          "name": "investor_contacts_value_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "investor_id",
+            "kind",
+            "value_bidx"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "investor_contacts_kind_ck": {
+          "name": "investor_contacts_kind_ck",
+          "value": "kind IN ('MOBILE', 'EMAIL')"
+        },
+        "investor_contacts_status_ck": {
+          "name": "investor_contacts_status_ck",
+          "value": "status IN ('CURRENT', 'PREVIOUS', 'REVOKED')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.investor_devices": {
+      "name": "investor_devices",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "investor_id": {
+          "name": "investor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_ref_hash": {
+          "name": "device_ref_hash",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "app_version": {
+          "name": "app_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "os_version": {
+          "name": "os_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "investor_devices_investor_id_investors_id_fk": {
+          "name": "investor_devices_investor_id_investors_id_fk",
+          "tableFrom": "investor_devices",
+          "tableTo": "investors",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "investor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "investor_devices_ref_uq": {
+          "name": "investor_devices_ref_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "investor_id",
+            "device_ref_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "investor_devices_platform_ck": {
+          "name": "investor_devices_platform_ck",
+          "value": "platform IN ('WEB', 'ANDROID')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.investors": {
+      "name": "investors",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "mobile_enc": {
+          "name": "mobile_enc",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mobile_bidx": {
+          "name": "mobile_bidx",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mobile_last4": {
+          "name": "mobile_last4",
+          "type": "char(4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mobile_verified_at": {
+          "name": "mobile_verified_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_enc": {
+          "name": "email_enc",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_bidx": {
+          "name": "email_bidx",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_masked": {
+          "name": "email_masked",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_verified_at": {
+          "name": "email_verified_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_order_at": {
+          "name": "first_order_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "can_purchase": {
+          "name": "can_purchase",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "can_exit": {
+          "name": "can_exit",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "purchase_block_reason": {
+          "name": "purchase_block_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "exit_block_reason": {
+          "name": "exit_block_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_contact_change_at": {
+          "name": "last_contact_change_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_bank_change_at": {
+          "name": "last_bank_change_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fp_investor_profile_id": {
+          "name": "fp_investor_profile_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fp_mf_investment_account_id": {
+          "name": "fp_mf_investment_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fp_mfia_old_id": {
+          "name": "fp_mfia_old_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fp_phone_id": {
+          "name": "fp_phone_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fp_email_id": {
+          "name": "fp_email_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fp_address_id": {
+          "name": "fp_address_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "investors_mobile_bidx_uq": {
+          "name": "investors_mobile_bidx_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "mobile_bidx"
+          ]
+        },
+        "investors_email_bidx_uq": {
+          "name": "investors_email_bidx_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email_bidx"
+          ]
+        },
+        "investors_fp_investor_profile_id_uq": {
+          "name": "investors_fp_investor_profile_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "fp_investor_profile_id"
+          ]
+        },
+        "investors_fp_mfia_id_uq": {
+          "name": "investors_fp_mfia_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "fp_mf_investment_account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "investors_status_ck": {
+          "name": "investors_status_ck",
+          "value": "status IN ('ACTIVE', 'SUSPENDED', 'FRAUD_HOLD', 'CLOSURE_REQUESTED', 'CLOSED')"
+        },
+        "investors_mobile_last4_ck": {
+          "name": "investors_mobile_last4_ck",
+          "value": "mobile_last4 ~ '^[0-9]{4}$'"
+        },
+        "investors_email_pair_ck": {
+          "name": "investors_email_pair_ck",
+          "value": "(email_enc IS NULL) = (email_bidx IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.otp_codes": {
+      "name": "otp_codes",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_enc": {
+          "name": "destination_enc",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_bidx": {
+          "name": "destination_bidx",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_masked": {
+          "name": "destination_masked",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_id": {
+          "name": "reference_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code_hmac": {
+          "name": "code_hmac",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pepper_kid": {
+          "name": "pepper_kid",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consumed_reason": {
+          "name": "consumed_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "inet",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_ref_hash": {
+          "name": "device_ref_hash",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_message_id": {
+          "name": "provider_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "template_id": {
+          "name": "template_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dlr_status": {
+          "name": "dlr_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dlr_at": {
+          "name": "dlr_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "otp_codes_live_scope_uq": {
+          "name": "otp_codes_live_scope_uq",
+          "columns": [
+            {
+              "expression": "purpose",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "destination_bidx",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(reference_id, '00000000-0000-0000-0000-000000000000'::uuid)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "consumed_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "otp_codes_destination_created_idx": {
+          "name": "otp_codes_destination_created_idx",
+          "columns": [
+            {
+              "expression": "destination_bidx",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "otp_codes_ip_created_idx": {
+          "name": "otp_codes_ip_created_idx",
+          "columns": [
+            {
+              "expression": "ip",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "otp_codes_device_created_idx": {
+          "name": "otp_codes_device_created_idx",
+          "columns": [
+            {
+              "expression": "device_ref_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "otp_codes_purpose_ck": {
+          "name": "otp_codes_purpose_ck",
+          "value": "purpose IN ('LOGIN', 'NEW_DEVICE_STEPUP', 'EMAIL_FALLBACK_LOGIN', 'VERIFY_EMAIL', 'CONSENT', 'CONTACT_CHANGE_OLD', 'CONTACT_CHANGE_NEW', 'REAUTH')"
+        },
+        "otp_codes_channel_ck": {
+          "name": "otp_codes_channel_ck",
+          "value": "channel IN ('SMS', 'EMAIL')"
+        },
+        "otp_codes_attempts_ck": {
+          "name": "otp_codes_attempts_ck",
+          "value": "attempts >= 0 AND attempts <= 5"
+        },
+        "otp_codes_consumed_reason_ck": {
+          "name": "otp_codes_consumed_reason_ck",
+          "value": "consumed_reason IN ('VERIFIED', 'EXPIRED', 'LOCKED', 'SUPERSEDED')"
+        },
+        "otp_codes_consumed_pair_ck": {
+          "name": "otp_codes_consumed_pair_ck",
+          "value": "(consumed_at IS NULL) = (consumed_reason IS NULL)"
+        },
+        "otp_codes_provider_ck": {
+          "name": "otp_codes_provider_ck",
+          "value": "provider IN ('MSG91', 'SES')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.audit_events": {
+      "name": "audit_events",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "inet",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "audit_events_entity_idx": {
+          "name": "audit_events_entity_idx",
+          "columns": [
+            {
+              "expression": "entity_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_events_occurred_at_idx": {
+          "name": "audit_events_occurred_at_idx",
+          "columns": [
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "audit_events_actor_type_ck": {
+          "name": "audit_events_actor_type_ck",
+          "value": "actor_type IN ('INVESTOR', 'ADMIN', 'SYSTEM', 'ANONYMOUS')"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

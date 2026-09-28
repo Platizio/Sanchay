@@ -24,6 +24,7 @@
     "@orpc/contract": "catalog:",
     "@orpc/nest": "catalog:",
     "@orpc/server": "catalog:",
+    "@sanchay/domain": "workspace:*",
     "drizzle-orm": "catalog:",
     "fastify": "catalog:",
     "nestjs-cls": "catalog:",
