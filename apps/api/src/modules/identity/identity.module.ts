@@ -3,9 +3,11 @@ import { AppConfig } from '../../config/app-config.js';
 import { createDb, type DbHandle } from '../../db/client.js';
 import { AccountSessions } from './account-sessions.service.js';
 import { AuthService } from './auth.service.js';
+import { ContactEmailService } from './contact-email.service.js';
 import { DeviceRegistry } from './device-registry.service.js';
 import { InvestorAccounts } from './investor-accounts.service.js';
 import { LoginRouter } from './login.router.js';
+import { MeRouter } from './me.router.js';
 import { OTP_BOOKKEEPING_DB, OtpService } from './otp.service.js';
 import { SessionGuard } from './session.guard.js';
 import { SessionRouter } from './session.router.js';
@@ -27,7 +29,7 @@ class OtpBookkeepingDbLifecycle implements OnApplicationShutdown {
 }
 
 @Module({
-  controllers: [LoginRouter, SessionRouter],
+  controllers: [LoginRouter, SessionRouter, MeRouter],
   providers: [
     OtpService,
     InvestorAccounts,
@@ -35,6 +37,7 @@ class OtpBookkeepingDbLifecycle implements OnApplicationShutdown {
     SessionService,
     AuthService,
     AccountSessions,
+    ContactEmailService,
     SessionGuard,
     {
       provide: OTP_BOOKKEEPING_DB,
