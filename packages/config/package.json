@@ -9,5 +9,14 @@
     "./tsconfig/node-lib.json": "./tsconfig/node-lib.json",
     "./tsconfig/node-lib-build.json": "./tsconfig/node-lib-build.json",
     "./vitest": "./vitest/base.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
