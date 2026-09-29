@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-09-29. Repo: `C:\Users\pc\Desktop\sanchay`, branch `main` at `225d60a` (70 commits)._
+_Last updated: 2026-09-29 (afternoon). Repo: `C:\Users\pc\Desktop\sanchay`, branch `main` at `bcec8dc`. Plan 01 code is at `225d60a`; the four later commits are plan documents only._
 
 Sanchay is Platizio's **investor-led B2C mutual-fund app for India**, replacing the old distributor-led (B2B2C) WealthTech. Investors sign up themselves, complete onboarding, browse funds by SEBI category, invest (lumpsum and SIP), redeem, and track their own portfolio: invested amount, current value, XIRR and active SIPs.
 
@@ -86,12 +86,91 @@ All 50 tasks were implemented test-first, with a review after each batch, fix lo
 
 ---
 
-## 4. In progress
+## 4. Plans 02–04: review and assembly (2026-09-29)
 
-- **Plans 02–04, the full TDD plans for Sprints 2–4.** All 25 draft chunks are written, covering the 63 tasks D1–D10, E1–E25 and F1–F28, and are saved in `.superpowers/plans-draft/`. **Remaining:** a consistency review per plan, fixes, and assembly into:
-  - `docs/superpowers/plans/2026-10-12-plan-02-kernel-catalogue-data.md` (S2: platform kernel, Cybrilla gateway plus a local fake, catalogue data, dev AWS)
-  - `docs/superpowers/plans/2026-10-26-plan-03-consent-onboarding-lumpsum.md` (S3: consent engine, onboarding, catalogue UI, lumpsum)
-  - `docs/superpowers/plans/2026-11-09-plan-04-sip-portfolio-redemption-prod.md` (S4: SIP and mandates, ledger, dashboard, redemption, production, pilot week)
+The drafts in `.superpowers/plans-draft/` (never edit that folder) were written in parallel, and each plan's drafts guessed at the previous plan's API. So each plan is reviewed, rewritten where needed and assembled into `docs/superpowers/plans/`.
+
+### 4.1 Plan 02 (Sprint 2): DONE, committed
+- **File:** `docs/superpowers/plans/2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md`.
+- **Commits:** `0dfb146` (assembly), with amendments in `5cd725c`, `cd961e6` and `bcec8dc`.
+- **Header:** execution order, the migration table (`0004`–`0009`) and errata **RV-02-1 … RV-02-13**.
+- **Main fixes:**
+  - **Migrations:** migration-number collisions resolved.
+  - **Build order:** D3 now builds without D4.
+  - **pg-boss 12 API:** injectable `Jobs` using `boss.send(…, {db})`, `createQueue` at start, and keyed `boss.schedule` inside `registerSchedules`.
+  - **Jobs:** the NAV and FP-sync jobs are now registered, the `identity.cleanup` schedule exists, and D6's `handle(job)` shape is fixed.
+  - **D10:** reads Cybrilla's real thresholds shape.
+  - **FakeFp:** stamps its call log from the app clock.
+  - **Invite gate (D7):** off in tests and local dev (it would have broken every sign-in test).
+  - **Test fixtures (D9):** D9 is now the single creator of `packages/test-fixtures`.
+  - **Types:** safe under `exactOptionalPropertyTypes`.
+  - **State machine (D5):** gains the `UNDER_REVIEW → REJECTED` edge.
+- **Unverified dependency pins:** `undici`, `lossless-json`, `tsx`, `@aws-sdk/client-sesv2` and CDK. Run `pnpm view <pkg> version` at task time and pin the newest version that passes the 7-day release age.
+
+### 4.2 Plan 03 (Sprint 3): DONE, committed (`bcec8dc`)
+- **File:** `docs/superpowers/plans/2026-10-26-plan-03-mvp-consent-onboarding-catalogue-lumpsum.md`.
+- **Header:**
+  - **Global Constraints:** the binding "Plan 02 as built" contract.
+  - Execution order, migrations `0010`–`0025`, errata and known gaps.
+- **Rewritten from scratch:** E11 (attest and FP provisioning saga) and E20/E21 (lumpsum orders, payments, H-2 checkout).
+- **Glue corrected:**
+  - **E1:** webhooks.
+  - **E2:** `RuntimeConfig` is static.
+  - **E3/E4:** the consent engine uses D3/D5 types and the `CONSENT_SUBJECT_JOBS` registry.
+  - **E6/E7:** KYC and bank pre-verification run in worker jobs.
+  - **E8–E10:** generate-then-custom migrations; string document versions.
+  - **E16:** the returns job is registered.
+  - **E22:** owns its quote edit to `purchase.service.ts`.
+- **Conventions every later task relies on:**
+  - `CONSENT_SUBJECT_JOBS[subjectType] → job`, enqueued by `approve`.
+  - Worker-only providers go through `XModule.forRoot(env)`.
+  - Test helpers:
+    - `jobOf(name, data)` (E1).
+    - `expectNoPmWritesBeforeConsumed(app, challengeId)` and `expectBola(app, key, args)` (E4).
+    - `seedReadyInvestor` (E11).
+    - `seedScheme` and `seedInvestableInvestor` (E20).
+  - Tests spy on `Jobs.enqueue` and call `handle(jobOf(…))` directly.
+- **Known gaps (listed in the header):**
+  - The screen tasks E12, E13, E17, E23 and E24 were checked for API-name drift only.
+  - Four Cybrilla details need confirming in the FP sandbox before the pilot.
+
+### 4.3 Plan 03 test-harness fix: DONE (committed with this file)
+E8–E10's integration tests called a nonexistent `authedRequest` and `bootTestApp(db)`. They now use:
+- a new helper, `signedInInvestor(app)` (`apps/api/test/int/signed-in.ts`, created by E8), built on Plan 01's `signInWeb`;
+- `bootTestApp()`;
+- `app.db.db`.
+
+Their test data also uses string document versions, matching the E10 fix. The Plan 03 header's known-gaps note is corrected: Plan 01's `test/int/factories.ts` does exist, with `insertInvestor(db)`, `insertDevice` and `insertOtp`, and E14's use of it is fine.
+
+### 4.4 Plan 04 (Sprint 4 and pilot week): IN PROGRESS, surveyed only
+- **Target file:** `docs/superpowers/plans/2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md`.
+- All 28 drafts (F1–F28) are present in `.superpowers/plans-draft/plan-04/`. They have the same drift Plan 03 had. Rewrite them against Plan 02 and Plan 03 as built; the Global Constraints section at the top of the Plan 03 file is the contract.
+- **F2 (SIP and mandate):**
+  - **FP calls:** it uses an invented `FpTransact.call('pg.mandates.create' | 'pg.emandate.auth' | 'mf.purchasePlans.create', …)`. Use D3's operation keys `mandate.create`, `mandateAuth.create` and `purchasePlan.create`, by filling D3's `FpTransact` stubs (`createMandate`, `authoriseMandate`, `createPurchasePlan`, `updatePurchasePlan`).
+  - **Reads:** `FpRead.purchasesByPlan` does not exist; use `FpRead.purchases({ plan })`.
+  - **Jobs:** `mandates.submit`, `mandates.poll`, `plans.sip.submit` and `plans.instalments.sync` need class-level `@JobHandler` classes, not method-level decorators.
+  - **7-day saga:** E4 decides the window by subject type.
+    - With a new mandate, use `MANDATE_REGISTRATION` and map `CONSENT_SUBJECT_JOBS.MANDATE_REGISTRATION → 'mandates.submit'`.
+    - With a reused mandate, use `SIP_REGISTRATION` and map `CONSENT_SUBJECT_JOBS.SIP_REGISTRATION → 'plans.sip.submit'`.
+  - **Runtime config:** `@Inject(RuntimeConfig)` becomes the static `RuntimeConfig.get(exec, key)`.
+- **F3 (eNACH):** redefines F2's `MandatesSubmitJob`; merge it into F2's job.
+- **F4 (ledger):**
+  - `@Inject(ReconBreaks)` becomes the static `ReconBreaks.open`.
+  - Schedules go inside `registerSchedules`, with `await` and a `key`.
+  - `@sanchay/domain/rules/*` subpath imports must use the root `@sanchay/domain`, re-exported from `packages/domain/src/rules/index.ts`.
+- **F5/F7 (redemption, reconciliation):**
+  - They import a nonexistent `../platform/jobs.js`.
+  - They use method-level `@JobHandler`, bare `schedule()` calls and `handle({…})` payloads (use `handle(job)` with `job.data`).
+  - They use `@Inject(ReconBreaks)`.
+- **F28 (SIP cancel):** uses a method-level `@JobHandler`.
+- **Tests in F2–F5, F7, F10 and F28:** they import factory functions that don't exist (`createInvestorWithBankAndFolio`, `createFolioWithLot`, `createSettledPurchaseOrder`, `createInvestorWithSettledLumpsumHolding`). Build on `seedReadyInvestor`, `seedInvestableInvestor` and `seedScheme` from Plan 03.
+- **Also:**
+  - Absolute paths (`C:/Users/pc/Desktop/sanchay…`) become repo-relative.
+  - Commit trailers use `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+  - Migrations continue from **`0026`**.
+  - Every money task registers its own `CONSENT_SUBJECT_JOBS` entry.
+  - `FakeFp` does not serve SIP, mandate or redemption operations yet, so extend it for each operation a task needs (the way E11 and E21 did).
+- **Suggested order:** F2 → F3/F4 → F5/F6/F7 → F10/F11 → F28, then the lighter tasks (F1, F8/F9, F12–F27: ops, UI, evidence). Finish with the header (Global Constraints, execution order, migration table, errata) and assemble.
 
 ---
 
@@ -99,7 +178,7 @@ All 50 tasks were implemented test-first, with a review after each batch, fix lo
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | Finish Plans 02–04 (review → fix → assemble), then start **Sprint 2** on a new branch from `main` | Claude |
+| 1 | Apply the pending Plan 03 fix (§4.3). Rewrite and assemble Plan 04 (§4.4). Then start **Sprint 2** (Plan 02) on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
 | 4 | Create the **GitHub repo** and share its URL. There is no remote yet, and pushes happen only when the owner asks. | Owner |
@@ -116,7 +195,18 @@ All 50 tasks were implemented test-first, with a review after each batch, fix lo
 
 ---
 
-## 6. Where to look
+## 6. Resuming in a cloud session
+
+A cloud session sees only what is in a remote repository. Today there is **no git remote**, and this file is **untracked**. Before switching:
+1. **Create the GitHub repo** (open item 4) and add it as `origin`. Only the owner authorises pushes.
+2. **Commit this file:** `git add till_now.md` then `git commit -m "docs: progress notes"`.
+3. **Push `main`.**
+
+In the cloud session, read `AGENTS.md`, this file (§4) and then the plan headers. Nothing from the local scratchpad or `~/.claude` memory carries over; everything needed to continue is written here.
+
+Work style the owner asked for: **efficiency mode**. Do one task at a time, inline, with no multi-agent workflows unless asked, and keep usage low.
+
+## 7. Where to look
 
 - **Rules for agents:** `AGENTS.md`
 - **Execution ledger (every task, review, fix and ruling):** `.superpowers/sdd/2026-09-28-plan-01-foundation/progress.md`
