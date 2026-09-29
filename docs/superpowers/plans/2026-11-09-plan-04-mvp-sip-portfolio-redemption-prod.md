@@ -1,15 +1,15 @@
 # Plan 04: MVP SIP, portfolio, redemption, prod (WORK IN PROGRESS)
 
 > **Status: partial assembly.** This file is being rebuilt task by task against Plans 02 and 03 as built.
-> Tasks present here: F1 (draft, not yet reviewed), F2 (reviewed and rewritten). The remaining tasks
+> Tasks present here: F1 (draft, not yet reviewed), F2 and F3 (reviewed and rewritten). The remaining tasks
 > (F3–F28), the Global Constraints, the execution order and the errata are added as each task is reconciled.
 > Do not execute any task from this file until this banner is removed.
 
 ## Assembly notes so far
 - F2 owns `packages/domain/src/rules/sip-dates.ts` (firstInstalmentDate) and `modules/plans/sip-eligibility.ts` (assertSipEligible, sipSchemeOf, SipScheme, SIP_FLOOR, UPI_AUTOPAY_LIMIT, MAX_INSTALMENTS). F10: drop sip-dates.ts from Create, keep golden JSON + quote; import from `../plans/sip-eligibility.js`; contract/router/module are `modules/plans/*` (not orders); CutoffHolidays comes from E22's cutoff.ts (no re-declare). SipScheme fields are `sipMin/sipMax/sipMultiple/sipDates` (Money).
 - All SIP/mandate code lives in `apps/api/src/modules/plans/` (PlansModule.forRoot). F3/F28 must edit there, not orders/ or payments/.
-- F3: MandatesSubmitJob already exists in F2 (plans/mandates-submit.job.ts); F3 extends for ENACH, must not redefine.
-- Migrations: F2 = 0026 (generated plans_mandates), 0027 (custom plans_mandates_guard). Next free: 0028.
+- F3 (done) extends F2 in place: `mandate-ladder.ts` in domain, `rail` on createSip, `mandates.auth_url_enc` (0028), `MandatesService.authUrlOf`. F2 FP calls are rail-generic (`authoriseMandate({mandateId, mandateType})`).
+- Migrations: F2 = 0026 (generated plans_mandates), 0027 (custom plans_mandates_guard); F3 = 0028 (generated mandates_auth_url). Next free: 0029.
 - Plan 02 errata RV-02-14 added D5 edges: PLAN UNDER_REVIEW->REJECTED|CONSENT_EXPIRED, CONFIRMING->REJECTED, SUBMITTING->REJECTED; MANDATE CONSENTED->CONSENT_EXPIRED, SUBMITTING->REJECTED.
 - Known gap: mandate RECONCILING -> CRITICAL recon break MANDATE_CREATE_AMBIGUOUS (no FP mandate list-by-bank read in D3).
 - New error codes: PLAN_STATE_INVALID, MANDATE_STATE_INVALID (409). Job names: mandates.submit, mandates.poll, plans.sip.submit, plans.sip.advance, plans.instalments.sync.
@@ -1744,6 +1744,9 @@ export class MandatesSubmitJob {
     const [bank] = await db.select().from(bankAccounts).where(eq(bankAccounts.id, mandate.bankAccountId));
     const bankOldId = bank?.fpBankOldId ?? null;
     if (bankOldId === null) throw new AppError('INTERNAL', { message: 'mandate bank is not registered at FP' });
+    const mandateType = mandate.rail === 'ENACH' ? 'E_MANDATE' : 'UPI';
+    // FP takes the limit as a whole-rupee integer; every allowed limit (mandates_limit_ck) is one.
+    const mandateLimit = Number.parseInt(mandate.limitAmount, 10);
 
     try {
       await this.consent.useConsumed(challengeId, async (consumed) => {
@@ -1754,7 +1757,7 @@ export class MandatesSubmitJob {
         }
         if (current.status === 'SUBMITTING') {
           const created = toFpMandateView(
-            await this.fp.createMandate({ bankAccountId: bankOldId, mandateType: 'UPI', mandateLimit: 100000 }, consumed),
+            await this.fp.createMandate({ bankAccountId: bankOldId, mandateType, mandateLimit }, consumed),
           );
           await moveMandate(db, current, 'CREATED', 'fp_mandate_created', {
             fpMandateId: created.id,
@@ -1764,7 +1767,7 @@ export class MandatesSubmitJob {
           current = { ...current, status: 'CREATED', fpMandateId: created.id };
         }
         if (current.fpMandateId === null) return;
-        const upiUri = upiUriOf(await this.fp.authoriseMandate({ mandateId: String(current.fpMandateId) }, consumed));
+        const upiUri = upiUriOf(await this.fp.authoriseMandate({ mandateId: String(current.fpMandateId), mandateType }, consumed));
         if (current.status === 'CREATED') {
           await moveMandate(db, current, 'AUTH_PENDING', 'emandate_auth_created', { upiUri });
         } else {
@@ -2366,10 +2369,16 @@ export class InstalmentsSyncJob {
     return (result.body ?? {}) as Record<string, unknown>;
   }
 
-  /** Returns the UPI intent in `upi.uri`; no postback URL (the app polls `mandates.poll`). */
-  async authoriseMandate(input: { mandateId: string }, consent: ConsumedConsent): Promise<Record<string, unknown>> {
+  /**
+   * UPI returns the intent in `upi.uri`; E_MANDATE (F3) returns a bank `token_url`. No postback URL: the
+   * app polls `mandates.poll`.
+   */
+  async authoriseMandate(
+    input: { mandateId: string; mandateType: 'UPI' | 'E_MANDATE' },
+    consent: ConsumedConsent,
+  ): Promise<Record<string, unknown>> {
     const result = await this.transport.call('mandateAuth.create', {
-      body: { mandate_id: Number(input.mandateId), upi: { type: 'uri' } },
+      body: { mandate_id: Number(input.mandateId), ...(input.mandateType === 'UPI' ? { upi: { type: 'uri' } } : {}) },
       consent,
     });
     return (result.body ?? {}) as Record<string, unknown>;
@@ -2442,6 +2451,9 @@ const fpError = (statusCode: number, code: string, message: string): FakeReply =
         const mandate = this.state.mandates.get(Number(body.mandate_id));
         if (mandate === undefined) return fpError(404, 'NOT_FOUND', `mandate ${String(body.mandate_id)} not found`);
         if (mandate.status !== 'CREATED') return fpError(400, 'INVALID_STATE', 'mandate is not awaiting authorisation');
+        if (!Object.hasOwn(body, 'upi')) {
+          return { statusCode: 200, data: { mandate_id: mandate.id, token_url: `https://pg.fake.local/emandate/${mandate.mandateRef}` } };
+        }
         return { statusCode: 200, data: { mandate_id: mandate.id, upi: { type: 'uri', uri: `upi://mandate?pa=fake@upi&tr=${mandate.mandateRef}` } } };
       }
       case 'purchasePlan.create': {
@@ -2830,3 +2842,396 @@ pnpm lint
 git add packages/domain/src/rules packages/domain/test/sip-dates.test.ts apps/api/src/modules/plans apps/api/src/modules/orders/orders.schema.ts apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake apps/api/src/db/app-schema.ts apps/api/src/modules/platform/jobs apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/sip-seed.ts apps/api/test/int/sip-mandate.int.test.ts packages/contract/src packages/app-core/src/errors/messages.ts
 git commit -m "feat(api): SIP registration and UPI Autopay mandate backend (F2)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+---
+
+### Task F3: [T6] eNACH rail and limit ladder (Dev A, 6 h) (trim candidate)
+
+**Files:**
+- **Create:** `packages/domain/src/rules/mandate-ladder.ts`, `packages/domain/test/mandate-ladder.test.ts`, `apps/api/test/int/mandate-enach.int.test.ts`
+- **Create (migration):** `apps/api/drizzle/0028_mandates_auth_url.sql` (generated: `mandates.auth_url_enc`)
+- **Modify (F2 files):** `apps/api/src/modules/plans/{plans.schema.ts, fp-plan.ts, fp-plan.test.ts, sip-eligibility.ts, sip-eligibility.test.ts, sip.service.ts, mandates-submit.job.ts, mandates.service.ts, mandates.router.ts}`, `packages/contract/src/plans.ts`, `packages/contract/src/plans.test.ts`, `packages/contract/src/mandates.ts`, `apps/api/openapi.json`
+- **Modify:** `packages/domain/src/rules/index.ts`
+
+**Interfaces:**
+- **Prerequisites:** F2. F2's `MandatesSubmitJob` already sends `mandate_type`/`mandate_limit` from the mandate row and asks for a UPI intent only for `UPI`. F2's FakeFp also already returns a `token_url` when no `upi` key is sent. So this task adds no second submit job and changes no FP call.
+- **Consumes:** `Money`, `Rounding` (`@sanchay/money`); `MANDATE_RAILS`, `type MandateRail` (`@sanchay/domain`); `Crypto.encrypt/decrypt(…, {table, column, rowId})` and `asRowId` (Plan 01); the `mandates_limit_ck` CHECK (F2), which already allows every ladder rung, so no new CHECK is needed.
+- **Produces:**
+  - `mandateLimitFor(required: Money): Money | null` and `MANDATE_LIMIT_LADDER` in `@sanchay/domain`. It returns the smallest rung ≥ 1.5 × `required`, or `null` above the top rung (₹25,00,000). The 1.5× product is truncated (`Rounding.DOWN`) to money scale. That is the only mode that satisfies the spec boundaries: ML-02, 66,666.67 → ₹1,00,000, and ML-03, 66,666.68 → ₹2,00,000. `CEIL` or `HALF_UP` would push 66,666.67 into the ₹2,00,000 rung.
+  - `plans.createSip` input gains `rail: 'UPI_AUTOPAY' | 'ENACH'`, default `'UPI_AUTOPAY'`.
+  - **eNACH mandate sizing:**
+    - Reuse works as in F2 but per rail: an `APPROVED` mandate of the same rail with headroom.
+    - A new eNACH mandate's limit is `mandateLimitFor(Σ live plans on mandates of the same bank + this amount)`. "Live" uses F2's headroom predicate.
+    - Above the top rung, the request is refused with `MANDATE_LIMIT_EXCEEDED`.
+    - The UPI Autopay cap (₹1,00,000 per SIP) applies to the UPI rail only.
+  - **Encrypted auth URL:** `mandates.auth_url_enc` (`bytea`) holds the eNACH `token_url`, encrypted with AAD `mandates.auth_url_enc.<id>`. It is written by `mandates.submit` and by a re-authorise.
+  - **API:** `MandatesService.authUrlOf(row)` decrypts it. `mandates.get`/`list` return `authUrl`, which is set only for `ENACH` while `AUTH_PENDING`, next to F2's `upiUri`.
+- **Review fixes** (the draft was written against F2's draft):
+  - It redefined `MandatesSubmitJob` with a `handle({mandateId, challengeId})` payload and the invented `FpTransact.call('pg.*')`.
+  - It added a `MandatesService.createOrReuse` that F2 never had.
+  - It imported the subpath `@sanchay/domain/rules/mandate-ladder.js`, and threw an `Error` from `@sanchay/domain`, which cannot import `AppError`.
+  - It relied on F2 having "reserved" an `authUrlEnc` column that no migration created.
+  - Its tests used nonexistent helpers (`createInvestorWithBankAndFolio`, `approveConsentChallenge`, `t.jobs.runOnce`, `t.runtimeConfig`, `t.fixtures`, `fakeFp.lastEmandateTokenUrl`).
+  - The fix: the ladder is a pure `Money | null` rule, the vectors live in the domain test, and the integration test reuses F2's `sip-seed.ts`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`packages/domain/test/mandate-ladder.test.ts`:
+```ts
+import { Money } from '@sanchay/money';
+import { describe, expect, it } from 'vitest';
+import { mandateLimitFor } from '../src/rules/mandate-ladder.js';
+
+const VECTORS: ReadonlyArray<{ id: string; sum: string; limit: string | null }> = [
+  { id: 'ML-01', sum: '0.00', limit: '100000.00' },
+  { id: 'ML-02', sum: '66666.67', limit: '100000.00' },
+  { id: 'ML-03', sum: '66666.68', limit: '200000.00' },
+  { id: 'ML-04', sum: '133333.33', limit: '200000.00' },
+  { id: 'ML-05', sum: '133333.34', limit: '500000.00' },
+  { id: 'ML-06', sum: '333333.33', limit: '500000.00' },
+  { id: 'ML-07', sum: '333333.34', limit: '1000000.00' },
+  { id: 'ML-08', sum: '1666666.68', limit: null },
+];
+
+describe('mandateLimitFor (ML-01..08)', () => {
+  for (const v of VECTORS) {
+    it(`${v.id}: Σ ${v.sum} -> ${v.limit ?? 'refused'}`, () => {
+      expect(mandateLimitFor(Money.parse(v.sum))?.toWire() ?? null).toBe(v.limit);
+    });
+  }
+});
+```
+
+Append to `apps/api/src/modules/plans/sip-eligibility.test.ts`'s `assertSipEligible` block:
+```ts
+  it('the ₹1,00,000 cap is UPI-only: eNACH above it passes here (the ladder decides)', () => {
+    expect(() => assertSipEligible({ scheme, amount: Money.parse('150000.00'), installmentDay: 10, rail: 'ENACH' })).not.toThrow();
+  });
+```
+
+Append to `apps/api/src/modules/plans/fp-plan.test.ts`:
+```ts
+describe('tokenUrlOf', () => {
+  it('reads the eNACH token_url', () => {
+    expect(tokenUrlOf({ token_url: 'https://pg.example/e/1' })).toBe('https://pg.example/e/1');
+    expect(tokenUrlOf({ upi: { uri: 'upi://x' } })).toBeNull();
+  });
+});
+```
+(and add `tokenUrlOf` to that file's import).
+
+Append to `packages/contract/src/plans.test.ts`:
+```ts
+describe('CreateSipInputSchema rail', () => {
+  it('defaults to UPI_AUTOPAY and accepts ENACH only as the other rail', () => {
+    expect(CreateSipInputSchema.parse(valid).rail).toBe('UPI_AUTOPAY');
+    expect(CreateSipInputSchema.parse({ ...valid, rail: 'ENACH' }).rail).toBe('ENACH');
+    expect(CreateSipInputSchema.safeParse({ ...valid, rail: 'NACH_PHYSICAL' }).success).toBe(false);
+  });
+});
+```
+
+`apps/api/test/int/mandate-enach.int.test.ts`:
+```ts
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type ConsentApprovedJobData, ConsentEngine } from '../../src/modules/legal-consent/consent-engine.js';
+import { consentChallenges } from '../../src/modules/legal-consent/legal-consent.schema.js';
+import { MandatesService } from '../../src/modules/plans/mandates.service.js';
+import { MandatesSubmitJob } from '../../src/modules/plans/mandates-submit.job.js';
+import { mandates } from '../../src/modules/plans/plans.schema.js';
+import { SipService } from '../../src/modules/plans/sip.service.js';
+import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
+import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
+import { jobOf } from './jobs.js';
+import { seedSipInvestor, seedSipScheme, setSipEnabled } from './sip-seed.js';
+
+let t: FpTestApp;
+const enqueued: Array<{ name: string; data: unknown }> = [];
+
+beforeAll(async () => {
+  t = await bootFpTestApp();
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
+    enqueued.push({ name, data });
+  });
+  await setSipEnabled(t, true);
+});
+afterAll(async () => {
+  await t.close();
+});
+beforeEach(() => {
+  enqueued.length = 0;
+});
+
+type SipInvestor = Awaited<ReturnType<typeof seedSipInvestor>>;
+
+async function draftEnach(amount: string, investor?: SipInvestor) {
+  const who = investor ?? (await seedSipInvestor(t));
+  const scheme = await seedSipScheme(t);
+  const created = await t.app.get(SipService).createSip({
+    investorId: who.investorId,
+    schemeId: scheme.id,
+    amount,
+    installmentDay: 10,
+    numberOfInstalments: null,
+    rail: 'ENACH',
+    userIp: '203.0.113.10',
+    initiatedVia: 'web',
+  });
+  return { investor: who, ...created };
+}
+
+async function approve(draft: { challengeId: string; investor: SipInvestor }): Promise<ConsentApprovedJobData> {
+  const engine = t.app.get(ConsentEngine);
+  const [row] = await t.db.db.select().from(consentChallenges).where(eq(consentChallenges.id, draft.challengeId));
+  const needsEmail = row?.requiredFactors.includes('EMAIL') === true;
+  await engine.sendOtp(draft.challengeId, 'SMS');
+  if (needsEmail) await engine.sendOtp(draft.challengeId, 'EMAIL');
+  await engine.approve(draft.challengeId, {
+    smsCode: t.sms.latestCode(draft.investor.mobile) ?? '',
+    ...(needsEmail ? { emailCode: t.email.latestCode(draft.investor.email) ?? '' } : {}),
+  });
+  const job = [...enqueued].reverse().find((j) => j.name === 'mandates.submit');
+  expect(job, 'approve enqueues mandates.submit').toBeDefined();
+  return job?.data as ConsentApprovedJobData;
+}
+
+const mandateOf = async (id: string) => (await t.db.db.select().from(mandates).where(eq(mandates.id, id)))[0];
+
+describe('eNACH mandate', () => {
+  it('E_MANDATE at the ladder limit; the token_url is stored encrypted and surfaced as authUrl, never upiUri', async () => {
+    const draft = await draftEnach('2000.00');
+    expect(await mandateOf(draft.mandateId)).toMatchObject({ rail: 'ENACH', limitAmount: '100000.00' });
+    await t.app.get(MandatesSubmitJob).handle(jobOf('mandates.submit', await approve(draft)));
+
+    const mandate = await mandateOf(draft.mandateId);
+    expect(mandate).toMatchObject({ status: 'AUTH_PENDING', upiUri: null });
+    expect(mandate?.authUrlEnc).toBeInstanceOf(Buffer);
+    expect(t.fakeFp.state.mandates.get(Number(mandate?.fpMandateId))?.raw).toMatchObject({ mandate_type: 'E_MANDATE', mandate_limit: 100000 });
+    expect(t.app.get(MandatesService).authUrlOf(mandate as NonNullable<typeof mandate>)).toBe(
+      `https://pg.fake.local/emandate/${mandate?.mandateRef}`,
+    );
+  });
+
+  it('sizes a new eNACH mandate at 1.5x the live SIPs on the same bank: 60,000 + 40,001 -> ₹2,00,000', async () => {
+    const first = await draftEnach('60000.00');
+    expect((await mandateOf(first.mandateId))?.limitAmount).toBe('100000.00');
+    const second = await draftEnach('40001.00', first.investor);
+    expect(second.newMandate).toBe(true);
+    expect((await mandateOf(second.mandateId))?.limitAmount).toBe('200000.00');
+  });
+
+  it('above the top rung -> MANDATE_LIMIT_EXCEEDED', async () => {
+    await expect(draftEnach('1700000.00')).rejects.toMatchObject({ code: 'MANDATE_LIMIT_EXCEEDED' });
+  });
+});
+```
+
+- [ ] **Step 2: Run them to confirm they fail**
+
+```
+pnpm --filter=@sanchay/domain test -- mandate-ladder
+pnpm --filter=@sanchay/api test -- sip-eligibility fp-plan
+pnpm --filter=@sanchay/contract test -- plans
+pnpm --filter=@sanchay/api test:int -- mandate-enach
+```
+Expected:
+- `Cannot find module '../src/rules/mandate-ladder.js'`.
+- `tokenUrlOf` is not exported.
+- The `rail` assertions fail (`undefined`, and the `strictObject` refuses the key).
+- The integration test fails typecheck on `rail` and `authUrlOf`.
+
+- [ ] **Step 3: Minimal implementation**
+
+`packages/domain/src/rules/mandate-ladder.ts`:
+```ts
+import { Money, Rounding } from '@sanchay/money';
+
+/** eNACH limit rungs (spec §4.3); the `mandates_limit_ck` CHECK allows exactly these. */
+export const MANDATE_LIMIT_LADDER: readonly Money[] = ['100000.00', '200000.00', '500000.00', '1000000.00', '2500000.00'].map((v) =>
+  Money.parse(v),
+);
+
+/**
+ * Smallest rung ≥ 1.5 × `required` (the monthly SIPs the mandate must carry), or null above the top rung.
+ * The product is truncated to money scale: only DOWN keeps 66,666.67 in the ₹1,00,000 rung (ML-02).
+ */
+export function mandateLimitFor(required: Money): Money | null {
+  const needed = required.multiply('1.5', Rounding.DOWN);
+  return MANDATE_LIMIT_LADDER.find((rung) => rung.gte(needed)) ?? null;
+}
+```
+Append to `packages/domain/src/rules/index.ts`: `export * from './mandate-ladder.js';`.
+
+`apps/api/src/modules/plans/plans.schema.ts` (in `mandates`, after `upiUri`; add `bytea` to the `app-schema.js` import):
+```ts
+    /** eNACH `token_url`, encrypted (AAD mandates.auth_url_enc.<id>); null for UPI. */
+    authUrlEnc: bytea('auth_url_enc'),
+```
+
+`apps/api/src/modules/plans/fp-plan.ts` (append):
+```ts
+/** `POST /api/pg/payments/emandate/auth` for E_MANDATE returns the bank page in `token_url`. */
+export function tokenUrlOf(raw: Record<string, unknown>): string | null {
+  return typeof raw.token_url === 'string' ? raw.token_url : null;
+}
+```
+
+`apps/api/src/modules/plans/sip-eligibility.ts`:
+- Add `import type { MandateRail } from '@sanchay/domain';`.
+- Change `assertSipEligible`'s input type to `{ scheme: SipScheme; amount: Money; installmentDay: number; rail?: MandateRail }`.
+- Replace its last line:
+```ts
+  // The UPI Autopay mandate is fixed at ₹1,00,000; an eNACH mandate is sized by the ladder instead (F3).
+  if ((input.rail ?? 'UPI_AUTOPAY') === 'UPI_AUTOPAY' && amount.gt(UPI_AUTOPAY_LIMIT)) {
+    throw new AppError('MANDATE_LIMIT_EXCEEDED', field('amount', 'MANDATE_LIMIT_EXCEEDED'));
+  }
+```
+
+`apps/api/src/modules/plans/sip.service.ts`:
+- Imports: add `type MandateRail` and `mandateLimitFor` to the `@sanchay/domain` import.
+- `CreateSipInput` gains `rail: MandateRail;`.
+- `createSip` passes the rail to the eligibility check: `assertSipEligible({ scheme: sip, amount, installmentDay: input.installmentDay, rail: input.rail });`.
+- Inside the transaction, replace everything from `const reused = …` down to the end of the `if (newMandate) { … }` insert block with:
+```ts
+      const reused = await this.mandateWithHeadroom(tx, input.investorId, input.rail, amount, now);
+      const newMandate = reused === null;
+      const mandateId = reused ?? newId('mandates');
+      let limitWire: string | null = null;
+      if (newMandate) {
+        limitWire = input.rail === 'UPI_AUTOPAY' ? UPI_AUTOPAY_LIMIT_WIRE : await this.enachLimit(tx, input.investorId, bank.id, amount, now);
+        await tx.insert(mandates).values({
+          id: mandateId,
+          createdBy: input.investorId,
+          updatedBy: input.investorId,
+          investorId: input.investorId,
+          bankAccountId: bank.id,
+          rail: input.rail,
+          limitAmount: limitWire,
+        });
+        await tx.insert(orderEvents).values({ mandateId, toStatus: 'CONSENT_PENDING', trigger: 'plans.createSip' });
+      }
+```
+- In the consent `fields`, replace `mandateLimit: UPI_AUTOPAY_LIMIT_WIRE,` with `...(limitWire === null ? {} : { mandateLimit: limitWire }),`.
+- Replace `mandateWithHeadroom` and add `livePlans`/`enachLimit`:
+```ts
+  /** Plans whose amount counts against a mandate: live states, plus CONSENT_PENDING drafts still approvable. */
+  private livePlans(now: Date) {
+    const freshSince = new Date(now.getTime() - CHALLENGE_EXPIRY_MS);
+    return or(inArray(plans.status, HEADROOM_STATUSES), and(eq(plans.status, 'CONSENT_PENDING'), gt(plans.createdAt, freshSince)));
+  }
+
+  /** The investor's APPROVED mandate on `rail` with room for `amount`, oldest first; null when none. */
+  private async mandateWithHeadroom(exec: DbExecutor, investorId: string, rail: MandateRail, amount: Money, now: Date): Promise<string | null> {
+    const approved = await exec
+      .select({ id: mandates.id, limitAmount: mandates.limitAmount })
+      .from(mandates)
+      .where(and(eq(mandates.investorId, investorId), eq(mandates.rail, rail), eq(mandates.status, 'APPROVED')))
+      .orderBy(asc(mandates.createdAt));
+    for (const mandate of approved) {
+      const [used] = await exec
+        .select({ total: sql<string>`COALESCE(SUM(${plans.amount}), 0)::numeric(18,2)::text` })
+        .from(plans)
+        .where(and(eq(plans.mandateId, mandate.id), this.livePlans(now)));
+      if (!Money.parse(used?.total ?? '0.00').add(amount).gt(Money.parse(mandate.limitAmount))) return mandate.id;
+    }
+    return null;
+  }
+
+  /** eNACH ladder (spec §4.3): ≥ 1.5 × every live SIP on this bank's mandates plus this one. */
+  private async enachLimit(exec: DbExecutor, investorId: string, bankAccountId: string, amount: Money, now: Date): Promise<string> {
+    const [onBank] = await exec
+      .select({ total: sql<string>`COALESCE(SUM(${plans.amount}), 0)::numeric(18,2)::text` })
+      .from(plans)
+      .innerJoin(mandates, eq(plans.mandateId, mandates.id))
+      .where(and(eq(plans.investorId, investorId), eq(mandates.bankAccountId, bankAccountId), this.livePlans(now)));
+    const limit = mandateLimitFor(Money.parse(onBank?.total ?? '0.00').add(amount));
+    if (limit === null) throw new AppError('MANDATE_LIMIT_EXCEEDED', { fields: [{ path: 'amount', code: 'MANDATE_LIMIT_EXCEEDED', message: 'MANDATE_LIMIT_EXCEEDED' }] });
+    return limit.toWire();
+  }
+```
+
+`apps/api/src/modules/plans/mandates-submit.job.ts`:
+- Imports: add `import { Crypto } from '../platform/crypto.js';`, `asRowId` from `../platform/ids.js`, and `tokenUrlOf` next to `upiUriOf`.
+- Constructor: add `@Inject(Crypto) private readonly crypto: Crypto,`.
+- Replace the tail of the `useConsumed` callback, from `const upiUri = …` to the end of its `if/else`:
+```ts
+        const auth = await this.fp.authoriseMandate({ mandateId: String(current.fpMandateId), mandateType }, consumed);
+        const tokenUrl = tokenUrlOf(auth);
+        const intent =
+          mandateType === 'UPI'
+            ? { upiUri: upiUriOf(auth) }
+            : {
+                authUrlEnc:
+                  tokenUrl === null
+                    ? null
+                    : this.crypto.encrypt(tokenUrl, { table: 'mandates', column: 'auth_url_enc', rowId: asRowId('mandates', current.id) }),
+              };
+        if (current.status === 'CREATED') {
+          await moveMandate(db, current, 'AUTH_PENDING', 'emandate_auth_created', intent);
+        } else {
+          await db.update(mandates).set(intent).where(eq(mandates.id, current.id)); // re-authorise: same state, new intent
+        }
+```
+
+`apps/api/src/modules/plans/mandates.service.ts`:
+- Add `import { Crypto } from '../platform/crypto.js';` and `import { asRowId } from '../platform/ids.js';`.
+- Constructor: add `@Inject(Crypto) private readonly crypto: Crypto,`.
+- Add the method:
+```ts
+  /** The eNACH bank page to open; only while the mandate waits for the investor. */
+  authUrlOf(row: typeof mandates.$inferSelect): string | null {
+    if (row.rail !== 'ENACH' || row.status !== 'AUTH_PENDING' || row.authUrlEnc === null) return null;
+    return this.crypto.decrypt(row.authUrlEnc, { table: 'mandates', column: 'auth_url_enc', rowId: asRowId('mandates', row.id) });
+  }
+```
+
+`apps/api/src/modules/plans/mandates.router.ts`:
+- Change `toWire` to take the decrypted URL: `const toWire = (row: typeof mandates.$inferSelect, authUrl: string | null) => ({ …, authUrl, … })`, adding `authUrl` after `upiUri`.
+- Call sites become `toWire(row, this.mandatesService.authUrlOf(row))`: in `list`, `.map((row) => toWire(row, this.mandatesService.authUrlOf(row)))`; in `get`, bind the row first.
+
+`packages/contract/src/plans.ts` (`CreateSipInputSchema`, after `numberOfInstalments`):
+```ts
+  rail: z.enum(['UPI_AUTOPAY', 'ENACH']).default('UPI_AUTOPAY'),
+```
+
+`packages/contract/src/mandates.ts` (`MandateSchema`, after `upiUri`):
+```ts
+  /** The eNACH bank page to open, present only for ENACH while AUTH_PENDING. */
+  authUrl: z.string().nullable(),
+```
+
+Update F2's callers:
+- `sip-mandate.int.test.ts`'s `draftSip` passes `rail: 'UPI_AUTOPAY'`.
+- `PlansRouter.createSip` already spreads `input`, so it passes the parsed `rail`.
+
+- [ ] **Step 4: Run tests to confirm they pass**
+
+```
+pnpm --filter=@sanchay/api db:generate --name=mandates_auth_url
+pnpm --filter=@sanchay/domain test -- mandate-ladder
+pnpm --filter=@sanchay/api typecheck
+pnpm --filter=@sanchay/api test -- sip-eligibility fp-plan
+pnpm --filter=@sanchay/contract test -- plans
+pnpm --filter=@sanchay/api test:int -- mandate-enach sip-mandate
+pnpm --filter=@sanchay/api openapi
+git diff --exit-code apps/api/openapi.json
+```
+Expected:
+- `mandate-ladder` 8/8.
+- `sip-eligibility` 9/9 and `fp-plan` 4/4.
+- Contract `plans` 4/4.
+- `mandate-enach` 3/3 and `sip-mandate` still 17/17.
+- `openapi.json` is clean after regeneration.
+
+- [ ] **Step 5: Commit**
+
+```
+pnpm exec biome check --write packages/domain/src/rules packages/domain/test/mandate-ladder.test.ts apps/api/src/modules/plans apps/api/test/int/mandate-enach.int.test.ts apps/api/test/int/sip-mandate.int.test.ts packages/contract/src
+pnpm --filter=@sanchay/api typecheck
+pnpm --filter=@sanchay/api test:int -- mandate-enach sip-mandate
+pnpm lint
+git add packages/domain/src/rules packages/domain/test/mandate-ladder.test.ts apps/api/src/modules/plans apps/api/drizzle apps/api/openapi.json apps/api/test/int/mandate-enach.int.test.ts apps/api/test/int/sip-mandate.int.test.ts packages/contract/src
+git commit -m "feat(api): eNACH mandate rail and limit ladder (F3, T6)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
