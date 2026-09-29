@@ -63,6 +63,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-10: FakeFp uses the app clock.** `FakeFp`'s call log is stamped by an injected `now` (the app `Clock` in `FpModule`, `Date.now` by default), so Plan 03's consent-first assertion compares like with like.
 - **RV-02-11: invite gate in tests.** D7 defaulted `SANCHAY_PILOT_INVITE_ONLY` to `true` without touching `testEnv`, which would 403 every existing sign-in test and the web e2e. `testEnv` and `.env.example` now set it `false`; the schema default stays `true`.
 - **RV-02-12: one creator for `packages/test-fixtures`.** D9 creates the full package shell (the repo's `node-lib` tsconfig pattern, `vitest run --passWithNoTests`, an empty barrel); Plan 03's golden-vector tasks only add files and barrel exports. `Jobs.enqueue` builds its pg-boss options without explicit `undefined`s (`exactOptionalPropertyTypes`).
+- **RV-02-13: ORDER machine.** FP can fail a purchase straight out of review (custom checkout: `under_review` → `pending` or `failed`), so D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`); Plan 03 E20 uses it.
 - **RV-02-8: `Jobs` is injectable.** D2's `Jobs` is an `@Injectable()` service exported by the global `JobsModule`, with an instance `enqueue(exec, name, data, opts)`. It was static; every consumer (D6 `Notify`, D9, and Plan 03/04) injects it, and unit tests stub it. D6 used `JOB_NAMES.NOTIFICATIONS_SEND`, which never existed; job names are dotted string literals checked against `JobName`.
 
 **Verify at execution time (not changed here):**
@@ -5153,6 +5154,7 @@ export const ORDER_TRANSITIONS: readonly Transition<OrderStatus>[] = [
   { from: 'SUBMITTING', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'UNDER_REVIEW', to: 'CONFIRMING', trigger: 'fp_pending' },
   { from: 'UNDER_REVIEW', to: 'CONSENT_EXPIRED', trigger: 'saga_expired_under_review' },
+  { from: 'UNDER_REVIEW', to: 'REJECTED', trigger: 'fp_review_failed' },
   { from: 'UNDER_REVIEW', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'CONFIRMING', to: 'AWAITING_PAYMENT', trigger: 'fp_submitted_redirect' },
   { from: 'CONFIRMING', to: 'PROCESSING', trigger: 'fp_confirmed_submitted' },
