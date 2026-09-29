@@ -60,6 +60,9 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-6: D10 used an invented FP shape.** D10 shadowed D3's `FpRead` with a local interface, and its thresholds shape (`{kind:'purchase', min, max, multiple}`) does not exist in Cybrilla's API. It now uses D3's `FpRead` and reads `raw.thresholds[]` per `docs/research/fp-api.md` §8A. Money goes through `fpJson.money`, and `schemePlans` is paged. A unit test pins the parsing.
 - **RV-02-7: dependency pins.** See "New dependencies" above.
 - **RV-02-9: schedules and handler shape.** `identity.cleanup` (described as hourly) had no schedule; D2 now registers it, and D9 appends to the body. Every handler is `handle(job: Job<N>)` and reads `job.data` (D6 took the payload directly).
+- **RV-02-10: FakeFp uses the app clock.** `FakeFp`'s call log is stamped by an injected `now` (the app `Clock` in `FpModule`, `Date.now` by default), so Plan 03's consent-first assertion compares like with like.
+- **RV-02-11: invite gate in tests.** D7 defaulted `SANCHAY_PILOT_INVITE_ONLY` to `true` without touching `testEnv`, which would 403 every existing sign-in test and the web e2e. `testEnv` and `.env.example` now set it `false`; the schema default stays `true`.
+- **RV-02-12: one creator for `packages/test-fixtures`.** D9 creates the full package shell (the repo's `node-lib` tsconfig pattern, `vitest run --passWithNoTests`, an empty barrel); Plan 03's golden-vector tasks only add files and barrel exports. `Jobs.enqueue` builds its pg-boss options without explicit `undefined`s (`exactOptionalPropertyTypes`).
 - **RV-02-8: `Jobs` is injectable.** D2's `Jobs` is an `@Injectable()` service exported by the global `JobsModule`, with an instance `enqueue(exec, name, data, opts)`. It was static; every consumer (D6 `Notify`, D9, and Plan 03/04) injects it, and unit tests stub it. D6 used `JOB_NAMES.NOTIFICATIONS_SEND`, which never existed; job names are dotted string literals checked against `JobName`.
 
 **Verify at execution time (not changed here):**
@@ -1168,9 +1171,9 @@ export class Jobs {
     if (activeBoss === undefined) throw new Error('Jobs.enqueue called before JobsService started pg-boss');
     await activeBoss.send(name, (data ?? {}) as object, {
       db: drizzleAdapter(exec),
-      singletonKey: opts.singletonKey,
-      startAfter: opts.startAfter,
       retryLimit: opts.retryLimit ?? 3,
+      ...(opts.singletonKey === undefined ? {} : { singletonKey: opts.singletonKey }),
+      ...(opts.startAfter === undefined ? {} : { startAfter: opts.startAfter }),
     });
   }
 }
@@ -3954,7 +3957,11 @@ export class FakeFp {
   private readonly scripts = new Map<FpOperationKey, FakeFpScript>();
   private webhookQueue: unknown[] = [];
 
-  constructor(private readonly baseUrls: FpBaseUrls) {
+  /** `now` stamps the call log; FpModule passes the app Clock so tests can compare it with consent timestamps. */
+  constructor(
+    private readonly baseUrls: FpBaseUrls,
+    private readonly now: () => number = Date.now,
+  ) {
     this.agent = new MockAgent();
     this.agent.disableNetConnect();
     this.wireTokenEndpoints();
@@ -4049,7 +4056,7 @@ export class FakeFp {
     }
 
     const result = this.route(op, params, body, url.searchParams);
-    this.callLog.push({ op, class: definition.class, at: Date.now() });
+    this.callLog.push({ op, class: definition.class, at: this.now() });
 
     const script = this.scripts.get(op);
     if (script === undefined) return result;
@@ -4198,7 +4205,7 @@ export class FakeFp {
 }
 ```
 
-**`apps/api/src/integrations/fp/fp.module.ts`** (modify — the only change from D3's Step 3 version is that `FakeFp` now resolves to a real file; the import line already reads `import { FakeFp } from './fake/fake-fp.js';` and needs no edit).
+**`apps/api/src/integrations/fp/fp.module.ts`** (modify — see "D4 Step 3 addendum" below: fake mode provides `FakeFp` and uses its `MockAgent`).
 
 **`apps/api/test/int/fake-fp.ts`:**
 
@@ -4798,11 +4805,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 **D4 Step 3 addendum: `apps/api/src/integrations/fp/fp.module.ts`** (edit D3's file: add the import, then replace the `FP_DISPATCHER` provider and the `exports` line):
 
 ```ts
+import { CLOCK, type Clock } from '../../modules/platform/clock.js';
 import { FakeFp } from './fake/fake-fp.js';
 // ...D3's other imports unchanged (MockAgent is no longer used; remove it from the undici import)...
 
       providers: [
-        ...(isFake ? [{ provide: FakeFp, useFactory: () => new FakeFp(baseUrls) }] : []),
+        ...(isFake
+          ? [{ provide: FakeFp, inject: [CLOCK], useFactory: (clock: Clock) => new FakeFp(baseUrls, () => clock.now().getTime()) }]
+          : []),
         {
           provide: FP_DISPATCHER,
           inject: isFake ? [FakeFp] : [],
@@ -6921,7 +6931,7 @@ If gitleaks flags anything in the throwaway `test-auth-key`/`test-app-key`-style
 
 **Files:**
 - Create: `apps/api/src/modules/identity/pilot-invites.schema.ts`, `apps/api/src/modules/identity/pilot-invites.service.ts`, `apps/api/src/cli/ops-invite.ts`, `apps/api/drizzle/0008_pilot_invites.sql`, `apps/api/src/modules/identity/pilot-invites.service.test.ts`, `apps/api/test/int/pilot-invites.int.test.ts`
-- Modify: `apps/api/src/modules/identity/auth.service.ts`, `apps/api/src/modules/identity/identity.module.ts`, `apps/api/src/modules/platform/ids.ts`, `apps/api/src/modules/platform/audit.service.ts`, `apps/api/src/db/schema.ts`, `apps/api/src/config/env.ts`, `apps/api/.env.example`, `package.json` (root), `apps/api/package.json`
+- Modify: `apps/api/src/modules/identity/auth.service.ts`, `apps/api/src/modules/identity/identity.module.ts`, `apps/api/src/modules/platform/ids.ts`, `apps/api/src/modules/platform/audit.service.ts`, `apps/api/src/db/schema.ts`, `apps/api/src/config/env.ts`, `apps/api/.env.example`, `apps/api/test/int/env.ts` (`testEnv` gains `SANCHAY_PILOT_INVITE_ONLY: 'false'` so every existing sign-in test keeps creating fresh investors; D7's own tests pass `'true'`), `package.json` (root), `apps/api/package.json`
 
 **Interfaces:**
 - Prerequisites: D6 (this task's `auth.service.ts` edit lands on top of D6's, since both touch `verifyLoginOtp`).
@@ -7549,8 +7559,14 @@ export class IdentityModule {}
 
 `apps/api/.env.example` (modify — append):
 ```
-# invite-only pilot gate (D7); false is refused in prod until P2 (boot invariant 10)
-SANCHAY_PILOT_INVITE_ONLY=true
+# invite-only pilot gate (D7). The schema default is true; local dev and the web e2e sign up fresh
+# numbers, so the local example turns it off. false is refused in prod until P2 (boot invariant 10).
+SANCHAY_PILOT_INVITE_ONLY=false
+```
+
+`apps/api/test/int/env.ts` (modify — add to `testEnv`'s defaults, next to `SANCHAY_PROVIDER_MODE_EMAIL`):
+```ts
+    SANCHAY_PILOT_INVITE_ONLY: 'false',
 ```
 
 `apps/api/drizzle/0008_pilot_invites.sql` (generated by `pnpm --filter=@sanchay/api db:generate --name=pilot_invites`; shown here for review, matching `0002_identity.sql`'s generated style):
@@ -7600,7 +7616,7 @@ pnpm --filter=@sanchay/api test -- pilot-invites.service.test.ts
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test:int -- pilot-invites.int.test.ts
 pnpm lint
-git add apps/api/src/modules/identity apps/api/src/cli/ops-invite.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/config/env.ts apps/api/.env.example apps/api/drizzle apps/api/test/int/pilot-invites.int.test.ts apps/api/package.json package.json
+git add apps/api/src/modules/identity apps/api/src/cli/ops-invite.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/config/env.ts apps/api/.env.example apps/api/drizzle apps/api/test/int/pilot-invites.int.test.ts apps/api/test/int/env.ts apps/api/package.json package.json
 git commit -m "feat(api): add invite-only pilot gate before new-investor creation" -m "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands, then re-add and re-commit.
@@ -8576,7 +8592,7 @@ git commit -m "feat(catalogue): add catalogue schema, seed data and ops:catalogu
 ### Task D9: AMFI NAVAll parser port, `nav.sync.daily`, history backfill, `ops:nav-release` (Dev B, 10 h)
 
 **Files (create):**
-- `packages/test-fixtures/package.json`, `packages/test-fixtures/src/amfi/navall-daily.txt`, `packages/test-fixtures/src/amfi/navall-history.txt`
+- `packages/test-fixtures/{package.json, tsconfig.json, tsconfig.build.json, vitest.config.ts, src/index.ts}` (the package shell; **D9 is the only task that creates these**, and later tasks add golden files and barrel exports only), `packages/test-fixtures/src/amfi/navall-daily.txt`, `packages/test-fixtures/src/amfi/navall-history.txt`
 - `apps/api/src/integrations/amfi/{amfi-nav-parser.ts, amfi-nav-parser.test.ts, amfi-client.ts, nav-floors.ts}`
 - `apps/api/src/modules/catalogue/nav/{nav.service.ts, nav-sync.job.ts, nav-history-backfill.ts}`
 - `apps/api/src/modules/catalogue/catalogue.module.ts` (RV-02-5: registers `NavSyncJob`; D10 extends it)
@@ -8601,15 +8617,80 @@ git commit -m "feat(catalogue): add catalogue schema, seed data and ops:catalogu
 
 - [ ] **Step 1: Write the failing test**
 
-`packages/test-fixtures/package.json`:
+`packages/test-fixtures/package.json` (the package shell every later golden-vector task extends; consumers import typed fixtures from the `@sanchay/test-fixtures` barrel and add it as a `workspace:*` devDependency):
 
 ```json
 {
   "name": "@sanchay/test-fixtures",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@sanchay/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
 }
+```
+
+`packages/test-fixtures/tsconfig.json`:
+
+```json
+{
+  "extends": "@sanchay/config/tsconfig/node-lib.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test"]
+}
+```
+
+`packages/test-fixtures/tsconfig.build.json`:
+
+```json
+{
+  "extends": "@sanchay/config/tsconfig/node-lib-build.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "resolveJsonModule": true
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/test-fixtures/vitest.config.ts`:
+
+```typescript
+import { baseTestConfig } from '@sanchay/config/vitest';
+import { defineConfig, mergeConfig } from 'vitest/config';
+
+export default mergeConfig(baseTestConfig, defineConfig({ test: {} }));
+```
+
+`packages/test-fixtures/src/index.ts` (empty barrel; Plan 03 tasks append their exports):
+
+```ts
+export {};
 ```
 
 `packages/test-fixtures/src/amfi/navall-daily.txt` (real AMFI-published values, per the v1 test's own comment that these are the NAVs AMFI actually published for these ISINs on 24-Aug-2026):
@@ -9486,12 +9567,13 @@ Expected: all 30 parser cases and both NAV-sync/grade integration tests pass; `t
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write apps/api/src/integrations/amfi apps/api/src/modules/catalogue/nav apps/api/src/cli/ops-nav-backfill.ts apps/api/src/cli/ops-nav-release.ts apps/api/test/int/nav-sync.int.test.ts apps/api/src/modules/platform/jobs/schedules.ts packages/test-fixtures apps/api/package.json package.json
+pnpm install
+pnpm exec biome check --write apps/api/src/integrations/amfi apps/api/src/modules/catalogue/nav apps/api/src/modules/catalogue/catalogue.module.ts apps/api/src/app.module.ts apps/api/src/cli/ops-nav-backfill.ts apps/api/src/cli/ops-nav-release.ts apps/api/test/int/nav-sync.int.test.ts apps/api/src/modules/platform/jobs/schedules.ts packages/test-fixtures apps/api/package.json package.json
 pnpm --filter=@sanchay/api test -- amfi-nav-parser
 pnpm --filter=@sanchay/api test:int -- nav-sync
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
-git add apps/api/src/integrations/amfi apps/api/src/modules/catalogue/nav apps/api/src/cli/ops-nav-backfill.ts apps/api/src/cli/ops-nav-release.ts apps/api/test/int/nav-sync.int.test.ts apps/api/src/modules/platform/jobs/schedules.ts packages/test-fixtures apps/api/package.json package.json
+git add apps/api/src/integrations/amfi apps/api/src/modules/catalogue/nav apps/api/src/modules/catalogue/catalogue.module.ts apps/api/src/app.module.ts apps/api/src/cli/ops-nav-backfill.ts apps/api/src/cli/ops-nav-release.ts apps/api/test/int/nav-sync.int.test.ts apps/api/src/modules/platform/jobs/schedules.ts packages/test-fixtures pnpm-lock.yaml apps/api/package.json package.json
 git commit -m "feat(catalogue): port AMFI NAV parser, add nav.sync.daily and NAV ops CLIs" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
