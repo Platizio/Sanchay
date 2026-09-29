@@ -3030,6 +3030,7 @@ git commit -m "feat(legal-consent): sanchay.consent.v2 snapshot, JCS hashing and
 - Consumes (Plan 02, as built): `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler`, `type Job<N>`, `type JobName` (`jobs/job-registry.ts`; `consent.expiry.sweep` and `drafts.abandon` are already in `JOB_NAMES`), `registerSchedules` (`jobs/schedules.ts`); `type ConsumedConsent`, `assertConsumed` (D3, `apps/api/src/integrations/fp/consumed-consent.ts`); `CHALLENGE_STATUSES`, `type ChallengeStatus` (D5, `@sanchay/domain`); `bootFpTestApp`, `type FpTestApp`, `FakeFp.calls()` (D4, `apps/api/test/int/fake-fp.ts`; call-log `at` is stamped from the app `Clock`); `AppConfig` (Plan 01).
 - Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
 - Review fix (Plan 02 as built): `ConsumedConsent`/`assertConsumed` come from D3 and `CHALLENGE_STATUSES` from D5; there are no local copies. `useConsumed` mints the D3 brand (`subjectIds` are the subject row ids) and checks it with `assertConsumed`. It refuses unless `SANCHAY_APP_ROLE === 'worker'` (from `AppConfig`), replacing the draft's `asWorker()` object-copy.
+- Review fix: `ConsentRouter` uses Plan 01's `@Controller` + `@Implement` pattern (the draft's `implement(...).router(...)` object on an `@Injectable` would never have been mounted), checks that every challenge belongs to the signed-in investor (the draft let any investor read, send, approve or cancel any challenge), and applies `requireIdempotency(idem, cls)` to `cancel` (the draft called it with no arguments).
 - Review fix: both sweeps are `@JobHandler` classes whose `handle(job)` calls `run()`, scheduled through `registerSchedules` (`consent.expiry.sweep` `*/5 * * * *`, `drafts.abandon` `0 * * * *`). `LegalConsentModule` injects real tokens (`DB`, `CLOCK`, `Crypto`, `OtpService` from `IdentityModule`, the global `Jobs`), not string tokens and not a no-op `JOBS`. Tests boot the worker app with FakeFp and spy on the injected `Jobs`.
 - Review fix: one shared `consent.approved` queue cannot fan out; pg-boss hands each job to exactly one worker. `approve` therefore enqueues the job registered for the challenge's subject type in `CONSENT_SUBJECT_JOBS`, or nothing when none is registered. The registering file must be loaded in the **api** role too, since `approve` runs in the request.
 
@@ -4256,60 +4257,95 @@ export const contract = { health: healthContract, auth: authContract, me: meCont
 export type Contract = typeof contract;
 ```
 
-`apps/api/src/modules/legal-consent/consent.router.ts`:
+`apps/api/src/modules/legal-consent/consent.router.ts` (Plan 01's `@Controller` + `@Implement` pattern; every procedure first proves the challenge belongs to the signed-in investor, so a foreign id is 404, never readable or actionable):
 ```ts
-import { Inject, Injectable } from '@nestjs/common';
-import { implement } from '@orpc/server';
+import { Controller, Inject } from '@nestjs/common';
+import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
+import { and, eq } from 'drizzle-orm';
+import { ClsService } from 'nestjs-cls';
+import { DB, type DbHandle } from '../../db/client.js';
+import { requireAuth } from '../identity/request-auth.js';
+import { AppError } from '../platform/errors.js';
 import { requireIdempotency } from '../platform/idempotency.middleware.js';
+import { IdempotencyService } from '../platform/idempotency.service.js';
+import type { SanchayClsStore } from '../platform/request-context.js';
 import { ConsentEngine } from './consent-engine.js';
 import { consentChallenges } from './legal-consent.schema.js';
-import { DB, type DbHandle } from '../../db/client.js';
-import { eq } from 'drizzle-orm';
-import { AppError } from '../platform/errors.js';
 
-const os = implement(contract.consents);
-
-@Injectable()
+@Controller()
 export class ConsentRouter {
   constructor(
     @Inject(ConsentEngine) private readonly engine: ConsentEngine,
     @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(IdempotencyService) private readonly idem: IdempotencyService,
+    @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
-  router = os.router({
-    getChallenge: os.getChallenge.handler(async ({ input }) => {
-      const [row] = await this.dbh.db
-        .select()
-        .from(consentChallenges)
-        .where(eq(consentChallenges.id, input.id))
-        .limit(1);
-      if (row === undefined) throw new AppError('NOT_FOUND');
+  /** BOLA: the challenge must belong to the signed-in investor. */
+  private async owned(challengeId: string) {
+    const { investorId } = requireAuth(this.cls);
+    const [row] = await this.dbh.db
+      .select()
+      .from(consentChallenges)
+      .where(and(eq(consentChallenges.id, challengeId), eq(consentChallenges.investorId, investorId)))
+      .limit(1);
+    if (row === undefined) throw new AppError('NOT_FOUND');
+    return row;
+  }
+
+  @Implement(contract.consents.getChallenge)
+  getChallenge() {
+    return implement(contract.consents.getChallenge).handler(async ({ input }) => {
+      const row = await this.owned(input.id);
       return {
         challengeId: row.id,
         status: row.status,
         requiredFactors: row.requiredFactors,
-        expiresAt: row.expiresAt,
+        expiresAt: row.expiresAt.toISOString(),
       };
-    }),
-    sendOtp: os.sendOtp.handler(async ({ input }) => {
+    });
+  }
+
+  @Implement(contract.consents.sendOtp)
+  sendOtp() {
+    return implement(contract.consents.sendOtp).handler(async ({ input }) => {
+      await this.owned(input.id);
       await this.engine.sendOtp(input.id, input.channel);
       return { ok: true as const };
-    }),
-    approve: os.approve.handler(async ({ input }) => {
+    });
+  }
+
+  @Implement(contract.consents.approve)
+  approve() {
+    return implement(contract.consents.approve).handler(async ({ input }) => {
+      await this.owned(input.id);
       const result = await this.engine.approve(input.id, {
-        smsCode: input.smsCode,
-        emailCode: input.emailCode,
+        ...(input.smsCode === undefined ? {} : { smsCode: input.smsCode }),
+        ...(input.emailCode === undefined ? {} : { emailCode: input.emailCode }),
       });
-      return result;
-    }),
-    cancel: os.cancel.use(requireIdempotency()).handler(async ({ input }) => {
-      await this.engine.cancel(this.dbh.db, input.id);
-      return { ok: true as const };
-    }),
-  });
+      return {
+        challengeId: result.challengeId,
+        executeBefore: result.executeBefore.toISOString(),
+        sagaExpiresAt: result.sagaExpiresAt.toISOString(),
+      };
+    });
+  }
+
+  /** R-20: cancel requires an Idempotency-Key (D1). */
+  @Implement(contract.consents.cancel)
+  cancel() {
+    return implement(contract.consents.cancel)
+      .use(requireIdempotency(this.idem, this.cls))
+      .handler(async ({ input }) => {
+        await this.owned(input.id);
+        await this.engine.cancel(this.dbh.db, input.id);
+        return { ok: true as const };
+      });
+  }
 }
 ```
+(If `contract.consents.approve`'s output schema above uses `Date` rather than ISO strings, keep this handler's `toISOString()` and change the schema to `InstantSchema` from `./common.js`, the Plan 01 convention for instants on the wire.)
 
 - [ ] **Step 3 (continued): the trigger migration**
 
@@ -18032,6 +18068,8 @@ import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { ClsService } from 'nestjs-cls';
 import { requireAuth } from '../identity/request-auth.js';
+import { requireIdempotency } from '../platform/idempotency.middleware.js';
+import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
 import { PurchaseService } from './purchase.service.js';
 
@@ -18050,12 +18088,13 @@ const toWire = (row: { id: string; type: string; status: string; schemeId: strin
 export class OrdersRouter {
   constructor(
     @Inject(PurchaseService) private readonly purchases: PurchaseService,
+    @Inject(IdempotencyService) private readonly idem: IdempotencyService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
   @Implement(contract.orders.createPurchase)
   createPurchase() {
-    return implement(contract.orders.createPurchase).handler(({ input }) => {
+    return implement(contract.orders.createPurchase).use(requireIdempotency(this.idem, this.cls)).handler(({ input }) => {
       const auth = requireAuth(this.cls);
       return this.purchases.createPurchase({
         ...input,
@@ -18078,11 +18117,13 @@ export class OrdersRouter {
 
   @Implement(contract.orders.cancel)
   cancel() {
-    return implement(contract.orders.cancel).handler(({ input }) => this.purchases.cancel(requireAuth(this.cls).investorId, input.id));
+    return implement(contract.orders.cancel)
+      .use(requireIdempotency(this.idem, this.cls))
+      .handler(({ input }) => this.purchases.cancel(requireAuth(this.cls).investorId, input.id));
   }
 }
 ```
-(`orders.createPurchase` and `orders.cancel` are [K]: the D1 idempotency middleware requires `Idempotency-Key` on both.)
+(`orders.createPurchase` and `orders.cancel` are [K]: `.use(requireIdempotency(idem, cls))` (D1) requires a UUID `Idempotency-Key` and replays a repeated one. Add `'IDEMPOTENCY_KEY_REQUIRED', 'IDEMPOTENCY_KEY_REUSED', 'IDEMPOTENCY_IN_PROGRESS'` to both procedures' `errorMap` in `orders.ts`.)
 
 `apps/api/src/modules/orders/orders.module.ts`:
 ```ts
