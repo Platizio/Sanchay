@@ -211,7 +211,7 @@ Name `sanchay`, `"private": true`, `"type": "module"`, engines `"node": ">=24.21
 | test:int | `turbo run test:int` | B6 |
 | db:up | `docker compose up -d postgres mailpit` | B6 |
 | db:migrate | `pnpm --filter=@sanchay/api db:migrate` | B26 |
-| e2e:web | `pnpm --filter=@sanchay/web e2e:web` | C12 |
+| e2e:web | `turbo run e2e:web --filter=@sanchay/web` | C12 |
 
 devDependencies: `@biomejs/biome`, `@sanchay/config` (`workspace:*`), `lefthook`, `turbo`, `typescript` (all `catalog:`).
 
@@ -1126,6 +1126,7 @@ export interface UseOtpLogin { step; pending; error: string|null; errorCode: str
 **`playwright.config.ts`**
 - `testDir ./e2e`, `baseURL http://localhost:3001`.
 - Projects: `desktop-chromium`, and `mobile-chromium` (Pixel 7, shell spec only).
+- `globalSetup ./e2e/global-setup.ts`: reads `.next/routes-manifest.json` and throws (`apiRewriteProblem` in `src/lib/api-rewrite.ts`) unless the build rewrites `/api/v1/:path*` to `${SANCHAY_API_ORIGIN ?? 'http://localhost:3000'}/api/v1/:path*`. The rewrite is baked in by `next build`; the `SANCHAY_API_ORIGIN` given to `next start` below cannot add it.
 - `webServer`, in order:
   1. The API: `pnpm --filter=@sanchay/api dev`, `cwd ../..`, url `${SANCHAY_API_ORIGIN ?? 'http://localhost:3000'}/api/v1/health`, timeout 180 s. Env: `{...baseEnv, PORT:'3000', SANCHAY_APP_ENV:'local', SANCHAY_APP_ORIGIN:'http://localhost:3001', SANCHAY_PROVIDER_MODE_SMS:'mailpit', SANCHAY_PROVIDER_MODE_EMAIL:'mailpit', SANCHAY_MAILPIT_URL:'http://localhost:8025', SANCHAY_OTP_PER_IP_PER_HOUR:'1000'}`. The keys come from `apps/api/.env`.
   2. The web: `pnpm start`, url `/login`. Env: `{...baseEnv, SANCHAY_PLATFORM_ARN:'ARN-000000', SANCHAY_API_ORIGIN:'http://localhost:3000'}`.
@@ -1143,10 +1144,11 @@ export interface UseOtpLogin { step; pending; error: string|null; errorCode: str
 | Purpose | Command |
 |---|---|
 | Install browser | `pnpm --filter=@sanchay/web exec playwright install chromium` |
-| Build (PowerShell) | `$env:SANCHAY_PLATFORM_ARN='ARN-000000'; $env:SANCHAY_API_ORIGIN='http://localhost:3000'; pnpm turbo run build --filter=@sanchay/web` |
-| Build (Git Bash) | `SANCHAY_PLATFORM_ARN=ARN-000000 SANCHAY_API_ORIGIN=http://localhost:3000 pnpm turbo run build --filter=@sanchay/web` |
-| Shell only | `pnpm --filter=@sanchay/web e2e:web --grep-invert "@api"` (10 tests) |
-| All | `pnpm db:up`, `pnpm db:migrate`, then `pnpm --filter=@sanchay/web e2e:web` (13 tests) |
+| Build (PowerShell) | `$env:SANCHAY_PLATFORM_ARN='ARN-000000'; $env:SANCHAY_PLATFORM_ARN_VALID_TILL='2099-12-31'; $env:SANCHAY_API_ORIGIN='http://localhost:3000'; pnpm turbo run build --filter=@sanchay/web` |
+| Build (Git Bash) | `SANCHAY_PLATFORM_ARN=ARN-000000 SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31 SANCHAY_API_ORIGIN=http://localhost:3000 pnpm turbo run build --filter=@sanchay/web` |
+| All (PowerShell) | `pnpm db:up`, `pnpm db:migrate`, then `$env:SANCHAY_PLATFORM_ARN='ARN-000000'; $env:SANCHAY_PLATFORM_ARN_VALID_TILL='2099-12-31'; $env:SANCHAY_API_ORIGIN='http://localhost:3000'; pnpm e2e:web` (13 tests; turbo rebuilds `@sanchay/web` with this env first) |
+| All (Git Bash) | `pnpm db:up`, `pnpm db:migrate`, then `SANCHAY_PLATFORM_ARN=ARN-000000 SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31 SANCHAY_API_ORIGIN=http://localhost:3000 pnpm e2e:web` (13 tests) |
+| Rerun without turbo | `pnpm --filter=@sanchay/web e2e:web` (13 tests; add `--grep-invert "@api"` for the 10 shell tests). It reuses the existing `.next`, so only after one of the builds above: `next.config.ts` bakes the `/api/v1` rewrite in at build time, and `e2e/global-setup.ts` fails fast when that build has no rewrite to `SANCHAY_API_ORIGIN`. |
 
 ### 7.6 Mobile (apps/mobile, `@sanchay/mobile`, version 0.1.0)
 
