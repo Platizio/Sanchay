@@ -142,8 +142,15 @@ E8–E10's integration tests called a nonexistent `authedRequest` and `bootTestA
 
 Their test data also uses string document versions, matching the E10 fix. The Plan 03 header's known-gaps note is corrected: Plan 01's `test/int/factories.ts` does exist, with `insertInvestor(db)`, `insertDevice` and `insertOtp`, and E14's use of it is fine.
 
-### 4.4 Plan 04 (Sprint 4 and pilot week): IN PROGRESS, surveyed only
-- **Target file:** `docs/superpowers/plans/2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md`.
+### 4.4 Plan 04 (Sprint 4 and pilot week): IN PROGRESS — F2 and F3 done
+- **File (committed, work in progress):** `docs/superpowers/plans/2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md`. A banner at the top says not to execute it yet. Its "Assembly notes" section records cross-task facts; that file is now the canonical copy (the scratchpad does not persist).
+- **Progress (2026-09-29 afternoon):**
+  - `ef7dea6`: Plan 03 E4 ConsentRouter rewritten to the `@Controller` + `@Implement` pattern, with an ownership (BOLA) check and `requireIdempotency(idem, cls)` on cancel; E20 `createPurchase`/`cancel` gain idempotency.
+  - `b92f355`: Plan 02 errata **RV-02-14** — D5 PLAN gains `UNDER_REVIEW → REJECTED | CONSENT_EXPIRED`, `CONFIRMING → REJECTED`, `SUBMITTING → REJECTED`; MANDATE gains `CONSENTED → CONSENT_EXPIRED`, `SUBMITTING → REJECTED`.
+  - `f843bbe`: Plan 04 file started — F1 (draft, not yet reviewed) and **F2 rewritten**. All SIP/mandate code lives in a new `apps/api/src/modules/plans/` module. F2 owns `firstInstalmentDate` (`packages/domain/src/rules/sip-dates.ts`) and `assertSipEligible` (`modules/plans/sip-eligibility.ts`), so **F2 runs before F10**. Migrations 0026 (`plans_mandates`) and 0027 (`plans_mandates_guard`).
+  - `cb8102a`: **F3 rewritten** on top of F2 (eNACH rail, limit ladder `mandateLimitFor` with 1.5× truncated, `mandates.auth_url_enc` in migration 0028). F2 mandate FP calls are rail-generic. **Next free migration: 0029.**
+- **F4 (ledger) — next, findings so far:** E21's `handleMfPurchaseEvent` (`modules/payments/fp-events.ts`) moves orders to `SETTLED`/`UNITS_PENDING` with no ledger hook, and F2's `plans.instalments.sync` mirrors instalment orders the same way. F4 must wire `LedgerService.applyAllotment` into both (the draft left it unwired). E20's `orders` lacks `stamp_duty`, `redeemed_units`, `redeemed_amount`, `units_pending_since` and `payout_expected_on`, and stores `allotted_nav` as numeric(18,6) and `allotted_nav_date` as text; F4 must add the missing columns in its own migration. Also fix: `@Inject(ReconBreaks)` → static; golden JSON imported by relative path; nonexistent test factories and `t.jobs.runOnce`/`t.fixtures`/`t.mail`; `FpRead.folio/holdings` do not exist yet.
+- **Original survey (still valid for F5 onward):**
 - All 28 drafts (F1–F28) are present in `.superpowers/plans-draft/plan-04/`. They have the same drift Plan 03 had. Rewrite them against Plan 02 and Plan 03 as built; the Global Constraints section at the top of the Plan 03 file is the contract.
 - **F2 (SIP and mandate):**
   - **FP calls:** it uses an invented `FpTransact.call('pg.mandates.create' | 'pg.emandate.auth' | 'mf.purchasePlans.create', …)`. Use D3's operation keys `mandate.create`, `mandateAuth.create` and `purchasePlan.create`, by filling D3's `FpTransact` stubs (`createMandate`, `authoriseMandate`, `createPurchasePlan`, `updatePurchasePlan`).
@@ -153,7 +160,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
     - With a new mandate, use `MANDATE_REGISTRATION` and map `CONSENT_SUBJECT_JOBS.MANDATE_REGISTRATION → 'mandates.submit'`.
     - With a reused mandate, use `SIP_REGISTRATION` and map `CONSENT_SUBJECT_JOBS.SIP_REGISTRATION → 'plans.sip.submit'`.
   - **Runtime config:** `@Inject(RuntimeConfig)` becomes the static `RuntimeConfig.get(exec, key)`.
-- **F3 (eNACH):** redefines F2's `MandatesSubmitJob`; merge it into F2's job.
+- **F3 (eNACH):** done (see above).
 - **F4 (ledger):**
   - `@Inject(ReconBreaks)` becomes the static `ReconBreaks.open`.
   - Schedules go inside `registerSchedules`, with `await` and a `key`.
@@ -178,7 +185,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | Apply the pending Plan 03 fix (§4.3). Rewrite and assemble Plan 04 (§4.4). Then start **Sprint 2** (Plan 02) on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude |
+| 1 | Continue Plan 04 from F4 (§4.4), then F5–F28, the header (Global Constraints, execution order, migration table, errata), a review of F1, and removing the WIP banner. Then start **Sprint 2** (Plan 02) on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
 | 4 | Create the **GitHub repo** and share its URL. There is no remote yet, and pushes happen only when the owner asks. | Owner |
@@ -197,10 +204,9 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 ## 6. Resuming in a cloud session
 
-A cloud session sees only what is in a remote repository. Today there is **no git remote**, and this file is **untracked**. Before switching:
+A cloud session sees only what is in a remote repository. Today there is **no git remote**; this file and every plan are committed on `main`. Before switching:
 1. **Create the GitHub repo** (open item 4) and add it as `origin`. Only the owner authorises pushes.
-2. **Commit this file:** `git add till_now.md` then `git commit -m "docs: progress notes"`.
-3. **Push `main`.**
+2. **Push `main`.**
 
 In the cloud session, read `AGENTS.md`, this file (§4) and then the plan headers. Nothing from the local scratchpad or `~/.claude` memory carries over; everything needed to continue is written here.
 
