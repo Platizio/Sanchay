@@ -59,6 +59,8 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-5: jobs never registered.** D9 and D10 defined `runNavSync` and `runCatalogueFpSync` but no `@JobHandler` classes, and no module registered them. D9 now adds `NavSyncJob` and creates `catalogue.module.ts`. D10 turns it into `CatalogueModule.forRoot(env)`, adding `CatalogueRouter` and, in the worker role only, `CatalogueFpSyncJob`.
 - **RV-02-6: D10 used an invented FP shape.** D10 shadowed D3's `FpRead` with a local interface, and its thresholds shape (`{kind:'purchase', min, max, multiple}`) does not exist in Cybrilla's API. It now uses D3's `FpRead` and reads `raw.thresholds[]` per `docs/research/fp-api.md` §8A. Money goes through `fpJson.money`, and `schemePlans` is paged. A unit test pins the parsing.
 - **RV-02-7: dependency pins.** See "New dependencies" above.
+- **RV-02-9: schedules and handler shape.** `identity.cleanup` (described as hourly) had no schedule; D2 now registers it, and D9 appends to the body. Every handler is `handle(job: Job<N>)` and reads `job.data` (D6 took the payload directly).
+- **RV-02-8: `Jobs` is injectable.** D2's `Jobs` is an `@Injectable()` service exported by the global `JobsModule`, with an instance `enqueue(exec, name, data, opts)`. It was static; every consumer (D6 `Notify`, D9, and Plan 03/04) injects it, and unit tests stub it. D6 used `JOB_NAMES.NOTIFICATIONS_SEND`, which never existed; job names are dotted string literals checked against `JobName`.
 
 **Verify at execution time (not changed here):**
 - `boss.createQueue` must be idempotent in pg-boss 12.34.0; the D2 integration tests boot twice.
@@ -826,7 +828,7 @@ git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBr
 - Produces:
   - `JOB_NAMES` (`job-registry.ts`): `'identity.cleanup' | 'nav.sync.daily' | 'catalogue.returns.compute' | 'catalogue.fp.sync' | 'sms.dlr.sync' | 'notifications.send' | 'consent.expiry.sweep' | 'drafts.abandon' | 'fp.event.process'`. **Deviation from outline:** the outline calls `JOB_NAMES` "a closed union of every MVP job in spec §1" and defers verification to D3's expansion; this task's Files list gives it no mandate to re-derive that full inventory from the spec, so `JOB_NAMES` here is the jobs Plan 02 itself needs (`identity.cleanup`, registered by this task) plus one forward-declared name per job the outline names for a later Plan-02/03 task (D6 `sms.dlr.sync`/`notifications.send`, D9 `nav.sync.daily`, D10 `catalogue.fp.sync`/`catalogue.returns.compute`, E1 `fp.event.process`, E4 `consent.expiry.sweep`/`drafts.abandon`). `JOB_NAMES` is append-only (same convention as `ERROR_CATALOGUE`): each later task that adds a job appends its literal to the union in the same PR that registers its handler.
   - `@JobHandler(name: JobName)` (class decorator, `job-registry.ts`): marks a provider's `handle(job)` method as the pg-boss worker for `name`, found via Nest's `DiscoveryService`.
-  - `Jobs.enqueue(exec: DbExecutor, name: JobName, data: unknown, opts?): Promise<void>` (`jobs.service.ts`, static): `opts` is `{singletonKey?, startAfter?, retryLimit?}`. **Deviation from outline:** instead of pg-boss's `db` adapter option (`{executeSql(text, values)}`) reaching into Drizzle's private driver client, `enqueue` inserts the job row directly into pg-boss's own `pgboss.job` table with Drizzle's parameterised `sql` template, using the exact same `exec: DbExecutor` (`Database | Tx`) every other write in this codebase already takes — this is atomic with a caller's `db.transaction()` for the same structural reason `auditEvents`/`idempotencyKeys` writes are, with no second, undocumented adapter surface. pg-boss's own worker loop (`boss.work()`) dequeues the row normally once it is committed.
+  - `Jobs` (`jobs.service.ts`, `@Injectable()`, provided and exported by the global `JobsModule`): `enqueue(exec: DbExecutor, name: JobName, data: unknown, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?}): Promise<void>`. It goes through pg-boss's `send(name, data, {db})` BYODB adapter on the caller's executor, so the job commits or rolls back with the caller's transaction (`startAfter` as a number is seconds, per pg-boss). Consumers inject it (`@Inject(Jobs) private readonly jobs: Jobs`) and unit tests stub it with `{ enqueue: vi.fn() }`.
   - `registerSchedules(boss: PgBoss): Promise<void>` (`schedules.ts`): the one schedule extension point, awaited by `JobsService` after the workers are registered. It starts empty; later tasks add keyed `await boss.schedule(name, cron, data, {tz: 'Asia/Kolkata', key})` calls to its body (pg-boss needs a distinct `key` for several schedules on one queue). `JobsService.onModuleInit` also calls `boss.createQueue(name)` for every `JOB_NAMES` entry (pg-boss 10+ requires a queue before `send`/`work`), and `Jobs.enqueue` goes through `boss.send(..., {db})` (pg-boss's BYODB adapter) so the job commits with the caller's transaction; it never writes `pgboss.job` directly.
   - `JobsService` (`jobs.service.ts`, `@Injectable`, provided by the new `JobsModule`, `@Global()`, imported once from `AppModule.forRoot`): owns the one process-wide `PgBoss` instance. `onModuleInit()` starts pg-boss (`migrate: false` — see the migration note below) in **every** role so `Jobs.enqueue` is callable from `api` request handlers; it registers `.work()` handlers and starts the heartbeat loop **only** when `env.SANCHAY_APP_ROLE === 'worker'`. `onApplicationShutdown()` stops the heartbeat and calls `boss.stop({graceful: true, timeout: 10_000})`.
   - `runWorker(env: Env): Promise<INestApplicationContext>` (`worker.main.ts`): `NestFactory.createApplicationContext(AppModule.forRoot(env), {bufferLogs: true})` — no Fastify adapter, so nothing ever binds a port; wires `SIGTERM` to drain.
@@ -991,41 +993,36 @@ describe('Jobs.enqueue', () => {
   it('leaves no job row when the caller transaction rolls back', async () => {
     await t.db.db
       .transaction(async (tx) => {
-        await Jobs.enqueue(tx, 'identity.cleanup', {});
+        await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', {});
         throw new Error('rollback');
       })
       .catch(() => undefined);
-    const count = await t.app.get(Jobs.constructor as never); // placeholder to keep import graph honest
-    void count;
     const rows = await t.db.pool.query(`SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'identity.cleanup'`);
     expect(rows.rows[0]?.n).toBe(0);
   });
 
   it('a job enqueued inside a committed transaction is processed once', async () => {
-    let seen = 0;
     // JobsService (worker role) already called boss.work for identity.cleanup in beforeAll's bootTestApp;
     // this test asserts the row lands and is picked up, not a second independent worker.
     await t.db.db.transaction(async (tx) => {
-      await Jobs.enqueue(tx, 'identity.cleanup', { probe: true }, { singletonKey: 'jobs-int-test' });
+      await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', { probe: true }, { singletonKey: 'jobs-int-test' });
     });
     await new Promise((r) => setTimeout(r, 500));
     const rows = await t.db.pool.query(
       `SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'identity.cleanup' AND state = 'completed'`,
     );
     expect(rows.rows[0]?.n).toBeGreaterThanOrEqual(1);
-    void seen;
   });
 
   it('singletonKey serialises jobs for the same aggregate', async () => {
     await t.db.db.transaction(async (tx) => {
-      await Jobs.enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' });
+      await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' });
     });
     await expect(
       t.db.db.transaction(async (tx) => {
-        await Jobs.enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' });
+        await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' });
       }),
-    ).resolves.not.toThrow(); // second insert with the same singletonKey is accepted by our own INSERT;
-    // pg-boss itself is the one that refuses to run two active jobs sharing a singletonKey concurrently.
+    ).resolves.not.toThrow(); // pg-boss drops the duplicate (send returns null) instead of throwing
   });
 });
 
@@ -1049,7 +1046,7 @@ describe('role gating', () => {
 
   it('the api role does not start job processing (no .work() registrations)', async () => {
     const apiApp = await bootTestApp({ env: { SANCHAY_APP_ROLE: 'api' } });
-    await Jobs.enqueue(apiApp.db.db, 'identity.cleanup', { fromApi: true }, { singletonKey: 'api-gate' });
+    await apiApp.app.get(Jobs).enqueue(apiApp.db.db, 'identity.cleanup', { fromApi: true }, { singletonKey: 'api-gate' });
     await new Promise((r) => setTimeout(r, 300));
     const rows = await apiApp.db.pool.query(
       `SELECT state FROM pgboss.job WHERE name = 'identity.cleanup' AND data->>'fromApi' = 'true'`,
@@ -1100,7 +1097,7 @@ describe('identity.cleanup', () => {
       consumedReason: 'VERIFIED',
     });
     await insertOtp(t.db.db, { purpose: 'CONSENT', expiresAt: old, consumedAt: old, consumedReason: 'VERIFIED' });
-    await Jobs.enqueue(t.db.db, 'identity.cleanup', {}, { singletonKey: 'cleanup-otp-test' });
+    await t.app.get(Jobs).enqueue(t.db.db, 'identity.cleanup', {}, { singletonKey: 'cleanup-otp-test' });
     await new Promise((r) => setTimeout(r, 500));
     const remaining = await t.db.db.select().from(otpCodes);
     expect(remaining.map((r) => r.purpose).sort()).toEqual(['CONSENT']);
@@ -1139,15 +1136,13 @@ import { registerSchedules } from './schedules.js';
 
 export interface JobsEnqueueOptions {
   singletonKey?: string;
-  startAfter?: Date;
+  startAfter?: Date | number;
   retryLimit?: number;
 }
 
 /**
- * Holds the one process-wide PgBoss instance. `Jobs.enqueue` is static (called as
- * `Jobs.enqueue(tx, name, data, opts)` from anywhere a `DbExecutor` is already in scope, the
- * same ergonomics as `ReconBreaks.open`/`newId`) and reads that instance through a module-level
- * reference `JobsService.onModuleInit()` sets, so callers never need PgBoss injected directly.
+ * Holds the one process-wide PgBoss instance, set by `JobsService.onModuleInit()`. `Jobs` is the
+ * injectable enqueue API; it reads that instance, so callers never need PgBoss injected directly.
  */
 let activeBoss: PgBoss | undefined;
 
@@ -1162,8 +1157,9 @@ function drizzleAdapter(exec: DbExecutor) {
   };
 }
 
+@Injectable()
 export class Jobs {
-  static async enqueue<N extends JobName>(
+  async enqueue<N extends JobName>(
     exec: DbExecutor,
     name: N,
     data: unknown,
@@ -1228,13 +1224,13 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
 ```ts
 import { DiscoveryModule } from '@nestjs/core';
 import { Global, Module } from '@nestjs/common';
-import { JobsService } from './jobs.service.js';
+import { Jobs, JobsService } from './jobs.service.js';
 
 @Global()
 @Module({
   imports: [DiscoveryModule],
-  providers: [JobsService],
-  exports: [JobsService],
+  providers: [JobsService, Jobs],
+  exports: [JobsService, Jobs],
 })
 export class JobsModule {}
 ```
@@ -1248,8 +1244,10 @@ import type { PgBoss } from 'pg-boss';
  * (`boss.schedule('nav.sync.daily', '30 21,23 * * *', {}, {tz: 'Asia/Kolkata'})` and three more
  * crons for the other sync times). Each later task appends its own `boss.schedule(...)` call here.
  */
-export async function registerSchedules(_boss: PgBoss): Promise<void> {
-  // No cron schedules in D2; D9 fills this body with keyed `boss.schedule(...)` calls.
+/** The single schedule extension point. Later tasks append keyed calls; pg-boss needs a distinct `key` per schedule on one queue. */
+export async function registerSchedules(boss: PgBoss): Promise<void> {
+  const tz = 'Asia/Kolkata';
+  await boss.schedule('identity.cleanup', '0 * * * *', {}, { tz, key: 'identity-cleanup' });
 }
 ```
 
@@ -5662,7 +5660,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test/typecheck co
   - `IdentityModule` (providers/exports) — `apps/api/src/modules/identity/identity.module.ts`.
   - `AppModule.forRoot` (imports array) — `apps/api/src/app.module.ts`.
   - `LEGAL_ENTITY_NAME` from `@sanchay/domain` (`packages/domain/src/legal-entity.ts`).
-  - `Jobs.enqueue(tx, name, data, opts?)`, `@JobHandler(name)`, `JOB_NAMES` (D2; no ground truth exists yet, so this task follows the D2 outline's shape verbatim).
+  - `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler(name)` with `handle(job: Job<N>)`, `JobName` (dotted string literals from `JOB_NAMES`).
 - Produces:
   - `Msg91SmsSender implements SmsSender`, `Msg91Credentials`, `Msg91CredentialsSchema`, `parseMsg91CredentialsJson`.
   - `SesEmailSender implements EmailSender`.
@@ -5893,7 +5891,9 @@ describe('NotificationsSendJob', () => {
     );
     // The pg-boss retry ladder re-invokes handle() up to retryLimit=3 times; each call re-reads the
     // delivery row's attempts and increments it. This test drives that loop directly.
-    await expect(job.handle({ notificationId: 'notif-1' })).rejects.toThrow('smtp down');
+    await expect(
+      job.handle({ id: 'job-1', name: 'notifications.send', data: { notificationId: 'notif-1' } }),
+    ).rejects.toThrow('smtp down');
   });
 });
 ```
@@ -6262,9 +6262,7 @@ import type { DbExecutor } from '../../db/client.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { newId } from '../platform/ids.js';
-// D2 ground truth is unavailable at drafting time; the import path and API shape follow the D2
-// outline verbatim ("Jobs.enqueue(tx, name: JobName, data, opts?)", "JOB_NAMES").
-import { JOB_NAMES, Jobs } from '../platform/jobs/jobs.service.js';
+import { Jobs } from '../platform/jobs/jobs.service.js';
 import { pgErrorCodeOf } from '../platform/pg-errors.js';
 import {
   type NotificationCategory,
@@ -6332,7 +6330,7 @@ export class Notify {
       if (pgErrorCodeOf(error) === '23505') return;
       throw error;
     }
-    await this.jobs.enqueue(exec, JOB_NAMES.NOTIFICATIONS_SEND, { notificationId: id });
+    await this.jobs.enqueue(exec, 'notifications.send', { notificationId: id });
   }
 }
 ```
@@ -6348,7 +6346,7 @@ import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { asRowId, newId } from '../platform/ids.js';
 // D2 ground truth is unavailable at drafting time; @JobHandler follows the D2 outline verbatim.
-import { JobHandler } from '../platform/jobs/job-registry.js';
+import { JobHandler, type Job } from '../platform/jobs/job-registry.js';
 import { notificationDeliveries, notifications } from './notifications.schema.js';
 import { renderNotification } from './templates.js';
 
@@ -6370,7 +6368,8 @@ export class NotificationsSendJob {
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
   ) {}
 
-  async handle(data: NotificationsSendJobData): Promise<void> {
+  async handle(job: Job<'notifications.send'>): Promise<void> {
+    const data = job.data as NotificationsSendJobData;
     const db = this.dbh.db;
     const [row] = await db
       .select()
@@ -9408,11 +9407,12 @@ try {
 
 **D9 Step 3 addendum (RV-02-4/5).**
 
-`apps/api/src/modules/platform/jobs/schedules.ts` (modify: replace D2's empty body):
+`apps/api/src/modules/platform/jobs/schedules.ts` (modify: append the four NAV schedules after D2's `identity.cleanup` line):
 
 ```typescript
 export async function registerSchedules(boss: PgBoss): Promise<void> {
   const tz = 'Asia/Kolkata';
+  await boss.schedule('identity.cleanup', '0 * * * *', {}, { tz, key: 'identity-cleanup' });
   await boss.schedule('nav.sync.daily', '30 21 * * *', { kind: 'DAILY_2130' }, { tz, key: 'nav-2130' });
   await boss.schedule('nav.sync.daily', '30 23 * * *', { kind: 'DAILY_2330' }, { tz, key: 'nav-2330' });
   await boss.schedule('nav.sync.daily', '0 7 * * *', { kind: 'DAILY_0700' }, { tz, key: 'nav-0700' });
@@ -9436,11 +9436,12 @@ export class NavSyncJob {
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(Jobs) private readonly jobs: Jobs,
   ) {}
 
   async handle(job: Job<'nav.sync.daily'>): Promise<void> {
     const { kind } = job.data as { kind: NavSyncDeps['kind'] };
-    await runNavSync(this.dbh.db, { client: new AmfiClient(), reconBreaks: ReconBreaks, jobs: Jobs, clock: this.clock, kind });
+    await runNavSync(this.dbh.db, { client: new AmfiClient(), reconBreaks: ReconBreaks, jobs: this.jobs, clock: this.clock, kind });
   }
 }
 ```
