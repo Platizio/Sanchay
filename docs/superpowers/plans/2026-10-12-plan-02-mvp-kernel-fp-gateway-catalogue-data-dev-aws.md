@@ -64,6 +64,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-11: invite gate in tests.** D7 defaulted `SANCHAY_PILOT_INVITE_ONLY` to `true` without touching `testEnv`, which would 403 every existing sign-in test and the web e2e. `testEnv` and `.env.example` now set it `false`; the schema default stays `true`.
 - **RV-02-12: one creator for `packages/test-fixtures`.** D9 creates the full package shell (the repo's `node-lib` tsconfig pattern, `vitest run --passWithNoTests`, an empty barrel); Plan 03's golden-vector tasks only add files and barrel exports. `Jobs.enqueue` builds its pg-boss options without explicit `undefined`s (`exactOptionalPropertyTypes`).
 - **RV-02-13: ORDER machine.** FP can fail a purchase straight out of review (custom checkout: `under_review` → `pending` or `failed`), so D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`); Plan 03 E20 uses it.
+- **RV-02-14: PLAN machine.** An ONDC purchase plan can end `failed` out of review, or be refused at the confirm `PATCH`, and the 7-day saga can lapse while FP is reviewing. D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`), `UNDER_REVIEW → CONSENT_EXPIRED` (`saga_expired_under_review`) and `CONFIRMING → REJECTED` (`fp_confirm_rejected`) and, as for orders, `SUBMITTING → REJECTED` (`live_check_failed`) for an FP 4xx on create. The MANDATE machine gains `CONSENTED → CONSENT_EXPIRED` (`execute_before_missed`: approved but never submitted in time) and `SUBMITTING → REJECTED` (`live_check_failed`). Plan 04 F2 uses them.
 - **RV-02-8: `Jobs` is injectable.** D2's `Jobs` is an `@Injectable()` service exported by the global `JobsModule`, with an instance `enqueue(exec, name, data, opts)`. It was static; every consumer (D6 `Notify`, D9, and Plan 03/04) injects it, and unit tests stub it. D6 used `JOB_NAMES.NOTIFICATIONS_SEND`, which never existed; job names are dotted string literals checked against `JobName`.
 
 **Verify at execution time (not changed here):**
@@ -4950,11 +4951,17 @@ describe('state machine registry', () => {
     expect(canTransition('PLAN', 'SUBMITTING', 'UNDER_REVIEW', 'fp_created')).toBe(true);
     expect(canTransition('PLAN', 'UNDER_REVIEW', 'CONFIRMING', 'fp_review_completed')).toBe(true);
     expect(canTransition('PLAN', 'CONFIRMING', 'ACTIVE', 'fp_submitted_active')).toBe(true);
+    expect(canTransition('PLAN', 'UNDER_REVIEW', 'REJECTED', 'fp_review_failed')).toBe(true);
+    expect(canTransition('PLAN', 'UNDER_REVIEW', 'CONSENT_EXPIRED', 'saga_expired_under_review')).toBe(true);
+    expect(canTransition('PLAN', 'CONFIRMING', 'REJECTED', 'fp_confirm_rejected')).toBe(true);
+    expect(canTransition('PLAN', 'SUBMITTING', 'REJECTED', 'live_check_failed')).toBe(true);
     expect(canTransition('PLAN', 'ACTIVE', 'CANCEL_PENDING', 'investor_plans_cancel')).toBe(true);
     expect(canTransition('PLAN', 'CANCEL_PENDING', 'CANCELLED', 'fp_cancelled')).toBe(true);
     expect(canTransition('PLAN', 'ACTIVE', 'MANDATE_REVOKED', 'fp_mandate_cancelled_external')).toBe(true);
 
     expect(canTransition('MANDATE', 'CONSENT_PENDING', 'CONSENTED', 'approve')).toBe(true);
+    expect(canTransition('MANDATE', 'CONSENTED', 'CONSENT_EXPIRED', 'execute_before_missed')).toBe(true);
+    expect(canTransition('MANDATE', 'SUBMITTING', 'REJECTED', 'live_check_failed')).toBe(true);
     expect(canTransition('MANDATE', 'CONSENTED', 'SUBMITTING', 'job_submit')).toBe(true);
     expect(canTransition('MANDATE', 'SUBMITTING', 'CREATED', 'fp_mandate_created')).toBe(true);
     expect(canTransition('MANDATE', 'CREATED', 'AUTH_PENDING', 'emandate_auth_created')).toBe(true);
@@ -5264,10 +5271,14 @@ export const PLAN_TRANSITIONS: readonly Transition<PlanStatus>[] = [
   { from: 'MANDATE_SETUP', to: 'FAILED', trigger: 'mandate_rejected_or_expired' },
   { from: 'MANDATE_SETUP', to: 'CONSENT_EXPIRED', trigger: 'seven_day_saga_no_plan_write' },
   { from: 'SUBMITTING', to: 'UNDER_REVIEW', trigger: 'fp_created' },
+  { from: 'SUBMITTING', to: 'REJECTED', trigger: 'live_check_failed' },
   { from: 'SUBMITTING', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'UNDER_REVIEW', to: 'CONFIRMING', trigger: 'fp_review_completed' },
+  { from: 'UNDER_REVIEW', to: 'REJECTED', trigger: 'fp_review_failed' },
+  { from: 'UNDER_REVIEW', to: 'CONSENT_EXPIRED', trigger: 'saga_expired_under_review' },
   { from: 'UNDER_REVIEW', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'CONFIRMING', to: 'ACTIVE', trigger: 'fp_submitted_active' },
+  { from: 'CONFIRMING', to: 'REJECTED', trigger: 'fp_confirm_rejected' },
   { from: 'CONFIRMING', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'ACTIVE', to: 'MANDATE_REVOKED', trigger: 'fp_mandate_cancelled_external' },
   { from: 'ACTIVE', to: 'CANCEL_PENDING', trigger: 'investor_plans_cancel' },
@@ -5325,7 +5336,9 @@ const MANDATE_RECONCILING_EXITS: readonly MandateStatus[] = [
 export const MANDATE_TRANSITIONS: readonly Transition<MandateStatus>[] = [
   { from: 'CONSENT_PENDING', to: 'CONSENTED', trigger: 'approve' },
   { from: 'CONSENTED', to: 'SUBMITTING', trigger: 'job_submit' },
+  { from: 'CONSENTED', to: 'CONSENT_EXPIRED', trigger: 'execute_before_missed' },
   { from: 'SUBMITTING', to: 'CREATED', trigger: 'fp_mandate_created' },
+  { from: 'SUBMITTING', to: 'REJECTED', trigger: 'live_check_failed' },
   { from: 'SUBMITTING', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'CREATED', to: 'AUTH_PENDING', trigger: 'emandate_auth_created' },
   { from: 'CREATED', to: 'RECONCILING', trigger: 'ambiguous' },
