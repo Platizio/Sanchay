@@ -1,6 +1,8 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-09-29 (afternoon). Repo: `C:\Users\pc\Desktop\sanchay`, branch `main` at `bcec8dc`. Plan 01 code is at `225d60a`; the four later commits are plan documents only._
+_Last updated: 2026-09-30. Repo: `C:UserspcDesktopsanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only._
+
+_2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
 Sanchay is Platizio's **investor-led B2C mutual-fund app for India**, replacing the old distributor-led (B2B2C) WealthTech. Investors sign up themselves, complete onboarding, browse funds by SEBI category, invest (lumpsum and SIP), redeem, and track their own portfolio: invested amount, current value, XIRR and active SIPs.
 
@@ -142,14 +144,14 @@ E8–E10's integration tests called a nonexistent `authedRequest` and `bootTestA
 
 Their test data also uses string document versions, matching the E10 fix. The Plan 03 header's known-gaps note is corrected: Plan 01's `test/int/factories.ts` does exist, with `insertInvestor(db)`, `insertDevice` and `insertOtp`, and E14's use of it is fine.
 
-### 4.4 Plan 04 (Sprint 4 and pilot week): IN PROGRESS — F2 and F3 done
+### 4.4 Plan 04 (Sprint 4 and pilot week): IN PROGRESS — F1 (draft), F2, F3, F4 done
 - **File (committed, work in progress):** `docs/superpowers/plans/2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md`. A banner at the top says not to execute it yet. Its "Assembly notes" section records cross-task facts; that file is now the canonical copy (the scratchpad does not persist).
 - **Progress (2026-09-29 afternoon):**
   - `ef7dea6`: Plan 03 E4 ConsentRouter rewritten to the `@Controller` + `@Implement` pattern, with an ownership (BOLA) check and `requireIdempotency(idem, cls)` on cancel; E20 `createPurchase`/`cancel` gain idempotency.
   - `b92f355`: Plan 02 errata **RV-02-14** — D5 PLAN gains `UNDER_REVIEW → REJECTED | CONSENT_EXPIRED`, `CONFIRMING → REJECTED`, `SUBMITTING → REJECTED`; MANDATE gains `CONSENTED → CONSENT_EXPIRED`, `SUBMITTING → REJECTED`.
   - `f843bbe`: Plan 04 file started — F1 (draft, not yet reviewed) and **F2 rewritten**. All SIP/mandate code lives in a new `apps/api/src/modules/plans/` module. F2 owns `firstInstalmentDate` (`packages/domain/src/rules/sip-dates.ts`) and `assertSipEligible` (`modules/plans/sip-eligibility.ts`), so **F2 runs before F10**. Migrations 0026 (`plans_mandates`) and 0027 (`plans_mandates_guard`).
   - `cb8102a`: **F3 rewritten** on top of F2 (eNACH rail, limit ladder `mandateLimitFor` with 1.5× truncated, `mandates.auth_url_enc` in migration 0028). F2 mandate FP calls are rail-generic. **Next free migration: 0029.**
-- **F4 (ledger) — next, findings so far:** E21's `handleMfPurchaseEvent` (`modules/payments/fp-events.ts`) moves orders to `SETTLED`/`UNITS_PENDING` with no ledger hook, and F2's `plans.instalments.sync` mirrors instalment orders the same way. F4 must wire `LedgerService.applyAllotment` into both (the draft left it unwired). E20's `orders` lacks `stamp_duty`, `redeemed_units`, `redeemed_amount`, `units_pending_since` and `payout_expected_on`, and stores `allotted_nav` as numeric(18,6) and `allotted_nav_date` as text; F4 must add the missing columns in its own migration. Also fix: `@Inject(ReconBreaks)` → static; golden JSON imported by relative path; nonexistent test factories and `t.jobs.runOnce`/`t.fixtures`/`t.mail`; `FpRead.folio/holdings` do not exist yet.
+- **F4 (ledger) — DONE in the cloud session (§7.2); these local findings were all addressed there or in the merge (§4.5):** E21's `handleMfPurchaseEvent` (`modules/payments/fp-events.ts`) moves orders to `SETTLED`/`UNITS_PENDING` with no ledger hook, and F2's `plans.instalments.sync` mirrors instalment orders the same way. F4 must wire `LedgerService.applyAllotment` into both (the draft left it unwired). E20's `orders` lacks `stamp_duty`, `redeemed_units`, `redeemed_amount`, `units_pending_since` and `payout_expected_on`, and stores `allotted_nav` as numeric(18,6) and `allotted_nav_date` as text; F4 must add the missing columns in its own migration. Also fix: `@Inject(ReconBreaks)` → static; golden JSON imported by relative path; nonexistent test factories and `t.jobs.runOnce`/`t.fixtures`/`t.mail`; `FpRead.folio/holdings` do not exist yet.
 - **Original survey (still valid for F5 onward):**
 - All 28 drafts (F1–F28) are present in `.superpowers/plans-draft/plan-04/`. They have the same drift Plan 03 had. Rewrite them against Plan 02 and Plan 03 as built; the Global Constraints section at the top of the Plan 03 file is the contract.
 - **F2 (SIP and mandate):**
@@ -179,16 +181,25 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
   - `FakeFp` does not serve SIP, mandate or redemption operations yet, so extend it for each operation a task needs (the way E11 and E21 did).
 - **Suggested order:** F2 → F3/F4 → F5/F6/F7 → F10/F11 → F28, then the lighter tasks (F1, F8/F9, F12–F27: ops, UI, evidence). Finish with the header (Global Constraints, execution order, migration table, errata) and assemble.
 
+### 4.5 Merge of the local and cloud Plan 04 work (2026-09-30)
+- Local `main` (F1–F3, the Plan 02/03 amendments `2324ce8`, `ef7dea6`, `b92f355`) and `claude/f4-continuation-3kwbcp` (F4) were merged into local `main`. Both sides had created the Plan 04 file.
+- **Plan 04 file:** the cloud header and Global Constraints (extended with the F2/F3 facts), the local assembly notes, one migration table (F2 0026–0027, F3 0028, **F4 0029–0030; next free 0031**), then F1, F2, F3, F4 in order.
+- **F2↔F4 fixes made during the merge (in F4's text, since F4 now runs after F2):**
+  - F2's `plans.instalments.sync` copied FP states onto instalment orders, so an allotted SIP instalment reached SETTLED with **no lot**. F4 now edits it: instalments are mirrored only up to PROCESSING and every later state goes through `PurchaseSettlement.apply` (the ledger path). `PlansModule` imports `PortfolioModule`; one new instalment test in `sip-mandate.int.test.ts`.
+  - F2 made `StoredPurchase.plan` required and F4 added four allotment fields: F4's `ledger-seed.ts` literal gains `plan: null`, and F2's `addInstalment` literal sets the four fields to null.
+- The two Plan 03 errata from the F5 research (§7.3: the consent snapshot hash never matching on approve, and `consent.expiry.sweep` ignoring `firstAttemptAt`) are now recorded in the Plan 04 "Review notes" (F5 resume step 1 is done).
+- The progress notes live only at `docs/till_now.md` (the root copy is removed).
+
 ---
 
 ## 5. Open items and next steps
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | Continue Plan 04 from F4 (§4.4), then F5–F28, the header (Global Constraints, execution order, migration table, errata), a review of F1, and removing the WIP banner. Then start **Sprint 2** (Plan 02) on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude |
+| 1 | Finish Plan 04: resume F5 from step 2 of §7.3, then F6–F28, a review of F1, and removing the WIP banner. Then start **Sprint 2** on a new branch from `main` | Claude |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
-| 4 | Create the **GitHub repo** and share its URL. There is no remote yet, and pushes happen only when the owner asks. | Owner |
+| 4 | ~~Create the GitHub repo~~ **Done:** `Platizio/Sanchay`. Push local `main` when ready: it contains PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1) (F4) plus the merge, so the PR then shows as merged. | Owner |
 | 5 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, risk questionnaire sign-off, curated fund list, commission rates | Owner / team |
 | 6 | Velocity checkpoints: **Fri 10-09** (trims T1–T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate) | Owner + Claude |
 
@@ -202,19 +213,141 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 ---
 
-## 6. Resuming in a cloud session
-
-A cloud session sees only what is in a remote repository. Today there is **no git remote**; this file and every plan are committed on `main`. Before switching:
-1. **Create the GitHub repo** (open item 4) and add it as `origin`. Only the owner authorises pushes.
-2. **Push `main`.**
-
-In the cloud session, read `AGENTS.md`, this file (§4) and then the plan headers. Nothing from the local scratchpad or `~/.claude` memory carries over; everything needed to continue is written here.
-
-Work style the owner asked for: **efficiency mode**. Do one task at a time, inline, with no multi-agent workflows unless asked, and keep usage low.
-
-## 7. Where to look
+## 6. Where to look
 
 - **Rules for agents:** `AGENTS.md`
 - **Execution ledger (every task, review, fix and ruling):** `.superpowers/sdd/2026-09-28-plan-01-foundation/progress.md`
 - **Rulings:** `docs/delivery/rulings.md`
 - **Master plan (approved):** `C:\Users\pc\.claude\plans\superpowers-brainstorming-product-manag-smooth-waterfall.md`
+
+---
+
+## 7. Cloud session 2026-09-29: Plan 04 Task F4 done, Task F5 stopped
+
+- **Branch:** `claude/f4-continuation-3kwbcp` on `Platizio/Sanchay`.
+- **PR:** draft [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1), base `main` at `61c9945`.
+- **State:** CI (`verify`, `e2e-web`) is green on `f576d71`. The PR is mergeable, has no review threads, and waits on the owner.
+- **Scope:** plan text only. Nothing from Plans 02–04 is implemented in `apps/` or `packages/` yet.
+
+### 7.1 Commits
+
+| Commit | What |
+|---|---|
+| `b029f34` | Started the Plan 04 file with **Task F4** written as a full TDD task (Files → Interfaces → Steps 1–5). The file has a header, Global Constraints, migration numbers, errata and known gaps. It totals 3,274 lines. |
+| `f576d71` | Moved this file from the repo root to `docs/till_now.md`. CI's `check-brand` failed on 3 lines naming the legal entity outside the R-19 allowlist, and `docs/**` is allowlisted. |
+| this commit | Added this section. |
+
+### 7.2 Task F4: Ledger, FIFO, folio sync, units reconcile (Dev A, 12 h): written and verified
+
+What the task delivers:
+- **Domain (`@sanchay/domain`):**
+  - `fifoExit` (FIFO lot consumption with cost and proceeds split, half-up, capped).
+  - The strict ELSS lock: `lockInMonthsFor`, `lockInUntil` (month-end clamp) and `isLotUnlocked`, where exit NAV date > lock-in date.
+  - IST and business-day helpers: `istIsoDate`, `calendarDaysBetween`, `businessDaysAfter`.
+  - Golden vectors **FIFO-01..08** (`fifo.json`) and **ELSS-01..06** (`elss-lock.json`).
+- **Tables:**
+  - New: `lots`, `lot_consumptions` (append-only), `ledger_exceptions` and `redemption_reservations` (created in F4, written by F5).
+  - `folios` gains the spec §2.3 columns: registered contacts as blind indexes plus masked copies, the masked payout bank, `fp_holdings_snapshot`, `reconciliation_status` and `last_reconciled_at`.
+  - `orders` gains `stamp_duty`, `units_source` and `units_pending_since`.
+  - Migrations: `<n>_ledger` (generated) and `<n+1>_ledger_guards` (custom).
+- **`Ledger`:**
+  - `applyAllotment` writes the lot, upserts the folio, derives stamp duty and sends the `ORDER_ALLOTTED` email.
+  - `applyExit` runs FIFO. A shortfall writes UNITS_SHORTFALL, marks the folio MISMATCH and opens a CRITICAL break; it is never rolled back (SHORTFALL-BREAK).
+  - `reverseAllotment` reverses an untouched lot; a consumed lot raises a CRITICAL break.
+- **`PurchaseSettlement`:** the single path from a re-fetched FP purchase to SETTLED, UNITS_PENDING, FAILED, EXPIRED or REVERSED. Both the `mf_purchase` webhook handler and the sweep use it.
+- **Jobs (worker only):**
+  - `folio.sync` (05:00 and on demand) is the only writer of the R-09 FP holdings snapshot and sets the reconciliation status.
+  - `orders.units.reconcile` (every 2 h) raises a T+3 WARNING and a T+5 CRITICAL break (business days) and re-fetches PROCESSING purchases whose webhook was lost.
+- **Handover:** the task ends with a **"For F5"** note on how redemption must call the ledger and read the snapshot.
+
+**How F4 was verified.** The plan's code ran in a scratch prototype in this cloud container, not in the repo:
+- **Domain:** 27/27 tests, with 100% statement and branch coverage of the new rules.
+- **Schema:** drizzle-kit generated the migration delta.
+- **Ledger and jobs:** ledger, settlement, jobs, the FakeFp additions and both integration-test files ran on PostgreSQL 16 with Drizzle 0.45.3, through a hand-wired `bootFpTestApp` stand-in: 60/60 tests.
+- **Round-trip:** every code block in the plan was diffed back against the verified sources.
+- **Not exercised:** Nest DI, D3's real transport and PostgreSQL 18. The task's Step 4 covers those.
+- **The prototype is not saved.** It lived in the session's temporary scratch space. The plan file carries all of the verified code.
+
+**Plan 02/03 errata found while writing F4.** All are recorded in the Plan 04 section "Review notes".
+
+Fixed inside F4, each with a regression test:
+- **D1 `ReconBreaks.open`** caught `23505` inside the caller's transaction. PostgreSQL then turns the `COMMIT` into a silent `ROLLBACK`. F4 switches to `ON CONFLICT DO NOTHING`.
+- **D5** lacked `UNITS_PENDING → REVERSED`; F4 adds it.
+- **E21's `mf_purchase` handler** settled orders with no ledger writes.
+- **Drizzle `bytea().array()`** cannot write Buffers (`22P02`); F4 uses a `customType` instead.
+
+Observed only, not changed:
+- **D6 `Notify.enqueue`** has the same catch-23505 pattern.
+- **E21's** `toThrow(/payment_attempts_live_uq/)` cannot match under Drizzle 0.45; it needs `pgConstraintOf`.
+- **E20's `orders.allotted_units`** is `numeric(20,4)`, but the spec says `(20,3)`.
+
+**Known gaps to confirm in the FP sandbox before the pilot:**
+- The holdings-report envelope shape.
+- The folio `payout_details[].bank_account` fields.
+- Whether FP fills holdings for ONDC folios (UNCONFIRMED; if not, ALL redemptions are refused, which is a PO-2 escalation).
+- That `allotted_nav_date` is a plain `YYYY-MM-DD`.
+
+### 7.3 Task F5: Redemption backend, AMOUNT and ALL (Dev A, 16 h): STOPPED
+
+**Status:**
+- Research into Plans 01–03 is nearly done.
+- **No code, prototype or plan text has been written.**
+- The Plan 04 file still carries only the outline text for F5 (outline §3 "F5").
+- Work stopped on the owner's instruction on 2026-09-29.
+
+**Drafted design.** None of this has been verified yet; it is a starting point, not a decision.
+- **Domain rules (new, in `@sanchay/domain`):**
+  - `redemption-buffer.ts`: a σ table per category (design §F.6, D-MONEY-050..054; outline §0 item 7 says to verify σ and n and pin them by a golden vector before any code).
+    - Buffer = `min(0.10, max(0.02, 3σ√n))`, rounded up to 4 dp.
+    - `n = max(1, businessDaysAfter(latestNavDate, exitNavDate))`.
+  - `redemption-availability.ts`: `expectedRedemptionNavDate`.
+    - STANDARD cut-off is 15:00. LIQUID is 15:00 and OVERNIGHT 19:00, and for both the NAV date is the day before the next business day after T. This needs `nextBusinessDay`/`isBusinessDay` added to `business-days.ts`.
+  - Availability is computed as held → locked/unlocked → minus ACTIVE reservations → available. It is then capped at min(ledger, FP snapshot); a mismatch opens a recon break.
+  - `maxRedeemableAmount = floor2(effective × NAV × (1 − buffer))`. It is offered only when the NAV grade is OK (an AGED NAV blocks AMOUNT, per R-12).
+  - `reservationUnits = ceil3(amount / NAV × (1 + buffer))`.
+  - The ALL decision has three outcomes: FULL, AMOUNT_WITH_RESIDUAL, or refused. It is refused with `REDEMPTION_CONFLICT_PENDING` or `FOLIO_RECONCILIATION_REQUIRED`. ALL needs `reconciliation_status = 'MATCHED'` within 24 h.
+  - Golden file `packages/test-fixtures/src/golden/redemption-availability.json` with **RA-01..RA-12** plus a v1 reference vector. The vectors cover NAV −3%, 0 and +3%; a reservation blocking a concurrent draft; and the ELSS strict lock on 29 Feb, at month-end and across a holiday.
+- **API (oRPC):**
+  - `quoteRedemption`: `POST /orders/redemptions/quote {folioId, isin}`. It reads the R-09 snapshot. If the snapshot is older than 24 h, it returns REFRESHING and enqueues `folio.sync {folioId}` with `singletonKey: folioId`.
+  - `createRedemption`: `POST /orders/redemptions` with an idempotency key; body `{folioId, isin, mode: AMOUNT|ALL, amount?}`. Order of checks:
+    1. Folio ownership (404 on BOLA).
+    2. `canExit` (`EXIT_BLOCKED`).
+    3. `orders.enabled`.
+    4. Folio-registered contacts.
+    5. `pg_advisory_xact_lock(hashtextextended('folio:scheme', 0))`.
+    6. Write the ACTIVE reservation.
+    7. Create the REDEMPTION consent challenge (`TPL_REDEMPTION`; SMS + EMAIL factors). AMOUNT uses the CONSENT SMS template with action `redeem`; ALL/FULL uses CONSENT_UNITS with units `all`.
+- **Consent:**
+  - A deterministic `SNAPSHOT_BUILDERS.REDEMPTION` built from DB rows plus the resolver's destinations. Its own builder avoids the E3/E4 erratum below.
+  - `CONSENT_SUBJECT_JOBS.REDEMPTION = 'orders.redemption.submit'`.
+- **Jobs and settlement:**
+  - The submit job re-checks FP holdings live inside `useConsumed` after SUBMITTING (R-09).
+    - A failed check moves the order to REJECTED (`live_check_failed`), calls a new `ConsentEngine.markUnused`, and RELEASES the reservation.
+    - An ambiguous FP result moves it to RECONCILING, and the reservation stays ACTIVE.
+  - The advance job sends one PATCH `{id, state: 'confirmed', consent}` and moves the order to PROCESSING.
+  - Settlement runs in one transaction. The order goes to SETTLED, `Ledger.applyExit` is called with FP's redeemed units, proceeds, NAV and NAV date, and the reservation is SETTLED. The payout becomes EXPECTED with `payoutExpectedOn` (T+1 for debt, T+2 for others). The REDEMPTION_PROCESSED email is sent and an audit row written (R-20).
+  - `payout.watch` (10:00):
+    - A `bank_credit_reference` marks the payout CREDITED.
+    - Past T+3 it marks the payout DELAYED, sends the PAYOUT_DELAYED email, and opens a WARNING break and an audit row.
+  - There is an `mf_redemption` event handler, and F4's units-reconcile sweep is extended to redemptions.
+- **Supporting changes:**
+  - FakeFp redemption routes and the `FpTransact` redemption bodies.
+  - New `orders` columns: `redeemed_units`, `redeemed_amount`, `redeemed_nav`, `redeemed_nav_date`, `payout_expected_on`, `payout_ref` and `payout_updated_at`.
+
+**New Plan 03 errata found while researching F5.** They were found by reading the plan; neither has been run, and neither is recorded in the Plan 04 file yet.
+1. **The consent snapshot hash can never match on approve (E3/E4).**
+   - E4's `ConsentEngine.create` builds the snapshot with `destinationsMasked: destinations.map(d => d.masked)` and the caller's full `fields`.
+   - `approve` rebuilds it with `destinationsMasked: []` and only the four render fields (action, amount, units, schemeShort). See Plan 03 around line 3842.
+   - Both the E3 generic builder (used by PURCHASE, E20) and E11's `ONBOARDING_ATTEST` builder hash `ctx.destinationsMasked`. `create` refuses zero destinations, so the recomputed hash always differs, and approvals would fail with `CONSENT_MISMATCH`.
+   - Likely fix: persist the masked destinations and the hashed fields on the challenge, and rebuild from those.
+2. **E4's `consent.expiry.sweep` ignores `firstAttemptAt`.**
+   - It marks every CONSUMED challenge past `execute_before` as CONSUMED_UNUSED, even one whose first FP write already happened. For that challenge, `useConsumed`'s deadline is `saga_expires_at`, not `execute_before`.
+   - There is also no `markUnused` API, which F5's live-check rejection needs.
+
+**To resume F5:**
+1. ~~Record the two errata above in the Plan 04 "Review notes".~~ Done in the 2026-09-30 merge.
+2. Verify σ and n against design §F.6 and D-MONEY-050..054, then write and pin RA-01..RA-12 and the v1 vector.
+3. Prototype the domain rules with ≥95% coverage.
+4. Prototype the API side on Postgres: the quote, create, submit, advance and settlement paths, `payout.watch`, the event handler and the FakeFp routes. Include the G-E1 consent-first test (`expectNoPmWritesBeforeConsumed`) and the R-20 audit assertions.
+5. Append Task F5 to the Plan 04 file in the same shape as F4.
+6. Commit and push to the PR.
