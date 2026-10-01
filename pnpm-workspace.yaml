@@ -21,6 +21,9 @@ trustPolicy: no-downgrade
 # carrying release instead of excluding the trust check. See ADR-0001 (review fix, round 1).
 overrides:
   chokidar: 4.0.1
+  # GHSA-667r-xxjv-c9mm, GHSA-p68q-wchp-6fh7, GHSA-hwr6-493r-vm6h, GHSA-9q9j-q6p8-xq58 (high, fastify <5.12.2):
+  # @nestjs/platform-fastify@11.2.6 pins fastify 5.11.3 exactly. See ADR-0001 (2026-10-01).
+  fastify: 5.12.5
 
 # Owner ruling R-28 (docs/delivery/rulings.md): exact `name@version` trust-policy exceptions
 # only, never a range, bare name or pattern; `trustPolicy: no-downgrade` stays on for everything
@@ -142,7 +145,9 @@ catalog:
   drizzle-kit: 0.31.11
   drizzle-orm: 0.45.3
   fast-check: 4.10.2
-  fastify: 5.11.3
+  # GHSA-667r-xxjv-c9mm, GHSA-p68q-wchp-6fh7, GHSA-hwr6-493r-vm6h, GHSA-9q9j-q6p8-xq58 (high, fastify <5.12.2):
+  # @nestjs/platform-fastify@11.2.6 pins fastify 5.11.3 exactly. See ADR-0001 (2026-10-01).
+  fastify: 5.12.5
   jsdom: 30.1.1
   lefthook: 2.1.14
   light-my-request: 6.6.0
