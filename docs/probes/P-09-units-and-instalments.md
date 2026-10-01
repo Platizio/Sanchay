@@ -31,12 +31,14 @@
 | 9 | 2026-10-01 11:43:31 | `POST /v2/mf_purchase_plans/cancel {id, cancellation_code: invest_later}` | 200 | plan | `19fc43ab32af8c5a2d5021409d9888f0` | plan `cancelled`, but FP recorded `cancellation_code: custom_reason` |
 | 10 | 2026-10-01 11:43:31 | (b) `POST /v2/mf_purchase_plans` QUARTERLY | **400** | — | `fb76e1eca319365b0de269b544df7370` | "only monthly and daily frequency supported" |
 | 11 | 2026-10-01 11:44:25 | `POST /api/pg/mandates {mandate_type: UPI, limit 100000, provider CYBRILLAPOA}`, then authorise and simulate `APPROVED` | 201 / 200 / 200 | mandate 31 | `ecd6db21…`, `6a13adca…`, `84481602…` | authorise returns `upi {type, vpa, uri}` (`upi://…`), no `token_url`; status `APPROVED`. Lowercase `"upi"` also accepted (mandate 32) |
+| 12 | 2026-10-01 15:01–15:02 | Addendum: **redeem ALL** with `POST /v2/mf_redemptions` sending **neither** `amount` nor `units`, on v1 folio `UAVP…` (`INF209KA1K47`, 399.324 units), confirmed with the `folio_defaults` contacts | 200 / 200 | `mfr_c35696fbcf3a4e11af6dd54181821d97` (old 228) | — | `under_review → pending → submitted → successful` (submitted 15:02:05, successful 15:02:15); `redeemed_units 399.324`, `redeemed_amount 10161.15`, `redeemed_price 25.4459`; folio holdings → 0 |
 
 ## Evidence
 | Feature | SUPPORTED / REJECTED | FP response excerpt |
 |---|---|---|
 | Redeem by units (ONDC) | **REJECTED at the gateway** | created and confirmed, then `failed`, `failure_code: order_failure_at_gateway` |
 | Redeem by amount (control) | SUPPORTED | `successful`; `redeemed_units 3.9299` (4 dp), `redeemed_amount 100`, `redeemed_price 25.4459`, `redeemed_nav_date "2026-10-01"`; holdings 399.324 → 395.394 |
+| Redeem ALL (neither amount nor units) | SUPPORTED | `successful` in 10 s; `redeemed_units 399.324` (the whole holding, 3 dp), `redeemed_amount 10161.15`; holdings → 0. F5's ALL FULL form works on ONDC. |
 | `generate_first_installment_now` | SUPPORTED | plan accepted; first instalment created at once (`scheduled_on` today, `submitted`); `next_installment_date 2026-11-10`, `remaining_installments 5` |
 | Pause (`skip_instructions`) | SUPPORTED (sandbox) | `200`, `PENDING` → `ACTIVE` |
 | Quarterly plan | REJECTED | `400`: "only monthly and daily frequency supported" |
@@ -49,6 +51,7 @@
 
 **Decision.**
 - T5 (redeem by units) is forced: `features.redeemByUnits=false`. Do not build F6/F17. PO-2 note: units mode is unavailable on ONDC per this sandbox run.
+- Redeem ALL works on ONDC without units (addendum, 15:02 IST), so F5's ALL FULL path (send neither amount nor units) stands.
 - `features.sipPause` may be enabled in a later phase (pause works on ONDC in the sandbox); PO-6 step-up stays out (not exposed).
 - `fp.sipQuarterly=false` (matches the MVP's monthly-only rule).
 - F2's UPI Autopay rail is usable in the sandbox; its first instalment must be paid with `POST /api/pg/payments/nach` when `generate_first_installment_now` is used.
