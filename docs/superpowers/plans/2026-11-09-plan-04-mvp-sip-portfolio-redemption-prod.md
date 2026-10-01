@@ -6627,3 +6627,1346 @@ git commit -m "feat(portfolio): FIFO ledger with ELSS lock and SHORTFALL-BREAK, 
 - **Ledger code:** `Ledger`, `PurchaseSettlement`, the parsers, both jobs, the FakeFp additions and the D1 fix ran against a real PostgreSQL 16 through Drizzle 0.45.3.
 - **Integration tests:** `ledger.int.test.ts` and `folio-sync.int.test.ts`, as written above, ran through a stand-in for `bootFpTestApp` that wires the same classes by hand over D4's FakeFp (undici `MockAgent`).
 - **Not exercised:** Nest DI, D3's real transport (tokens, lossless-json) and PostgreSQL 18. Step 4 is their check.
+
+---
+
+### Task F5: Redemption backend, AMOUNT and ALL (Dev A, 16 h) — PART 1 OF 2 (domain rules)
+
+> **Partial.** This part pins and verifies the domain rules and golden vectors (resume steps 2–3 of `docs/till_now.md` §7.3). Part 2 (contract, `quoteRedemption`/`createRedemption`, the REDEMPTION consent builder, the submit/advance jobs, settlement through `Ledger.applyExit`, `payout.watch`, the `mf_redemption` handler, FakeFp routes, migrations and the integration tests) is still to be written; until then the task's Files/Interfaces below cover the domain half only.
+
+**Files (part 1):**
+- **Create (domain):** `packages/domain/src/rules/{redemption-buffer.ts, redemption-availability.ts}`, `packages/domain/test/redemption-availability.test.ts`
+- **Create (golden):** `packages/test-fixtures/src/golden/redemption-availability.json`
+- **Modify (domain):** `packages/domain/src/rules/business-days.ts` (F4; append `addCalendarDays`, `isBusinessDay`, `nextBusinessDay`), `packages/domain/src/rules/index.ts` (append two exports)
+
+**Interfaces (part 1):**
+- **Consumes:** F4 `businessDaysAfter`, `istIsoDate`, `isLotUnlocked`; E22 `CutoffHolidays`; Plan 01 `VolatilityClass`, `NavGrade` (`OK | STALE | UNAVAILABLE`), `IsoDate`/`toIsoDate`, `@sanchay/money` `Dec`, `Money`, `Nav`, `Units`, `Rounding`. The σ class comes from `sebi_categories.volatility_class` (Plan 02 seed), not a per-category table.
+- **Produces:**
+  - `VOLATILITY_SIGMA`, `REDEMPTION_BUFFER_FLOOR`, `REDEMPTION_BUFFER_CAP`, `redemptionBuffer({volatilityClass, latestNavDate, exitNavDate, holidays}) → {n, buffer}` (buffer a 4 dp fraction string, rounded up).
+  - `REDEMPTION_CUTOFFS`, `expectedRedemptionNavDate({cutoffClass, at, holidays}) → {navDate, displayCutoff}`.
+  - `FolioReconciliation`, `AvailabilityLot`, `redemptionAvailability(input) → {heldUnits, lockedUnits, unlockedUnits, reservedUnits, availableUnits, providerShort, maxAmount, all}` with `all: FULL{units} | AMOUNT_WITH_RESIDUAL{amount} | REFUSED{code}`.
+  - `reservationUnits(amount, nav, buffer)`, `checkRedemptionAmount(amount, availability) → RedemptionRefusal | null`.
+  - Refusal codes are Plan 01's: `REDEMPTION_CONFLICT_PENDING`, `FOLIO_RECONCILIATION_REQUIRED`, `INSUFFICIENT_REDEEMABLE`, `NAV_UNAVAILABLE`.
+
+**Decisions pinned in part 1** (spec sources: design §F.6, D-MONEY-023/050/051, GAP-05 1a/1b):
+- **σ and n verified:** σ V_HIGH 1.5%, V_EQUITY 1.2%, V_HYBRID 0.6%, V_DEBT 0.2%, V_CASH 0.02%; `n = max(1, businessDaysAfter(latestNavDate, exitNavDate))`. The spec gives no scale for the buffer; it is rounded **up** to 4 dp.
+- **Redemption cut-offs:** STANDARD and LIQUID 15:00 (shown 14:45); OVERNIGHT online 19:00 (shown 18:45). STANDARD gets the effective day's NAV; LIQUID and OVERNIGHT get the NAV of the day before the next business day after the effective day. E22's `expectedNavDate` stays purchase-only.
+- **min(ledger, FP):** reservations are subtracted from both the ledger's unlocked units and FP's redeemable units, because FP may not yet reflect an exit Sanchay has reserved. This can under-offer while an exit is in flight; it never over-offers.
+- **ALL**, in order: any ACTIVE reservation → `REDEMPTION_CONFLICT_PENDING`; MISMATCH, FEED_UNAVAILABLE or FP short → `FOLIO_RECONCILIATION_REQUIRED`; nothing available → `INSUFFICIENT_REDEEMABLE`; no locked units and MATCHED within 24 h → FULL; otherwise the floor2 amount with a residual (needs NAV OK, else `NAV_UNAVAILABLE`). STP/SWP (`PLAN_ACTIVE_ON_HOLDING`) is not in the MVP.
+- **Reservation never exceeds availability** for an amount that passes `checkRedemptionAmount` (proved in the `reservationUnits` comment and asserted over every vector), so it is not capped.
+
+- [ ] **Step 1 (part 1): Write the failing tests**
+
+`packages/test-fixtures/src/golden/redemption-availability.json` (RN-01..11 NAV dates, RB-01..11 buffers, RA-01..15 availability, RA-V1 the v1 cross-check):
+```json
+{
+  "navDate": [
+    {
+      "id": "RN-01",
+      "name": "STANDARD Mon 14:59 IST: same day",
+      "cutoffClass": "STANDARD",
+      "atIso": "2026-10-12T09:29:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-12",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-02",
+      "name": "STANDARD Mon 15:00 IST: next business day",
+      "cutoffClass": "STANDARD",
+      "atIso": "2026-10-12T09:30:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-13",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-03",
+      "name": "STANDARD Fri 16:00 IST: Monday",
+      "cutoffClass": "STANDARD",
+      "atIso": "2026-10-16T10:30:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-19",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-04",
+      "name": "STANDARD Saturday: Monday",
+      "cutoffClass": "STANDARD",
+      "atIso": "2026-10-17T05:00:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-19",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-05",
+      "name": "LIQUID Mon 14:59: day before Tuesday",
+      "cutoffClass": "LIQUID",
+      "atIso": "2026-10-12T09:29:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-12",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-06",
+      "name": "LIQUID Fri 14:00: Sunday (day before Monday)",
+      "cutoffClass": "LIQUID",
+      "atIso": "2026-10-16T08:30:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-18",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-07",
+      "name": "LIQUID Fri 15:30: effective Monday, so Monday",
+      "cutoffClass": "LIQUID",
+      "atIso": "2026-10-16T10:00:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-19",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-08",
+      "name": "OVERNIGHT Mon 18:59 (NC-004)",
+      "cutoffClass": "OVERNIGHT",
+      "atIso": "2026-10-12T13:29:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-12",
+      "expectedDisplayCutoff": "18:45"
+    },
+    {
+      "id": "RN-09",
+      "name": "OVERNIGHT Mon 19:00: effective Tuesday",
+      "cutoffClass": "OVERNIGHT",
+      "atIso": "2026-10-12T13:30:00.000Z",
+      "holidays": [],
+      "expectedNavDate": "2026-10-13",
+      "expectedDisplayCutoff": "18:45"
+    },
+    {
+      "id": "RN-10",
+      "name": "LIQUID Mon 10:00, Tue holiday: day before Wednesday",
+      "cutoffClass": "LIQUID",
+      "atIso": "2026-11-09T04:30:00.000Z",
+      "holidays": ["2026-11-10"],
+      "expectedNavDate": "2026-11-10",
+      "expectedDisplayCutoff": "14:45"
+    },
+    {
+      "id": "RN-11",
+      "name": "STANDARD on a holiday Monday: Tuesday",
+      "cutoffClass": "STANDARD",
+      "atIso": "2026-11-09T04:30:00.000Z",
+      "holidays": ["2026-11-09"],
+      "expectedNavDate": "2026-11-10",
+      "expectedDisplayCutoff": "14:45"
+    }
+  ],
+  "buffer": [
+    {
+      "id": "RB-01",
+      "name": "V_EQUITY n=1",
+      "volatilityClass": "V_EQUITY",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-13",
+      "holidays": [],
+      "expectedN": 1,
+      "expectedBuffer": "0.0360"
+    },
+    {
+      "id": "RB-02",
+      "name": "V_EQUITY same date: n floors to 1",
+      "volatilityClass": "V_EQUITY",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-12",
+      "holidays": [],
+      "expectedN": 1,
+      "expectedBuffer": "0.0360"
+    },
+    {
+      "id": "RB-03",
+      "name": "V_EQUITY n=2 rounds up",
+      "volatilityClass": "V_EQUITY",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-14",
+      "holidays": [],
+      "expectedN": 2,
+      "expectedBuffer": "0.0510"
+    },
+    {
+      "id": "RB-04",
+      "name": "V_HIGH n=5 hits the 10% cap",
+      "volatilityClass": "V_HIGH",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-19",
+      "holidays": [],
+      "expectedN": 5,
+      "expectedBuffer": "0.1000"
+    },
+    {
+      "id": "RB-05",
+      "name": "V_HYBRID n=1 hits the 2% floor",
+      "volatilityClass": "V_HYBRID",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-13",
+      "holidays": [],
+      "expectedN": 1,
+      "expectedBuffer": "0.0200"
+    },
+    {
+      "id": "RB-06",
+      "name": "V_HYBRID n=2 rounds up",
+      "volatilityClass": "V_HYBRID",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-14",
+      "holidays": [],
+      "expectedN": 2,
+      "expectedBuffer": "0.0255"
+    },
+    {
+      "id": "RB-07",
+      "name": "V_DEBT n=3 floor",
+      "volatilityClass": "V_DEBT",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-15",
+      "holidays": [],
+      "expectedN": 3,
+      "expectedBuffer": "0.0200"
+    },
+    {
+      "id": "RB-08",
+      "name": "V_CASH n=1 floor",
+      "volatilityClass": "V_CASH",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-13",
+      "holidays": [],
+      "expectedN": 1,
+      "expectedBuffer": "0.0200"
+    },
+    {
+      "id": "RB-09",
+      "name": "V_EQUITY Fri NAV to Mon exit: weekend is not counted",
+      "volatilityClass": "V_EQUITY",
+      "latestNavDate": "2026-10-16",
+      "exitNavDate": "2026-10-19",
+      "holidays": [],
+      "expectedN": 1,
+      "expectedBuffer": "0.0360"
+    },
+    {
+      "id": "RB-10",
+      "name": "V_EQUITY Mon NAV to Wed exit over a Tue holiday: n=1",
+      "volatilityClass": "V_EQUITY",
+      "latestNavDate": "2026-11-09",
+      "exitNavDate": "2026-11-11",
+      "holidays": ["2026-11-10"],
+      "expectedN": 1,
+      "expectedBuffer": "0.0360"
+    },
+    {
+      "id": "RB-11",
+      "name": "V_HIGH n=1",
+      "volatilityClass": "V_HIGH",
+      "latestNavDate": "2026-10-12",
+      "exitNavDate": "2026-10-13",
+      "holidays": [],
+      "expectedN": 1,
+      "expectedBuffer": "0.0450"
+    }
+  ],
+  "availability": [
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-01",
+      "name": "NAV flat between quote and allotment: max amount fits the reservation",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "amount": "9640.00",
+      "allotmentNav": "100.000000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": "9640.00",
+        "all": {
+          "kind": "FULL",
+          "units": "100.000"
+        },
+        "amountCheck": null,
+        "reservationUnits": "99.871",
+        "unitsAtAllotment": "96.400"
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-02",
+      "name": "NAV -3% at allotment: the units FP redeems still fit the reservation",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "amount": "9640.00",
+      "allotmentNav": "97.000000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": "9640.00",
+        "all": {
+          "kind": "FULL",
+          "units": "100.000"
+        },
+        "amountCheck": null,
+        "reservationUnits": "99.871",
+        "unitsAtAllotment": "99.382"
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-03",
+      "name": "NAV +3% at allotment",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "amount": "9640.00",
+      "allotmentNav": "103.000000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": "9640.00",
+        "all": {
+          "kind": "FULL",
+          "units": "100.000"
+        },
+        "amountCheck": null,
+        "reservationUnits": "99.871",
+        "unitsAtAllotment": "93.593"
+      }
+    },
+    {
+      "reservedUnits": "99.871",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-04",
+      "name": "RA-01's ACTIVE reservation blocks a concurrent draft and ALL",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "amount": "9640.00",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "0.129",
+        "providerShort": false,
+        "maxAmount": "12.43",
+        "all": {
+          "kind": "REFUSED",
+          "code": "REDEMPTION_CONFLICT_PENDING"
+        },
+        "amountCheck": "INSUFFICIENT_REDEEMABLE"
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2027-02-26T00:00:00.000Z",
+      "now": "2027-02-26T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-05",
+      "name": "ELSS allotted 29-Feb-2024: locked on its lock-in date 28-Feb-2027 (strict)",
+      "lots": [
+        {
+          "id": "e1",
+          "unitsRemaining": "50.000",
+          "allotmentDate": "2024-02-29",
+          "lockInUntil": "2027-02-28",
+          "lockInMonths": 36
+        },
+        {
+          "id": "p1",
+          "unitsRemaining": "10.000",
+          "allotmentDate": "2023-01-10",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "60.000",
+      "exitNavDate": "2027-02-28",
+      "expected": {
+        "exitNavDate": "2027-02-28",
+        "heldUnits": "60.000",
+        "lockedUnits": "50.000",
+        "unlockedUnits": "10.000",
+        "availableUnits": "10.000",
+        "providerShort": false,
+        "maxAmount": "964.00",
+        "all": {
+          "kind": "AMOUNT_WITH_RESIDUAL",
+          "amount": "964.00"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2027-02-26T00:00:00.000Z",
+      "now": "2027-02-26T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-06",
+      "name": "ELSS allotted 29-Feb-2024: unlocked the day after (1-Mar-2027)",
+      "lots": [
+        {
+          "id": "e1",
+          "unitsRemaining": "50.000",
+          "allotmentDate": "2024-02-29",
+          "lockInUntil": "2027-02-28",
+          "lockInMonths": 36
+        },
+        {
+          "id": "p1",
+          "unitsRemaining": "10.000",
+          "allotmentDate": "2023-01-10",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "60.000",
+      "exitNavDate": "2027-03-01",
+      "expected": {
+        "exitNavDate": "2027-03-01",
+        "heldUnits": "60.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "60.000",
+        "availableUnits": "60.000",
+        "providerShort": false,
+        "maxAmount": "5784.00",
+        "all": {
+          "kind": "FULL",
+          "units": "60.000"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-07",
+      "name": "ELSS lock ends on a month-end: still locked at that NAV date",
+      "lots": [
+        {
+          "id": "e1",
+          "unitsRemaining": "40.000",
+          "allotmentDate": "2023-10-31",
+          "lockInUntil": "2026-10-31",
+          "lockInMonths": 36
+        }
+      ],
+      "providerRedeemableUnits": "40.000",
+      "exitNavDate": "2026-10-31",
+      "expected": {
+        "exitNavDate": "2026-10-31",
+        "heldUnits": "40.000",
+        "lockedUnits": "40.000",
+        "unlockedUnits": "0.000",
+        "availableUnits": "0.000",
+        "providerShort": false,
+        "maxAmount": "0.00",
+        "all": {
+          "kind": "REFUSED",
+          "code": "INSUFFICIENT_REDEEMABLE"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-11-09T00:00:00.000Z",
+      "now": "2026-11-09T04:30:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-08",
+      "name": "ELSS lock ends on a holiday Monday: the exit NAV rolls to Tuesday, so the lot is unlocked",
+      "lots": [
+        {
+          "id": "e1",
+          "unitsRemaining": "40.000",
+          "allotmentDate": "2023-11-09",
+          "lockInUntil": "2026-11-09",
+          "lockInMonths": 36
+        }
+      ],
+      "providerRedeemableUnits": "40.000",
+      "exitAt": {
+        "cutoffClass": "STANDARD",
+        "atIso": "2026-11-09T04:30:00.000Z",
+        "holidays": ["2026-11-09"]
+      },
+      "expected": {
+        "exitNavDate": "2026-11-10",
+        "heldUnits": "40.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "40.000",
+        "availableUnits": "40.000",
+        "providerShort": false,
+        "maxAmount": "3856.00",
+        "all": {
+          "kind": "FULL",
+          "units": "40.000"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MISMATCH",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-09",
+      "name": "FP redeemable below the ledger: MISMATCH, ALL refused, AMOUNT capped at FP",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "80.000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "80.000",
+        "providerShort": true,
+        "maxAmount": "7712.00",
+        "all": {
+          "kind": "REFUSED",
+          "code": "FOLIO_RECONCILIATION_REQUIRED"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-12T00:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "STALE",
+      "buffer": "0.0360",
+      "id": "RA-10",
+      "name": "NAV STALE: no AMOUNT, but ALL of an unlocked MATCHED folio is FULL",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "amount": "100.00",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": null,
+        "all": {
+          "kind": "FULL",
+          "units": "100.000"
+        },
+        "amountCheck": "NAV_UNAVAILABLE"
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "UNRECONCILED",
+      "lastReconciledAt": null,
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "STALE",
+      "buffer": "0.0360",
+      "id": "RA-11",
+      "name": "NAV STALE and UNRECONCILED: ALL refused with NAV_UNAVAILABLE",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": null,
+        "all": {
+          "kind": "REFUSED",
+          "code": "NAV_UNAVAILABLE"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "MATCHED",
+      "lastReconciledAt": "2026-10-11T04:00:00.000Z",
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-12",
+      "name": "MATCHED 25 h ago: ALL falls back to the amount with a residual",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "100.000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": "9640.00",
+        "all": {
+          "kind": "AMOUNT_WITH_RESIDUAL",
+          "amount": "9640.00"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "FEED_UNAVAILABLE",
+      "lastReconciledAt": null,
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "100.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-13",
+      "name": "FEED_UNAVAILABLE (no FP snapshot): AMOUNT on the ledger, ALL refused",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "100.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": null,
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "100.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "100.000",
+        "availableUnits": "100.000",
+        "providerShort": false,
+        "maxAmount": "9640.00",
+        "all": {
+          "kind": "REFUSED",
+          "code": "FOLIO_RECONCILIATION_REQUIRED"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "UNRECONCILED",
+      "lastReconciledAt": null,
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "10.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-14",
+      "name": "FP holds fewer units while UNRECONCILED: available capped at FP, ALL refused",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "10.000",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "5.000",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "10.000",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "10.000",
+        "availableUnits": "5.000",
+        "providerShort": true,
+        "maxAmount": "48.20",
+        "all": {
+          "kind": "REFUSED",
+          "code": "FOLIO_RECONCILIATION_REQUIRED"
+        }
+      }
+    },
+    {
+      "reservedUnits": "0.000",
+      "reconciliation": "UNRECONCILED",
+      "lastReconciledAt": null,
+      "now": "2026-10-12T05:00:00.000Z",
+      "nav": "1.000000",
+      "navGrade": "OK",
+      "buffer": "0.0360",
+      "id": "RA-15",
+      "name": "Dust holding: the buffered maximum floors to 0.00, so ALL is refused",
+      "lots": [
+        {
+          "id": "l1",
+          "unitsRemaining": "0.001",
+          "allotmentDate": "2025-01-15",
+          "lockInUntil": null,
+          "lockInMonths": null
+        }
+      ],
+      "providerRedeemableUnits": "0.001",
+      "exitNavDate": "2026-10-12",
+      "expected": {
+        "exitNavDate": "2026-10-12",
+        "heldUnits": "0.001",
+        "lockedUnits": "0.000",
+        "unlockedUnits": "0.001",
+        "availableUnits": "0.001",
+        "providerShort": false,
+        "maxAmount": "0.00",
+        "all": {
+          "kind": "REFUSED",
+          "code": "INSUFFICIENT_REDEEMABLE"
+        }
+      }
+    }
+  ],
+  "v1Reference": {
+    "id": "RA-V1",
+    "name": "v1 reference (RedemptionAvailability RED-02/04): 100 units, NAV 45.5, a pending AMOUNT exit of 1000.00. Cross-check only; v2 is more conservative by the buffer.",
+    "input": {
+      "heldUnits": "100.000",
+      "nav": "45.500000",
+      "pendingAmount": "1000.00",
+      "buffer": "0.0360"
+    },
+    "v1": {
+      "availableUnits": "78.02197802",
+      "availableAmount": "3550.0000"
+    },
+    "v2": {
+      "reservationUnits": "22.770",
+      "availableUnits": "77.230",
+      "maxAmount": "3387.46"
+    }
+  }
+}
+```
+
+`packages/domain/test/redemption-availability.test.ts`:
+```ts
+import { Money, Nav, Rounding, Units } from '@sanchay/money';
+import { describe, expect, it } from 'vitest';
+import golden from '../../test-fixtures/src/golden/redemption-availability.json' with {
+  type: 'json',
+};
+import type { NavGrade, VolatilityClass } from '../src/catalogue.js';
+import { toIsoDate } from '../src/ids.js';
+import {
+  type AvailabilityLot,
+  checkRedemptionAmount,
+  expectedRedemptionNavDate,
+  type FolioReconciliation,
+  redemptionAvailability,
+  reservationUnits,
+} from '../src/rules/redemption-availability.js';
+import { redemptionBuffer } from '../src/rules/redemption-buffer.js';
+
+const u = (s: string): Units => Units.parse(s, 3);
+const holidaysOf = (days: readonly string[]) => new Set(days);
+
+describe('expectedRedemptionNavDate (RN golden vectors)', () => {
+  it.each(golden.navDate)('$id $name', (v) => {
+    const r = expectedRedemptionNavDate({
+      cutoffClass: v.cutoffClass as 'STANDARD' | 'LIQUID' | 'OVERNIGHT',
+      at: new Date(v.atIso),
+      holidays: holidaysOf(v.holidays),
+    });
+    expect(r).toEqual({ navDate: v.expectedNavDate, displayCutoff: v.expectedDisplayCutoff });
+  });
+});
+
+describe('redemptionBuffer (RB golden vectors)', () => {
+  it.each(golden.buffer)('$id $name', (v) => {
+    const r = redemptionBuffer({
+      volatilityClass: v.volatilityClass as VolatilityClass,
+      latestNavDate: toIsoDate(v.latestNavDate),
+      exitNavDate: toIsoDate(v.exitNavDate),
+      holidays: holidaysOf(v.holidays),
+    });
+    expect(r).toEqual({ n: v.expectedN, buffer: v.expectedBuffer });
+  });
+});
+
+describe('redemptionAvailability (RA golden vectors)', () => {
+  it.each(golden.availability)('$id $name', (v) => {
+    const exitNavDate =
+      'exitAt' in v && v.exitAt !== undefined
+        ? expectedRedemptionNavDate({
+            cutoffClass: 'STANDARD',
+            at: new Date(v.exitAt.atIso),
+            holidays: holidaysOf(v.exitAt.holidays),
+          }).navDate
+        : toIsoDate((v as { exitNavDate: string }).exitNavDate);
+    const lots: AvailabilityLot[] = v.lots.map((l) => ({
+      id: l.id,
+      unitsRemaining: u(l.unitsRemaining),
+      lockInUntil: l.lockInUntil === null ? null : toIsoDate(l.lockInUntil),
+    }));
+    const nav = Nav.parse(v.nav);
+    const a = redemptionAvailability({
+      lots,
+      reservedUnits: u(v.reservedUnits),
+      exitNavDate,
+      providerRedeemableUnits:
+        v.providerRedeemableUnits === null ? null : u(v.providerRedeemableUnits),
+      reconciliation: v.reconciliation as FolioReconciliation,
+      lastReconciledAt: v.lastReconciledAt === null ? null : new Date(v.lastReconciledAt),
+      now: new Date(v.now),
+      nav,
+      navGrade: v.navGrade as NavGrade,
+      buffer: v.buffer,
+    });
+    const e = v.expected;
+    expect(exitNavDate).toBe(e.exitNavDate);
+    expect({
+      heldUnits: a.heldUnits.toWire(),
+      lockedUnits: a.lockedUnits.toWire(),
+      unlockedUnits: a.unlockedUnits.toWire(),
+      availableUnits: a.availableUnits.toWire(),
+      providerShort: a.providerShort,
+      maxAmount: a.maxAmount?.toWire() ?? null,
+    }).toEqual({
+      heldUnits: e.heldUnits,
+      lockedUnits: e.lockedUnits,
+      unlockedUnits: e.unlockedUnits,
+      availableUnits: e.availableUnits,
+      providerShort: e.providerShort,
+      maxAmount: e.maxAmount,
+    });
+    const all =
+      a.all.kind === 'FULL'
+        ? { kind: 'FULL', units: a.all.units.toWire() }
+        : a.all.kind === 'AMOUNT_WITH_RESIDUAL'
+          ? { kind: a.all.kind, amount: a.all.amount.toWire() }
+          : a.all;
+    expect(all).toEqual(e.all);
+
+    if ('amount' in v && v.amount !== undefined) {
+      const amount = Money.parse(v.amount);
+      expect(checkRedemptionAmount(amount, a)).toBe(e.amountCheck);
+      if (e.amountCheck === null) {
+        const reserved = reservationUnits(amount, nav, v.buffer);
+        expect(reserved.toWire()).toBe(e.reservationUnits);
+        expect(reserved.compare(a.availableUnits)).toBeLessThanOrEqual(0);
+        if ('allotmentNav' in v && v.allotmentNav !== undefined) {
+          // The units FP redeems at the allotment NAV must fit inside the reservation (±3% vectors).
+          const units = Units.round(
+            amount.toDecimal().div(Nav.parse(v.allotmentNav).toDecimal()),
+            3,
+            Rounding.UP,
+          );
+          expect(units.toWire()).toBe(e.unitsAtAllotment);
+          expect(units.compare(reserved)).toBeLessThanOrEqual(0);
+        }
+      }
+    }
+  });
+
+  it('every amount at the buffered maximum reserves no more than the available units', () => {
+    for (const v of golden.availability) {
+      if (v.expected.maxAmount === null || v.expected.maxAmount === '0.00') continue;
+      const reserved = reservationUnits(
+        Money.parse(v.expected.maxAmount),
+        Nav.parse(v.nav),
+        v.buffer,
+      );
+      expect(reserved.compare(u(v.expected.availableUnits))).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('RA-V1: v2 is never less conservative than the v1 reference', () => {
+    const r = golden.v1Reference;
+    const nav = Nav.parse(r.input.nav);
+    const reserved = reservationUnits(Money.parse(r.input.pendingAmount), nav, r.input.buffer);
+    const a = redemptionAvailability({
+      lots: [{ id: 'l1', unitsRemaining: u(r.input.heldUnits), lockInUntil: null }],
+      reservedUnits: reserved,
+      exitNavDate: toIsoDate('2026-10-12'),
+      providerRedeemableUnits: u(r.input.heldUnits),
+      reconciliation: 'MATCHED',
+      lastReconciledAt: new Date('2026-10-12T00:00:00.000Z'),
+      now: new Date('2026-10-12T05:00:00.000Z'),
+      nav,
+      navGrade: 'OK',
+      buffer: r.input.buffer,
+    });
+    expect({
+      reservationUnits: reserved.toWire(),
+      availableUnits: a.availableUnits.toWire(),
+      maxAmount: a.maxAmount?.toWire() ?? null,
+    }).toEqual(r.v2);
+    expect(a.availableUnits.toDecimal().lte(r.v1.availableUnits)).toBe(true);
+    expect(a.maxAmount?.toDecimal().lte(r.v1.availableAmount)).toBe(true);
+  });
+
+  it('checkRedemptionAmount refuses a zero or negative amount', () => {
+    const a = redemptionAvailability({
+      lots: [{ id: 'l1', unitsRemaining: u('10.000'), lockInUntil: null }],
+      reservedUnits: u('0.000'),
+      exitNavDate: toIsoDate('2026-10-12'),
+      providerRedeemableUnits: null,
+      reconciliation: 'UNRECONCILED',
+      lastReconciledAt: null,
+      now: new Date('2026-10-12T05:00:00.000Z'),
+      nav: Nav.parse('10.000000'),
+      navGrade: 'OK',
+      buffer: '0.0360',
+    });
+    expect(checkRedemptionAmount(Money.parse('0.00'), a)).toBe('INSUFFICIENT_REDEEMABLE');
+    expect(checkRedemptionAmount(Money.parse('50.00'), a)).toBeNull();
+  });
+
+  it('ignores lots with no units left', () => {
+    const a = redemptionAvailability({
+      lots: [
+        { id: 'gone', unitsRemaining: u('0.000'), lockInUntil: toIsoDate('2030-01-01') },
+        { id: 'l1', unitsRemaining: u('5.000'), lockInUntil: null },
+      ],
+      reservedUnits: u('0.000'),
+      exitNavDate: toIsoDate('2026-10-12'),
+      providerRedeemableUnits: u('5.000'),
+      reconciliation: 'MATCHED',
+      lastReconciledAt: new Date('2026-10-12T00:00:00.000Z'),
+      now: new Date('2026-10-12T05:00:00.000Z'),
+      nav: Nav.parse('10.000000'),
+      navGrade: 'OK',
+      buffer: '0.0360',
+    });
+    expect(a.heldUnits.toWire()).toBe('5.000');
+    expect(a.lockedUnits.toWire()).toBe('0.000');
+    expect(a.all).toEqual({ kind: 'FULL', units: u('5.000') });
+  });
+});
+```
+
+- [ ] **Step 2 (part 1): Run them to confirm they fail**
+
+```
+pnpm --filter=@sanchay/domain test -- redemption-availability
+```
+Expected: `Cannot find module '../src/rules/redemption-availability.js'`.
+
+- [ ] **Step 3 (part 1): Minimal implementation**
+
+`packages/domain/src/rules/business-days.ts` (F4's file; append):
+```ts
+/** F5: `isoDate` shifted by `days` calendar days (negative goes back). */
+export function addCalendarDays(isoDate: IsoDate, days: number): IsoDate {
+  return isoOf(utcMidnight(isoDate) + days * DAY_MS);
+}
+
+/** F5: Mon–Fri and not a holiday. */
+export function isBusinessDay(isoDate: IsoDate, holidays: CutoffHolidays): boolean {
+  const dow = new Date(utcMidnight(isoDate)).getUTCDay();
+  return dow !== 0 && dow !== 6 && !holidays.has(isoDate);
+}
+
+/** F5: the first business day strictly after `isoDate`. */
+export function nextBusinessDay(isoDate: IsoDate, holidays: CutoffHolidays): IsoDate {
+  let day = addCalendarDays(isoDate, 1);
+  while (!isBusinessDay(day, holidays)) day = addCalendarDays(day, 1);
+  return day;
+}
+```
+
+`packages/domain/src/rules/redemption-buffer.ts`:
+```ts
+import { Dec, Rounding } from '@sanchay/money';
+import type { VolatilityClass } from '../catalogue.js';
+import type { IsoDate } from '../ids.js';
+import { businessDaysAfter } from './business-days.js';
+import type { CutoffHolidays } from './cutoff.js';
+
+/** Daily NAV σ per volatility class (design §F.6, D-MONEY-050). */
+export const VOLATILITY_SIGMA: Readonly<Record<VolatilityClass, string>> = {
+  V_HIGH: '0.015',
+  V_EQUITY: '0.012',
+  V_HYBRID: '0.006',
+  V_DEBT: '0.002',
+  V_CASH: '0.0002',
+};
+export const REDEMPTION_BUFFER_FLOOR = '0.02';
+export const REDEMPTION_BUFFER_CAP = '0.10';
+
+export interface RedemptionBufferInput {
+  readonly volatilityClass: VolatilityClass;
+  /** The NAV date of the NAV the quote is priced at (`schemes.nav_date`). */
+  readonly latestNavDate: IsoDate;
+  /** `expectedRedemptionNavDate(...)`: the NAV date the exit is expected to get. */
+  readonly exitNavDate: IsoDate;
+  readonly holidays: CutoffHolidays;
+}
+
+export interface RedemptionBuffer {
+  /** Business days from the latest NAV date to the exit NAV date, at least 1. */
+  readonly n: number;
+  /** A fraction, 4 dp, rounded up (the conservative side): `"0.0360"` is 3.60%. */
+  readonly buffer: string;
+}
+
+/**
+ * `min(10%, max(2%, 3 × σ × √n))` (design §F.6). The spec fixes no scale for the fraction; it is
+ * rounded UP to 4 dp so the cap never under-reserves.
+ */
+export function redemptionBuffer(input: RedemptionBufferInput): RedemptionBuffer {
+  const n = Math.max(1, businessDaysAfter(input.latestNavDate, input.exitNavDate, input.holidays));
+  const raw = new Dec(3).times(VOLATILITY_SIGMA[input.volatilityClass]).times(new Dec(n).sqrt());
+  const clamped = Dec.min(REDEMPTION_BUFFER_CAP, Dec.max(REDEMPTION_BUFFER_FLOOR, raw));
+  return { n, buffer: clamped.toDecimalPlaces(4, Rounding.UP).toFixed(4) };
+}
+```
+
+`packages/domain/src/rules/redemption-availability.ts`:
+```ts
+import { Dec, Money, type Nav, Rounding, Units } from '@sanchay/money';
+import type { NavGrade } from '../catalogue.js';
+import type { IsoDate } from '../ids.js';
+import { addCalendarDays, isBusinessDay, istIsoDate, nextBusinessDay } from './business-days.js';
+import type { CutoffHolidays } from './cutoff.js';
+import { isLotUnlocked } from './elss-lock.js';
+
+type RedemptionCutoffClass = 'STANDARD' | 'LIQUID' | 'OVERNIGHT';
+
+/**
+ * Redemption cut-offs (GAP-05 1a/1b, D-MONEY-023; SEBI/HO/IMD/PoD2/P/CIR/2025/56): regulatory time in
+ * IST minutes and the time shown to investors (15 minutes earlier, for OTP and FP submission).
+ */
+export const REDEMPTION_CUTOFFS: Readonly<
+  Record<
+    RedemptionCutoffClass,
+    { readonly regulatoryMinutes: number; readonly displayCutoff: string }
+  >
+> = {
+  STANDARD: { regulatoryMinutes: 15 * 60, displayCutoff: '14:45' },
+  LIQUID: { regulatoryMinutes: 15 * 60, displayCutoff: '14:45' },
+  OVERNIGHT: { regulatoryMinutes: 19 * 60, displayCutoff: '18:45' },
+};
+
+export interface RedemptionNavDateInput {
+  readonly cutoffClass: RedemptionCutoffClass;
+  /** When the redemption reaches the AMC: the confirm time (the server clock, never the client's). */
+  readonly at: Date;
+  readonly holidays: CutoffHolidays;
+}
+
+export interface RedemptionNavDate {
+  readonly navDate: IsoDate;
+  readonly displayCutoff: string;
+}
+
+const IST_OFFSET_MS = 330 * 60_000;
+
+/**
+ * Design §F.6/§F.8 `expectedNavDate` for exits. The effective day is today when it is a business day
+ * and the time is before the regulatory cut-off, otherwise the next business day. STANDARD gets the
+ * effective day's NAV; LIQUID and OVERNIGHT get the NAV of the calendar day before the business day
+ * after the effective day (so a Friday redemption gets Sunday's NAV).
+ */
+export function expectedRedemptionNavDate(input: RedemptionNavDateInput): RedemptionNavDate {
+  const cutoff = REDEMPTION_CUTOFFS[input.cutoffClass];
+  const today = istIsoDate(input.at);
+  const ist = new Date(input.at.getTime() + IST_OFFSET_MS);
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const effective =
+    isBusinessDay(today, input.holidays) && minutes < cutoff.regulatoryMinutes
+      ? today
+      : nextBusinessDay(today, input.holidays);
+  const navDate =
+    input.cutoffClass === 'STANDARD'
+      ? effective
+      : addCalendarDays(nextBusinessDay(effective, input.holidays), -1);
+  return { navDate, displayCutoff: cutoff.displayCutoff };
+}
+
+/** `folios.reconciliation_status` (F4). */
+export type FolioReconciliation = 'UNRECONCILED' | 'MATCHED' | 'MISMATCH' | 'FEED_UNAVAILABLE';
+
+export interface AvailabilityLot {
+  readonly id: string;
+  /** 3 dp. */
+  readonly unitsRemaining: Units;
+  readonly lockInUntil: IsoDate | null;
+}
+
+export interface RedemptionAvailabilityInput {
+  /** OPEN lots of one folio and scheme. */
+  readonly lots: readonly AvailabilityLot[];
+  /** Σ units of the folio-scheme's ACTIVE redemption reservations (3 dp). */
+  readonly reservedUnits: Units;
+  readonly exitNavDate: IsoDate;
+  /** FP `redeemable_units` from the R-09 snapshot, or null when there is none (FEED_UNAVAILABLE). */
+  readonly providerRedeemableUnits: Units | null;
+  readonly reconciliation: FolioReconciliation;
+  readonly lastReconciledAt: Date | null;
+  readonly now: Date;
+  readonly nav: Nav;
+  readonly navGrade: NavGrade;
+  /** `redemptionBuffer(...).buffer`. */
+  readonly buffer: string;
+}
+
+export type RedemptionRefusal =
+  | 'REDEMPTION_CONFLICT_PENDING'
+  | 'FOLIO_RECONCILIATION_REQUIRED'
+  | 'INSUFFICIENT_REDEEMABLE'
+  | 'NAV_UNAVAILABLE';
+
+export type RedeemAllDecision =
+  /** FP call with neither amount nor units (D-MONEY-051). */
+  | { readonly kind: 'FULL'; readonly units: Units }
+  /** The floor2 amount, with the residual note and a later "Redeem remaining". */
+  | { readonly kind: 'AMOUNT_WITH_RESIDUAL'; readonly amount: Money }
+  | { readonly kind: 'REFUSED'; readonly code: RedemptionRefusal };
+
+export interface RedemptionAvailability {
+  readonly heldUnits: Units;
+  readonly lockedUnits: Units;
+  readonly unlockedUnits: Units;
+  readonly reservedUnits: Units;
+  /** min(ledger, FP) after reservations, never negative. */
+  readonly availableUnits: Units;
+  /** FP's redeemable units are below the ledger's unlocked units: flag the folio, raise a break. */
+  readonly providerShort: boolean;
+  /** floor2(available × NAV × (1 − buffer)); null unless the NAV grade is OK (R-12). */
+  readonly maxAmount: Money | null;
+  readonly all: RedeemAllDecision;
+}
+
+const ZERO = Units.parse('0.000', 3);
+const MATCHED_FRESH_MS = 24 * 60 * 60 * 1000;
+
+function sum(values: readonly Units[]): Units {
+  return values.reduce((acc, u) => acc.add(u), ZERO);
+}
+
+function nonNegative(u: Units): Units {
+  return u.isNegative() ? ZERO : u;
+}
+
+function minUnits(a: Units, b: Units): Units {
+  return a.compare(b) <= 0 ? a : b;
+}
+
+/**
+ * Design §F.6, D-MONEY-050/051. `available = min(unlocked − reserved, FP redeemable − reserved)`:
+ * reservations come off both sides, because FP may not yet reflect an exit Sanchay has reserved. That
+ * can under-offer while an exit is in flight; it never over-offers.
+ */
+export function redemptionAvailability(input: RedemptionAvailabilityInput): RedemptionAvailability {
+  const open = input.lots.filter((lot) => lot.unitsRemaining.isPositive());
+  const unlocked = open.filter((lot) => isLotUnlocked(lot.lockInUntil, input.exitNavDate));
+  const heldUnits = sum(open.map((lot) => lot.unitsRemaining));
+  const unlockedUnits = sum(unlocked.map((lot) => lot.unitsRemaining));
+  const lockedUnits = heldUnits.subtract(unlockedUnits);
+  const provider = input.providerRedeemableUnits;
+  const providerShort = provider !== null && provider.compare(unlockedUnits) < 0;
+  const ledgerAvailable = nonNegative(unlockedUnits.subtract(input.reservedUnits));
+  const availableUnits =
+    provider === null
+      ? ledgerAvailable
+      : minUnits(ledgerAvailable, nonNegative(provider.subtract(input.reservedUnits)));
+  const maxAmount =
+    input.navGrade === 'OK'
+      ? Money.round(
+          availableUnits
+            .toDecimal()
+            .times(input.nav.toDecimal())
+            .times(new Dec(1).minus(input.buffer)),
+          Rounding.DOWN,
+        )
+      : null;
+  const all = decideAll(input, { availableUnits, lockedUnits, providerShort, maxAmount });
+  return {
+    heldUnits,
+    lockedUnits,
+    unlockedUnits,
+    reservedUnits: input.reservedUnits,
+    availableUnits,
+    providerShort,
+    maxAmount,
+    all,
+  };
+}
+
+function decideAll(
+  input: RedemptionAvailabilityInput,
+  a: { availableUnits: Units; lockedUnits: Units; providerShort: boolean; maxAmount: Money | null },
+): RedeemAllDecision {
+  if (input.reservedUnits.isPositive())
+    return { kind: 'REFUSED', code: 'REDEMPTION_CONFLICT_PENDING' };
+  if (
+    input.reconciliation === 'MISMATCH' ||
+    input.reconciliation === 'FEED_UNAVAILABLE' ||
+    a.providerShort
+  ) {
+    return { kind: 'REFUSED', code: 'FOLIO_RECONCILIATION_REQUIRED' };
+  }
+  if (!a.availableUnits.isPositive()) return { kind: 'REFUSED', code: 'INSUFFICIENT_REDEEMABLE' };
+  const matchedFresh =
+    input.reconciliation === 'MATCHED' &&
+    input.lastReconciledAt !== null &&
+    input.now.getTime() - input.lastReconciledAt.getTime() <= MATCHED_FRESH_MS;
+  if (a.lockedUnits.isZero() && matchedFresh) return { kind: 'FULL', units: a.availableUnits };
+  if (a.maxAmount === null) return { kind: 'REFUSED', code: 'NAV_UNAVAILABLE' };
+  if (!a.maxAmount.isPositive()) return { kind: 'REFUSED', code: 'INSUFFICIENT_REDEEMABLE' };
+  return { kind: 'AMOUNT_WITH_RESIDUAL', amount: a.maxAmount };
+}
+
+/**
+ * Units an AMOUNT redemption reserves: ceil3(amount ÷ NAV × (1 + buffer)). For any amount that passes
+ * `checkRedemptionAmount` this never exceeds the available units: the unrounded value is at most
+ * available × (1 − buffer²), strictly below a 3 dp number, so rounding up to 3 dp cannot pass it.
+ */
+export function reservationUnits(amount: Money, nav: Nav, buffer: string): Units {
+  return Units.round(
+    amount.toDecimal().div(nav.toDecimal()).times(new Dec(1).plus(buffer)),
+    3,
+    Rounding.UP,
+  );
+}
+
+/** AMOUNT-mode check at draft and confirm: NAV grade OK (R-12) and amount ≤ the buffered maximum. */
+export function checkRedemptionAmount(
+  amount: Money,
+  availability: RedemptionAvailability,
+): RedemptionRefusal | null {
+  if (availability.maxAmount === null) return 'NAV_UNAVAILABLE';
+  if (!amount.isPositive() || amount.gt(availability.maxAmount)) return 'INSUFFICIENT_REDEEMABLE';
+  return null;
+}
+```
+
+`packages/domain/src/rules/index.ts` (append):
+```ts
+export * from './redemption-availability.js';
+export * from './redemption-buffer.js';
+```
+
+- [ ] **Step 4 (part 1): Run tests to confirm they pass**
+
+```
+pnpm --filter=@sanchay/domain typecheck
+pnpm --filter=@sanchay/domain test
+```
+Expected: `redemption-availability` 41/41; the two new rule files at 100% statements/lines/functions and ≥ 97% branches.
+
+**How part 1 was verified (2026-10-01):** the code above ran in a scratch worktree of `main` with F4's `business-days.ts` and `elss-lock.ts` taken verbatim from this plan and a one-interface stand-in for E22's `CutoffHolidays`: 41/41 tests, typecheck and Biome clean. Every vector was also checked by hand (for example RB-03 = 3 × 1.2% × √2 = 0.050912 → 0.0510; RA-02's 99.382 units at NAV −3% fit the 99.871-unit reservation; RA-V1's v1 figures 78.02197802 units / 3550.0000 come from RED-02/RED-04 by hand).
+
+Step 5 (commit) comes with part 2.

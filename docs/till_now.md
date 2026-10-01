@@ -346,8 +346,9 @@ Observed only, not changed:
 
 **To resume F5:**
 1. ~~Record the two errata above in the Plan 04 "Review notes".~~ Done in the 2026-09-30 merge.
-2. Verify σ and n against design §F.6 and D-MONEY-050..054, then write and pin RA-01..RA-12 and the v1 vector.
-3. Prototype the domain rules with ≥95% coverage.
+2. ~~Verify σ and n against design §F.6 and D-MONEY-050..054, then write and pin RA-01..RA-12 and the v1 vector.~~ Done 2026-10-01: σ/n confirmed; vectors RN-01..11, RB-01..11, RA-01..15 and RA-V1 pinned.
+3. ~~Prototype the domain rules with ≥95% coverage.~~ Done 2026-10-01: 41/41 tests, 100% statements, 97.6% branches. Written into Plan 04 as **Task F5 part 1 (domain rules)**, with the pinned decisions (cut-offs, min(ledger, FP) with reservations on both sides, the ALL order, no reservation cap).
+   **Resume here (part 2):** step 4, then step 5 appends part 2 under the part-1 heading and adds the Step 5 commit.
 4. Prototype the API side on Postgres: the quote, create, submit, advance and settlement paths, `payout.watch`, the event handler and the FakeFp routes. Include the G-E1 consent-first test (`expectNoPmWritesBeforeConsumed`) and the R-20 audit assertions.
 5. Append Task F5 to the Plan 04 file in the same shape as F4.
 6. Commit and push to the PR.
