@@ -26,9 +26,21 @@ Probes answer questions the plans cannot settle from the documentation. Each res
 ## Shared sandbox context (fill once)
 | Item | Value |
 |---|---|
-| Tenant name | |
-| Sandbox investor (`inv_…`) | |
-| Investment account (`mfia_…` and old id) | |
-| Folio(s) used | |
-| Scheme ISINs used | |
-| Who ran the probes, and dates | |
+| Tenant name | The FP sandbox tenant in `FINPRIM_TENANT_NAME` (`apps/api/.env`); host `s.finprim.com` |
+| Sandbox investor | A v1 test investor (KYC-compliant simulator PAN `XXXPX3751X`), reused because FP profiles cannot be deleted |
+| Investment account (`mfia_…` and old id) | `mfia_d167e151153f48b08a148c8187e189d1`, old id 23. Folio defaults complete; payout bank old id 33 (savings, account ending `1193`) |
+| Folio(s) used | New folios from the run-1 purchases (pending allotment); v1 sandbox folio `I5II…NK` (ABSL Credit Risk, 399.324 units) for the redemptions |
+| Scheme ISINs used | `INF209K01165` (ABSL Large & Mid Cap, regular growth) for purchases and plans; `INF209KA1K47` (ABSL Credit Risk) for redemptions |
+| Who ran the probes, and dates | Claude, scripted (`scratchpad` runner; every call logged with masked PII), 2026-10-01 11:30–11:50 IST, plus background watchers for settlement |
+
+## Run 1 summary (2026-10-01)
+
+| Probe | Result | One line |
+|---|---|---|
+| P-04 | **FAIL** | FP auto-fills one tenant-default EUIN on every order type even when `euin`/`partner` are omitted. |
+| P-05 | **INCONCLUSIVE** | No ARN in any FP object or report; FP has no per-order ARN field. Needs Cybrilla's ONDC-message evidence or the canary RTA statement. |
+| P-07 | **PENDING** | Three paid orders are `submitted`; ONDC orders cannot be force-settled ("ONDC gateway orders can't be simulated"). Watcher running. |
+| P-09 | **(a) FAIL, (b) answered** | Units redemption fails at the ONDC gateway (`order_failure_at_gateway`), so T5 is forced; an amount redemption succeeded in 10 s. First instalment now: supported; pause: supported; quarterly: rejected; step-up: not exposed; UPI Autopay: supported. |
+| Lumpsum flow | **PASS to `submitted`; settlement pending** | Plan 03's H-2 order works as written (review ~3 s); string amount `"1000.00"` accepted. |
+
+**Plan errata found:** Plan 04 F4 holdings envelope (fixed in this PR: RV-04-F4-1); Plan 02 D4 `expand` (RV-02-15). Questions for Cybrilla are listed in each probe's follow-ups.

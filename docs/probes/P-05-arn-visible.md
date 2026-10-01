@@ -15,14 +15,22 @@
 ## Run log
 | # | Date (IST) | Call | HTTP | FP object id | Request id | Note |
 |---|---|---|---|---|---|---|
-| 1 | | | | | | |
+| 1 | 2026-10-01 11:30–11:50 | `GET` of every probe order (3 purchases, 1 plan, 1 instalment, 2 redemptions) | 200 | see P-04 | — | no `ARN` string in any response |
+| 2 | 2026-10-01 11:28 | `GET /v2/mf_purchases?mf_investment_account=…` across all 86 sandbox accounts (145 purchases) | 200 | — | — | no `ARN` string in any purchase |
+| 3 | 2026-10-01 11:44 | `GET /v2/mf_folios?mf_investment_account=…` | 200 | 2 folios | — | no ARN/broker/distributor field; keys are holder, contact, nominee and payout details only |
+| 4 | 2026-10-01 11:44 | `GET /api/oms/reports/holdings?investment_account_id=23` | 200 | — | — | no ARN |
+| 5 | 2026-10-01 11:44:28 | `POST /v2/mf_purchases/reports/mf_purchase_list` and `POST /v2/transactions/reports/transaction_list` | 200 | — | — | `{object, report, data, filter_by}` with no rows for the window (filters need tuning); `GET` on the purchase report is 404 |
 
 ## Evidence
-_Where the ARN appeared (field path) and the trimmed excerpt._
+- Purchase, plan and redemption objects have `partner` (null), `sub_partner_license_code` (null) and `euin` (tenant default, see P-04). There is no ARN-like field.
+- `SANCHAY_PLATFORM_ARN` is not set yet, so a found value could not have been compared anyway.
 
 ## Result
-**PASS / FAIL / INCONCLUSIVE:**
+**INCONCLUSIVE.** The ARN is not visible in any FP object or report in the sandbox, consistent with "no per-order ARN field".
 
-**Decision** (flag value set, or PO-2 escalation raised, with the Cybrilla question number):
+**Decision.** No flag change. ARN evidence must come from Cybrilla (the ONDC message for a sandbox order) and, for G-B8, from the RTA/AMC statement of the canary folio (F20).
 
 **Follow-ups:**
+- Ask Cybrilla: show the ONDC `fulfillment.agent.organization.creds` for one of the run-1 order ids above, and confirm the tenant's registered ARN.
+- Owner: add the platform ARN to `apps/api/.env` as `SANCHAY_PLATFORM_ARN=ARN-…` so later runs can compare it.
+- Re-run step 5 with the report's documented filters once known (both reports returned no rows for a one-day window).
