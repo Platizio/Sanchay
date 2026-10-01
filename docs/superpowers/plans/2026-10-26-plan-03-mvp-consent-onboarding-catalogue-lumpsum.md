@@ -128,7 +128,7 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
-- **E8, E9, E10 and E14 test harness.** Their integration tests use helpers that do not exist: `insertInvestor`, `authedRequest`, `bootTestApp(db)` and `t.db.insert`. Rewrite them with `bootTestApp()`, `signInWeb(app, mobile)` → `{cookies, investorId}`, `app.app.inject({headers: webHeaders({cookies})})` and `app.db.db`, keeping every assertion. The production code in these tasks was reviewed for Plan 02 drift only.
+- **E8–E10 test harness (fixed in place).** Their tests called a nonexistent `authedRequest` and `bootTestApp(db)`. They now use `signedInInvestor(app)` (new helper created by E8, built on Plan 01's `signInWeb`), `bootTestApp()` and `app.db.db`. (`insertInvestor` in Plan 01's `test/int/factories.ts` is real; E14's use of it is correct.) The production code in E8–E10 was reviewed for Plan 02 drift only.
 - **E12, E13, E17, E23 and E24 (screens)** were checked only for API-name drift, not rebuilt.
 - **Confirm in the FP sandbox (D4 `tools/fp-probes`) before the pilot:**
   - FP accepts `amount` as a 2-dp string;
@@ -3030,6 +3030,7 @@ git commit -m "feat(legal-consent): sanchay.consent.v2 snapshot, JCS hashing and
 - Consumes (Plan 02, as built): `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler`, `type Job<N>`, `type JobName` (`jobs/job-registry.ts`; `consent.expiry.sweep` and `drafts.abandon` are already in `JOB_NAMES`), `registerSchedules` (`jobs/schedules.ts`); `type ConsumedConsent`, `assertConsumed` (D3, `apps/api/src/integrations/fp/consumed-consent.ts`); `CHALLENGE_STATUSES`, `type ChallengeStatus` (D5, `@sanchay/domain`); `bootFpTestApp`, `type FpTestApp`, `FakeFp.calls()` (D4, `apps/api/test/int/fake-fp.ts`; call-log `at` is stamped from the app `Clock`); `AppConfig` (Plan 01).
 - Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
 - Review fix (Plan 02 as built): `ConsumedConsent`/`assertConsumed` come from D3 and `CHALLENGE_STATUSES` from D5; there are no local copies. `useConsumed` mints the D3 brand (`subjectIds` are the subject row ids) and checks it with `assertConsumed`. It refuses unless `SANCHAY_APP_ROLE === 'worker'` (from `AppConfig`), replacing the draft's `asWorker()` object-copy.
+- Review fix: `ConsentRouter` uses Plan 01's `@Controller` + `@Implement` pattern (the draft's `implement(...).router(...)` object on an `@Injectable` would never have been mounted), checks that every challenge belongs to the signed-in investor (the draft let any investor read, send, approve or cancel any challenge), and applies `requireIdempotency(idem, cls)` to `cancel` (the draft called it with no arguments).
 - Review fix: both sweeps are `@JobHandler` classes whose `handle(job)` calls `run()`, scheduled through `registerSchedules` (`consent.expiry.sweep` `*/5 * * * *`, `drafts.abandon` `0 * * * *`). `LegalConsentModule` injects real tokens (`DB`, `CLOCK`, `Crypto`, `OtpService` from `IdentityModule`, the global `Jobs`), not string tokens and not a no-op `JOBS`. Tests boot the worker app with FakeFp and spy on the injected `Jobs`.
 - Review fix: one shared `consent.approved` queue cannot fan out; pg-boss hands each job to exactly one worker. `approve` therefore enqueues the job registered for the challenge's subject type in `CONSENT_SUBJECT_JOBS`, or nothing when none is registered. The registering file must be loaded in the **api** role too, since `approve` runs in the request.
 
@@ -4256,60 +4257,95 @@ export const contract = { health: healthContract, auth: authContract, me: meCont
 export type Contract = typeof contract;
 ```
 
-`apps/api/src/modules/legal-consent/consent.router.ts`:
+`apps/api/src/modules/legal-consent/consent.router.ts` (Plan 01's `@Controller` + `@Implement` pattern; every procedure first proves the challenge belongs to the signed-in investor, so a foreign id is 404, never readable or actionable):
 ```ts
-import { Inject, Injectable } from '@nestjs/common';
-import { implement } from '@orpc/server';
+import { Controller, Inject } from '@nestjs/common';
+import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
+import { and, eq } from 'drizzle-orm';
+import { ClsService } from 'nestjs-cls';
+import { DB, type DbHandle } from '../../db/client.js';
+import { requireAuth } from '../identity/request-auth.js';
+import { AppError } from '../platform/errors.js';
 import { requireIdempotency } from '../platform/idempotency.middleware.js';
+import { IdempotencyService } from '../platform/idempotency.service.js';
+import type { SanchayClsStore } from '../platform/request-context.js';
 import { ConsentEngine } from './consent-engine.js';
 import { consentChallenges } from './legal-consent.schema.js';
-import { DB, type DbHandle } from '../../db/client.js';
-import { eq } from 'drizzle-orm';
-import { AppError } from '../platform/errors.js';
 
-const os = implement(contract.consents);
-
-@Injectable()
+@Controller()
 export class ConsentRouter {
   constructor(
     @Inject(ConsentEngine) private readonly engine: ConsentEngine,
     @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(IdempotencyService) private readonly idem: IdempotencyService,
+    @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
-  router = os.router({
-    getChallenge: os.getChallenge.handler(async ({ input }) => {
-      const [row] = await this.dbh.db
-        .select()
-        .from(consentChallenges)
-        .where(eq(consentChallenges.id, input.id))
-        .limit(1);
-      if (row === undefined) throw new AppError('NOT_FOUND');
+  /** BOLA: the challenge must belong to the signed-in investor. */
+  private async owned(challengeId: string) {
+    const { investorId } = requireAuth(this.cls);
+    const [row] = await this.dbh.db
+      .select()
+      .from(consentChallenges)
+      .where(and(eq(consentChallenges.id, challengeId), eq(consentChallenges.investorId, investorId)))
+      .limit(1);
+    if (row === undefined) throw new AppError('NOT_FOUND');
+    return row;
+  }
+
+  @Implement(contract.consents.getChallenge)
+  getChallenge() {
+    return implement(contract.consents.getChallenge).handler(async ({ input }) => {
+      const row = await this.owned(input.id);
       return {
         challengeId: row.id,
         status: row.status,
         requiredFactors: row.requiredFactors,
-        expiresAt: row.expiresAt,
+        expiresAt: row.expiresAt.toISOString(),
       };
-    }),
-    sendOtp: os.sendOtp.handler(async ({ input }) => {
+    });
+  }
+
+  @Implement(contract.consents.sendOtp)
+  sendOtp() {
+    return implement(contract.consents.sendOtp).handler(async ({ input }) => {
+      await this.owned(input.id);
       await this.engine.sendOtp(input.id, input.channel);
       return { ok: true as const };
-    }),
-    approve: os.approve.handler(async ({ input }) => {
+    });
+  }
+
+  @Implement(contract.consents.approve)
+  approve() {
+    return implement(contract.consents.approve).handler(async ({ input }) => {
+      await this.owned(input.id);
       const result = await this.engine.approve(input.id, {
-        smsCode: input.smsCode,
-        emailCode: input.emailCode,
+        ...(input.smsCode === undefined ? {} : { smsCode: input.smsCode }),
+        ...(input.emailCode === undefined ? {} : { emailCode: input.emailCode }),
       });
-      return result;
-    }),
-    cancel: os.cancel.use(requireIdempotency()).handler(async ({ input }) => {
-      await this.engine.cancel(this.dbh.db, input.id);
-      return { ok: true as const };
-    }),
-  });
+      return {
+        challengeId: result.challengeId,
+        executeBefore: result.executeBefore.toISOString(),
+        sagaExpiresAt: result.sagaExpiresAt.toISOString(),
+      };
+    });
+  }
+
+  /** R-20: cancel requires an Idempotency-Key (D1). */
+  @Implement(contract.consents.cancel)
+  cancel() {
+    return implement(contract.consents.cancel)
+      .use(requireIdempotency(this.idem, this.cls))
+      .handler(async ({ input }) => {
+        await this.owned(input.id);
+        await this.engine.cancel(this.dbh.db, input.id);
+        return { ok: true as const };
+      });
+  }
 }
 ```
+(If `contract.consents.approve`'s output schema above uses `Date` rather than ISO strings, keep this handler's `toISOString()` and change the schema to `InstantSchema` from `./common.js`, the Plan 01 convention for instants on the wire.)
 
 - [ ] **Step 3 (continued): the trigger migration**
 
@@ -7199,6 +7235,7 @@ git commit -m "feat(onboarding): bank account penny-drop, Jaro-Winkler name matc
   - `packages/contract/src/onboarding.ts` (created by E5; append `getNomination`/`putNomination`)
   - `apps/api/src/modules/platform/ids.ts` (append `'nominees' | 'nomination_decisions'` to `TableName`)
 - Generated: `apps/api/drizzle/<n>_nominees.sql` (`db:generate --name=nominees`, the two tables) and `apps/api/drizzle/<n+1>_nominees_set_sum.sql` (`db:generate --custom --name=nominees_set_sum`, the deferred set-sum trigger); numbers per the plan's migration table. Also modify `packages/domain/src/rules/index.ts` (append `export * from './nominee-split.js';`).
+- Create: `apps/api/test/int/signed-in.ts` (test helper)
 - Test:
   - `packages/domain/test/nominee-split.test.ts`
   - `apps/api/test/int/nomination.int.test.ts`
@@ -7233,6 +7270,52 @@ git commit -m "feat(onboarding): bank account penny-drop, Jaro-Winkler name matc
   - `AUDIT_ACTIONS.ONBOARDING_NOMINATION_SET` (append to `apps/api/src/modules/platform/audit.service.ts`; `data` reuses the existing `'status'` allowlist key for the decision).
 
 - [ ] **Step 1: Write the failing tests**
+
+`apps/api/test/int/signed-in.ts` (created by E8, reused by E9/E10; a signed-in investor through Plan 01's real OTP flow):
+```ts
+import { randomUUID } from 'node:crypto';
+import type { TestApp } from './app.js';
+import { signInWeb } from './flows.js';
+import { webHeaders } from './http.js';
+
+export interface AuthedResponse {
+  status: number;
+  // biome-ignore lint/suspicious/noExplicitAny: tests assert response bodies structurally
+  body: any;
+}
+
+export interface AuthedRequest {
+  get(url: string): Promise<AuthedResponse>;
+  post(url: string, payload?: unknown): Promise<AuthedResponse>;
+  put(url: string, payload?: unknown): Promise<AuthedResponse>;
+}
+
+export async function signedInInvestor(app: TestApp): Promise<{ investor: { id: string }; cookies: Record<string, string>; req: AuthedRequest }> {
+  const mobile = `9${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`;
+  const { investorId, cookies } = await signInWeb(app, mobile);
+  const send = async (method: 'GET' | 'POST' | 'PUT', url: string, payload?: unknown): Promise<AuthedResponse> => {
+    const res = await app.app.inject({
+      method,
+      url,
+      headers: { ...webHeaders({ cookies }), 'idempotency-key': randomUUID() },
+      ...(payload === undefined ? {} : { payload: payload as Record<string, unknown> }),
+    });
+    let body: unknown = null;
+    try {
+      body = res.json();
+    } catch {
+      body = res.body;
+    }
+    return { status: res.statusCode, body };
+  };
+  return {
+    investor: { id: investorId },
+    cookies,
+    req: { get: (url) => send('GET', url), post: (url, payload) => send('POST', url, payload), put: (url, payload) => send('PUT', url, payload) },
+  };
+}
+```
+
 
 `packages/test-fixtures/package.json` (already created by Plan 02 D9; do not rewrite; skip this block):
 ```json
@@ -7326,22 +7409,18 @@ describe('requiresAnnexureBAcceptance (H-12 opt-out gate, enforced at attest by 
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nominationDecisions, nominees } from '../../src/modules/onboarding/nomination.schema.js';
-import { createTestDatabase, type TestDatabase } from './db.js';
-import { insertInvestor } from './factories.js';
-import { authedRequest, bootTestApp, type TestApp } from './app.js';
+import { bootTestApp, type TestApp } from './app.js';
+import { signedInInvestor } from './signed-in.js';
 import { expectBola } from './bola.js';
 
-let t: TestDatabase;
 let app: TestApp;
 
 beforeAll(async () => {
-  t = await createTestDatabase();
-  app = await bootTestApp(t);
+  app = await bootTestApp();
 });
 
 afterAll(async () => {
   await app.close();
-  await t.drop();
 });
 
 const nominee = (position: number, allocationPct?: number) => ({
@@ -7353,9 +7432,8 @@ const nominee = (position: number, allocationPct?: number) => ({
 
 describe('onboarding.putNomination / getNomination', () => {
   it('defaults to the equal split (34/33/33) for 3 nominees', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [nominee(1), nominee(2), nominee(3)],
@@ -7367,9 +7445,8 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('accepts a custom allocation that sums to 100', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: false,
       nominees: [nominee(1, 60), nominee(2, 40)],
@@ -7381,9 +7458,8 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('rejects a set that sums to 99', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [nominee(1, 60), nominee(2, 39)],
@@ -7393,9 +7469,8 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('rejects a 4th nominee', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [nominee(1), nominee(2), nominee(3), nominee(4)],
@@ -7405,9 +7480,8 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('rejects AADHAAR_LAST4 as an id type', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [{ ...nominee(1), idType: 'AADHAAR_LAST4', idValue: '1234' }],
@@ -7416,9 +7490,8 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('rejects a PAN id for a minor', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [
@@ -7436,20 +7509,19 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('increments set_version on a second PUT and replaces the prior set', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [nominee(1), nominee(2)],
     });
-    const second = await req.put('/api/v1/onboarding/nomination').send({
+    const second = await req.put('/api/v1/onboarding/nomination', {
       decision: 'NOMINATED',
       displayPreference: true,
       nominees: [nominee(1)],
     });
     expect(second.status).toBe(200);
-    const rows = await t.db
+    const rows = await app.db.db
       .select()
       .from(nominees)
       .where(eq(nominees.investorId, investor.id));
@@ -7459,13 +7531,12 @@ describe('onboarding.putNomination / getNomination', () => {
   });
 
   it('OPTED_OUT is accepted without nominees and records the decision', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/nomination').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/nomination', {
       decision: 'OPTED_OUT',
     });
     expect(res.status).toBe(200);
-    const [decision] = await t.db
+    const [decision] = await app.db.db
       .select()
       .from(nominationDecisions)
       .where(eq(nominationDecisions.investorId, investor.id));
@@ -8187,12 +8258,10 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { riskProfiles } from '../../src/modules/onboarding/risk-profile.schema.js';
 import { seedRiskQuestionnaire } from '../../src/modules/onboarding/risk-profile.service.js';
-import { createTestDatabase, type TestDatabase } from './db.js';
-import { insertInvestor } from './factories.js';
-import { authedRequest, bootTestApp, type TestApp } from './app.js';
+import { bootTestApp, type TestApp } from './app.js';
+import { signedInInvestor } from './signed-in.js';
 import { expectBola } from './bola.js';
 
-let t: TestDatabase;
 let app: TestApp;
 
 const ANSWERS_AGGRESSIVE = {
@@ -8206,14 +8275,12 @@ const ANSWERS_AGGRESSIVE = {
 };
 
 beforeAll(async () => {
-  t = await createTestDatabase();
-  await seedRiskQuestionnaire(t.db);
-  app = await bootTestApp(t);
+  app = await bootTestApp();
+  await seedRiskQuestionnaire(app.db.db);
 });
 
 afterAll(async () => {
   await app.close();
-  await t.drop();
 });
 
 describe('riskProfile.questionnaire / get / submit', () => {
@@ -8225,9 +8292,8 @@ describe('riskProfile.questionnaire / get / submit', () => {
   });
 
   it('submit pins the questionnaire sha and computes level from GAP-03 bands', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/risk-profile').send({
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/risk-profile', {
       dob: '2000-01-01',
       ...ANSWERS_AGGRESSIVE,
     });
@@ -8235,7 +8301,7 @@ describe('riskProfile.questionnaire / get / submit', () => {
     expect(res.body.level).toBe('AGGRESSIVE');
     expect(res.body.maxRiskometer).toBe('VERY_HIGH');
     expect(res.body.ackSha256).toBeUndefined();
-    const [row] = await t.db
+    const [row] = await app.db.db
       .select()
       .from(riskProfiles)
       .where(eq(riskProfiles.investorId, investor.id));
@@ -8250,10 +8316,9 @@ describe('riskProfile.questionnaire / get / submit', () => {
   });
 
   it('an expired profile blocks with RISK_PROFILE_EXPIRED at the next get', async () => {
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    await req.put('/api/v1/risk-profile').send({ dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
-    await t.db
+    const { investor, req } = await signedInInvestor(app);
+    await req.put('/api/v1/risk-profile', { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
+    await app.db.db
       .update(riskProfiles)
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(riskProfiles.investorId, investor.id));
@@ -8894,11 +8959,9 @@ import {
   legalDocuments,
 } from '../../src/modules/legal-consent/legal-consent.schema.js';
 import { nominationDecisions } from '../../src/modules/onboarding/nomination.schema.js';
-import { createTestDatabase, type TestDatabase } from './db.js';
-import { insertInvestor } from './factories.js';
-import { authedRequest, bootTestApp, type TestApp } from './app.js';
+import { bootTestApp, type TestApp } from './app.js';
+import { signedInInvestor } from './signed-in.js';
 
-let t: TestDatabase;
 let app: TestApp;
 
 const REQUIRED = [
@@ -8912,11 +8975,11 @@ const REQUIRED = [
 
 async function seedDocs() {
   for (const key of [...REQUIRED, 'NOMINATION_OPT_OUT_ANNEX_B', 'KYC_CONSENT'] as const) {
-    await t.db
+    await app.db.db
       .insert(legalDocuments)
       .values({
         key,
-        version: 1,
+        version: '1',
         bodyMarkdown: `# ${key}`,
         sha256: Buffer.alloc(32),
         status: 'PUBLISHED',
@@ -8927,26 +8990,23 @@ async function seedDocs() {
 }
 
 beforeAll(async () => {
-  t = await createTestDatabase();
-  app = await bootTestApp(t);
+  app = await bootTestApp();
 });
 
 afterAll(async () => {
   await app.close();
-  await t.drop();
 });
 
 describe('legal.pending', () => {
   it('lists only unaccepted current versions', async () => {
     await seedDocs();
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
+    const { investor, req } = await signedInInvestor(app);
     const before = await req.get('/api/v1/legal/pending');
     expect(before.body.keys.sort()).toEqual(
       [...REQUIRED, 'KYC_CONSENT'].sort(),
     );
-    await req.put('/api/v1/onboarding/declarations').send({
-      accept: REQUIRED.map((key) => ({ key, version: 1 })),
+    await req.put('/api/v1/onboarding/declarations', {
+      accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     const after = await req.get('/api/v1/legal/pending');
     expect(after.body.keys).toEqual(['KYC_CONSENT']);
@@ -8956,11 +9016,10 @@ describe('legal.pending', () => {
 describe('onboarding.stageDeclarations', () => {
   it('rejects a stale version acceptance', async () => {
     await seedDocs();
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    await t.db.update(legalDocuments).set({ version: 2 }).where(eq(legalDocuments.key, 'TNC'));
-    const res = await req.put('/api/v1/onboarding/declarations').send({
-      accept: REQUIRED.map((key) => ({ key, version: 1 })),
+    const { investor, req } = await signedInInvestor(app);
+    await app.db.db.update(legalDocuments).set({ version: '2' }).where(eq(legalDocuments.key, 'TNC'));
+    const res = await req.put('/api/v1/onboarding/declarations', {
+      accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     expect(res.status).toBe(409);
     expect(res.body.message).toBe('DECLARATION_OUTDATED');
@@ -8968,28 +9027,27 @@ describe('onboarding.stageDeclarations', () => {
 
   it('requires NOMINATION_OPT_OUT_ANNEX_B only when the investor opted out', async () => {
     await seedDocs();
-    const investor = await insertInvestor(t.db);
-    await t.db.insert(nominationDecisions).values({
+    const { investor, req } = await signedInInvestor(app);
+    await app.db.db.insert(nominationDecisions).values({
       investorId: investor.id,
       createdBy: 'system:test',
       updatedBy: 'system:test',
       decision: 'OPTED_OUT',
       decidedAt: new Date(),
     });
-    const req = await authedRequest(app, investor.id);
-    const withoutAnnex = await req.put('/api/v1/onboarding/declarations').send({
-      accept: REQUIRED.map((key) => ({ key, version: 1 })),
+    const withoutAnnex = await req.put('/api/v1/onboarding/declarations', {
+      accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     expect(withoutAnnex.status).toBe(400);
 
-    const withAnnex = await req.put('/api/v1/onboarding/declarations').send({
+    const withAnnex = await req.put('/api/v1/onboarding/declarations', {
       accept: [
-        ...REQUIRED.map((key) => ({ key, version: 1 })),
-        { key: 'NOMINATION_OPT_OUT_ANNEX_B', version: 1 },
+        ...REQUIRED.map((key) => ({ key, version: '1' })),
+        { key: 'NOMINATION_OPT_OUT_ANNEX_B', version: '1' },
       ],
     });
     expect(withAnnex.status).toBe(200);
-    const rows = await t.db
+    const rows = await app.db.db
       .select()
       .from(declarationStagings)
       .where(
@@ -9005,13 +9063,12 @@ describe('onboarding.stageDeclarations', () => {
 
   it('does not restage KYC_CONSENT (already recorded at ONB-02 by E6)', async () => {
     await seedDocs();
-    const investor = await insertInvestor(t.db);
-    const req = await authedRequest(app, investor.id);
-    const res = await req.put('/api/v1/onboarding/declarations').send({
-      accept: REQUIRED.map((key) => ({ key, version: 1 })),
+    const { investor, req } = await signedInInvestor(app);
+    const res = await req.put('/api/v1/onboarding/declarations', {
+      accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     expect(res.status).toBe(200);
-    const staged = await t.db
+    const staged = await app.db.db
       .select()
       .from(declarationStagings)
       .where(eq(declarationStagings.investorId, investor.id));
@@ -9427,7 +9484,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - It read `app.lastConsumedConsent`; the challenge id now comes from the job data.
   - It sent `mobileLast4` as the phone number, and read encrypted columns (`pan`, `dateOfBirth`, `accountNumber`) as plain text; they are now decrypted in the worker.
   - It never passed the consent to the P writes; now it does.
-  - Its tests used APIs that do not exist (`app.app.request`, `factories.js`, `app.consentSnapshots`, `clock.plusMonths`); they are rewritten.
+  - Its tests used APIs that do not exist (`app.app.request`, factory functions that `test/int/factories.ts` does not export, `app.consentSnapshots`, `clock.plusMonths`); they are rewritten.
   - The trigger now handles an investor with no application row (a NULL would have violated `can_purchase NOT NULL`), and it treats a risk profile as valid only when `status = 'ACTIVE'` and not expired.
   - `attest` is session-scoped (no id argument), so it has no BOLA test.
 
@@ -18011,6 +18068,8 @@ import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { ClsService } from 'nestjs-cls';
 import { requireAuth } from '../identity/request-auth.js';
+import { requireIdempotency } from '../platform/idempotency.middleware.js';
+import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
 import { PurchaseService } from './purchase.service.js';
 
@@ -18029,12 +18088,13 @@ const toWire = (row: { id: string; type: string; status: string; schemeId: strin
 export class OrdersRouter {
   constructor(
     @Inject(PurchaseService) private readonly purchases: PurchaseService,
+    @Inject(IdempotencyService) private readonly idem: IdempotencyService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
   @Implement(contract.orders.createPurchase)
   createPurchase() {
-    return implement(contract.orders.createPurchase).handler(({ input }) => {
+    return implement(contract.orders.createPurchase).use(requireIdempotency(this.idem, this.cls)).handler(({ input }) => {
       const auth = requireAuth(this.cls);
       return this.purchases.createPurchase({
         ...input,
@@ -18057,11 +18117,13 @@ export class OrdersRouter {
 
   @Implement(contract.orders.cancel)
   cancel() {
-    return implement(contract.orders.cancel).handler(({ input }) => this.purchases.cancel(requireAuth(this.cls).investorId, input.id));
+    return implement(contract.orders.cancel)
+      .use(requireIdempotency(this.idem, this.cls))
+      .handler(({ input }) => this.purchases.cancel(requireAuth(this.cls).investorId, input.id));
   }
 }
 ```
-(`orders.createPurchase` and `orders.cancel` are [K]: the D1 idempotency middleware requires `Idempotency-Key` on both.)
+(`orders.createPurchase` and `orders.cancel` are [K]: `.use(requireIdempotency(idem, cls))` (D1) requires a UUID `Idempotency-Key` and replays a repeated one. Add `'IDEMPOTENCY_KEY_REQUIRED', 'IDEMPOTENCY_KEY_REUSED', 'IDEMPOTENCY_IN_PROGRESS'` to both procedures' `errorMap` in `orders.ts`.)
 
 `apps/api/src/modules/orders/orders.module.ts`:
 ```ts
