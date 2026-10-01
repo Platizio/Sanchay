@@ -21,7 +21,7 @@
 | 7 | D8 catalogue schema and seeds | Dev B | Plan 01 |
 | 8 | D9 AMFI NAV sync | Dev B | D1, D2, D8 |
 | 9 | D10 FP scheme sync, catalogue procedures | Dev B | D3, D8, D9 |
-| 10 | E25 CDK `SanchayMvpStack-dev` (protected, S2 week 2, R-05) | Dev A | D2 |
+| 10 | E25 CDK `SanchayMvpStack-dev` (protected, S2 week 2, R-05) | Dev A | D2, D3, D6, D7 |
 | 11 | D4 FakeFp and smoke harness (starts S3 week 1, outline §0.3) | Dev A | D3 |
 
 The task sections below appear in chunk order (D1–D4, D5–D7, D8–D10, E25); run them in the order above.
@@ -67,8 +67,38 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-14: PLAN machine.** An ONDC purchase plan can end `failed` out of review, or be refused at the confirm `PATCH`, and the 7-day saga can lapse while FP is reviewing. D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`), `UNDER_REVIEW → CONSENT_EXPIRED` (`saga_expired_under_review`) and `CONFIRMING → REJECTED` (`fp_confirm_rejected`) and, as for orders, `SUBMITTING → REJECTED` (`live_check_failed`) for an FP 4xx on create. The MANDATE machine gains `CONSENTED → CONSENT_EXPIRED` (`execute_before_missed`: approved but never submitted in time) and `SUBMITTING → REJECTED` (`live_check_failed`). Plan 04 F2 uses them.
 - **RV-02-15: D4 sandbox probe sends `expand` (found against the live sandbox, 2026-10-01).** `GET /v2/mf_scheme_plans/cybrillapoa` without `expand` returns `400 parameter_missing` ("required request parameter 'expand'"). D3's `FpRead` already sent it; D4's `tools/fp-probes` client did not, so the sandbox smoke would have failed at its catalogue step. D4 now requests `?expand=mf_scheme,mf_fund&page=0&size=100`, and its stub only matches when `expand` is present. Also confirmed in the sandbox: the list is under `data` (482 orderable plans); the POA token is issued only by the FP host (`{SANCHAY_FP_BASE_URL}/v2/auth/cybrillarta/token`; the POA host answers 404), and both hosts serve `/poa/pre_verifications/{id}`, so `liveBaseUrls` mapping every audience to `SANCHAY_FP_BASE_URL` is correct.
 - **RV-02-8: `Jobs` is injectable.** D2's `Jobs` is an `@Injectable()` service exported by the global `JobsModule`, with an instance `enqueue(exec, name, data, opts)`. It was static; every consumer (D6 `Notify`, D9, and Plan 03/04) injects it, and unit tests stub it. D6 used `JOB_NAMES.NOTIFICATIONS_SEND`, which never existed; job names are dotted string literals checked against `JobName`.
+- **RV-02-16: E25 CDK CLI pin (found while assembling Plan 04, 2026-10-01).** `aws-cdk@2.216.0` does not exist: the CDK CLI left aws-cdk-lib's version line at 2.1000.0 (2025-02-18), so E25's catalog fragment failed `pnpm install`. E25 now pins `aws-cdk: 2.1143.0` (the newest CLI past the 7-day `minimumReleaseAge` on 2026-10-01; a newer CLI always reads an older library's cloud assembly). `aws-cdk-lib 2.216.0` and `constructs 10.4.2` stay. The three pins install under the workspace's `minimumReleaseAge`, `trustPolicy` and `strictDepBuilds`, and the same code also passes against aws-cdk-lib 2.270.0 with constructs 10.8.1.
+- **RV-02-17: E25 TypeScript build and synth.** `infra/tsconfig.json` extended `@sanchay/config/tsconfig-node`, which the package does not export (TS6053); it now extends `@sanchay/config/tsconfig/node-lib.json`, adds `types: ["node"]` and turns off `exactOptionalPropertyTypes` for `infra` only. aws-cdk-lib's own declarations fail under that option (16 errors, for example `Vpc` is not assignable to `IVpc` through `vpnGatewayId`), and `noUncheckedIndexedAccess` stays on. `cdk.json` ran `node --experimental-strip-types bin/sanchay.ts`, which cannot resolve `../lib/config.js` (`ERR_MODULE_NOT_FOUND` on Node 24.21), so `cdk synth` never worked. It now runs `tsc -p tsconfig.json && node dist/bin/sanchay.js`, verified with a real `cdk synth` from both PowerShell 5.1 and Git Bash. The synth also showed that the cdk CLI overwrites `CDK_DEFAULT_REGION` with the caller's default region (us-east-1 when none is configured), so `bin/sanchay.ts` pins `region: 'ap-south-1'` (spec §2.4). `.gitignore` gains `cdk.out/`.
+- **RV-02-18: E25 code that did not compile or lint.** `rds.PostgresEngineVersion.VER_18_6` does not exist: 2.216.0's newest constants are VER_17_6 and VER_18_0, and even 2.270.0 stops at VER_18_3, although RDS has offered 18.6 since August 2026. The stack now uses one `rds.PostgresEngineVersion.of('18.6', '18')` engine for the parameter group and the instance. The four non-null assertions that `biome ci` rejects (`dbInstance.secret!`, `alb.connections.securityGroups[0]!` twice, `sub[0]!`) became guarded destructuring and `charAt(0)`. In the test, `rules[0].Properties` (TS2532 under `noUncheckedIndexedAccess`) became `const [rule] = rules`.
+- **RV-02-19: E25 RDS master user (BRIEF D6).** The generated master credentials were for `sanchay_app`, the name of the NOLOGIN role that `0000_bootstrap` creates and `0003_grants` scopes. The app therefore logged in as `rds_superuser`, owned schema `app`, and the append-only REVOKEs did not bind it (R-16). The master is now `sanchay_master` (`DB_MASTER_USER`), secret `sanchay/{env}/db-master`, and the migrate task logs in with it. The LOGIN role `sanchay_app_login` (secret `sanchay/{env}/db-app`) and `sanchay_readonly_login` belong to F1 (D6), so api and worker share the master login until F1 points the stack's single seam, `appDbLogin`, at `sanchay_app_login`.
+- **RV-02-20: E25 container environment and role-aware boot invariants.** As written, no API-image container could boot, even at the end of Plan 02. Run through the boot guard as D3, D6 and D7 leave it, the api was refused by invariant 7 (no retriever hash) and invariant 8 (FP mode defaults to `fake`), and worker and migrate failed to parse (no `SANCHAY_APP_ORIGIN`). Now api, worker and migrate share `bootEnv`: `SANCHAY_APP_ENV`, `SANCHAY_APP_ORIGIN`, `SANCHAY_API_ORIGIN` (before E2 requires it), `SANCHAY_CLIENT_IP_SOURCE=alb`, `SANCHAY_KEY_SERVICE=secrets`, `SANCHAY_PROVIDER_MODE_FP` (`sandbox` in dev, `production` in prod), `SANCHAY_PILOT_INVITE_ONLY=true` and `SANCHAY_PLATFORM_ARN` (before E21 requires it). api and worker add `msg91`/`ses`/`SANCHAY_SES_FROM`, api adds `SANCHAY_SMS_RETRIEVER_HASH`, and worker adds `SANCHAY_FP_BASE_URL`. `loadStackConfig(envName, source = process.env)` reads the two deploy inputs, `SANCHAY_PLATFORM_ARN` and `SANCHAY_SMS_RETRIEVER_HASH`, and throws `StackConfigError` without them; `deploy.yml` passes both from the GitHub environment. B2's invariants 1 and 7 now follow R-19's owning containers through two constants, `role` and `sends`: invariant 1 applies to api and worker, and invariant 7 to api only. Worker and migrate therefore boot without the api-only hash, and migrate boots without senders. Verified: each container's synthesised environment boots through the reconstructed guard. With Plan 03 added, E1's invariant 13 as written still refuses worker and migrate (no `SANCHAY_FP_WEBHOOK_SECRET`, which R-19 gives to api only). E1 must use `role === 'api'` too; this is an open item for Plan 03.
+- **RV-02-21: E25 web container and health checks.** The web container had no `PORT`, so Next.js standalone bound 3000, the api's port in the shared task network. It also lacked `SANCHAY_WWW_ORIGIN` and `SANCHAY_APP_ORIGIN`, which `apps/web/src/proxy.ts` needs for H-1 host routing. Both target groups probed `/api/v1/health` on their own port, but Next serves no `/api/v1/*` route in AWS (the rewrites are local only; the image answers 404), so every web target was unhealthy and ECS replaced the task in a loop. Now web gets `PORT=3001`, `HOSTNAME=0.0.0.0` and both origins, and both target groups probe `/api/v1/health` on port 3000 of the same task. The R-12 path is unchanged, and a crashed web process still stops the task because every container is essential.
+- **RV-02-22: E25 service name, SES, instance size and the NAV alarm.** The `FargateService` had no `serviceName`, so `deploy.yml`'s `--service Service` named nothing. It is now `sanchay-app` (`SERVICE_NAME`, spec §2.4) with `minHealthyPercent: 100`, and `deploy.yml` waits for `services-stable`. The task role could not send email, so D6's `SesEmailSender` failed. Statement `SesSendFromSanchayDomain` now allows `ses:SendEmail` and `ses:SendRawEmail` on any identity, restricted by `ses:FromAddress` to `SANCHAY_SES_FROM` (recipients are identities too while SES is in the sandbox). The hard-coded `db.t4g.micro` became `config.dbInstanceSize`: micro in dev, `db.t4g.medium` in prod (spec §2.4). The NAV-age alarm is removed. Nothing published its metric `Sanchay/nav.newest_age_days`, so with `treatMissingData: BREACHING` it would sit in ALARM permanently, and a ">= 2 days" threshold would page every weekend. F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm, with its metric source, in both envs.
+- **RV-02-23: E25 first deploy and images.** The stack creates its ECR repositories empty and its secrets with placeholder values, so the first deploy could never stabilise and would roll the whole stack back. `-c firstDeploy=true` now creates the service with no tasks, and ADR-0014 gives the bootstrap, first-deploy, secrets, images, migrate and `deploy.yml` sequence. The stack outputs `AppSubnetIds` and `ServiceSecurityGroupId` for the run-task. The api image could not have run (verified):
+  - The runtime copied the hoisted `node_modules` to `/repo_node_modules`, which ESM resolution never reads (`ERR_MODULE_NOT_FOUND: zod`).
+  - It never built the workspace packages, whose `exports` point at `dist/`.
+  - It left out `drizzle/`, so `migrate.js` had no migrations.
+  - `node:24.13.1` fails `engineStrict`, because the lockfile's `jsdom` 30 needs `^24.15.0`.
+
+  Both Dockerfiles now use `.node-version`'s 24.21.0 pinned by digest, build with `--filter=@sanchay/api...` / `--filter=@sanchay/web...`, and keep the `/repo` layout with production dependencies only. The web image takes the `/site` prerender inputs (`SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL`, the two origins) as build arguments; without them `next build` stops at `/site`. A new `.dockerignore` keeps `node_modules` and `.env` files out of the build context; before it, `COPY apps/api apps/api` would have baked a developer's `apps/api/.env` into the image. The task definition is ARM64 but the runners are x86_64, so `deploy.yml` registers QEMU (`tonistiigi/binfmt`, pinned by digest) and builds `--platform linux/arm64`. `apps/web/public/.well-known/assetlinks.json` (`[]`) gives the web image its `public/` directory until F18 writes the App Links payload. Verified on Docker Desktop: the arm64 api image migrated Postgres 18.6 and answered `/api/v1/health` with 200, and the arm64 web image served `/site` on the www host and `assetlinks.json` on the app host.
+- **RV-02-24: D4 and D8 main guards on Windows.** ``import.meta.url === `file://${process.argv[1]}` `` never matches on Windows (`file:///C:/...` against `file://C:\...`), so `pnpm --filter=@sanchay/fp-probes smoke` and `pnpm ops:catalogue:seed` exited 0 without doing anything. Both now compare against `pathToFileURL(process.argv[1]).href`. Verified under node and tsx from both PowerShell 5.1 and Git Bash: the old guard skipped `main`, the new one runs it.
+- **RV-02-25: D3, D6 and D7 env tests (found while verifying E25's env.ts change; outside the assigned list).** D3's invariant 8 refuses the default FP mode outside local/test, but `devSecrets` had no `SANCHAY_PROVIDER_MODE_FP`. Three Plan 01 cases therefore failed (reproduced): `requires SANCHAY_SMS_RETRIEVER_HASH outside local/test`, `refuses fake SMS/email providers in staging and prod, but not in dev`, and `boots outside local/test with the secrets keyring behind the ALB`. `devSecrets` now gains `SANCHAY_PROVIDER_MODE_FP: 'sandbox'`. D6's two cases called `validLocalEnv()`, which `env.test.ts` never defines; they now use `base`. D6 and D7 added keys without updating the closed-list pin test, so that test failed after each of them. D6 now adds `'SANCHAY_MSG91_CREDENTIALS_JSON'` and `'SANCHAY_SES_FROM'`. D7 lists `env.test.ts`, adds `'SANCHAY_PILOT_INVITE_ONLY'` and one invariant-10 case.
+- **RV-02-26: commands and trailers (BRIEF D8 and AGENTS.md; outside the assigned list).** Under pnpm 11, `pnpm --filter=X test -- <filter>` forwards a literal `--`, and Vitest then runs the whole suite (verified: 19 files instead of 1). All 49 `test`, `test:int` and `smoke` commands in this plan now pass their arguments without `--`; arguments after the script name still reach the script (verified). The D5, D6 and D7 commit trailers named Claude Sonnet 5 instead of AGENTS.md's `Claude Opus 5.5`.
+- **RV-02-27: D8 registers the catalogue tables in `db/schema.ts` (Plan 04 assembly review, round 2, FR-2; blocker).** D8 appended `export * from '../modules/catalogue/catalogue.schema.js'` to `db/app-schema.ts`, but `catalogue.schema.ts` imports `appSchema` from that file. The ESM cycle (`client.ts` → `schema.ts` → `identity.schema.ts` → `app-schema.ts` → `catalogue.schema.ts`, which calls `appSchema.table` before `app-schema.ts` has run) stopped every app and test boot with `TypeError: Cannot read properties of undefined (reading 'table')`. And because `db/client.ts` builds Drizzle from `db/schema.ts`, D8's `db.query.fundFactsRevisions`, D9's `exec.query.schemeNavs` and D10's `db.query.schemes` were TS2339 (all reproduced). D8 now appends the line to `apps/api/src/db/schema.ts`, the D1/D6/D7 pattern, and its Files, deviation note, biome and `git add` lists name that file; `drizzle-kit` already finds `catalogue.schema.ts` through its `./src/modules/*/*.schema.ts` glob. Verified: with the line in `schema.ts` the cycle is gone, `db:generate` emits all 12 tables, `db:check` is clean, and D8's int test and the existing audit int test pass.
+- **RV-02-28: D3 and D10 add the workspace packages they import (FR-4; blocker).** D3's `fp-json.ts` is the first `apps/api` import of `@sanchay/money`, and D10's `fp-sync.job.ts` the first of `@sanchay/validation`, but `apps/api/package.json` depended on neither. With `nodeLinker: hoisted`, `apps/api/node_modules/@sanchay` held only `config`, `contract` and `domain`, so both imports failed with TS2307 (reproduced). D3's Step 3a now runs `pnpm --filter=@sanchay/api add "@sanchay/money@workspace:*"` and D10's Step 3 runs `pnpm --filter=@sanchay/api add "@sanchay/validation@workspace:*"`; each lists and stages `apps/api/package.json` and `pnpm-lock.yaml`. Verified offline: each command adds one `workspace:*` line and three lockfile lines, `pnpm install --frozen-lockfile` accepts the result, `biome ci` accepts the written `package.json`, and both packages resolve under `tsc` and under Vitest. The quoted spec reaches pnpm intact from PowerShell 5.1 (checked) and the commands ran from Git Bash. Plan 03 E20's conditional `@sanchay/money` add (RV-03-6) now finds the dependency present.
+- **RV-02-29: D7 relaxes Plan 01's audit pins (FR-10; major).** Plan 01's `apps/api/test/int/audit.int.test.ts` pinned `AUDIT_DATA_ALLOWLIST` and the `AUDIT_ACTIONS` keys with exact lists, so D7's `PILOT_INVITE_ADDED` turned `pnpm test:int` red (reproduced), and Plan 03 E4 and Plan 04 F7 would have kept it red. D7, the first task to append, turns both checks into `expect.arrayContaining([...the Plan 01 list])` and adds the file to its Files, Step 4, biome and `git add` lists; later tasks append without editing the test. Verified: green with D7's append and with E4/F7-style allowlist appends; red when a Plan 01 action is removed. Also fixed (outside the assigned list, by inspection): D7's int test read `ta.db.database`, which `TestDatabase` (a `DbHandle`, whose Drizzle instance is `db`) does not have, a TS2339 in D7's `typecheck`; it is now `ta.db.db`.
+- **RV-02-30: D10 relaxes Plan 01's contract key pin.** D10 adds `catalogue`, the first new top-level contract key, before Plan 03 E2, which carried the relax of `packages/contract/src/auth.test.ts` (RV-03-5). D10's own `pnpm --filter=@sanchay/contract test` therefore failed on the exact `['auth', 'health', 'me']` (reproduced). D10 now carries E2's fragment unchanged (the top-level and `me` keys become `expect.arrayContaining`) and lists the file in Files, biome and `git add`; E2's fragment is already applied when E2 runs. Verified: 41/41 contract tests with D10's contract added.
+- **RV-02-31: D1 `RuntimeConfig.get` parses the jsonb once (FR-19; minor).** node-postgres already parses `jsonb`, and drizzle-orm 0.45.3's jsonb mapper `JSON.parse`s any string a second time, so a stored `"4000.00"` (`pilot.caps.perOrder`) came back as the number 4000; the zod schema then failed and `RuntimeConfig.get` threw `INTERNAL` (reproduced against Postgres 18). It now selects `value::text` and `JSON.parse`s it once. The unit stub returns JSON text and gains a money-cap case (6 tests), and `idempotency.int.test.ts` gains a real-jsonb case (10 tests; the old count, 8, also missed the `ReconBreaks.open` case). Both new cases fail on the old code and pass on the new one.
+- **RV-02-32: E25's post-deploy checks run in both shells (FR-22; minor).** `curl -s -o /dev/null -w ...` fails in PowerShell 5.1, where `curl` is `Invoke-WebRequest` (`Missing an argument for parameter 'SessionVariable'`, reproduced). The three checks are now `curl.exe -s -o NUL -w "%{http_code}\n" <url>`, which printed `200` and `200 application/json` from both PowerShell 5.1 and Git Bash against a local stand-in for the three URLs, without creating a file named `NUL`.
+- **RV-02-33: E25's deploy role trusts the deploy input `SANCHAY_GITHUB_REPOSITORY`.** `DEV_CONFIG` and `PROD_CONFIG` hard-coded `githubRepo: 'Vendtta01/sanchay'`, which is not this repository (`origin` belongs to the company organisation), so `deploy.yml` could never assume the role; and the organisation's name is the legal-entity name, which the brand rule keeps out of code. `githubRepo` is now `string | undefined`, read from `SANCHAY_GITHUB_REPOSITORY` (the name F1 uses) and refused unless it is `<owner>/<repo>`. The OIDC provider and `GithubDeployRole` are built only when it is set; `assertDeployInputs(config)`, which `bin/sanchay.ts` calls, refuses a synth or deploy without it; `deploy.yml` passes `github.repository`; and ADR-0014's first-deploy commands set it in both shells. The infra test file has 19 tests: one checks that the role trusts exactly `repo:<owner>/<repo>:*` and exists only with the input, and one that the input is read, a malformed one is refused, and a deploy without it is refused. Both fail on the old code. Verified: infra `typecheck`, 19/19, and a real `cdk synth` (fake hosted-zone and AZ context; no AWS credentials) that was refused without the input and, with it, built one deploy role, from PowerShell 5.1 and from Git Bash. F1 keeps this contract: E25's tests synthesise without the repository, and F1 adds its prod alarm-recipient checks to `assertDeployInputs`.
+- **RV-02-34: D8 passes `biome ci`.** `ops-catalogue-seed.ts` had 28 non-null assertions (`row.name!` and the like) and an unused `eq` import, and `catalogue-schema.int.test.ts` had 8 (`amc!.id` and the like) and five unused imports. `biome ci` (`pnpm lint`) rejects every one, and `biome check --write` fixes none. The seed now reads required cells through `cell(row, key)`, which throws with the column's name when a cell is missing or empty, and the test reads `.returning()` rows through `only()`. `navSyncRuns`' unused extra-config parameter became `() => [...]`. Also fixed (outside the assigned list): the test's "40 SEBI categories" case counted 42, because the two CHECK cases before it insert their own `TC_*` categories into the same database; it now counts only the seeded rows. Verified: `biome ci` clean on D8's files, `typecheck` clean, and the six D8 int tests pass (the seed runs twice).
+- **RV-02-35: D8 and D10 rebuild the workspace packages they change (found while verifying; the FR-6/FR-7 class).** `apps/api` reads `@sanchay/domain` and `@sanchay/contract` from `dist/`, and `pnpm --filter=@sanchay/api ...` does not rebuild them. Without a build, D8's `typecheck` failed with TS2305 on `SCHEME_STATUSES` and its `db:generate` stopped with `TypeError: Cannot read properties of undefined (reading 'map')`; D10's api `typecheck` failed with TS2339 on `contract.catalogue`, and `pnpm --filter=@sanchay/api openapi` would have written a document without the catalogue paths (reproduced). Step 4 and Step 5 of both tasks now start with `pnpm exec turbo run build --filter=@sanchay/api^...`. No other Plan 02 task changes a package that `apps/api` reads: D5's new domain exports have no `apps/api` consumer in this plan, and D9 reads its fixtures by file path.
+- **RV-02-36: D10's router reaches the database (found while verifying).** `CatalogueRouter` injected `DB` as a Drizzle `Database`, but `PlatformModule` provides a `DbHandle` (`createDb`), so every catalogue call answered 500 (`this.db.select is not a function`; reproduced by booting the app with the router mounted). It now injects `DbHandle` and passes `this.dbh.db`, the D1 pattern, and answers 200 with the 40 seeded categories. `listSchemes` takes the contract's `ListSchemesInput`, because its `{ q?: string }` parameter failed `typecheck` with TS2379 under `exactOptionalPropertyTypes`. The non-null assertions in the queries (`page[page.length - 1]!`) and in the int test (`amc!`, `cat!`) are gone. Plan 03 E14 replaces this router with the same `Database` injection, so it needs the same fix.
 
 **Verify at execution time (not changed here):**
+- `biome ci` rejects non-null assertions, and three tasks whose code the 2026-10-01 round did not change still carry them: D3's `fp-provider-calls.int.test.ts` (`row!` in three places), D4 (`body.data[0]!` in its unit test, `actualParts[i]!` in `tools/fp-probes`, and `params.id!` twice in `FakeFp`) and D9 (`DAYS_IN_MONTH[monthIndex]!`, `run!.id` and `parsed.rows[parsed.rows.length - 1]!`). Replace each with a guard, as RV-02-34 and RV-02-36 do, before that task's Step 5 `pnpm lint`.
+- `apps/api/drizzle.config.ts` reads `schema: './src/modules/*/*.schema.ts'`, which matches one directory level only. Checked with drizzle-kit itself (2026-10-01): it ignores D2's `src/modules/platform/jobs/jobs.schema.ts` and D3's `src/integrations/fp/provider-calls.schema.ts`, so D2's and D3's `db:generate` steps would create neither `worker_heartbeats` nor `provider_calls`, and `db:check`, which runs the same config, cannot notice. Open item raised with the assembler, not changed here: before D2's `db:generate`, the config must also cover those two paths (a `schema` array), or the two files must move to one-level module directories.
+- D6's `notifications.int.test.ts` reads `ta.db.database` five times; `TestDatabase` extends `DbHandle`, whose Drizzle instance is `ta.db.db` (TS2339 in D6's `typecheck`, by inspection). RV-02-29 made the same fix in D7.
 - `boss.createQueue` must be idempotent in pg-boss 12.34.0; the D2 integration tests boot twice.
 - The api-role DB user needs privileges on the `pgboss` schema for `send`.
 - `Money.toWire()` must format whole rupees as `'500.00'` (D10's new test assumes it).
@@ -107,7 +137,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
     - `recon_breaks`: `id uuid PK` (`newId('recon_breaks')`), std columns, `kind text NOT NULL`, `entity_type text NOT NULL`, `entity_id text NOT NULL`, `severity IN ('WARNING','CRITICAL')`, `detail jsonb NOT NULL DEFAULT '{}'`, `status IN ('OPEN','RESOLVED')` default `OPEN`, `resolved_at timestamptz`. Partial unique index `(kind, entity_id) WHERE status <> 'RESOLVED'` (one open break per kind+entity).
   - `IdempotencyService` (`idempotency.service.ts`, `@Injectable`, exported by `PlatformModule`): `begin(input)`, `complete(input)`, `release(input)` — see Step 3 for exact behaviour (autocommit inserts, not a caller transaction, so a concurrent request sees the `IN_PROGRESS` marker row immediately instead of blocking on a lock).
   - `requireIdempotency(idem: IdempotencyService, cls: ClsService<SanchayClsStore>)` (`idempotency.middleware.ts`): an oRPC `Middleware` (from `@orpc/server`) applied per-procedure with `.use(...)`. Missing/malformed key → 428 `IDEMPOTENCY_KEY_REQUIRED`. Same key, different input hash → 422 `IDEMPOTENCY_KEY_REUSED`. Same key while the first call has not completed → 409 `IDEMPOTENCY_IN_PROGRESS`. Same key, same hash, completed → returns the stored response and sets `idempotent-replayed: true`. A handler error whose mapped HTTP status is ≥ 500 releases (deletes) the row so a retry starts fresh; a 4xx business error leaves the row `IN_PROGRESS` uncompleted, which a legitimate retry with the same key and body will also see as `IDEMPOTENCY_IN_PROGRESS` until it expires (documented as the MVP's accepted behaviour — no code path completes a row with a 4xx response in this task).
-  - `RuntimeConfig.get<K extends RuntimeConfigKey>(exec: DbExecutor, key: K): Promise<RuntimeConfigValue<K>>` (`runtime-config.ts`) and `RUNTIME_CONFIG_SCHEMAS`/`RUNTIME_CONFIG_DEFAULTS`/`RuntimeConfigKey`. Typed keys and MVP defaults exactly per the outline: `orders.enabled` (`false`), `plans.sip.enabled` (`false`), `fp.lumpsumFlow` (`'CUSTOM_CHECKOUT' | 'PAYMENT_AFTER_SUBMIT'`, default `'CUSTOM_CHECKOUT'`), `fp.sendPartner` (`false`), `features.redeemByUnits` (`false`), `pilot.caps.perOrder` (`'100000.00'`), `pilot.caps.perInvestorPerDay` (`'200000.00'`), `money_params_version` (`'v1'`), `minAppVersion.android` (`'1.0.0'`).
+  - `RuntimeConfig.get<K extends RuntimeConfigKey>(exec: DbExecutor, key: K): Promise<RuntimeConfigValue<K>>` (`runtime-config.ts`; it selects `value::text` and `JSON.parse`s it once, RV-02-31) and `RUNTIME_CONFIG_SCHEMAS`/`RUNTIME_CONFIG_DEFAULTS`/`RuntimeConfigKey`. Typed keys and MVP defaults exactly per the outline: `orders.enabled` (`false`), `plans.sip.enabled` (`false`), `fp.lumpsumFlow` (`'CUSTOM_CHECKOUT' | 'PAYMENT_AFTER_SUBMIT'`, default `'CUSTOM_CHECKOUT'`), `fp.sendPartner` (`false`), `features.redeemByUnits` (`false`), `pilot.caps.perOrder` (`'100000.00'`), `pilot.caps.perInvestorPerDay` (`'200000.00'`), `money_params_version` (`'v1'`), `minAppVersion.android` (`'1.0.0'`).
   - `ReconBreaks.open(exec: DbExecutor, input: {kind, entityType, entityId, severity, detail?}): Promise<void>` (`runtime-config.ts`, co-located with `RuntimeConfig` — both are small `app_config`/`recon_breaks` kernel primitives and the outline gives them no separate file). Idempotent while an open break for the same `(kind, entity_id)` exists (swallows the `23505` from the partial unique index).
   - `me.router.ts` wires `requireIdempotency(this.idempotency, this.cls)` onto both `requestEmailOtp` and `verifyEmail`, superseding D-8.
   - `ids.ts`'s `TableName` union gains `'idempotency_keys' | 'app_config' | 'recon_breaks'`.
@@ -222,11 +252,12 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type { DbExecutor } from '../../db/client.js';
 import { RUNTIME_CONFIG_DEFAULTS, RuntimeConfig, type RuntimeConfigKey } from './runtime-config.js';
 
-function execReturning(row: { key: string; value: unknown } | undefined): DbExecutor {
+/** RuntimeConfig.get selects `value::text` (RV-02-31), so a stored row reaches it as JSON text. */
+function execReturning(jsonText: string | undefined): DbExecutor {
   const chain = {
     select: () => chain,
     from: () => chain,
-    where: () => Promise.resolve(row ? [row] : []),
+    where: () => Promise.resolve(jsonText === undefined ? [] : [{ value: jsonText }]),
   };
   return chain as unknown as DbExecutor;
 }
@@ -239,16 +270,19 @@ describe('RuntimeConfig', () => {
 
   it('returns the stored value when it matches the key schema', async () => {
     const value = await RuntimeConfig.get(
-      execReturning({ key: 'fp.lumpsumFlow', value: 'PAYMENT_AFTER_SUBMIT' }),
+      execReturning('"PAYMENT_AFTER_SUBMIT"'),
       'fp.lumpsumFlow',
     );
     expect(value).toBe('PAYMENT_AFTER_SUBMIT');
   });
 
+  it('parses the stored JSON once, so a money cap stays a decimal string', async () => {
+    const value = await RuntimeConfig.get(execReturning('"4000.00"'), 'pilot.caps.perOrder');
+    expect(value).toBe('4000.00');
+  });
+
   it('throws on a stored value that does not match the key schema', async () => {
-    await expect(
-      RuntimeConfig.get(execReturning({ key: 'orders.enabled', value: 'yes' }), 'orders.enabled'),
-    ).rejects.toThrow();
+    await expect(RuntimeConfig.get(execReturning('"yes"'), 'orders.enabled')).rejects.toThrow();
   });
 
   it('every default satisfies its own schema', () => {
@@ -271,7 +305,7 @@ void vi;
 ```ts
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { idempotencyKeys, reconBreaks } from '../../src/db/schema.js';
+import { appConfig, idempotencyKeys, reconBreaks } from '../../src/db/schema.js';
 import { HOUR } from '../../src/modules/platform/clock.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
@@ -411,6 +445,14 @@ describe('ReconBreaks.open', () => {
       .from(reconBreaks)
       .where(eq(reconBreaks.entityId, 'INF000X01234'));
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('RuntimeConfig.get', () => {
+  it('reads a stored money cap back as the same string (jsonb parsed once, RV-02-31)', async () => {
+    const { RuntimeConfig } = await import('../../src/modules/platform/runtime-config.js');
+    await t.db.db.insert(appConfig).values({ key: 'pilot.caps.perOrder', value: '4000.00' });
+    await expect(RuntimeConfig.get(t.db.db, 'pilot.caps.perOrder')).resolves.toBe('4000.00');
   });
 });
 ```
@@ -610,7 +652,7 @@ export function requireIdempotency<TOutput>(
 
 `apps/api/src/modules/platform/runtime-config.ts`
 ```ts
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DbExecutor } from '../../db/client.js';
 import { AppError } from './errors.js';
@@ -652,10 +694,15 @@ export class RuntimeConfig {
     exec: DbExecutor,
     key: K,
   ): Promise<RuntimeConfigValue<K>> {
-    const [row] = await exec.select().from(appConfig).where(eq(appConfig.key, key));
+    // The jsonb is read as text and parsed once (RV-02-31): Drizzle's jsonb mapper JSON-parses
+    // the string node-postgres has already parsed, so a stored "4000.00" would read back as 4000.
+    const [row] = await exec
+      .select({ value: sql<string>`${appConfig.value}::text` })
+      .from(appConfig)
+      .where(eq(appConfig.key, key));
     if (row === undefined) return RUNTIME_CONFIG_DEFAULTS[key];
     const schema = RUNTIME_CONFIG_SCHEMAS[key];
-    const parsed = schema.safeParse(row.value);
+    const parsed = schema.safeParse(JSON.parse(row.value));
     if (!parsed.success) {
       throw new AppError('INTERNAL', {
         message: `app_config row '${key}' does not match its RuntimeConfig schema`,
@@ -785,8 +832,8 @@ pnpm --filter=@sanchay/api db:check
 ```
 Expected:
 - `typecheck`: exits 0 (the `// @ts-expect-error` line in `runtime-config.test.ts` is satisfied, not a real error).
-- `test`: `runtime-config.test.ts` — 5 passed.
-- `test:int`: `idempotency.int.test.ts` — 8 passed; `migrations.int.test.ts` — 8 passed (was 7); `me-email.int.test.ts` — 4 passed, unchanged (it now sends no `Idempotency-Key` header on any call and would fail with 428 — **it must be updated to add an `Idempotency-Key` header to every `/me/email/*` POST in this same commit**, or it regresses; treat this file as touched by Step 3 alongside `me.router.ts` even though it was not listed above as a literal edit target, since leaving it red violates Step 4's own gate. Add a UUID literal per call, mirroring the pattern in `idempotency.int.test.ts`).
+- `test`: `runtime-config.test.ts` — 6 passed.
+- `test:int`: `idempotency.int.test.ts` — 10 passed (the eight `/me/email/*` cases, `ReconBreaks.open` and `RuntimeConfig.get`); `migrations.int.test.ts` — 8 passed (was 7); `me-email.int.test.ts` — 4 passed, unchanged (it now sends no `Idempotency-Key` header on any call and would fail with 428 — **it must be updated to add an `Idempotency-Key` header to every `/me/email/*` POST in this same commit**, or it regresses; treat this file as touched by Step 3 alongside `me.router.ts` even though it was not listed above as a literal edit target, since leaving it red violates Step 4's own gate. Add a UUID literal per call, mirroring the pattern in `idempotency.int.test.ts`).
 - `db:check`: `db:check OK: schema and migrations are in sync`.
 
 - [ ] **Step 5: Commit**
@@ -1577,7 +1624,8 @@ git commit -m "feat(api): pg-boss JobsModule, worker role, heartbeats, readiness
   - `apps/api/src/modules/platform/request-context.ts` (add `dbInTx: boolean` to `SanchayClsStore`)
   - `apps/api/src/app.module.ts` (the `ClsModule.forRoot` request `setup` callback initialises `cls.set('dbInTx', false)`; `imports` conditionally appends `FpModule.forRoot(env)` when `env.SANCHAY_APP_ROLE === 'worker'`)
   - `pnpm-workspace.yaml` (new `catalog:` entries `undici` and `lossless-json` — new packages, not edits to an existing pin; see Step 3a)
-  - `apps/api/package.json` (`dependencies["undici"] = "catalog:"`, `dependencies["lossless-json"] = "catalog:"`)
+  - `apps/api/package.json` (`dependencies["undici"] = "catalog:"`, `dependencies["lossless-json"] = "catalog:"`, and `dependencies["@sanchay/money"] = "workspace:*"`: `fp-json.ts` is the first `apps/api` import of `@sanchay/money`, RV-02-28)
+  - `pnpm-lock.yaml` (written by the three `pnpm add` commands in Step 3a)
   - `docs/adr/0001-versions.md` (append-only rows for the two new catalog pins)
 
 **Interfaces:**
@@ -2066,13 +2114,13 @@ describe('provider_calls (worker role)', () => {
 #### Step 2: Run it to confirm it fails
 
 ```
-pnpm --filter=@sanchay/api test -- fp-operations fp-json consumed-consent fp-token-cache fp-transport
+pnpm --filter=@sanchay/api test fp-operations fp-json consumed-consent fp-token-cache fp-transport
 ```
 
 Expected failure: every file under `apps/api/src/integrations/fp/` fails to resolve (`Cannot find module './fp-operations.js'` and similarly for every other import), because none of them exists yet.
 
 ```
-pnpm --filter=@sanchay/api test:int -- fp-provider-calls
+pnpm --filter=@sanchay/api test:int fp-provider-calls
 ```
 
 Expected failure: the same — `providerCalls` and `FP_DISPATCHER` are unresolved imports.
@@ -2101,9 +2149,10 @@ Then run, one command per line:
 ```
 pnpm add --filter=@sanchay/api "undici@catalog:"
 pnpm add --filter=@sanchay/api "lossless-json@catalog:"
+pnpm --filter=@sanchay/api add "@sanchay/money@workspace:*"
 ```
 
-`pnpm add x@catalog:` resolves against the two entries just added and writes `apps/api/package.json`'s `dependencies` (`"lossless-json": "catalog:"`, `"undici": "catalog:"`) plus `pnpm-lock.yaml`. If either install reports `ERR_PNPM_IGNORED_BUILDS` or a `minimumReleaseAge` refusal, apply the matching A1 remedy (an `allowBuilds` entry, or an exact-version `minimumReleaseAgeExclude` entry with an ADR-0001 row and an expiry of publish date + 7 days) in this same commit; a `trustPolicy` refusal is stopped and reported to the lead, never resolved alone. Append to `docs/adr/0001-versions.md` (matching its existing row format):
+`pnpm add x@catalog:` resolves against the two entries just added and writes `apps/api/package.json`'s `dependencies` (`"lossless-json": "catalog:"`, `"undici": "catalog:"`) plus `pnpm-lock.yaml`. The third command (RV-02-28) links the workspace package `@sanchay/money`, which `fp-json.ts` imports and `apps/api` did not yet depend on: with `nodeLinker: hoisted`, `apps/api/node_modules/@sanchay` held only `config`, `contract` and `domain`, so the import failed with TS2307. It adds `"@sanchay/money": "workspace:*"` and the matching importer lines in `pnpm-lock.yaml`; a `workspace:` link is not a catalog pin and needs no ADR-0001 row. Plan 03 E20's conditional `@sanchay/money` add (RV-03-6) then finds it present and skips. If either install reports `ERR_PNPM_IGNORED_BUILDS` or a `minimumReleaseAge` refusal, apply the matching A1 remedy (an `allowBuilds` entry, or an exact-version `minimumReleaseAgeExclude` entry with an ADR-0001 row and an expiry of publish date + 7 days) in this same commit; a `trustPolicy` refusal is stopped and reported to the lead, never resolved alone. Append to `docs/adr/0001-versions.md` (matching its existing row format):
 
 ```markdown
 | `undici` | 7.16.0 | outside §A.2 | plan-02-mvp-kernel D3 (`apps/api/src/integrations/fp/fp-transport.ts`): FpGateway's HTTP client, chosen for its `Agent`/`MockAgent` pair (real per-request timeouts for D3; deterministic interception for D4's FakeFp and this task's own unit tests) |
@@ -2318,7 +2367,11 @@ Add to `assertBootInvariants`, after invariant 7:
   });
 ```
 
-(`devSecrets` is this file's existing dev-environment fixture; it already sets `SANCHAY_APP_ENV: 'dev'` and the other invariant-4/5/6/7 keys, so both new tests only add the one key each test is about.)
+`devSecrets` (this file's dev-environment fixture) gains one line, after `SANCHAY_SMS_RETRIEVER_HASH` (RV-02-25). With invariant 8 a dev configuration without an FP mode is refused, which would fail three Plan 01 cases (`requires SANCHAY_SMS_RETRIEVER_HASH outside local/test`, `refuses fake SMS/email providers in staging and prod, but not in dev`, `boots outside local/test with the secrets keyring behind the ALB`). The two new tests set the mode they are about themselves.
+
+```ts
+  SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+```
 
 **`apps/api/src/integrations/fp/fp-operations.ts`:**
 
@@ -3454,8 +3507,8 @@ REVOKE UPDATE, DELETE ON app.provider_calls FROM sanchay_app;
 
 ```
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- fp-operations fp-json consumed-consent fp-token-cache fp-transport env
-pnpm --filter=@sanchay/api test:int -- fp-provider-calls
+pnpm --filter=@sanchay/api test fp-operations fp-json consumed-consent fp-token-cache fp-transport env
+pnpm --filter=@sanchay/api test:int fp-provider-calls
 ```
 
 Expected: `typecheck` exits 0 (the `// @ts-expect-error` line in `fp-transport.test.ts` is satisfied, not a real error, matching D1's precedent for this same "no `tsd` runner" deviation). `fp-operations.test.ts` — 4 passed; `consumed-consent.test.ts` — 5 passed; `fp-json.test.ts` — 5 passed; `fp-token-cache.test.ts` — 4 passed; `fp-transport.test.ts` — 6 passed; `env.test.ts` — its existing suite plus the pin test and the two new invariant tests, all green. `fp-provider-calls.int.test.ts` — 3 passed. Every other `apps/api` test file is unaffected (D3 only adds files and makes additive edits to shared ones).
@@ -3465,8 +3518,8 @@ Expected: `typecheck` exits 0 (the `// @ts-expect-error` line in `fp-transport.t
 ```
 pnpm exec biome check --write apps/api/src/integrations/fp apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/db/client.ts apps/api/src/modules/platform/ids.ts apps/api/src/modules/platform/request-context.ts apps/api/src/app.module.ts apps/api/test/int/fp-provider-calls.int.test.ts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- fp-operations fp-json consumed-consent fp-token-cache fp-transport env
-pnpm --filter=@sanchay/api test:int -- fp-provider-calls
+pnpm --filter=@sanchay/api test fp-operations fp-json consumed-consent fp-token-cache fp-transport env
+pnpm --filter=@sanchay/api test:int fp-provider-calls
 pnpm lint
 git add apps/api/src/integrations/fp apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/db/client.ts apps/api/src/modules/platform/ids.ts apps/api/src/modules/platform/request-context.ts apps/api/src/app.module.ts apps/api/test/int/fp-provider-calls.int.test.ts apps/api/drizzle/0006_provider_calls.sql apps/api/drizzle/meta apps/api/package.json pnpm-workspace.yaml pnpm-lock.yaml docs/adr/0001-versions.md
 git commit -m "feat(api): FpGateway base with undici, per-audience tokens, provider_calls and ConsumedConsent" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -3511,7 +3564,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage befor
   - `apps/api/src/integrations/fp/fake/fake-fp.scenarios.ts`: `FAKE_SCHEME_FIXTURES` (10 ISINs: 3 liquid, 3 ELSS, 2 equity, 2 debt), `type FakeSchemeFixture`, `type FpScriptMode`, `type FakeFpScript`.
   - `apps/api/src/integrations/fp/fake/fake-fp.ts`: `FakeFp` (`agent: MockAgent`, `state: FakeFpState`, `calls(filter?)`, `advance(objectId, state, fields?)`, `script(op, mode)`, `emitWebhook(event)`, `drainWebhooks()`, `autoAdvance: boolean`).
   - `apps/api/test/int/fake-fp.ts`: `bootFpTestApp(options?): Promise<TestApp & {fakeFp: FakeFp}>` — boots a worker-role `TestApp` with `SANCHAY_PROVIDER_MODE_FP=fake` and returns the app's own `FakeFp` instance (from `app.get(FakeFp)`), for E6/E7/E11/E20/F2/F4/F5's integration tests.
-  - `tools/fp-probes/`: a new workspace package `@sanchay/fp-probes` — `pnpm --filter=@sanchay/fp-probes smoke -- --chain=<onboarding|lumpsum|sip|redemption> --env=<fake|sandbox>`, writing `docs/probes/smoke-<date>-<chain>.md`.
+  - `tools/fp-probes/`: a new workspace package `@sanchay/fp-probes` — `pnpm --filter=@sanchay/fp-probes smoke --chain=<onboarding|lumpsum|sip|redemption> --env=<fake|sandbox>`, writing `docs/probes/smoke-<date>-<chain>.md`.
 - Deviation from outline: `tools/fp-probes` does **not** depend on `@sanchay/api`. `apps/api` has no `exports` map and is built by `nest build`, not shaped as an importable library (`"private": true`, no `dist/index.js`); reaching into its compiled output from a sibling `tools/*` package would be a fragile, undocumented coupling. Instead `fp-probes` carries its own small, self-contained FP client (`src/fp-client.ts`, covering only the operations its four chains use: pre-verification create/get, scheme-plan list, purchase create/get/update, mandate create) and, for `--env=fake`, its own small `undici` `MockAgent`-backed responder (`src/fake-server.ts`) — a deliberate, independent duplicate of a slice of D3/D4's `FpTransport`/`FakeFp`, not a shared dependency, because this tool's job is to rehearse the *sandbox contract* end to end (including the OAuth dance) as an external caller would, which is a different exercise from unit-testing `apps/api`'s own gateway code. `apps/api/src/integrations/fp/fake/fake-fp.test.ts` and `apps/api/test/int/fake-fp.int.test.ts` are the tests that exercise the real `FakeFp`; `tools/fp-probes/test/smoke.test.ts` only exercises the harness's own chain-running and evidence-writing logic against its own fake responder.
 
 #### Step 1: Write the failing tests (complete code)
@@ -3749,8 +3802,8 @@ describe('fp-probes smoke harness (dry-run against its own fake responder)', () 
 #### Step 2: Run it to confirm it fails
 
 ```
-pnpm --filter=@sanchay/api test -- fake-fp
-pnpm --filter=@sanchay/api test:int -- fake-fp
+pnpm --filter=@sanchay/api test fake-fp
+pnpm --filter=@sanchay/api test:int fake-fp
 pnpm --filter=@sanchay/fp-probes test
 ```
 
@@ -4300,8 +4353,8 @@ pnpm install
 
 The Plan-02 sandbox contract-smoke harness (outline D4, G-E4 evidence).
 
-    pnpm --filter=@sanchay/fp-probes smoke -- --chain=onboarding --env=fake
-    pnpm --filter=@sanchay/fp-probes smoke -- --chain=lumpsum --env=sandbox
+    pnpm --filter=@sanchay/fp-probes smoke --chain=onboarding --env=fake
+    pnpm --filter=@sanchay/fp-probes smoke --chain=lumpsum --env=sandbox
 
 `--chain` is one of `onboarding`, `lumpsum`, `sip`, `redemption`. `--env=fake` runs against this
 tool's own small in-process fake FP/POA/PG responder (`src/fake-server.ts`) and needs no
@@ -4760,6 +4813,7 @@ export async function run(ctx: ChainContext): Promise<StepResult[]> {
 
 ```ts
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { writeEvidence } from './evidence.js';
 import { buildClient } from './fp-client.js';
 import * as lumpsum from './chains/lumpsum.js';
@@ -4809,7 +4863,9 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// RV-02-24: compare file URLs; `file://${argv[1]}` never matches import.meta.url on Windows.
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
   void main();
 }
 ```
@@ -4848,14 +4904,14 @@ import { FakeFp } from './fake/fake-fp.js';
 
 ```
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- fake-fp
-pnpm --filter=@sanchay/api test:int -- fake-fp
+pnpm --filter=@sanchay/api test fake-fp
+pnpm --filter=@sanchay/api test:int fake-fp
 pnpm --filter=@sanchay/fp-probes typecheck
 pnpm --filter=@sanchay/fp-probes test
-pnpm --filter=@sanchay/fp-probes smoke -- --chain=onboarding --env=fake
-pnpm --filter=@sanchay/fp-probes smoke -- --chain=lumpsum --env=fake
-pnpm --filter=@sanchay/fp-probes smoke -- --chain=sip --env=fake
-pnpm --filter=@sanchay/fp-probes smoke -- --chain=redemption --env=fake
+pnpm --filter=@sanchay/fp-probes smoke --chain=onboarding --env=fake
+pnpm --filter=@sanchay/fp-probes smoke --chain=lumpsum --env=fake
+pnpm --filter=@sanchay/fp-probes smoke --chain=sip --env=fake
+pnpm --filter=@sanchay/fp-probes smoke --chain=redemption --env=fake
 ```
 
 Expected: `apps/api` `typecheck` exits 0. `fake-fp.test.ts` — 6 passed. `fake-fp.int.test.ts` — 1 passed. `@sanchay/fp-probes` `typecheck` exits 0; `smoke.test.ts` — 2 passed. Each of the four `smoke` CLI runs exits 0, prints one `[PASSED]`/`[SKIPPED]` line per step with no `[FAILED]` line, and reports `Evidence written to .../docs/probes/smoke-<today>-<chain>.md`; the four files now exist on disk (not committed by this task — see the Files note).
@@ -4865,8 +4921,8 @@ Expected: `apps/api` `typecheck` exits 0. `fake-fp.test.ts` — 6 passed. `fake-
 ```
 pnpm exec biome check --write apps/api/src/integrations/fp/fake apps/api/test/int/fake-fp.ts apps/api/test/int/fake-fp.int.test.ts apps/api/src/integrations/fp/fp.module.ts tools/fp-probes
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- fake-fp
-pnpm --filter=@sanchay/api test:int -- fake-fp
+pnpm --filter=@sanchay/api test fake-fp
+pnpm --filter=@sanchay/api test:int fake-fp
 pnpm --filter=@sanchay/fp-probes typecheck
 pnpm --filter=@sanchay/fp-probes test
 pnpm lint
@@ -5098,7 +5154,7 @@ describe('state machine registry', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- states.test.ts
+pnpm --filter=@sanchay/domain test states.test.ts
 ```
 Expected failure: `Error: Cannot find module '../src/states/index.js'` (the `states/` directory does not exist yet), so every `it` in the file fails at the top-level `import`.
 
@@ -5648,7 +5704,7 @@ main();
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/domain test -- states.test.ts
+pnpm --filter=@sanchay/domain test states.test.ts
 pnpm --filter=@sanchay/domain typecheck
 node scripts/gen-states.ts
 git status --porcelain docs/specs/states.md
@@ -5659,11 +5715,11 @@ Expected: all `states.test.ts` cases green; `typecheck` clean; `gen-states.ts` p
 
 ```
 pnpm exec biome check --write packages/domain/src/states packages/domain/test/states.test.ts scripts/gen-states.ts docs/specs/states.md packages/domain/src/index.ts package.json .github/workflows/ci.yml
-pnpm --filter=@sanchay/domain test -- states.test.ts
+pnpm --filter=@sanchay/domain test states.test.ts
 pnpm --filter=@sanchay/domain typecheck
 pnpm lint
 git add packages/domain/src/states packages/domain/test/states.test.ts scripts/gen-states.ts docs/specs/states.md packages/domain/src/index.ts package.json .github/workflows/ci.yml
-git commit -m "feat(domain): add order/plan/mandate/payment-attempt/challenge/onboarding state machines" -m "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+git commit -m "feat(domain): add order/plan/mandate/payment-attempt/challenge/onboarding state machines" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test/typecheck commands, then `git add` the same paths again before re-committing.
 
@@ -6005,12 +6061,12 @@ describe('notifications (D6)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test -- msg91.sender.test.ts ses.sender.test.ts notify.service.test.ts notifications.job.test.ts
+pnpm --filter=@sanchay/api test msg91.sender.test.ts ses.sender.test.ts notify.service.test.ts notifications.job.test.ts
 ```
 Expected failure: every file fails at its top-level `import`, `Cannot find module './msg91.sender.js'` / `'./ses.sender.js'` / `'./notify.service.js'` / `'./notifications.job.js'` (none of these files exist yet).
 
 ```
-pnpm --filter=@sanchay/api test:int -- notifications.int.test.ts
+pnpm --filter=@sanchay/api test:int notifications.int.test.ts
 ```
 Expected failure: `Cannot find module '../../src/db/schema.js'` export `notifications`/`notificationDeliveries` (the schema does not exist yet), and `insertInvestor`'s `emailBidx`/`emailEnc` overrides are accepted already (factories.ts already supports `Partial<typeof investors.$inferInsert>` overrides), so the import itself is what fails.
 
@@ -6628,17 +6684,17 @@ Inside `assertBootInvariants`, appended after invariant 7:
   }
 ```
 
-`apps/api/src/config/env.test.ts` (modify — the outline calls this "B2's variable-set pin test"; append the new keys and invariant cases to whatever list/table already pins the full `Env` key set and the invariant count, following that file's existing style; two representative new cases):
+`apps/api/src/config/env.test.ts` (modify, RV-02-25): the closed-list pin test gains `'SANCHAY_MSG91_CREDENTIALS_JSON'` (after `'SANCHAY_MAILPIT_URL'`) and `'SANCHAY_SES_FROM'` (after `'SANCHAY_PROVIDER_MODE_SMS'`), and two cases use the file's `base` fixture (it has no `validLocalEnv()`):
 ```ts
   it('boot invariant 11: msg91 mode without SANCHAY_MSG91_CREDENTIALS_JSON is refused', () => {
     expect(() =>
-      parseEnv({ ...validLocalEnv(), SANCHAY_PROVIDER_MODE_SMS: 'msg91' }),
+      parseEnv({ ...base, SANCHAY_PROVIDER_MODE_SMS: 'msg91' }),
     ).toThrow(/SANCHAY_MSG91_CREDENTIALS_JSON/);
   });
 
   it('boot invariant 12: ses mode without SANCHAY_SES_FROM is refused', () => {
     expect(() =>
-      parseEnv({ ...validLocalEnv(), SANCHAY_PROVIDER_MODE_EMAIL: 'ses' }),
+      parseEnv({ ...base, SANCHAY_PROVIDER_MODE_EMAIL: 'ses' }),
     ).toThrow(/SANCHAY_SES_FROM/);
   });
 ```
@@ -6933,9 +6989,9 @@ In "Appended rows" (as the next row after the existing last one):
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/api test -- msg91.sender.test.ts ses.sender.test.ts notify.service.test.ts notifications.job.test.ts
+pnpm --filter=@sanchay/api test msg91.sender.test.ts ses.sender.test.ts notify.service.test.ts notifications.job.test.ts src/config/env.test.ts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- notifications.int.test.ts
+pnpm --filter=@sanchay/api test:int notifications.int.test.ts
 ```
 Expected: every unit test green; `typecheck` clean (in particular, `env.ts`'s two new invariants and `integrations.module.ts`'s two new branches compile); the integration test green against the Testcontainers PG 18 instance `test/int/db.ts` spins up.
 
@@ -6943,12 +6999,12 @@ Expected: every unit test green; `typecheck` clean (in particular, `env.ts`'s tw
 
 ```
 pnpm exec biome check --write apps/api/src/integrations apps/api/src/modules/notifications apps/api/src/modules/identity/auth.service.ts apps/api/src/modules/identity/identity.module.ts apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/db/schema.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/notifications.int.test.ts
-pnpm --filter=@sanchay/api test -- msg91.sender.test.ts ses.sender.test.ts notify.service.test.ts notifications.job.test.ts
+pnpm --filter=@sanchay/api test msg91.sender.test.ts ses.sender.test.ts notify.service.test.ts notifications.job.test.ts src/config/env.test.ts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- notifications.int.test.ts
+pnpm --filter=@sanchay/api test:int notifications.int.test.ts
 pnpm lint
 git add apps/api/src/integrations apps/api/src/modules/notifications apps/api/src/modules/identity/auth.service.ts apps/api/src/modules/identity/identity.module.ts apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/db/schema.ts apps/api/src/modules/platform/ids.ts apps/api/drizzle apps/api/.env.example apps/api/test/int/notifications.int.test.ts pnpm-workspace.yaml apps/api/package.json docs/adr/0001-versions.md
-git commit -m "feat(api): add MSG91/SES adapters, Notify and notifications.send, new-sign-in email" -m "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+git commit -m "feat(api): add MSG91/SES adapters, Notify and notifications.send, new-sign-in email" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If gitleaks flags anything in the throwaway `test-auth-key`/`test-app-key`-style fixtures above, add a narrow regex to `.gitleaks.toml` in this same commit (never a path wildcard), per the Step 5 order rule. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands, then re-add and re-commit.
 
@@ -6958,7 +7014,7 @@ If gitleaks flags anything in the throwaway `test-auth-key`/`test-app-key`-style
 
 **Files:**
 - Create: `apps/api/src/modules/identity/pilot-invites.schema.ts`, `apps/api/src/modules/identity/pilot-invites.service.ts`, `apps/api/src/cli/ops-invite.ts`, `apps/api/drizzle/0008_pilot_invites.sql`, `apps/api/src/modules/identity/pilot-invites.service.test.ts`, `apps/api/test/int/pilot-invites.int.test.ts`
-- Modify: `apps/api/src/modules/identity/auth.service.ts`, `apps/api/src/modules/identity/identity.module.ts`, `apps/api/src/modules/platform/ids.ts`, `apps/api/src/modules/platform/audit.service.ts`, `apps/api/src/db/schema.ts`, `apps/api/src/config/env.ts`, `apps/api/.env.example`, `apps/api/test/int/env.ts` (`testEnv` gains `SANCHAY_PILOT_INVITE_ONLY: 'false'` so every existing sign-in test keeps creating fresh investors; D7's own tests pass `'true'`), `package.json` (root), `apps/api/package.json`
+- Modify: `apps/api/src/modules/identity/auth.service.ts`, `apps/api/src/modules/identity/identity.module.ts`, `apps/api/src/modules/platform/ids.ts`, `apps/api/src/modules/platform/audit.service.ts`, `apps/api/src/db/schema.ts`, `apps/api/src/config/env.ts`, `apps/api/src/config/env.test.ts` (closed-list key and an invariant-10 case, RV-02-25), `apps/api/.env.example`, `apps/api/test/int/env.ts` (`testEnv` gains `SANCHAY_PILOT_INVITE_ONLY: 'false'` so every existing sign-in test keeps creating fresh investors; D7's own tests pass `'true'`), `package.json` (root), `apps/api/package.json`, `apps/api/test/int/audit.int.test.ts` (Plan 01's exact pins on `AUDIT_DATA_ALLOWLIST` and the `AUDIT_ACTIONS` keys become `expect.arrayContaining`, RV-02-29)
 
 **Interfaces:**
 - Prerequisites: D6 (this task's `auth.service.ts` edit lands on top of D6's, since both touch `verifyLoginOtp`).
@@ -6976,6 +7032,7 @@ Deviations from outline:
 1. **`identity.module.ts`, `platform/audit.service.ts`, `platform/ids.ts`, `db/schema.ts`, `config/env.ts`, `.env.example` and `apps/api/package.json` are also modified**, though the outline's Files list for D7 names only `identity/auth.service.ts` and root `package.json`. `AuthService` needs `PilotInvites`, `Crypto` and `AppConfig` injected (only `PilotInvites` is new — `Crypto`/`AppConfig` are `@Global()` from `PlatformModule` and need no module change, but `AuthService`'s constructor still grows), so `IdentityModule` must provide `PilotInvites`; `AUDIT_ACTIONS` needs an appended `PILOT_INVITE_ADDED` entry for the CLI's audit row; `ids.ts`'s `TableName` union needs `pilot_invites`; `db/schema.ts` needs the new export; `env.ts` needs `SANCHAY_PILOT_INVITE_ONLY` itself (§0.2 lists it as "already listed in H-8" — meaning the *binding spec* already names it, not that Plan-01's `env.ts` already parses it; reading `apps/api/src/config/env.ts` in full confirms it is absent from `EnvSchema` today); `apps/api/package.json` needs the `ops:invite` build+run script, matching `db:migrate`'s existing `"nest build -b swc && node dist/cli/....js"` pattern, which the root `package.json` script then delegates to via `pnpm --filter=@sanchay/api ops:invite`.
 2. **`SANCHAY_APP_ROLE` has no `'ops'` member yet.** The outline's §0.2 says `SANCHAY_APP_ROLE` gains `'ops'` in **F7** (Plan 04), not here. `apps/api/src/cli/ops-invite.ts` therefore runs exactly like the existing `apps/api/src/cli/migrate.ts` — a plain script that calls `parseEnv(process.env)` with no role check — rather than requiring `SANCHAY_APP_ROLE=ops`. DB access uses whatever `DATABASE_URL` role is configured (`sanchay_app` locally, already granted full DML on `pilot_invites` by 0003_grants.sql's `ALTER DEFAULT PRIVILEGES`); F7's `ops` role restriction (no DDL) applies transparently once it lands, since this CLI does no DDL.
 3. **Boot-invariant numbering.** This task claims invariant **10** exactly as the outline's §0.2 fixes it (`SANCHAY_PILOT_INVITE_ONLY=false` in prod → refused). If D6 lands first with its provisional 11/12 and D3 has still not landed, the merge integrator renumbers D6's comments to 8/9 and keeps this task's 10 unchanged; if D3 lands between D6 and D7, this task's 10 is renumbered instead. No test asserts the literal number.
+4. **Plan 01's `apps/api/test/int/audit.int.test.ts` is relaxed here (RV-02-29).** Its first test pins `AUDIT_DATA_ALLOWLIST` and `Object.keys(AUDIT_ACTIONS)` with exact `toEqual` lists, so appending `PILOT_INVITE_ADDED` turns `pnpm test:int` red (verified). This task, the first to append to either list, turns both checks into `expect.arrayContaining([...the Plan 01 list])`. Plan 03 E4 (the eight `CONSENT_*` actions, `subjectType`, `subjectIds`) and Plan 04 F7 (`approver2`, `refundRef`, `payoutRef`) then append without editing the test, and a removed or renamed Plan 01 name still fails it.
 
 - [ ] **Step 1: Write the failing test** (complete test code)
 
@@ -7115,7 +7172,7 @@ describe('pilot invite gate (D7)', () => {
   it('CLI writes an audit row', async () => {
     const ta = await bootTestApp();
     try {
-      const rows = await ta.db.database.select().from(auditEvents).where(eq(auditEvents.action, 'PILOT_INVITE_ADDED'));
+      const rows = await ta.db.db.select().from(auditEvents).where(eq(auditEvents.action, 'PILOT_INVITE_ADDED'));
       // ops-invite.ts is a standalone script run out of process (see Step 3); this row documents the
       // shape its audit write must match, exercised end to end by running the CLI against ta.db.url
       // in a follow-on ops-runbook smoke task.
@@ -7130,12 +7187,12 @@ describe('pilot invite gate (D7)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test -- pilot-invites.service.test.ts
+pnpm --filter=@sanchay/api test pilot-invites.service.test.ts
 ```
 Expected failure: `Cannot find module './pilot-invites.service.js'`.
 
 ```
-pnpm --filter=@sanchay/api test:int -- pilot-invites.int.test.ts
+pnpm --filter=@sanchay/api test:int pilot-invites.int.test.ts
 ```
 Expected failure: the first test gets `verify.statusCode === 200` (a brand-new investor is created and signed in) instead of the expected `403`, because `SANCHAY_PILOT_INVITE_ONLY` is not yet read anywhere and `AuthService.verifyLoginOtp` has no gate.
 
@@ -7253,6 +7310,43 @@ export const AUDIT_ACTIONS = {
 } as const;
 ```
 
+`apps/api/test/int/audit.int.test.ts` (modify, RV-02-29): replace Plan 01's first test, "pins the allowlist and the Plan-01 action names", with this one; the other four tests are unchanged:
+```ts
+  it('keeps the Plan-01 allowlist and action names (later tasks only append)', () => {
+    expect(AUDIT_DATA_ALLOWLIST).toEqual(
+      expect.arrayContaining([
+        'platform',
+        'purpose',
+        'channel',
+        'reason',
+        'sessionId',
+        'deviceId',
+        'outcome',
+        'isNewInvestor',
+        'isNewDevice',
+        'challengeId',
+        'revokedCount',
+        'status',
+      ]),
+    );
+    expect(Object.keys(AUDIT_ACTIONS)).toEqual(
+      expect.arrayContaining([
+        'AUTH_LOGIN',
+        'AUTH_LOGOUT',
+        'AUTH_OTP_FAILED',
+        'AUTH_OTP_LOCKED',
+        'AUTH_OTP_LOCKOUT',
+        'AUTH_OTP_SENT',
+        'AUTH_SESSIONS_REVOKED_ALL',
+        'AUTH_SIGNUP',
+        'CONTACT_EMAIL_OTP_SENT',
+        'CONTACT_EMAIL_VERIFIED',
+      ]),
+    );
+    for (const [key, value] of Object.entries(AUDIT_ACTIONS)) expect(value).toBe(key);
+  });
+```
+
 `apps/api/src/modules/platform/ids.ts` (modify):
 ```ts
 export type TableName =
@@ -7289,6 +7383,18 @@ Inside `assertBootInvariants`, appended after D6's invariants (see D6's numberin
   if (env.SANCHAY_APP_ENV === 'prod' && !env.SANCHAY_PILOT_INVITE_ONLY) {
     problems.push('SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2');
   }
+```
+
+`apps/api/src/config/env.test.ts` (modify, RV-02-25): the closed-list pin test gains `'SANCHAY_PILOT_INVITE_ONLY'` (after `'SANCHAY_OTP_PER_IP_PER_HOUR'`), and one case inside `describe('parseEnv', ...)`:
+```ts
+  it('refuses SANCHAY_PILOT_INVITE_ONLY=false in prod (invariant 10)', () => {
+    expect(
+      errorMessage(() =>
+        parseEnv({ ...devSecrets, SANCHAY_APP_ENV: 'prod', SANCHAY_PILOT_INVITE_ONLY: 'false' }),
+      ),
+    ).toMatch(/SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2/);
+    expect(parseEnv(base).SANCHAY_PILOT_INVITE_ONLY).toBe(true);
+  });
 ```
 
 `apps/api/src/cli/ops-invite.ts`:
@@ -7629,22 +7735,22 @@ CREATE INDEX "pilot_invites_live_idx" ON "app"."pilot_invites" USING btree ("mob
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/api test -- pilot-invites.service.test.ts
+pnpm --filter=@sanchay/api test pilot-invites.service.test.ts src/config/env.test.ts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- pilot-invites.int.test.ts
+pnpm --filter=@sanchay/api test:int pilot-invites.int.test.ts audit.int.test.ts
 ```
-Expected: `pilot-invites.service.test.ts` green (both cases); `typecheck` clean (in particular, `AuthService`'s three new constructor params and `AppConfig.env.SANCHAY_PILOT_INVITE_ONLY` resolve); `pilot-invites.int.test.ts` green — the first HTTP round trip now returns 403 `PILOT_INVITE_REQUIRED` for a brand-new, uninvited mobile, the `requestOtp` response shape stays identical for both mobiles, and the expired/absent-invite case matches the "uninvited" case exactly since `assertInvited`'s `WHERE` clause excludes both the same way.
+Expected: `pilot-invites.service.test.ts` green (both cases); `env.test.ts` green, including the invariant-10 case; `audit.int.test.ts` green (5 passed) with `PILOT_INVITE_ADDED` appended (RV-02-29); `typecheck` clean (in particular, `AuthService`'s three new constructor params and `AppConfig.env.SANCHAY_PILOT_INVITE_ONLY` resolve); `pilot-invites.int.test.ts` green — the first HTTP round trip now returns 403 `PILOT_INVITE_REQUIRED` for a brand-new, uninvited mobile, the `requestOtp` response shape stays identical for both mobiles, and the expired/absent-invite case matches the "uninvited" case exactly since `assertInvited`'s `WHERE` clause excludes both the same way.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write apps/api/src/modules/identity apps/api/src/cli/ops-invite.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/config/env.ts apps/api/test/int/pilot-invites.int.test.ts
-pnpm --filter=@sanchay/api test -- pilot-invites.service.test.ts
+pnpm exec biome check --write apps/api/src/modules/identity apps/api/src/cli/ops-invite.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/test/int/pilot-invites.int.test.ts apps/api/test/int/audit.int.test.ts
+pnpm --filter=@sanchay/api test pilot-invites.service.test.ts src/config/env.test.ts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- pilot-invites.int.test.ts
+pnpm --filter=@sanchay/api test:int pilot-invites.int.test.ts audit.int.test.ts
 pnpm lint
-git add apps/api/src/modules/identity apps/api/src/cli/ops-invite.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/config/env.ts apps/api/.env.example apps/api/drizzle apps/api/test/int/pilot-invites.int.test.ts apps/api/test/int/env.ts apps/api/package.json package.json
-git commit -m "feat(api): add invite-only pilot gate before new-investor creation" -m "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+git add apps/api/src/modules/identity apps/api/src/cli/ops-invite.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/.env.example apps/api/drizzle apps/api/test/int/pilot-invites.int.test.ts apps/api/test/int/audit.int.test.ts apps/api/test/int/env.ts apps/api/package.json package.json
+git commit -m "feat(api): add invite-only pilot gate before new-investor creation" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands, then re-add and re-commit.
 
@@ -7661,6 +7767,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands, then re
 **Files (modify):**
 - `packages/domain/src/catalogue.ts` (add `SCHEME_STATUSES`)
 - `apps/api/src/modules/platform/ids.ts` (extend `TableName` with every table this task creates)
+- `apps/api/src/db/schema.ts` (key-level append: `export * from '../modules/catalogue/catalogue.schema.js';`, RV-02-27)
 - `apps/api/package.json` (script `ops:catalogue:seed`)
 - root `package.json` (key-level append: script `ops:catalogue:seed`)
 - migration: `apps/api/drizzle/0009_catalogue.sql` (drizzle-kit generated; the number is assigned at merge in DAG order per AGENTS.md — do not hardcode it. It follows `0003_grants.sql` in this worktree today; D1–D7's own migrations land ahead of it once merged)
@@ -7671,7 +7778,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands, then re
 - Produces: Drizzle tables `amcs`, `sebiCategories`, `categoryAliases`, `schemes`, `fundFacts`, `fundFactsRevisions`, `commissionDisclosures`, `schemeNavs`, `navHistory`, `navSyncRuns`, `schemeReturns`, `marketHolidays`; local enums `RISKOMETER_LEVELS`, `FUND_FACTS_SOURCES`, `COMMISSION_KINDS`, `NAV_SYNC_KINDS`, `NAV_SYNC_STATUSES`, `MARKET_HOLIDAY_KINDS`; `SchemeThresholds` type; `seedCatalogue(db, dataDir?)` (exported for the CLI and for D8's own test); `pnpm ops:catalogue:seed`.
 - Deviation from outline: Plan-01's `packages/domain/src/catalogue.ts` already defines `SCHEME_OPTIONS = ['GROWTH', 'IDCW_PAYOUT', 'IDCW_REINVESTMENT']` plus a separate `LAUNCH_SCHEME_OPTIONS = ['GROWTH']` (PO-3: only Growth is orderable at launch, IDCW comes later), where the outline/spec §2.3 table says the `option` CHECK is `GROWTH` only. The `schemes.option` CHECK here uses `inList('option', SCHEME_OPTIONS)` (all three storable), and D10's `catalogue.listSchemes` filters `option IN LAUNCH_SCHEME_OPTIONS` for what is orderable — this is the code's own documented split between "storable" and "launch-orderable", so the code wins.
 - Deviation from outline: `SCHEME_STATUSES` (`DRAFT`, `PUBLISHED`, `SUSPENDED`) does not exist yet in `@sanchay/domain`; added here next to the existing `NAV_GRADES` using the same `defineEnum` pattern, since `schemes.status` needs it and no later task owns it.
-- Deviation from outline: the outline's Files list has no NestJS module wiring `catalogue.schema.ts` into `apps/api/src/db/app-schema.ts` — needed so `drizzle-kit generate` (which globs `./src/modules/*/*.schema.ts`, see `drizzle.config.ts`) and `apps/api/src/db/schema.ts` both see the new tables. Added `apps/api/src/db/app-schema.ts` to Files (modify): append `export * from '../modules/catalogue/catalogue.schema.js';`.
+- Deviation from outline (RV-02-27): the outline's Files list does not register `catalogue.schema.ts` with the app's Drizzle schema. `drizzle-kit generate` already sees the file (`drizzle.config.ts` globs `./src/modules/*/*.schema.ts`), but `db/client.ts` builds Drizzle from `apps/api/src/db/schema.ts`, and `db.query.fundFactsRevisions` (this task), D9's `exec.query.schemeNavs` and D10's `db.query.schemes` need the tables there. Added `apps/api/src/db/schema.ts` to Files (modify): append `export * from '../modules/catalogue/catalogue.schema.js';`, the way D1, D6 and D7 register theirs. Never re-export it from `apps/api/src/db/app-schema.ts`: `catalogue.schema.ts` imports `appSchema` from that file, and the cycle stops every app and test boot with `TypeError: Cannot read properties of undefined (reading 'table')` (reproduced).
 - `is_elss` is a **generated** column (spec §2.3 says only "generated", no formula). Assumption made explicit here: `is_elss` is `(category_code = 'EQ_ELSS')` stored, since `EQ_ELSS` is the ELSS row this task's own seed defines in `sebi-categories.csv`.
 - `pg_trgm` is already enabled by Plan-01's `0000_bootstrap.sql` (`CREATE EXTENSION IF NOT EXISTS pg_trgm`), so this migration only needs the GIN index, not the extension.
 
@@ -7706,15 +7813,18 @@ export const RISKOMETER_LEVELS = ['LOW', 'LOW_TO_MODERATE', 'MODERATE', 'MODERAT
 `apps/api/test/int/catalogue-schema.int.test.ts` (the full file, written now so Step 2 shows every assertion failing on the missing module):
 
 ```typescript
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { amcs, categoryAliases, fundFactsRevisions, marketHolidays, schemes, sebiCategories } from '../../src/db/schema.js';
 import { DEFAULT_DATA_DIR, seedCatalogue } from '../../src/cli/ops-catalogue-seed.js';
+import {
+  amcs,
+  categoryAliases,
+  fundFactsRevisions,
+  marketHolidays,
+  schemes,
+  sebiCategories,
+} from '../../src/db/schema.js';
 import { createTestDatabase, type TestDatabase } from './db.js';
-import { insertInvestor, rnd } from './factories.js';
+import { rnd } from './factories.js';
 import { pgErrorCode } from './pg.js';
 
 let t: TestDatabase;
@@ -7726,6 +7836,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await t.drop();
 });
+
+/** The one row an insert's `.returning()` wrote (biome refuses `rows[0]!`). */
+function only<T>(rows: T[]): T {
+  const [row] = rows;
+  if (row === undefined) throw new Error('expected the insert to return one row');
+  return row;
+}
 
 async function asAppRole(sqlText: string, params: unknown[] = []): Promise<string | undefined> {
   const client = await t.pool.connect();
@@ -7744,54 +7861,68 @@ async function asAppRole(sqlText: string, params: unknown[] = []): Promise<strin
 
 describe('catalogue schema checks', () => {
   it('plan_type CHECK rejects DIRECT', async () => {
-    const [amc] = await t.db.insert(amcs).values({ name: 'Test AMC', slug: `amc-${rnd(4).toString('hex')}` }).returning();
-    const [cat] = await t.db
-      .insert(sebiCategories)
-      .values({
-        code: `TC_${rnd(3).toString('hex')}`,
-        assetClass: 'EQUITY',
-        name: 'Test Category',
-        slug: `test-cat-${rnd(3).toString('hex')}`,
-        cutoffClass: 'STANDARD',
-        volatilityClass: 'V_EQUITY',
-      })
-      .returning();
+    const amc = only(
+      await t.db
+        .insert(amcs)
+        .values({ name: 'Test AMC', slug: `amc-${rnd(4).toString('hex')}` })
+        .returning(),
+    );
+    const cat = only(
+      await t.db
+        .insert(sebiCategories)
+        .values({
+          code: `TC_${rnd(3).toString('hex')}`,
+          assetClass: 'EQUITY',
+          name: 'Test Category',
+          slug: `test-cat-${rnd(3).toString('hex')}`,
+          cutoffClass: 'STANDARD',
+          volatilityClass: 'V_EQUITY',
+        })
+        .returning(),
+    );
     expect(
       await pgErrorCode(
         t.db.insert(schemes).values({
           isin: 'INF999TEST01',
-          amcId: amc!.id,
+          amcId: amc.id,
           name: 'Bad Plan Type',
           slug: `bad-plan-type-${rnd(3).toString('hex')}`,
           planType: 'DIRECT' as never,
-          categoryCode: cat!.code,
+          categoryCode: cat.code,
         }),
       ),
     ).toBe('23514');
   });
 
   it('option CHECK rejects IDCW', async () => {
-    const [amc] = await t.db.insert(amcs).values({ name: 'Test AMC 2', slug: `amc-${rnd(4).toString('hex')}` }).returning();
-    const [cat] = await t.db
-      .insert(sebiCategories)
-      .values({
-        code: `TC_${rnd(3).toString('hex')}`,
-        assetClass: 'EQUITY',
-        name: 'Test Category 2',
-        slug: `test-cat-${rnd(3).toString('hex')}`,
-        cutoffClass: 'STANDARD',
-        volatilityClass: 'V_EQUITY',
-      })
-      .returning();
+    const amc = only(
+      await t.db
+        .insert(amcs)
+        .values({ name: 'Test AMC 2', slug: `amc-${rnd(4).toString('hex')}` })
+        .returning(),
+    );
+    const cat = only(
+      await t.db
+        .insert(sebiCategories)
+        .values({
+          code: `TC_${rnd(3).toString('hex')}`,
+          assetClass: 'EQUITY',
+          name: 'Test Category 2',
+          slug: `test-cat-${rnd(3).toString('hex')}`,
+          cutoffClass: 'STANDARD',
+          volatilityClass: 'V_EQUITY',
+        })
+        .returning(),
+    );
     expect(
       await pgErrorCode(
         t.db.insert(schemes).values({
           isin: 'INF999TEST02',
-          amcId: amc!.id,
+          amcId: amc.id,
           name: 'Bad Option',
           slug: `bad-option-${rnd(3).toString('hex')}`,
           option: 'IDCW' as never,
-          categoryCode: cat!.code,
+          categoryCode: cat.code,
         }),
       ),
     ).toBe('23514');
@@ -7816,7 +7947,10 @@ describe('catalogue schema checks', () => {
   });
 
   it('40 SEBI categories each map a cutoff_class', async () => {
-    const rows = await t.db.select().from(sebiCategories);
+    // The two CHECK tests above add their own TC_* categories to this database; count the seeded ones.
+    const rows = (await t.db.select().from(sebiCategories)).filter(
+      (row) => !row.code.startsWith('TC_'),
+    );
     expect(rows.length).toBe(40);
     for (const row of rows) {
       expect(['STANDARD', 'LIQUID', 'OVERNIGHT', 'INTERNATIONAL']).toContain(row.cutoffClass);
@@ -7832,32 +7966,45 @@ describe('catalogue schema checks', () => {
   });
 
   it('fund_facts_revisions is append-only (UPDATE denied to sanchay_app)', async () => {
-    const [amc] = await t.db.insert(amcs).values({ name: 'Test AMC 3', slug: `amc-${rnd(4).toString('hex')}` }).returning();
-    const [cat] = await t.db
-      .insert(sebiCategories)
-      .values({
-        code: `TC_${rnd(3).toString('hex')}`,
-        assetClass: 'EQUITY',
-        name: 'Test Category 3',
-        slug: `test-cat-${rnd(3).toString('hex')}`,
-        cutoffClass: 'STANDARD',
-        volatilityClass: 'V_EQUITY',
-      })
-      .returning();
-    const [scheme] = await t.db
-      .insert(schemes)
-      .values({
-        isin: 'INF999TEST03',
-        amcId: amc!.id,
-        name: 'Revisions Fixture',
-        slug: `revisions-fixture-${rnd(3).toString('hex')}`,
-        categoryCode: cat!.code,
-      })
-      .returning();
-    await t.db.insert(fundFactsRevisions).values({ schemeId: scheme!.id, source: 'ADMIN', payload: { note: 'v1' } });
-    expect(await asAppRole(`UPDATE app.fund_facts_revisions SET payload = '{}' WHERE scheme_id = $1`, [scheme!.id])).toBe(
-      '42501',
+    const amc = only(
+      await t.db
+        .insert(amcs)
+        .values({ name: 'Test AMC 3', slug: `amc-${rnd(4).toString('hex')}` })
+        .returning(),
     );
+    const cat = only(
+      await t.db
+        .insert(sebiCategories)
+        .values({
+          code: `TC_${rnd(3).toString('hex')}`,
+          assetClass: 'EQUITY',
+          name: 'Test Category 3',
+          slug: `test-cat-${rnd(3).toString('hex')}`,
+          cutoffClass: 'STANDARD',
+          volatilityClass: 'V_EQUITY',
+        })
+        .returning(),
+    );
+    const scheme = only(
+      await t.db
+        .insert(schemes)
+        .values({
+          isin: 'INF999TEST03',
+          amcId: amc.id,
+          name: 'Revisions Fixture',
+          slug: `revisions-fixture-${rnd(3).toString('hex')}`,
+          categoryCode: cat.code,
+        })
+        .returning(),
+    );
+    await t.db
+      .insert(fundFactsRevisions)
+      .values({ schemeId: scheme.id, source: 'ADMIN', payload: { note: 'v1' } });
+    expect(
+      await asAppRole(`UPDATE app.fund_facts_revisions SET payload = '{}' WHERE scheme_id = $1`, [
+        scheme.id,
+      ]),
+    ).toBe('42501');
     expect(await asAppRole('DELETE FROM app.fund_facts_revisions')).toBe('42501');
   });
 });
@@ -7866,7 +8013,7 @@ describe('catalogue schema checks', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test:int -- catalogue-schema
+pnpm --filter=@sanchay/api test:int catalogue-schema
 ```
 
 Expected failure: module resolution error — `apps/api/src/db/schema.ts` has no `amcs`/`sebiCategories`/`schemes`/`marketHolidays`/`fundFactsRevisions` exports yet, and `apps/api/src/cli/ops-catalogue-seed.js` does not exist, so every import in the test file fails before a single `it` runs.
@@ -8143,7 +8290,7 @@ export const navSyncRuns = appSchema.table(
     maxNavDate: date('max_nav_date'),
     failureReason: text('failure_reason'),
   },
-  (t) => [check('nav_sync_runs_kind_ck', inList('kind', NAV_SYNC_KINDS)), check('nav_sync_runs_status_ck', inList('status', NAV_SYNC_STATUSES))],
+  () => [check('nav_sync_runs_kind_ck', inList('kind', NAV_SYNC_KINDS)), check('nav_sync_runs_status_ck', inList('status', NAV_SYNC_STATUSES))],
 );
 
 export const schemeReturns = appSchema.table(
@@ -8170,11 +8317,13 @@ export const marketHolidays = appSchema.table('market_holidays', {
 });
 ```
 
-`apps/api/src/db/app-schema.ts` (modify, append one line):
+`apps/api/src/db/schema.ts` (modify, key-level append, RV-02-27; `biome check --write` sorts the line among the D1, D2, D6 and D7 exports):
 
 ```typescript
 export * from '../modules/catalogue/catalogue.schema.js';
 ```
+
+Never add this line to `apps/api/src/db/app-schema.ts`: `catalogue.schema.ts` imports `appSchema` from it, so the re-export makes an ESM cycle and `db/client.ts` fails to load (see the deviation note).
 
 `packages/domain/src/catalogue.ts` (modify, append):
 
@@ -8378,13 +8527,12 @@ INF000P09099,1.90,2026-09-01,VERY_HIGH,2026-09-01,CRISIL Hybrid 35+65 Aggressive
 INF000P10010,1.95,2026-09-01,VERY_HIGH,2026-09-01,Nifty Smallcap 250 TRI,VERY_HIGH,1% if redeemed within 1 year,https://example.invalid/sid/INF000P10010.pdf,https://example.invalid/kim/INF000P10010.pdf
 ```
 
-`apps/api/src/cli/ops-catalogue-seed.ts` (full file):
+`apps/api/src/cli/ops-catalogue-seed.ts` (full file; RV-02-34: required CSV cells go through `cell()`, because `biome ci` refuses non-null assertions):
 
 ```typescript
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { eq } from 'drizzle-orm';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb, type Database } from '../db/client.js';
@@ -8394,8 +8542,8 @@ import {
   commissionDisclosures,
   fundFacts,
   fundFactsRevisions,
-  marketHolidays,
   type MarketHolidayKind,
+  marketHolidays,
   schemes,
   sebiCategories,
 } from '../modules/catalogue/catalogue.schema.js';
@@ -8404,12 +8552,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** apps/api/src/cli -> apps/api/src -> apps/api -> apps -> repo root -> data */
 export const DEFAULT_DATA_DIR = resolve(HERE, '../../../../data');
 
-function parseCsv(text: string): Record<string, string>[] {
+type CsvRow = Record<string, string>;
+
+function parseCsv(text: string): CsvRow[] {
   const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
   const header = lines[0]?.split(',') ?? [];
   return lines.slice(1).map((line) => {
     const cells = line.split(',');
-    const row: Record<string, string> = {};
+    const row: CsvRow = {};
     header.forEach((key, i) => {
       row[key.trim()] = (cells[i] ?? '').trim();
     });
@@ -8417,95 +8567,100 @@ function parseCsv(text: string): Record<string, string>[] {
   });
 }
 
-function readCsv(dataDir: string, file: string): Record<string, string>[] {
+function readCsv(dataDir: string, file: string): CsvRow[] {
   return parseCsv(readFileSync(resolve(dataDir, file), 'utf8'));
+}
+
+/**
+ * A required cell. Under noUncheckedIndexedAccess every lookup is `string | undefined`, and biome
+ * refuses non-null assertions, so a missing or empty required cell stops the seed and names itself.
+ */
+function cell(row: CsvRow, key: string): string {
+  const value = row[key];
+  if (value === undefined || value === '') {
+    throw new Error(`seedCatalogue: missing ${key} in ${JSON.stringify(row)}`);
+  }
+  return value;
 }
 
 export async function seedCatalogue(db: Database, dataDir: string): Promise<void> {
   for (const row of readCsv(dataDir, 'amcs.csv')) {
+    const amc = {
+      name: cell(row, 'name'),
+      fpFundName: row.fp_fund_name || null,
+      empanelled: row.empanelled === 'true',
+      active: row.active === 'true',
+    };
     await db
       .insert(amcs)
-      .values({
-        name: row.name!,
-        slug: row.slug!,
-        fpFundName: row.fp_fund_name || null,
-        empanelled: row.empanelled === 'true',
-        active: row.active === 'true',
-      })
-      .onConflictDoUpdate({
-        target: amcs.slug,
-        set: { name: row.name!, fpFundName: row.fp_fund_name || null, empanelled: row.empanelled === 'true', active: row.active === 'true' },
-      });
+      .values({ ...amc, slug: cell(row, 'slug') })
+      .onConflictDoUpdate({ target: amcs.slug, set: amc });
   }
 
   for (const row of readCsv(dataDir, 'sebi-categories.csv')) {
+    const category = {
+      assetClass: row.asset_class as never,
+      name: cell(row, 'name'),
+      slug: cell(row, 'slug'),
+      sebiRef: row.sebi_ref || null,
+      cutoffClass: row.cutoff_class as never,
+      volatilityClass: row.volatility_class as never,
+    };
     await db
       .insert(sebiCategories)
-      .values({
-        code: row.code!,
-        assetClass: row.asset_class as never,
-        name: row.name!,
-        slug: row.slug!,
-        sebiRef: row.sebi_ref || null,
-        cutoffClass: row.cutoff_class as never,
-        volatilityClass: row.volatility_class as never,
-      })
-      .onConflictDoUpdate({
-        target: sebiCategories.code,
-        set: {
-          assetClass: row.asset_class as never,
-          name: row.name!,
-          slug: row.slug!,
-          sebiRef: row.sebi_ref || null,
-          cutoffClass: row.cutoff_class as never,
-          volatilityClass: row.volatility_class as never,
-        },
-      });
+      .values({ ...category, code: cell(row, 'code') })
+      .onConflictDoUpdate({ target: sebiCategories.code, set: category });
   }
 
   for (const row of readCsv(dataDir, 'category-aliases.csv')) {
+    const categoryCode = cell(row, 'category_code');
     await db
       .insert(categoryAliases)
-      .values({ alias: row.alias!, source: row.source!, categoryCode: row.category_code! })
+      .values({ alias: cell(row, 'alias'), source: cell(row, 'source'), categoryCode })
       .onConflictDoUpdate({
         target: [categoryAliases.alias, categoryAliases.source],
-        set: { categoryCode: row.category_code! },
+        set: { categoryCode },
       });
   }
 
   for (const row of readCsv(dataDir, 'market-holidays-2026-2027.csv')) {
+    const kinds = cell(row, 'kinds').split('|') as MarketHolidayKind[];
     await db
       .insert(marketHolidays)
-      .values({ holidayDate: row.holiday_date!, kinds: row.kinds!.split('|') as MarketHolidayKind[] })
-      .onConflictDoUpdate({ target: marketHolidays.holidayDate, set: { kinds: row.kinds!.split('|') as MarketHolidayKind[] } });
+      .values({ holidayDate: cell(row, 'holiday_date'), kinds })
+      .onConflictDoUpdate({ target: marketHolidays.holidayDate, set: { kinds } });
   }
 
   const amcBySlug = new Map((await db.select().from(amcs)).map((a) => [a.slug, a.id]));
 
   for (const row of readCsv(dataDir, 'curated-schemes.csv')) {
-    const amcId = amcBySlug.get(row.amc_slug!);
-    if (!amcId) throw new Error(`seedCatalogue: unknown amc_slug ${row.amc_slug}`);
+    const amcSlug = cell(row, 'amc_slug');
+    const amcId = amcBySlug.get(amcSlug);
+    if (!amcId) throw new Error(`seedCatalogue: unknown amc_slug ${amcSlug}`);
+    const scheme = {
+      name: cell(row, 'name'),
+      categoryCode: cell(row, 'category_code'),
+      lockInMonths: row.lock_in_months ? Number(row.lock_in_months) : null,
+      curated: true,
+    };
     await db
       .insert(schemes)
       .values({
-        isin: row.isin!,
+        ...scheme,
+        isin: cell(row, 'isin'),
         amcId,
-        name: row.name!,
-        slug: row.name!.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
-        categoryCode: row.category_code!,
-        lockInMonths: row.lock_in_months ? Number(row.lock_in_months) : null,
-        curated: true,
+        slug: scheme.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)/g, ''),
       })
-      .onConflictDoUpdate({
-        target: schemes.isin,
-        set: { name: row.name!, categoryCode: row.category_code!, lockInMonths: row.lock_in_months ? Number(row.lock_in_months) : null, curated: true },
-      });
+      .onConflictDoUpdate({ target: schemes.isin, set: scheme });
   }
 
   const schemeByIsin = new Map((await db.select().from(schemes)).map((s) => [s.isin, s.id]));
 
   for (const row of readCsv(dataDir, 'fund-facts.csv')) {
-    const schemeId = schemeByIsin.get(row.isin!);
+    const schemeId = schemeByIsin.get(cell(row, 'isin'));
     if (!schemeId) continue;
     const payload = { ...row };
     await db
@@ -8546,29 +8701,32 @@ export async function seedCatalogue(db: Database, dataDir: string): Promise<void
   }
 
   for (const row of readCsv(dataDir, 'commission-disclosures.csv')) {
-    const amcId = amcBySlug.get(row.scope!) ?? null;
-    const schemeId = amcId ? null : (schemeByIsin.get(row.scope!) ?? null);
-    if (!amcId && !schemeId) throw new Error(`seedCatalogue: unknown commission scope ${row.scope}`);
+    const scope = cell(row, 'scope');
+    const amcId = amcBySlug.get(scope) ?? null;
+    const schemeId = amcId ? null : (schemeByIsin.get(scope) ?? null);
+    if (!amcId && !schemeId) throw new Error(`seedCatalogue: unknown commission scope ${scope}`);
+    const terms = {
+      trailMinBps: Number(row.trail_min_bps),
+      trailMaxBps: Number(row.trail_max_bps),
+      effectiveFrom: cell(row, 'effective_from'),
+    };
     await db
       .insert(commissionDisclosures)
       .values({
+        ...terms,
         amcId,
         schemeId,
-        disclosureKey: row.scope!,
-        trailMinBps: Number(row.trail_min_bps),
-        trailMaxBps: Number(row.trail_max_bps),
+        disclosureKey: scope,
         kind: row.kind as never,
-        effectiveFrom: row.effective_from!,
         source: 'ADMIN',
       })
-      .onConflictDoUpdate({
-        target: commissionDisclosures.disclosureKey,
-        set: { trailMinBps: Number(row.trail_min_bps), trailMaxBps: Number(row.trail_max_bps), effectiveFrom: row.effective_from! },
-      });
+      .onConflictDoUpdate({ target: commissionDisclosures.disclosureKey, set: terms });
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// RV-02-24: compare file URLs; `file://${argv[1]}` never matches import.meta.url on Windows.
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
   loadDotEnvFile();
   const env = parseEnv(process.env);
   const dbh = createDb(env.DATABASE_URL, 2);
@@ -8596,21 +8754,25 @@ root `package.json` (modify — append under `scripts`):
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=catalogue
-pnpm --filter=@sanchay/api test:int -- catalogue-schema
+pnpm --filter=@sanchay/api test:int catalogue-schema
 pnpm --filter=@sanchay/api typecheck
 ```
+
+The first line rebuilds `packages/domain/dist`, which is where `apps/api` reads `SCHEME_STATUSES` (RV-02-35). With a stale build, `typecheck` fails with TS2305 and `db:generate` stops with `TypeError: Cannot read properties of undefined (reading 'map')` (both reproduced).
 
 Expected: `db:generate` writes a new `drizzle/0009_catalogue.sql` + snapshot (append `REVOKE UPDATE, DELETE ON app.fund_facts_revisions FROM sanchay_app;` to the bottom of the generated SQL file by hand, matching the `0003_grants.sql` append-only pattern — drizzle-kit does not know about role grants). All 6 tests in `catalogue-schema.int.test.ts` pass; `typecheck` is clean.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write apps/api/src/modules/catalogue apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/db/app-schema.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/catalogue-schema.int.test.ts packages/domain/src/catalogue.ts data apps/api/package.json package.json apps/api/drizzle
-pnpm --filter=@sanchay/api test:int -- catalogue-schema
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm exec biome check --write apps/api/src/modules/catalogue apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/db/schema.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/catalogue-schema.int.test.ts packages/domain/src/catalogue.ts data apps/api/package.json package.json apps/api/drizzle
+pnpm --filter=@sanchay/api test:int catalogue-schema
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
-git add apps/api/src/modules/catalogue apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/db/app-schema.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/catalogue-schema.int.test.ts packages/domain/src/catalogue.ts data apps/api/package.json package.json apps/api/drizzle
+git add apps/api/src/modules/catalogue apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/db/schema.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/catalogue-schema.int.test.ts packages/domain/src/catalogue.ts data apps/api/package.json package.json apps/api/drizzle
 git commit -m "feat(catalogue): add catalogue schema, seed data and ops:catalogue:seed" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -9022,8 +9184,8 @@ describe('nav.sync.daily', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test -- amfi-nav-parser
-pnpm --filter=@sanchay/api test:int -- nav-sync
+pnpm --filter=@sanchay/api test amfi-nav-parser
+pnpm --filter=@sanchay/api test:int nav-sync
 ```
 
 Expected failure: `./amfi-nav-parser.js` and `../../src/modules/catalogue/nav/nav.service.js`/`nav-sync.job.js` do not exist, so every import fails.
@@ -9584,8 +9746,8 @@ root `package.json` (modify — append under `scripts`):
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/api test -- amfi-nav-parser
-pnpm --filter=@sanchay/api test:int -- nav-sync
+pnpm --filter=@sanchay/api test amfi-nav-parser
+pnpm --filter=@sanchay/api test:int nav-sync
 pnpm --filter=@sanchay/api typecheck
 ```
 
@@ -9596,8 +9758,8 @@ Expected: all 30 parser cases and both NAV-sync/grade integration tests pass; `t
 ```
 pnpm install
 pnpm exec biome check --write apps/api/src/integrations/amfi apps/api/src/modules/catalogue/nav apps/api/src/modules/catalogue/catalogue.module.ts apps/api/src/app.module.ts apps/api/src/cli/ops-nav-backfill.ts apps/api/src/cli/ops-nav-release.ts apps/api/test/int/nav-sync.int.test.ts apps/api/src/modules/platform/jobs/schedules.ts packages/test-fixtures apps/api/package.json package.json
-pnpm --filter=@sanchay/api test -- amfi-nav-parser
-pnpm --filter=@sanchay/api test:int -- nav-sync
+pnpm --filter=@sanchay/api test amfi-nav-parser
+pnpm --filter=@sanchay/api test:int nav-sync
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add apps/api/src/integrations/amfi apps/api/src/modules/catalogue/nav apps/api/src/modules/catalogue/catalogue.module.ts apps/api/src/app.module.ts apps/api/src/cli/ops-nav-backfill.ts apps/api/src/cli/ops-nav-release.ts apps/api/test/int/nav-sync.int.test.ts apps/api/src/modules/platform/jobs/schedules.ts packages/test-fixtures pnpm-lock.yaml apps/api/package.json package.json
@@ -9616,9 +9778,12 @@ git commit -m "feat(catalogue): port AMFI NAV parser, add nav.sync.daily and NAV
 
 **Files (modify):**
 - `packages/contract/src/index.ts`
+- `packages/contract/src/auth.test.ts` (Plan 01's exact top-level and `me` key checks become `expect.arrayContaining`, RV-02-30)
 - `apps/api/openapi.json` (regenerated, not hand-edited)
 - `apps/api/src/app.module.ts` (D9's `CatalogueModule` becomes `CatalogueModule.forRoot(env)`)
 - `apps/api/src/modules/catalogue/catalogue.module.ts` (created by D9; becomes `forRoot(env)`, adds the router and, in the worker role only, `CatalogueFpSyncJob`)
+- `apps/api/package.json` (`"@sanchay/validation": "workspace:*"`: `fp-sync.job.ts` is the first `apps/api` import of `@sanchay/validation`, RV-02-28)
+- `pnpm-lock.yaml` (written by that `pnpm add`)
 
 **Interfaces:**
 - Prerequisites: D8 (`schemes`, `sebiCategories`, `fundFactsRevisions` tables); D3 (`FpRead`, `fpJson`); D2 (`@JobHandler`, `Jobs.enqueue`, `schedule`).
@@ -9628,6 +9793,10 @@ git commit -m "feat(catalogue): port AMFI NAV parser, add nav.sync.daily and NAV
 - Review fix (RV-02-5): `catalogue.module.ts` is created by D9 (for `NavSyncJob`). D10 turns it into `CatalogueModule.forRoot(env)`, which adds `CatalogueRouter` and, only when `SANCHAY_APP_ROLE === 'worker'`, `CatalogueFpSyncJob` (it injects `FpRead`, which exists only in the worker via the global `FpModule`).
 - Deviation/assumption: no Plan-01 procedure yet binds a GET route to query-string input (`LoginRouter`/`MeRouter` are all POST; `ref.pincode` — D6 — uses a path param). `catalogue.listSchemes`'s input schema is written as a flat `z.object({ q, category, cursor })`, which `@orpc/openapi`'s GET binding maps to the query string; this is the documented oRPC convention, not something verified against existing Plan-01 code, since none exists yet.
 - Review fix (RV-02-6): the job uses D3's real `FpRead` (no local interface). Limits come from `FpSchemePlan.raw.thresholds[]` as documented in `docs/research/fp-api.md` §8A: `type: 'lumpsum'` gives `amount_min/amount_max/amount_multiples`; `type: 'sip'` with `frequency: 'monthly'` gives the SIP limits (falls back to lumpsum when absent). Each value goes through `fpJson.money(value, field)` and then `moneyWireSchema`. `schemePlans` is paged (size 100) until a short page. Eligibility flags come from `fundScheme(isin)` (§8B).
+- Review fix (RV-02-30): this task adds the first new top-level contract key (`catalogue`), so it relaxes Plan 01's `packages/contract/src/auth.test.ts` test "exposes exactly the 9 MVP procedures", whose exact `['auth', 'health', 'me']` check would otherwise fail (reproduced). The fragment is the one Plan 03 E2 carried as RV-03-5 (the top-level and `me` keys become `expect.arrayContaining`); E2, E4 and E5 then add `meta`, `consents` and `me.get` without editing the test, and E2's fragment is already applied.
+- Review fix (RV-02-28): `fp-sync.job.ts` imports `moneyWireSchema` from `@sanchay/validation`, which `apps/api` did not depend on (TS2307), so Step 3 adds the workspace link.
+- Review fix (RV-02-35): this task changes `packages/contract`, which `apps/api` reads from `dist/` (its typecheck and `pnpm --filter=@sanchay/api openapi`). Step 4 and Step 5 start with `pnpm exec turbo run build --filter=@sanchay/api^...`; without it the api typecheck fails with TS2339 on `contract.catalogue` and `openapi.json` misses the new paths (reproduced).
+- Review fix (RV-02-36): `CatalogueRouter` injects `DB` as the `DbHandle` that `PlatformModule` provides (`createDb`) and passes `this.dbh.db` to the queries. Typed as `Database`, every call answered 500 (`this.db.select is not a function`, reproduced). `listSchemes` takes the contract's `ListSchemesInput` (its `{ q?: string }` parameter failed TS2379 under `exactOptionalPropertyTypes`), and the non-null assertions that `biome ci` refuses are gone from the queries and the int test.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9664,12 +9833,13 @@ async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
     .insert(sebiCategories)
     .values({ code: `CAT_${Date.now()}`, assetClass: 'EQUITY', name: 'Cat', slug: `cat-${Date.now()}-${Math.random()}`, cutoffClass: 'STANDARD', volatilityClass: 'V_EQUITY' })
     .returning();
+  if (amc === undefined || cat === undefined) throw new Error('seedOneScheme: an insert returned no row');
   await app.db.db.insert(schemes).values({
     isin: `INF${String(Date.now()).slice(-9)}`,
-    amcId: amc!.id,
+    amcId: amc.id,
     name: 'Parag Parikh Flexi Cap Fund - Regular - Growth',
     slug: `scheme-${Date.now()}-${Math.random()}`,
-    categoryCode: cat!.code,
+    categoryCode: cat.code,
     status,
     curated,
   });
@@ -9770,8 +9940,8 @@ describe('catalogue.fp.sync', () => {
 
 ```
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test -- fp-sync.job
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test fp-sync.job
+pnpm --filter=@sanchay/api test:int catalogue-router
 ```
 
 Expected failure: `catalogue.ts` has no `catalogueContract`/exports yet (the contract's `index.ts` change in Step 3 has not landed), `./fp-sync.job.js` does not exist, and `/api/v1/catalogue/*` 404s.
@@ -9850,9 +10020,26 @@ export const contract = { health: healthContract, auth: authContract, me: meCont
 export type Contract = typeof contract;
 ```
 
+`packages/contract/src/auth.test.ts` (modify, RV-02-30). Replace Plan 01's test "exposes exactly the 9 MVP procedures"; only the name and the first and last checks change, because this task, Plan 03 E2, E4 and E5 each add a key:
+```typescript
+  it('keeps the 9 MVP procedures (later plans add contract keys and me.get)', () => {
+    expect(Object.keys(contract)).toEqual(expect.arrayContaining(['auth', 'health', 'me']));
+    expect(Object.keys(contract.health).sort()).toEqual(['live', 'ready']);
+    expect(Object.keys(a).sort()).toEqual([
+      'logout',
+      'requestOtp',
+      'revokeAll',
+      'session',
+      'verifyOtp',
+    ]);
+    expect(Object.keys(m)).toEqual(expect.arrayContaining(['requestEmailOtp', 'verifyEmail']));
+  });
+```
+
 `apps/api/src/modules/catalogue/catalogue.queries.ts` (full file):
 
 ```typescript
+import type { ListSchemesInput } from '@sanchay/contract';
 import { LAUNCH_SCHEME_OPTIONS } from '@sanchay/domain';
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client.js';
@@ -9862,19 +10049,39 @@ const PAGE_SIZE = 20;
 
 export async function listCategories(db: Database) {
   return db
-    .select({ code: sebiCategories.code, assetClass: sebiCategories.assetClass, name: sebiCategories.name, slug: sebiCategories.slug, cutoffClass: sebiCategories.cutoffClass, volatilityClass: sebiCategories.volatilityClass })
+    .select({
+      code: sebiCategories.code,
+      assetClass: sebiCategories.assetClass,
+      name: sebiCategories.name,
+      slug: sebiCategories.slug,
+      cutoffClass: sebiCategories.cutoffClass,
+      volatilityClass: sebiCategories.volatilityClass,
+    })
     .from(sebiCategories)
     .orderBy(asc(sebiCategories.name));
 }
 
-export async function listSchemes(db: Database, input: { q?: string; category?: string; cursor?: string }) {
-  const conditions = [eq(schemes.status, 'PUBLISHED'), eq(schemes.curated, true), eq(schemes.planType, 'REGULAR'), inArray(schemes.option, LAUNCH_SCHEME_OPTIONS)];
+export async function listSchemes(db: Database, input: ListSchemesInput) {
+  const conditions = [
+    eq(schemes.status, 'PUBLISHED'),
+    eq(schemes.curated, true),
+    eq(schemes.planType, 'REGULAR'),
+    inArray(schemes.option, LAUNCH_SCHEME_OPTIONS),
+  ];
   if (input.category) conditions.push(eq(schemes.categoryCode, input.category));
   if (input.cursor) conditions.push(gt(schemes.id, input.cursor));
   if (input.q) conditions.push(sql`${schemes.name} % ${input.q}`);
 
   const rows = await db
-    .select({ isin: schemes.isin, id: schemes.id, name: schemes.name, slug: schemes.slug, categoryCode: schemes.categoryCode, status: schemes.status, curated: schemes.curated })
+    .select({
+      isin: schemes.isin,
+      id: schemes.id,
+      name: schemes.name,
+      slug: schemes.slug,
+      categoryCode: schemes.categoryCode,
+      status: schemes.status,
+      curated: schemes.curated,
+    })
     .from(schemes)
     .where(and(...conditions))
     .orderBy(asc(schemes.id))
@@ -9882,31 +10089,31 @@ export async function listSchemes(db: Database, input: { q?: string; category?: 
 
   const hasMore = rows.length > PAGE_SIZE;
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+  const last = page.at(-1);
   return {
     items: page.map(({ id, ...rest }) => rest),
-    nextCursor: hasMore ? page[page.length - 1]!.id : null,
+    nextCursor: hasMore && last !== undefined ? last.id : null,
   };
 }
 ```
 
-`apps/api/src/modules/catalogue/catalogue.router.ts` (full file):
+`apps/api/src/modules/catalogue/catalogue.router.ts` (full file; RV-02-36: `DB` is the `DbHandle` PlatformModule provides):
 
 ```typescript
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { ClsService } from 'nestjs-cls';
-import type { SanchayClsStore } from '../platform/request-context.js';
+import { DB, type DbHandle } from '../../db/client.js';
 import { requireAuth } from '../identity/request-auth.js';
-import type { Database } from '../../db/client.js';
-import { DB } from '../../db/client.js';
-import { Inject } from '@nestjs/common';
+import type { SanchayClsStore } from '../platform/request-context.js';
 import { listCategories, listSchemes } from './catalogue.queries.js';
 
 @Controller()
 export class CatalogueRouter {
   constructor(
-    @Inject(DB) private readonly db: Database,
+    // DB is PlatformModule's DbHandle (createDb), as D1 injects it; the queries take its Drizzle db.
+    @Inject(DB) private readonly dbh: DbHandle,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
@@ -9914,7 +10121,7 @@ export class CatalogueRouter {
   categories() {
     return implement(contract.catalogue.categories).handler(() => {
       requireAuth(this.cls);
-      return listCategories(this.db);
+      return listCategories(this.dbh.db);
     });
   }
 
@@ -9922,7 +10129,7 @@ export class CatalogueRouter {
   listSchemes() {
     return implement(contract.catalogue.listSchemes).handler(({ input }) => {
       requireAuth(this.cls);
-      return listSchemes(this.db, input);
+      return listSchemes(this.dbh.db, input);
     });
   }
 }
@@ -9959,6 +10166,11 @@ imports: [
   IdentityModule,
   CatalogueModule.forRoot(env), // D9 added CatalogueModule
 ],
+```
+
+Link the workspace package that `fp-sync.job.ts` imports `moneyWireSchema` from (RV-02-28). The command adds `"@sanchay/validation": "workspace:*"` to `apps/api/package.json` and the importer lines to `pnpm-lock.yaml`:
+```
+pnpm --filter=@sanchay/api add "@sanchay/validation@workspace:*"
 ```
 
 `apps/api/src/modules/catalogue/fp-sync.job.ts` (full file; uses D3's real `FpRead`):
@@ -10063,26 +10275,28 @@ export class CatalogueFpSyncJob {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test -- fp-sync.job
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test fp-sync.job
+pnpm --filter=@sanchay/api test:int catalogue-router
 pnpm --filter=@sanchay/api openapi
 git diff --exit-code apps/api/openapi.json
 pnpm --filter=@sanchay/api typecheck
 ```
 
-Expected: all contract/unit/integration tests pass; `openapi` regeneration shows a diff on first run (new `/catalogue/*` paths) — commit that diff; a second run of the drift check is clean.
+Expected: the build refreshes `packages/contract/dist` before anything in `apps/api` reads it (RV-02-35); all contract/unit/integration tests pass, including the relaxed `auth.test.ts` with `catalogue` in the contract (RV-02-30); `openapi` regeneration shows a diff on first run (new `/catalogue/*` paths) — commit that diff; a second run of the drift check is clean.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write packages/contract/src/catalogue.ts packages/contract/src/index.ts apps/api/src/modules/catalogue apps/api/src/app.module.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm exec biome check --write packages/contract/src/catalogue.ts packages/contract/src/index.ts packages/contract/src/auth.test.ts apps/api/src/modules/catalogue apps/api/src/app.module.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test -- fp-sync.job
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test fp-sync.job
+pnpm --filter=@sanchay/api test:int catalogue-router
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
-git add packages/contract/src/catalogue.ts packages/contract/src/index.ts apps/api/src/modules/catalogue apps/api/src/app.module.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
+git add packages/contract/src/catalogue.ts packages/contract/src/index.ts packages/contract/src/auth.test.ts apps/api/src/modules/catalogue apps/api/src/app.module.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json apps/api/package.json pnpm-lock.yaml
 git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and catalogue.listSchemes" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -10094,198 +10308,51 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
 **Why S2 (unchanged from the outline):** FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06 demo all need a public dev host. Funded by taking E18 [T2] and E19 [T4] out of the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1. **Fallback:** a fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the local API, recorded in ADR-0014 and registered with Cybrilla by 10-23.
 
+> **Amended 2026-10-01 (RV-02-16 to RV-02-23).** The earlier text could not install, compile, synthesise, boot or deploy. This version was checked with a real `pnpm install` under the workspace's supply-chain policies, `tsc`, the CDK assertion tests, `cdk synth` from PowerShell 5.1 and Git Bash, each container's synthesised environment run through the boot guard, an arm64 api image that migrated a Postgres 18.6 database and answered `/api/v1/health` with 200, and an arm64 web image that served `/site` on the www host and `assetlinks.json` on the app host. What changed and why is in the errata at the top of this plan. RV-02-32 and RV-02-33 (also 2026-10-01) made the post-deploy checks run in both shells and moved the repository the deploy role trusts to the deploy input `SANCHAY_GITHUB_REPOSITORY`.
+
 **Files:**
 - Create: `infra/package.json`, `infra/tsconfig.json`, `infra/cdk.json`, `infra/vitest.config.ts`, `infra/bin/sanchay.ts`, `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts`
 - Create (fetched asset, Step 3): `infra/certs/rds-global-bundle.pem`
-- Create: `.github/workflows/deploy.yml`, `apps/api/Dockerfile`, `apps/api/docker-entrypoint.sh`, `apps/web/Dockerfile`, `docs/adr/0014-minimal-aws-topology.md`
-- Modify (key-level fragments only): `pnpm-workspace.yaml` (`packages:` list, `catalog:` map), `docs/adr/0001-versions.md` (append three rows), `docs/adr/README.md` (ADR-0014 row: `Planned` → `Accepted`), `apps/web/next.config.ts` (add `output: 'standalone'`)
+- Create: `.github/workflows/deploy.yml`, `.dockerignore`, `apps/api/Dockerfile`, `apps/api/docker-entrypoint.sh`, `apps/web/Dockerfile`, `apps/web/public/.well-known/assetlinks.json`, `docs/adr/0014-minimal-aws-topology.md`
+- Modify (key-level fragments only): `pnpm-workspace.yaml` (`packages:` list, `catalog:` map), `.gitignore` (one line), `apps/api/src/config/env.ts` (B2 invariants 1 and 7 follow the R-19 owning containers), `apps/api/src/config/env.test.ts` (two cases), `docs/adr/0001-versions.md` (append three rows), `docs/adr/README.md` (ADR-0014 row: `Planned` → `Accepted`), `apps/web/next.config.ts` (add `output: 'standalone'`)
 
 **Interfaces:**
-- **Prerequisites:** B6 (`createDb`, compose, Testcontainers harness — the same Postgres 18.6 image tag this stack's RDS engine version must match), B2/env.ts (`EnvSchema`, `assertBootInvariants`, invariant 6 `SANCHAY_CLIENT_IP_SOURCE=alb` outside local/test — this stack must inject `alb`), B18 (`InfraRoute`, `INFRA_ROUTE`, `HealthRouter` at `@InfraRoute('APP_AND_API_HOSTS')`) — none of these are touched by this task; E25 only has to keep the deployed containers compatible with them.
-- **Consumes (exact names from Plan-01 code):**
-  - `apps/api/src/modules/platform/health.router.ts` — `HealthRouter` serves `contract.health.live`/`contract.health.ready` at `/api/v1/health` under `@InfraRoute('APP_AND_API_HOSTS')`; this is the literal ALB/ECS health-check path (R-12).
-  - `apps/api/src/config/env.ts` — `EnvSchema` fields this stack must supply as container env/secrets: `SANCHAY_APP_ENV`, `SANCHAY_APP_ROLE` (`api`\|`worker`\|`migrate`), `HOST`, `PORT`, `SANCHAY_LOG_LEVEL`, `DATABASE_URL`, `SANCHAY_DB_POOL_MAX`, `SANCHAY_APP_ORIGIN`, `SANCHAY_CLIENT_IP_SOURCE=alb`, `SANCHAY_KEY_SERVICE=secrets`, `SANCHAY_KEYRING_JSON`, `SANCHAY_SMS_RETRIEVER_HASH`; boot invariants 1, 2, 5, 6, 7 (in `assertBootInvariants`) are what make a mis-wired container refuse to boot instead of running unsafely.
-  - `apps/api/package.json` scripts — `build` (`nest build -b swc`), `start` (`node dist/main.js`), `db:migrate` (`nest build -b swc && node dist/cli/migrate.js`); the Dockerfile and the migrate task definition call these, not new ones.
-  - `apps/api/src/cli/migrate.ts` — the entry point the one-off migrate ECS task runs.
-  - `apps/web/package.json` scripts — `build` (`next build`), and the Next.js `.next/standalone` output this task's Dockerfile copies (requires `output: 'standalone'`, added here).
-  - `.github/workflows/ci.yml` — reuses its exact three already-resolved action pins (`actions/checkout@3d3c42e5...`, `pnpm/action-setup@ea17c68d...`, `actions/setup-node@82076278...`) rather than introducing new, unresolved third-party action SHAs.
-  - `docs/adr/README.md` §ADR-0014 row (already `Planned`, "Minimal AWS topology: single ECS service, ALB only") and `docs/adr/0001-versions.md` (append-only, A1 rule).
-  - `pnpm-workspace.yaml` `packages:` (`apps/*`, `packages/*`, `tools/*`) and `catalog:` (A1 rule: exact pinned versions only).
-- **Produces (spec §2.4, matching the outline's Produces list):**
-  - `infra/lib/sanchay-mvp-stack.ts` — exported `SanchayMvpStack` (a `cdk.Stack` subclass) and `SanchayMvpStackProps` (env name, multi-AZ, deletion protection, desired count, GitHub repo, domain — parameterized so F1 reuses the same class for `SanchayMvpStack-prod` with different props, per the outline's F1 note "the same R-11 listener rules... as E25").
-  - `infra/lib/config.ts` — exported `loadStackConfig(envName: 'dev' | 'prod'): SanchayStackConfig`.
-  - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting).
-  - ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and the `routing.http.xff_header_processing.mode=append` attribute.
-  - Listener rules (R-11): host `api.dev.sanchay.in` (any path) → api target group (3000); host `app.dev.sanchay.in` + path `/api/v1/*` → api target group; default action (catches `www.dev.sanchay.in` and the rest of `app.dev.sanchay.in`) → web target group (3001). One `ecs.FargateService` registers both target groups via `service.loadBalancerTarget({containerName, containerPort})`. Both target groups' health check path is `/api/v1/health` (R-12).
-  - One ECS Fargate ARM64 service, containers `web`, `api`, `worker`. `SANCHAY_FP_CREDENTIALS_JSON` and its Secrets Manager secret go only into `worker`; `SANCHAY_KEYRING_JSON` goes into `api` and `worker` (R-19 owning containers).
-  - The one-off `MigrateTaskDef` Fargate task definition (run manually with `aws ecs run-task --overrides`, not a `Service`).
-  - RDS PostgreSQL with `rds.force_ssl=1` via a parameter group, `StorageEncrypted: true`, reachable only from the ECS service security group.
-  - S3 document bucket, ECR repos (`sanchay-dev-api`, `sanchay-dev-web`), Secrets Manager secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`, `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`, plus the RDS-generated credentials secret), CloudWatch log groups at 400-day retention (`logs.RetentionDays.THIRTEEN_MONTHS`), Route 53 A-alias records for `www.dev`, `app.dev`, `api.dev`.
-  - CloudWatch alarm on the `Sanchay/nav.newest_age_days` metric (R-12; the metric itself is published starting at F1/the catalogue sync job — this task only wires the alarm).
-  - GitHub OIDC provider + `GithubDeployRoleArn` output, consumed by `.github/workflows/deploy.yml`.
-  - `apps/api/Dockerfile` (bakes in `infra/certs/rds-global-bundle.pem`, sets `NODE_EXTRA_CA_CERTS`) and `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL=...&sslmode=verify-full` from split `SANCHAY_DB_*` env/secret pieces at container start — see deviation note below).
-  - `apps/web/Dockerfile` (Next.js standalone output).
-  - `docs/adr/0014-minimal-aws-topology.md` (accepted; records the dev hosts and the tunnel fallback).
-  - **Deviation from outline: the RDS connection string is not injected as one Secrets-Manager-composed `DATABASE_URL` value.** CDK/Secrets Manager cannot concatenate a generated-secret field with plain strings into one ECS secret at deploy time without a custom resource. Instead the api/worker containers get plain env `SANCHAY_DB_HOST`/`SANCHAY_DB_PORT`/`SANCHAY_DB_NAME`/`SANCHAY_DB_USER` plus one ECS secret `SANCHAY_DB_PASSWORD` (from the RDS-generated secret's `password` field), and `apps/api/docker-entrypoint.sh` composes `DATABASE_URL` with `?sslmode=verify-full` before `exec`ing `node dist/main.js` / the migrate script. No `apps/api/src` file changes; `EnvSchema.DATABASE_URL` (env.ts) is unaffected and still just reads `process.env.DATABASE_URL`.
-  - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist yet in the Plan-01 code (it is added by a later catalogue-seed task, D8–D10, outside this task's Files list). A one-line `# TODO(D8-D10)` marker is not used (no placeholders); instead the Dockerfile simply omits the line and a comment states which task adds it.
-  - **Deviation from outline: `.github/workflows/deploy.yml` authenticates to AWS by scripting the OIDC token exchange (`aws sts assume-role-with-web-identity`) and pushes to ECR with the AWS CLI + `docker buildx`, instead of the `aws-actions/configure-aws-credentials` / `aws-actions/amazon-ecr-login` marketplace actions.** AGENTS.md requires every pinned action SHA to be resolved with `git ls-remote` before commit; this session has no network access to resolve new SHAs for those two actions, so the workflow reuses only the three action pins `ci.yml` already carries (`actions/checkout`, `pnpm/action-setup`, `actions/setup-node`), which are already resolved, verified SHAs in this repository.
-- **Tests (from the outline, run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `health check path /api/v1/health`, `SG: RDS reachable only from service`, `log retention 400`, `ECS Exec logging configured`, `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`.
-- **Post-deploy verification (manual/CI, not part of the TDD loop — needs a real deploy):** `deploy to dev: /api/v1/health 200 on app.dev and api.dev`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.dev.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`. These are listed as a checklist at the end of this task, run after `deploy.yml` is dispatched by hand.
+- **Prerequisites:** B6 (`createDb`, compose, Testcontainers harness: `postgres:18.6-trixie`, the version this stack's RDS engine matches), B2/env.ts (`EnvSchema`, `parseEnv`, `assertBootInvariants`, invariants 1-7), B18 (`HealthRouter` at `@InfraRoute('APP_AND_API_HOSTS')`), D2 (`db/migrate.ts` reads the migrations from `../../drizzle` relative to `dist/db`), D3 (`SANCHAY_PROVIDER_MODE_FP`, `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON`, invariants 8 and 9), D6 (`SANCHAY_PROVIDER_MODE_SMS=msg91`, `SANCHAY_PROVIDER_MODE_EMAIL=ses`, `SANCHAY_MSG91_CREDENTIALS_JSON`, `SANCHAY_SES_FROM`, invariants 11 and 12, `SesEmailSender` (SES v2 `SendEmail`, task-role credentials)), D7 (`SANCHAY_PILOT_INVITE_ONLY`, invariant 10). The only `apps/api/src` changes are the two-condition edit to B2's invariants 1 and 7 and two cases in `env.test.ts`.
+- **Consumes (exact names):**
+  - `apps/api/src/modules/platform/health.router.ts`: `HealthRouter` serves `/api/v1/health` under `@InfraRoute('APP_AND_API_HOSTS')`; this is the literal ALB/ECS health-check path (R-12).
+  - `apps/api/src/config/env.ts`: every key the boot guard needs in a non-local env. All API-image roles: `SANCHAY_APP_ENV`, `SANCHAY_APP_ROLE`, `DATABASE_URL`, `SANCHAY_APP_ORIGIN`, `SANCHAY_CLIENT_IP_SOURCE=alb` (invariant 6), `SANCHAY_KEY_SERVICE=secrets` with `SANCHAY_KEYRING_JSON` (invariants 2 and 4b), `SANCHAY_PROVIDER_MODE_FP` (8, 9), `SANCHAY_PILOT_INVITE_ONLY` (10). api and worker: `SANCHAY_PROVIDER_MODE_SMS`/`_EMAIL`, `SANCHAY_MSG91_CREDENTIALS_JSON`, `SANCHAY_SES_FROM` (1, 11, 12). api only: `HOST`, `PORT`, `SANCHAY_SMS_RETRIEVER_HASH` (7), `SANCHAY_FP_WEBHOOK_SECRET`. worker only: `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON`. Set before the Plan 03 tasks that make them required: `SANCHAY_API_ORIGIN` (E2) and `SANCHAY_PLATFORM_ARN` (E21).
+  - `apps/web/src/proxy.ts`: reads `SANCHAY_WWW_ORIGIN` and `SANCHAY_APP_ORIGIN` at runtime for the H-1 host routing; `apps/web/src/lib/site-config.ts` `readSiteConfig()` runs when `next build` prerenders `/site` (C10/C11) and requires `SANCHAY_PLATFORM_ARN` and `SANCHAY_PLATFORM_ARN_VALID_TILL` (the origins are optional there); `apps/web/next.config.ts` rewrites `/api/v1/*` only when `SANCHAY_API_ORIGIN` is set at build time (local and e2e), never in the images.
+  - `apps/api/package.json` scripts: `build` (`nest build -b swc`), `start` (`node dist/main.js`); `apps/api/src/cli/migrate.ts` (the one-off migrate task's command). The workspace packages the api and web import (`@sanchay/contract`, `@sanchay/domain`, `@sanchay/api-client`, `@sanchay/tokens`, ...) export `dist/`, so the images build them with `--filter=@sanchay/api...` / `--filter=@sanchay/web...`.
+  - `.node-version` (24.21.0) and `pnpm-workspace.yaml` `engineStrict: true`, `nodeLinker: hoisted`.
+  - `.github/workflows/ci.yml`: its three already-resolved action pins (`actions/checkout@3d3c42e5...`, `pnpm/action-setup@ea17c68d...`, `actions/setup-node@82076278...`).
+  - `docs/adr/README.md` ADR-0014 row (`Planned`, "Minimal AWS topology: single ECS service, ALB only") and `docs/adr/0001-versions.md` (append-only, A1 rule).
+- **Produces (spec §2.4):**
+  - `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack` (a `cdk.Stack`), `SanchayMvpStackProps` (`{config}` plus `StackProps`), `SERVICE_NAME = 'sanchay-app'`, `DB_MASTER_USER = 'sanchay_master'`. Constructor locals F1 edits: `vpc`, `natEip`, `documentsBucket`, `apiRepo`, `webRepo`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `taskDef`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `httpsListener`, `apiTargetGroup`, `webTargetGroup`. Construct ids `NatEip`, `Database`, `Service`, `GithubOidc`, `GithubDeployRole`. Outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`, and `GithubDeployRoleArn` when the stack creates the OIDC provider and the deploy input `SANCHAY_GITHUB_REPOSITORY` is set (RV-02-33).
+  - `infra/lib/config.ts`: `loadStackConfig(envName: SanchayEnvName, source: DeployInputSource = process.env): SanchayStackConfig`, `SanchayEnvName`, `SanchayStackConfig` (E25's original keys, with `githubRepo: string | undefined` read from the deploy input `SANCHAY_GITHUB_REPOSITORY` (RV-02-33), plus `dbInstanceSize: 'MICRO' | 'MEDIUM'`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `DeployInputSource`, `StackConfigError`, `assertDeployInputs(config)`. Every env refuses to synthesise without the deploy inputs `SANCHAY_PLATFORM_ARN` (`ARN-<digits>`) and `SANCHAY_SMS_RETRIEVER_HASH` (11 characters of `[A-Za-z0-9+/]`) and refuses a `SANCHAY_GITHUB_REPOSITORY` that is not `<owner>/<repo>`; `assertDeployInputs` refuses a missing one (a real synth or deploy, never the tests).
+  - `infra/bin/sanchay.ts`: `SanchayMvpStack-dev`, region pinned to `ap-south-1`; it calls `assertDeployInputs(config)` before building the stack (RV-02-33).
+  - CDK context flag `-c firstDeploy=true`: the service is created with 0 tasks (ADR-0014 "First deploy").
+  - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`.
+  - Listener rules (R-11): host `api.dev.sanchay.in` (any path) → api target group (3000); host `app.dev.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.dev.sanchay.in` and the rest of `app.dev.sanchay.in`) → web target group (3001). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
+  - One ECS Fargate ARM64 service, containers `web`, `api`, `worker`, plus the one-off `MigrateTaskDef` (container `migrate`, run with `aws ecs run-task`). `SANCHAY_FP_CREDENTIALS_JSON` goes only into `worker`; `SANCHAY_FP_WEBHOOK_SECRET` and `SANCHAY_SMS_RETRIEVER_HASH` only into `api`; `SANCHAY_KEYRING_JSON` into `api`, `worker` and `migrate` (the boot guard's keyring check runs in every role).
+  - RDS PostgreSQL 18.6 with `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group; `db.t4g.micro` in dev, `db.t4g.medium` from `dbInstanceSize` (spec §2.4); master login `sanchay_master`, secret `sanchay/{env}/db-master` (BRIEF D6). The migrate task logs in as the master; api and worker share that login until F1 adds `sanchay_app_login` (secret `sanchay/{env}/db-app`) and moves `appDbLogin` to it.
+  - Task role statement `SesSendFromSanchayDomain` (`ses:SendEmail`, `ses:SendRawEmail`, condition `ses:FromAddress` = `SANCHAY_SES_FROM`).
+  - S3 document bucket, ECR repos (`sanchay-dev-api`, `sanchay-dev-web`), Secrets Manager secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`, `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`, `sanchay/dev/db-master`), CloudWatch log groups `/sanchay/dev/app` and `/sanchay/dev/ecs-exec` at 400-day retention, ECS Exec logging (R-16), Route 53 A-alias records for `www.dev`, `app.dev`, `api.dev`.
+  - No CloudWatch alarm. R-12's NAV-age alarm needs a published metric, and no task before F1 publishes one; F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm with its metric source in both envs.
+  - GitHub OIDC provider and the dev deploy role (output `GithubDeployRoleArn`), which trusts only `repo:<SANCHAY_GITHUB_REPOSITORY>:*` and is built only when that deploy input is set (RV-02-33), consumed by `.github/workflows/deploy.yml`, which reads the GitHub `dev` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs `cdk deploy`, forces a new deployment of `sanchay-app` and waits for it to stabilise.
+  - `apps/api/Dockerfile` (keeps the `/repo` layout, bakes in `infra/certs/rds-global-bundle.pem`, sets `NODE_EXTRA_CA_CERTS`), `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL=...?sslmode=verify-full` from the split `SANCHAY_DB_*` pieces), `apps/web/Dockerfile` (Next.js standalone, port 3001), `.dockerignore`, `apps/web/public/.well-known/assetlinks.json` (`[]` until F18 writes the App Links payload).
+  - B2 `assertBootInvariants`: the constants `role` and `sends` (`role === 'api' || role === 'worker'`); invariant 1 binds api and worker, invariant 7 binds api. E1 (Plan 03) must scope invariant 13 to `role === 'api'` the same way (open item for Plan 03).
+  - `docs/adr/0014-minimal-aws-topology.md` (accepted; dev hosts, tunnel fallback, first-deploy runbook).
+  - **Deviation from outline: the RDS connection string is not injected as one Secrets-Manager-composed `DATABASE_URL` value.** CDK/Secrets Manager cannot concatenate a generated-secret field with plain strings into one ECS secret at deploy time without a custom resource. Instead the containers get plain env `SANCHAY_DB_HOST`/`SANCHAY_DB_PORT`/`SANCHAY_DB_NAME`/`SANCHAY_DB_USER` plus one ECS secret `SANCHAY_DB_PASSWORD` (the login secret's `password` field), and `apps/api/docker-entrypoint.sh` composes `DATABASE_URL` with `?sslmode=verify-full` before `exec`ing the container command. `EnvSchema.DATABASE_URL` is unaffected.
+  - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist yet; the Dockerfile omits the line and a comment states which task adds it.
+  - **Deviation from outline: `.github/workflows/deploy.yml` authenticates to AWS by scripting the OIDC token exchange (`aws sts assume-role-with-web-identity`) and pushes to ECR with the AWS CLI and `docker build`, instead of the `aws-actions/configure-aws-credentials` / `aws-actions/amazon-ecr-login` marketplace actions.** It reuses only the three action pins `ci.yml` already carries; the arm64 emulation installer (`tonistiigi/binfmt`) is a container image pinned by digest, not an action.
+- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log retention 400`, `ECS Exec logging configured`, `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`, `RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service named sanchay-app; -c firstDeploy=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `RDS instance class follows config.dbInstanceSize (spec §2.4: db.t4g.medium)`, `the GitHub deploy role trusts only SANCHAY_GITHUB_REPOSITORY, and exists only with it`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
+- **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to dev: /api/v1/health 200 on app.dev and api.dev`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.dev.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
 
 ---
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-  Create `infra/test/sanchay-mvp-stack.test.ts`:
-
-  ```typescript
-  import { App } from 'aws-cdk-lib';
-  import { Template, Match } from 'aws-cdk-lib/assertions';
-  import { readFileSync, existsSync } from 'node:fs';
-  import path from 'node:path';
-  import { fileURLToPath } from 'node:url';
-  import { describe, expect, it } from 'vitest';
-  import { loadStackConfig } from '../lib/config.js';
-  import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
-
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const repoRoot = path.resolve(here, '../..');
-
-  function synthDevTemplate(): Template {
-    const app = new App();
-    const config = loadStackConfig('dev');
-    const stack = new SanchayMvpStack(app, 'SanchayMvpStack-dev', {
-      env: { account: '111111111111', region: 'ap-south-1' },
-      config,
-    });
-    return Template.fromStack(stack);
-  }
-
-  describe('SanchayMvpStack-dev (E25)', () => {
-    it('FP secret only in worker container', () => {
-      const template = synthDevTemplate();
-      const taskDefs = template.findResources('AWS::ECS::TaskDefinition');
-      const appTaskDef = Object.values(taskDefs).find((def) =>
-        (def.Properties.ContainerDefinitions as Array<{ Name: string }>).some(
-          (c) => c.Name === 'web',
-        ),
-      );
-      if (!appTaskDef) throw new Error('app task definition (web+api+worker) not found');
-      const containers = appTaskDef.Properties.ContainerDefinitions as Array<{
-        Name: string;
-        Secrets?: Array<{ Name: string }>;
-      }>;
-      const worker = containers.find((c) => c.Name === 'worker');
-      const api = containers.find((c) => c.Name === 'api');
-      const web = containers.find((c) => c.Name === 'web');
-      expect(worker?.Secrets?.some((s) => s.Name === 'SANCHAY_FP_CREDENTIALS_JSON')).toBe(true);
-      expect(api?.Secrets?.some((s) => s.Name === 'SANCHAY_FP_CREDENTIALS_JSON')).toBeFalsy();
-      expect(web?.Secrets?.some((s) => s.Name === 'SANCHAY_FP_CREDENTIALS_JSON')).toBeFalsy();
-      // R-19: SANCHAY_KEYRING_JSON goes into api and worker only.
-      expect(worker?.Secrets?.some((s) => s.Name === 'SANCHAY_KEYRING_JSON')).toBe(true);
-      expect(api?.Secrets?.some((s) => s.Name === 'SANCHAY_KEYRING_JSON')).toBe(true);
-      expect(web?.Secrets?.some((s) => s.Name === 'SANCHAY_KEYRING_JSON')).toBeFalsy();
-    });
-
-    it('RDS StorageEncrypted and force_ssl', () => {
-      const template = synthDevTemplate();
-      template.hasResourceProperties('AWS::RDS::DBInstance', {
-        StorageEncrypted: true,
-        Engine: 'postgres',
-      });
-      template.hasResourceProperties('AWS::RDS::DBParameterGroup', {
-        Parameters: Match.objectLike({ 'rds.force_ssl': '1' }),
-      });
-    });
-
-    it('ALB TLS policy', () => {
-      const template = synthDevTemplate();
-      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
-        Protocol: 'HTTPS',
-        SslPolicy: 'ELBSecurityPolicy-TLS13-1-2-2021-06',
-      });
-    });
-
-    it('listener rule app host + /api/v1/* → api target group', () => {
-      const template = synthDevTemplate();
-      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
-        Conditions: Match.arrayWith([
-          Match.objectLike({
-            Field: 'host-header',
-            HostHeaderConfig: { Values: ['app.dev.sanchay.in'] },
-          }),
-          Match.objectLike({
-            Field: 'path-pattern',
-            PathPatternConfig: { Values: ['/api/v1/*'] },
-          }),
-        ]),
-      });
-    });
-
-    it('health check path /api/v1/health', () => {
-      const template = synthDevTemplate();
-      const groups = template.findResources('AWS::ElasticLoadBalancingV2::TargetGroup');
-      const paths = Object.values(groups).map((g) => g.Properties.HealthCheckPath);
-      expect(paths).toEqual([
-        '/api/v1/health',
-        '/api/v1/health',
-      ]);
-    });
-
-    it('SG: RDS reachable only from service', () => {
-      const template = synthDevTemplate();
-      const ingress = template.findResources('AWS::EC2::SecurityGroupIngress', {
-        Properties: { FromPort: 5432, ToPort: 5432 },
-      });
-      const rules = Object.values(ingress);
-      expect(rules).toHaveLength(1);
-      expect(JSON.stringify(rules[0].Properties)).not.toContain('0.0.0.0/0');
-      expect(rules[0].Properties.SourceSecurityGroupId).toBeDefined();
-    });
-
-    it('log retention 400', () => {
-      const template = synthDevTemplate();
-      template.hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 400 });
-    });
-
-    it('ECS Exec logging configured', () => {
-      const template = synthDevTemplate();
-      template.hasResourceProperties('AWS::ECS::Cluster', {
-        Configuration: {
-          ExecuteCommandConfiguration: Match.objectLike({ Logging: 'OVERRIDE' }),
-        },
-      });
-    });
-
-    it('DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image', () => {
-      const entrypoint = readFileSync(
-        path.join(repoRoot, 'apps/api/docker-entrypoint.sh'),
-        'utf8',
-      );
-      expect(entrypoint).toContain('sslmode=verify-full');
-      const dockerfile = readFileSync(path.join(repoRoot, 'apps/api/Dockerfile'), 'utf8');
-      expect(dockerfile).toContain('rds-global-bundle.pem');
-      expect(dockerfile).toContain('NODE_EXTRA_CA_CERTS');
-      expect(existsSync(path.join(repoRoot, 'infra/certs/rds-global-bundle.pem'))).toBe(true);
-    });
-  });
-  ```
-
-- [ ] **Step 2: Run it to confirm it fails**
-
-  PowerShell:
-  ```
-  pnpm --filter=@sanchay/infra test
-  ```
-  Git Bash:
-  ```
-  pnpm --filter=@sanchay/infra test
-  ```
-  Expected failure: `Cannot find module '../lib/config.js'` (and `'../lib/sanchay-mvp-stack.js'`) — neither file exists yet. `pnpm install` also fails first with `ERR_PNPM_NO_MATCHING_VERSION` for `aws-cdk-lib`/`constructs`/`aws-cdk` until the catalog fragment in Step 3 is applied; run `pnpm install` before this command.
-
-- [ ] **Step 3: Minimal implementation**
-
-  **3.1 — `pnpm-workspace.yaml` key-level fragment.** Add `infra` to `packages:` and three exact-pinned entries to `catalog:` (A1 rule — do not touch any existing line):
+  **1.1 `pnpm-workspace.yaml` key-level fragment.** Add `infra` to `packages:` and three exact-pinned entries to `catalog:` (A1 rule; do not touch any existing line). The CDK CLI (`aws-cdk`) is versioned separately from `aws-cdk-lib` since 2.1000.0 (2025-02-18), so there is no `aws-cdk@2.216.0`; 2.1143.0 was the newest CLI that passed the 7-day `minimumReleaseAge` on 2026-10-01. Per "New dependencies" above, re-check with `pnpm view aws-cdk-lib version` (and the other two) at execution time; this code was also verified against aws-cdk-lib 2.270.0 and constructs 10.8.1.
   ```yaml
   packages:
     - apps/*
@@ -10296,29 +10363,19 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   ```yaml
   catalog:
     # ...existing entries unchanged...
-    aws-cdk: 2.216.0
+    aws-cdk: 2.1143.0
     aws-cdk-lib: 2.216.0
     constructs: 10.4.2
   ```
 
-  **3.2 — `docs/adr/0001-versions.md` append-only fragment** (A1 rule — new dependency rows, exact versions, no expiry needed since these are not release-age or ignored-build exceptions):
+  **1.2 `docs/adr/0001-versions.md` append-only fragment** (A1 rule; new dependency rows, exact versions, no expiry because these are not release-age or ignored-build exceptions):
   ```markdown
   | aws-cdk-lib | 2.216.0 | Plan 02 Task E25 |
   | constructs | 10.4.2 | Plan 02 Task E25 |
-  | aws-cdk (CLI) | 2.216.0 | Plan 02 Task E25 |
+  | aws-cdk (CLI, versioned 2.1xxx since 2025-02) | 2.1143.0 | Plan 02 Task E25 |
   ```
 
-  **3.3 — `docs/adr/README.md`**, update only the ADR-0014 row's Status and Written-by cells:
-  ```markdown
-  | 0014 | Minimal AWS topology: single ECS service, ALB only | Accepted | Plan 02 Task E25 |
-  ```
-
-  **3.4 — `apps/web/next.config.ts`**, one-key addition (read the existing file first; add only this key to the existing exported config object):
-  ```typescript
-  output: 'standalone',
-  ```
-
-  **3.5 — `infra/package.json`:**
+  **1.3 `infra/package.json`:**
   ```json
   {
     "name": "@sanchay/infra",
@@ -10347,29 +10404,21 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   }
   ```
 
-  **3.6 — `infra/tsconfig.json`:**
+  **1.4 `infra/tsconfig.json`.** `@sanchay/config` exports `./tsconfig/node-lib.json` (there is no `./tsconfig-node`, TS6053). `exactOptionalPropertyTypes` is off for this package only: aws-cdk-lib's own declarations do not compile under it (for example `Vpc` is not assignable to `IVpc` through `vpnGatewayId`, 16 errors in this stack). `noUncheckedIndexedAccess` and the rest of the shared base stay on.
   ```json
   {
-    "extends": "@sanchay/config/tsconfig-node",
+    "extends": "@sanchay/config/tsconfig/node-lib.json",
     "compilerOptions": {
       "outDir": "dist",
-      "rootDir": "."
+      "rootDir": ".",
+      "types": ["node"],
+      "exactOptionalPropertyTypes": false
     },
     "include": ["bin", "lib", "test"]
   }
   ```
 
-  **3.7 — `infra/cdk.json`** (Node 24's native TS execution, so no `ts-node`/`tsx` catalog addition is needed):
-  ```json
-  {
-    "app": "node --experimental-strip-types bin/sanchay.ts",
-    "context": {
-      "@aws-cdk/core:newStyleStackSynthesis": true
-    }
-  }
-  ```
-
-  **3.8 — `infra/vitest.config.ts`:**
+  **1.5 `infra/vitest.config.ts`:**
   ```typescript
   import { defineConfig } from 'vitest/config';
 
@@ -10381,9 +10430,430 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   });
   ```
 
-  **3.9 — `infra/lib/config.ts`:**
+  **1.6 `.gitignore` (shared; append one line).** `cdk synth` writes `infra/cdk.out/`; biome reads `.gitignore`, so this also keeps `pnpm lint` off the generated templates.
+  ```
+  cdk.out/
+  ```
+
+  **1.7 `infra/test/sanchay-mvp-stack.test.ts`:**
+  ```typescript
+  import { existsSync, readFileSync } from 'node:fs';
+  import path from 'node:path';
+  import { fileURLToPath } from 'node:url';
+  import { App } from 'aws-cdk-lib';
+  import { Match, Template } from 'aws-cdk-lib/assertions';
+  import { describe, expect, it } from 'vitest';
+  import {
+    assertDeployInputs,
+    loadStackConfig,
+    type SanchayStackConfig,
+    StackConfigError,
+  } from '../lib/config.js';
+  import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(here, '../..');
+
+  /** Fake deploy inputs: E21's test ARN and B2's test retriever hash. */
+  const DEPLOY_INPUTS = {
+    SANCHAY_PLATFORM_ARN: 'ARN-000000',
+    SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
+  };
+
+  function synth(config: SanchayStackConfig, context: Record<string, string> = {}): Template {
+    const app = new App({ context });
+    const stack = new SanchayMvpStack(app, `SanchayMvpStack-${config.envName}`, {
+      env: { account: '111111111111', region: 'ap-south-1' },
+      config,
+    });
+    return Template.fromStack(stack);
+  }
+
+  function synthDevTemplate(context: Record<string, string> = {}): Template {
+    return synth(loadStackConfig('dev', DEPLOY_INPUTS), context);
+  }
+
+  interface ContainerDef {
+    Name: string;
+    Environment?: Array<{ Name: string; Value: unknown }>;
+    Secrets?: Array<{ Name: string }>;
+  }
+
+  /** Every container definition in the template, by name (web, api, worker, migrate). */
+  function containersOf(template: Template): Map<string, ContainerDef> {
+    const out = new Map<string, ContainerDef>();
+    for (const def of Object.values(template.findResources('AWS::ECS::TaskDefinition'))) {
+      for (const c of def.Properties.ContainerDefinitions as ContainerDef[]) out.set(c.Name, c);
+    }
+    return out;
+  }
+
+  function envOf(c: ContainerDef | undefined): Record<string, unknown> {
+    return Object.fromEntries((c?.Environment ?? []).map((e) => [e.Name, e.Value]));
+  }
+
+  function secretNamesOf(c: ContainerDef | undefined): string[] {
+    return (c?.Secrets ?? []).map((s) => s.Name).sort();
+  }
+
+  function refusal(fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      expect(error).toBeInstanceOf(StackConfigError);
+      return (error as Error).message;
+    }
+    throw new Error('expected a StackConfigError');
+  }
+
+  describe('SanchayMvpStack-dev (E25)', () => {
+    it('FP secret only in worker container', () => {
+      const containers = containersOf(synthDevTemplate());
+      const worker = containers.get('worker');
+      const api = containers.get('api');
+      const web = containers.get('web');
+      expect(secretNamesOf(worker)).toContain('SANCHAY_FP_CREDENTIALS_JSON');
+      expect(secretNamesOf(api)).not.toContain('SANCHAY_FP_CREDENTIALS_JSON');
+      expect(secretNamesOf(web)).not.toContain('SANCHAY_FP_CREDENTIALS_JSON');
+      // R-19: SANCHAY_KEYRING_JSON goes into api and worker only (migrate: the boot guard's keyring check).
+      expect(secretNamesOf(worker)).toContain('SANCHAY_KEYRING_JSON');
+      expect(secretNamesOf(api)).toContain('SANCHAY_KEYRING_JSON');
+      expect(secretNamesOf(web)).not.toContain('SANCHAY_KEYRING_JSON');
+    });
+
+    it('RDS StorageEncrypted and force_ssl', () => {
+      const template = synthDevTemplate();
+      template.hasResourceProperties('AWS::RDS::DBInstance', {
+        StorageEncrypted: true,
+        Engine: 'postgres',
+        EngineVersion: '18.6',
+      });
+      template.hasResourceProperties('AWS::RDS::DBParameterGroup', {
+        Parameters: Match.objectLike({ 'rds.force_ssl': '1' }),
+      });
+    });
+
+    it('ALB TLS policy', () => {
+      synthDevTemplate().hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Protocol: 'HTTPS',
+        SslPolicy: 'ELBSecurityPolicy-TLS13-1-2-2021-06',
+      });
+    });
+
+    it('listener rule app host + /api/v1/* → api target group', () => {
+      synthDevTemplate().hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
+        Conditions: Match.arrayWith([
+          Match.objectLike({
+            Field: 'host-header',
+            HostHeaderConfig: { Values: ['app.dev.sanchay.in'] },
+          }),
+          Match.objectLike({
+            Field: 'path-pattern',
+            PathPatternConfig: { Values: ['/api/v1/*'] },
+          }),
+        ]),
+      });
+    });
+
+    it('health check path /api/v1/health on the api port, for both target groups (R-12)', () => {
+      const groups = Object.values(
+        synthDevTemplate().findResources('AWS::ElasticLoadBalancingV2::TargetGroup'),
+      );
+      expect(groups.map((g) => g.Properties.Port).sort()).toEqual([3000, 3001]);
+      for (const group of groups) {
+        expect(group.Properties.HealthCheckPath).toBe('/api/v1/health');
+        expect(group.Properties.HealthCheckPort).toBe('3000');
+      }
+    });
+
+    it('SG: RDS reachable only from service', () => {
+      const ingress = synthDevTemplate().findResources('AWS::EC2::SecurityGroupIngress', {
+        Properties: { FromPort: 5432, ToPort: 5432 },
+      });
+      const rules = Object.values(ingress);
+      expect(rules).toHaveLength(1);
+      const [rule] = rules;
+      expect(JSON.stringify(rule?.Properties)).not.toContain('0.0.0.0/0');
+      expect(rule?.Properties.SourceSecurityGroupId).toBeDefined();
+    });
+
+    it('log retention 400', () => {
+      synthDevTemplate().hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 400 });
+    });
+
+    it('ECS Exec logging configured', () => {
+      synthDevTemplate().hasResourceProperties('AWS::ECS::Cluster', {
+        Configuration: {
+          ExecuteCommandConfiguration: Match.objectLike({ Logging: 'OVERRIDE' }),
+        },
+      });
+    });
+
+    it('DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image', () => {
+      const entrypoint = readFileSync(path.join(repoRoot, 'apps/api/docker-entrypoint.sh'), 'utf8');
+      expect(entrypoint).toContain('sslmode=verify-full');
+      const dockerfile = readFileSync(path.join(repoRoot, 'apps/api/Dockerfile'), 'utf8');
+      expect(dockerfile).toContain('rds-global-bundle.pem');
+      expect(dockerfile).toContain('NODE_EXTRA_CA_CERTS');
+      expect(existsSync(path.join(repoRoot, 'infra/certs/rds-global-bundle.pem'))).toBe(true);
+    });
+
+    it('RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)', () => {
+      const template = synthDevTemplate();
+      template.hasResourceProperties('AWS::SecretsManager::Secret', {
+        Name: 'sanchay/dev/db-master',
+        GenerateSecretString: Match.objectLike({
+          SecretStringTemplate: '{"username":"sanchay_master"}',
+        }),
+      });
+      expect(JSON.stringify(template.toJSON())).not.toContain('"username":"sanchay_app"');
+      expect(envOf(containersOf(template).get('migrate')).SANCHAY_DB_USER).toBe('sanchay_master');
+    });
+
+    it('api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)', () => {
+      const containers = containersOf(synthDevTemplate());
+      const api = containers.get('api');
+      const worker = containers.get('worker');
+      const migrate = containers.get('migrate');
+      for (const [container, role] of [
+        [api, 'api'],
+        [worker, 'worker'],
+        [migrate, 'migrate'],
+      ] as const) {
+        expect(envOf(container)).toMatchObject({
+          SANCHAY_APP_ENV: 'dev',
+          SANCHAY_APP_ROLE: role,
+          SANCHAY_APP_ORIGIN: 'https://app.dev.sanchay.in',
+          SANCHAY_API_ORIGIN: 'https://api.dev.sanchay.in',
+          SANCHAY_CLIENT_IP_SOURCE: 'alb',
+          SANCHAY_KEY_SERVICE: 'secrets',
+          SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+          SANCHAY_PILOT_INVITE_ONLY: 'true',
+          SANCHAY_PLATFORM_ARN: 'ARN-000000',
+        });
+      }
+      for (const container of [api, worker]) {
+        expect(envOf(container)).toMatchObject({
+          SANCHAY_PROVIDER_MODE_SMS: 'msg91',
+          SANCHAY_PROVIDER_MODE_EMAIL: 'ses',
+          SANCHAY_SES_FROM: 'noreply@sanchay.in',
+        });
+      }
+      expect(envOf(migrate)).not.toHaveProperty('SANCHAY_PROVIDER_MODE_SMS');
+      expect(envOf(api).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
+      expect(envOf(worker)).not.toHaveProperty('SANCHAY_SMS_RETRIEVER_HASH');
+      expect(envOf(worker).SANCHAY_FP_BASE_URL).toBe('https://s.finprim.com');
+      expect(envOf(api)).not.toHaveProperty('SANCHAY_FP_BASE_URL');
+      expect(secretNamesOf(api)).toEqual([
+        'SANCHAY_DB_PASSWORD',
+        'SANCHAY_FP_WEBHOOK_SECRET',
+        'SANCHAY_KEYRING_JSON',
+        'SANCHAY_MSG91_CREDENTIALS_JSON',
+      ]);
+      expect(secretNamesOf(worker)).toEqual([
+        'SANCHAY_DB_PASSWORD',
+        'SANCHAY_FP_CREDENTIALS_JSON',
+        'SANCHAY_KEYRING_JSON',
+        'SANCHAY_MSG91_CREDENTIALS_JSON',
+      ]);
+      expect(secretNamesOf(migrate)).toEqual(['SANCHAY_DB_PASSWORD', 'SANCHAY_KEYRING_JSON']);
+    });
+
+    it('web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)', () => {
+      const web = containersOf(synthDevTemplate()).get('web');
+      expect(envOf(web)).toMatchObject({
+        PORT: '3001',
+        HOSTNAME: '0.0.0.0',
+        SANCHAY_WWW_ORIGIN: 'https://www.dev.sanchay.in',
+        SANCHAY_APP_ORIGIN: 'https://app.dev.sanchay.in',
+      });
+      expect(secretNamesOf(web)).toEqual([]);
+    });
+
+    it('one service named sanchay-app; -c firstDeploy=true creates it with no tasks', () => {
+      synthDevTemplate().hasResourceProperties('AWS::ECS::Service', {
+        ServiceName: 'sanchay-app',
+        DesiredCount: 1,
+      });
+      synthDevTemplate({ firstDeploy: 'true' }).hasResourceProperties('AWS::ECS::Service', {
+        ServiceName: 'sanchay-app',
+        DesiredCount: 0,
+      });
+    });
+
+    it('the tasks may send SES email only from SANCHAY_SES_FROM (D6)', () => {
+      synthDevTemplate().hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'SesSendFromSanchayDomain',
+              Action: ['ses:SendEmail', 'ses:SendRawEmail'],
+              Condition: { StringEquals: { 'ses:FromAddress': 'noreply@sanchay.in' } },
+            }),
+          ]),
+        },
+      });
+    });
+
+    it('RDS instance class follows config.dbInstanceSize (spec §2.4: db.t4g.medium)', () => {
+      synthDevTemplate().hasResourceProperties('AWS::RDS::DBInstance', {
+        DBInstanceClass: 'db.t4g.micro',
+      });
+      synth({
+        ...loadStackConfig('dev', DEPLOY_INPUTS),
+        dbInstanceSize: 'MEDIUM',
+      }).hasResourceProperties('AWS::RDS::DBInstance', { DBInstanceClass: 'db.t4g.medium' });
+    });
+
+    it('the GitHub deploy role trusts only SANCHAY_GITHUB_REPOSITORY, and exists only with it', () => {
+      const deployRole = { Properties: { RoleName: 'sanchay-dev-github-deploy' } };
+      expect(Object.keys(synthDevTemplate().findResources('AWS::IAM::Role', deployRole))).toEqual([]);
+      const template = synth(
+        loadStackConfig('dev', {
+          ...DEPLOY_INPUTS,
+          SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay',
+        }),
+      );
+      template.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'sanchay-dev-github-deploy',
+        AssumeRolePolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Condition: {
+                StringEquals: { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' },
+                StringLike: {
+                  'token.actions.githubusercontent.com:sub': 'repo:example-org/sanchay:*',
+                },
+              },
+            }),
+          ]),
+        }),
+      });
+      template.hasOutput('GithubDeployRoleArn', {});
+    });
+  });
+
+  describe('loadStackConfig (E25)', () => {
+    it('refuses to synthesise without the two deploy inputs, naming each', () => {
+      const message = refusal(() => loadStackConfig('dev', {}));
+      expect(message).toContain('SANCHAY_PLATFORM_ARN is required');
+      expect(message).toContain('SANCHAY_SMS_RETRIEVER_HASH is required');
+    });
+
+    it('refuses a malformed platform ARN or retriever hash', () => {
+      expect(
+        refusal(() => loadStackConfig('dev', { ...DEPLOY_INPUTS, SANCHAY_PLATFORM_ARN: '12345' })),
+      ).toContain('ARN-<digits>');
+      expect(
+        refusal(() =>
+          loadStackConfig('dev', { ...DEPLOY_INPUTS, SANCHAY_SMS_RETRIEVER_HASH: 'short' }),
+        ),
+      ).toContain('11 characters');
+    });
+
+    it('reads SANCHAY_GITHUB_REPOSITORY, refuses a malformed one, and a real deploy needs it', () => {
+      expect(loadStackConfig('dev', DEPLOY_INPUTS).githubRepo).toBeUndefined();
+      const withRepo = { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay' };
+      expect(loadStackConfig('dev', withRepo).githubRepo).toBe('example-org/sanchay');
+      expect(
+        refusal(() =>
+          loadStackConfig('dev', { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: 'no-slash' }),
+        ),
+      ).toContain('<owner>/<repo>');
+      // bin/sanchay.ts: a synth or deploy without the repository is refused before CloudFormation.
+      expect(refusal(() => assertDeployInputs(loadStackConfig('dev', DEPLOY_INPUTS)))).toContain(
+        'SANCHAY_GITHUB_REPOSITORY is required',
+      );
+      expect(() => assertDeployInputs(loadStackConfig('dev', withRepo))).not.toThrow();
+    });
+  });
+  ```
+
+  **1.8 `apps/api/src/config/env.test.ts`**, two cases inside `describe('parseEnv', ...)`, directly after the `requires SANCHAY_SMS_RETRIEVER_HASH outside local/test (invariant 7, R-10)` case. They set `SANCHAY_PROVIDER_MODE_FP` themselves, so they hold whatever FP mode `devSecrets` carries:
+  ```typescript
+    it('binds the retriever hash (invariant 7) to the api role only (R-19 owning containers, E25)', () => {
+      const noHash = {
+        ...omit(devSecrets, 'SANCHAY_SMS_RETRIEVER_HASH'),
+        SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+      };
+      expect(errorMessage(() => parseEnv({ ...noHash, SANCHAY_APP_ROLE: 'api' }))).toMatch(
+        /SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/,
+      );
+      for (const role of ['worker', 'migrate']) {
+        expect(parseEnv({ ...noHash, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
+      }
+    });
+
+    it('refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1, E25)', () => {
+      const prod = { ...devSecrets, SANCHAY_APP_ENV: 'prod', SANCHAY_PROVIDER_MODE_FP: 'production' };
+      for (const role of ['api', 'worker']) {
+        expect(errorMessage(() => parseEnv({ ...prod, SANCHAY_APP_ROLE: role }))).toMatch(
+          /fake SMS\/email providers \(capture, mailpit\) are refused in staging\/prod/,
+        );
+      }
+      const migrate = parseEnv({
+        ...omit(prod, 'SANCHAY_SMS_RETRIEVER_HASH'),
+        SANCHAY_APP_ROLE: 'migrate',
+      });
+      expect(migrate.SANCHAY_PROVIDER_MODE_SMS).toBe('capture');
+    });
+  ```
+
+  Then, one command:
+  ```
+  pnpm install
+  ```
+
+- [ ] **Step 2: Run them to confirm they fail**
+
+  PowerShell and Git Bash (the same commands; BRIEF D8: a test filter is passed without `--`):
+  ```
+  pnpm --filter=@sanchay/infra test
+  pnpm --filter=@sanchay/api test src/config/env.test.ts
+  ```
+  Expected: the infra file fails to load with `Cannot find module '../lib/config.js'` (and `'../lib/sanchay-mvp-stack.js'`); neither file exists yet. `env.test.ts`: 2 failed, the rest pass. The worker and migrate cases are refused with `SANCHAY_SMS_RETRIEVER_HASH is required outside local/test`, and the prod migrate case with `fake SMS/email providers (capture, mailpit) are refused in staging/prod`.
+
+- [ ] **Step 3: Minimal implementation**
+
+  **3.1 `apps/api/src/config/env.ts` (B2's `assertBootInvariants`), key-level.** R-19 gives the retriever hash to `api` only and the SMS/email credentials to `api` and `worker`; the guard now checks exactly those roles, so the worker and the migrate task boot without values R-19 denies them. Directly after the `stagingOrProd` line:
+  ```typescript
+    // R-19 owning containers (E25): api and worker send SMS and email; only api sends OTPs (the
+    // retriever hash) and, from E1 on, receives the FP webhook. migrate sends nothing.
+    const role = env.SANCHAY_APP_ROLE;
+    const sends = role === 'api' || role === 'worker';
+  ```
+  Invariant 1's condition gains `sends &&` after `stagingOrProd &&`; invariant 7's condition becomes:
+  ```typescript
+    if (!localOrTest && role === 'api' && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
+  ```
+  Messages are unchanged, so every existing case (default role `api`) still passes.
+
+  **3.2 `docs/adr/README.md`**, update only the ADR-0014 row's Status and Written-by cells:
+  ```markdown
+  | 0014 | Minimal AWS topology: single ECS service, ALB only | Accepted | Plan 02 Task E25 |
+  ```
+
+  **3.3 `apps/web/next.config.ts`**, one-key addition (read the existing file first; add only this key to the exported config object):
+  ```typescript
+  output: 'standalone',
+  ```
+
+  **3.4 `infra/cdk.json`.** Node's type stripping does not map `../lib/config.js` to `config.ts` (`node --experimental-strip-types bin/sanchay.ts` fails with `ERR_MODULE_NOT_FOUND` on Node 24.21), so the app is compiled first. `cdk` runs through `pnpm --filter=@sanchay/infra exec`, which puts `tsc` on the PATH; the CLI runs this line through a shell, so it works from PowerShell 5.1 and Git Bash alike (verified).
+  ```json
+  {
+    "app": "tsc -p tsconfig.json && node dist/bin/sanchay.js"
+  }
+  ```
+
+  **3.5 `infra/lib/config.ts`:**
   ```typescript
   export type SanchayEnvName = 'dev' | 'prod';
+
+  /**
+   * Values that differ per deploy and are never committed, read from the environment of the `cdk`
+   * process (`process.env` by default; deploy.yml passes them from the GitHub environment).
+   */
+  export type DeployInputSource = Readonly<Record<string, string | undefined>>;
 
   export interface SanchayStackConfig {
     envName: SanchayEnvName;
@@ -10394,16 +10864,35 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     deletionProtection: boolean;
     backupRetentionDays: number;
     desiredCount: number;
-    /** 'owner/repo' restricting which GitHub Actions runs may assume the deploy role. */
-    githubRepo: string;
+    /**
+     * 'owner/repo' whose GitHub Actions runs may assume the deploy role: the deploy input
+     * SANCHAY_GITHUB_REPOSITORY (deploy.yml passes `github.repository`, the exact case IAM compares).
+     * Never a constant: the owner is the company organisation, whose name R-19's brand lint keeps out
+     * of code. Without it the stack builds no deploy role (the tests); bin/sanchay.ts requires it.
+     */
+    githubRepo: string | undefined;
     /**
      * The GitHub OIDC provider is one resource per AWS account. Only the first stack deployed
      * into an account creates it; every later stack (prod, in F1) imports it instead.
      */
     createGithubOidcProvider: boolean;
+    /** Spec §2.4 sizes the RDS instance at db.t4g.medium; the dev stack stays on micro. */
+    dbInstanceSize: 'MICRO' | 'MEDIUM';
+    /** D3 boot invariants 8/9: fake is refused outside local/test, production only in prod. */
+    fpProviderMode: 'sandbox' | 'production';
+    /** docs/research/fp-api.md §0 (worker only, R-19). */
+    fpBaseUrl: string;
+    /** D6 SANCHAY_SES_FROM (api, worker). */
+    sesFrom: string;
+    /** E21 SANCHAY_PLATFORM_ARN (every API-image container); deploy input. */
+    platformArn: string;
+    /** B2 invariant 7 / R-10 SANCHAY_SMS_RETRIEVER_HASH (api only, R-19); deploy input. */
+    smsRetrieverHash: string;
   }
 
-  const DEV_CONFIG: SanchayStackConfig = {
+  type StaticConfig = Omit<SanchayStackConfig, 'githubRepo' | 'platformArn' | 'smsRetrieverHash'>;
+
+  const DEV_CONFIG: StaticConfig = {
     envName: 'dev',
     envSubdomain: 'dev',
     rootDomain: 'sanchay.in',
@@ -10411,12 +10900,15 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     deletionProtection: false,
     backupRetentionDays: 1,
     desiredCount: 1,
-    githubRepo: 'Vendtta01/sanchay',
     createGithubOidcProvider: true,
+    dbInstanceSize: 'MICRO',
+    fpProviderMode: 'sandbox',
+    fpBaseUrl: 'https://s.finprim.com',
+    sesFrom: 'noreply@sanchay.in',
   };
 
-  /** F1 (Plan 04) passes its own prod values; this task only ever instantiates 'dev'. */
-  const PROD_CONFIG: SanchayStackConfig = {
+  /** F1 (Plan 04) deploys prod from these values; this task only ever instantiates 'dev'. */
+  const PROD_CONFIG: StaticConfig = {
     envName: 'prod',
     envSubdomain: '',
     rootDomain: 'sanchay.in',
@@ -10424,26 +10916,82 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     deletionProtection: true,
     backupRetentionDays: 14,
     desiredCount: 2,
-    githubRepo: 'Vendtta01/sanchay',
     createGithubOidcProvider: false,
+    dbInstanceSize: 'MEDIUM',
+    fpProviderMode: 'production',
+    fpBaseUrl: 'https://api.fintechprimitives.com',
+    sesFrom: 'noreply@sanchay.in',
   };
 
-  export function loadStackConfig(envName: SanchayEnvName): SanchayStackConfig {
-    return envName === 'dev' ? DEV_CONFIG : PROD_CONFIG;
+  /** Same patterns as E21's EnvSchema.SANCHAY_PLATFORM_ARN and B2's SANCHAY_SMS_RETRIEVER_HASH. */
+  const PLATFORM_ARN = /^ARN-\d+$/;
+  const RETRIEVER_HASH = /^[A-Za-z0-9+/]{11}$/;
+  /** GitHub's <owner>/<repo>, as `github.repository` prints it. */
+  const GITHUB_REPOSITORY = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/;
+
+  export class StackConfigError extends Error {
+    override name = 'StackConfigError';
+  }
+
+  function blankToUndefined(raw: string | undefined): string | undefined {
+    const value = raw?.trim();
+    return value === undefined || value === '' ? undefined : value;
+  }
+
+  /**
+   * Refuses to synthesise without the deploy inputs the containers need to boot, so a missing GitHub
+   * environment variable fails `cdk deploy` before CloudFormation is touched instead of leaving a
+   * service whose containers the boot guard refuses.
+   */
+  export function loadStackConfig(
+    envName: SanchayEnvName,
+    source: DeployInputSource = process.env,
+  ): SanchayStackConfig {
+    const base = envName === 'dev' ? DEV_CONFIG : PROD_CONFIG;
+    const githubRepo = blankToUndefined(source.SANCHAY_GITHUB_REPOSITORY);
+    const platformArn = blankToUndefined(source.SANCHAY_PLATFORM_ARN);
+    const smsRetrieverHash = blankToUndefined(source.SANCHAY_SMS_RETRIEVER_HASH);
+    const problems: string[] = [];
+    if (githubRepo !== undefined && !GITHUB_REPOSITORY.test(githubRepo)) {
+      problems.push('SANCHAY_GITHUB_REPOSITORY must be <owner>/<repo>');
+    }
+    if (platformArn === undefined) {
+      problems.push('SANCHAY_PLATFORM_ARN is required (E21: every API-image container)');
+    } else if (!PLATFORM_ARN.test(platformArn)) {
+      problems.push('SANCHAY_PLATFORM_ARN must look like ARN-<digits>');
+    }
+    if (smsRetrieverHash === undefined) {
+      problems.push('SANCHAY_SMS_RETRIEVER_HASH is required (boot invariant 7, R-10)');
+    } else if (!RETRIEVER_HASH.test(smsRetrieverHash)) {
+      problems.push('SANCHAY_SMS_RETRIEVER_HASH must be 11 characters of [A-Za-z0-9+/]');
+    }
+    if (problems.length > 0 || platformArn === undefined || smsRetrieverHash === undefined) {
+      throw new StackConfigError(`Stack config ${envName} refused:\n- ${problems.join('\n- ')}`);
+    }
+    return { ...base, githubRepo, platformArn, smsRetrieverHash };
+  }
+
+  /**
+   * What a real `cdk synth|deploy` needs on top of loadStackConfig (bin/sanchay.ts calls it): the
+   * repository the GitHub deploy role trusts. Tests synthesise without it and get no deploy role.
+   */
+  export function assertDeployInputs(config: SanchayStackConfig): void {
+    const problems: string[] = [];
+    if (config.githubRepo === undefined) {
+      problems.push('SANCHAY_GITHUB_REPOSITORY is required (the GitHub deploy role trusts it)');
+    }
+    if (problems.length > 0) {
+      throw new StackConfigError(
+        `Stack config ${config.envName} refused:\n- ${problems.join('\n- ')}`,
+      );
+    }
   }
   ```
 
-  **3.10 — `infra/lib/sanchay-mvp-stack.ts`:**
+  **3.6 `infra/lib/sanchay-mvp-stack.ts`:**
   ```typescript
-  import {
-    CfnOutput,
-    Duration,
-    RemovalPolicy,
-    Stack,
-    type StackProps,
-  } from 'aws-cdk-lib';
+  import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
   import * as acm from 'aws-cdk-lib/aws-certificatemanager';
-  import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
   import * as ec2 from 'aws-cdk-lib/aws-ec2';
   import * as ecr from 'aws-cdk-lib/aws-ecr';
   import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -10462,14 +11010,28 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     config: SanchayStackConfig;
   }
 
+  /** Spec §2.4: the one ECS service, in every env. deploy.yml forces new deployments by this name. */
+  export const SERVICE_NAME = 'sanchay-app';
+  /** BRIEF D6: the RDS master login (secret sanchay/{env}/db-master). Never the NOLOGIN app role's name. */
+  export const DB_MASTER_USER = 'sanchay_master';
+
   /** R-11: raw AWS policy id, not the CDK enum name, so this stays correct across aws-cdk-lib versions. */
   const ALB_TLS_POLICY = 'ELBSecurityPolicy-TLS13-1-2-2021-06' as elbv2.SslPolicy;
   const ARM64_LINUX: ecs.RuntimePlatform = {
     cpuArchitecture: ecs.CpuArchitecture.ARM64,
     operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
   };
+  const API_PORT = 3000;
+  const WEB_PORT = 3001;
+  /**
+   * R-12 liveness. Both target groups probe /api/v1/health on the api port of the same task: Next.js
+   * serves no /api/v1/* route in AWS (next.config.ts rewrites are local only), so a web-port probe
+   * would 404 and ECS would replace every task. A crashed web process still stops the task, because
+   * every container in it is essential.
+   */
   const HEALTH_CHECK: elbv2.HealthCheck = {
     path: '/api/v1/health',
+    port: String(API_PORT),
     protocol: elbv2.Protocol.HTTP,
     healthyHttpCodes: '200',
   };
@@ -10479,7 +11041,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       super(scope, id, props);
       const { config } = props;
       const envName = config.envName;
-      const domain = config.envSubdomain === '' ? config.rootDomain : `${config.envSubdomain}.${config.rootDomain}`;
+      const domain =
+        config.envSubdomain === ''
+          ? config.rootDomain
+          : `${config.envSubdomain}.${config.rootDomain}`;
+      const wwwOrigin = `https://www.${domain}`;
+      const appOrigin = `https://app.${domain}`;
+      const apiOrigin = `https://api.${domain}`;
 
       // --- Network -----------------------------------------------------------------------
       const natEip = new ec2.CfnEIP(this, 'NatEip', { domain: 'vpc' });
@@ -10520,7 +11088,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
       const fpSecret = new secretsmanager.Secret(this, 'FpSecret', {
         secretName: `sanchay/${envName}/fp`,
-        description: 'SANCHAY_FP_CREDENTIALS_JSON (owning container: worker only). Populated out-of-band.',
+        description:
+          'SANCHAY_FP_CREDENTIALS_JSON (owning container: worker only). Populated out-of-band.',
       });
       const fpWebhookSecret = new secretsmanager.Secret(this, 'FpWebhookSecret', {
         secretName: `sanchay/${envName}/fp-webhook`,
@@ -10528,7 +11097,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
       const msg91Secret = new secretsmanager.Secret(this, 'Msg91Secret', {
         secretName: `sanchay/${envName}/msg91`,
-        description: 'SANCHAY_MSG91_CREDENTIALS_JSON (owning containers: api, worker). Populated out-of-band.',
+        description:
+          'SANCHAY_MSG91_CREDENTIALS_JSON (owning containers: api, worker). Populated out-of-band.',
       });
 
       // --- RDS PostgreSQL (R-15: sslmode=verify-full at the app; force_ssl=1 here) ---------
@@ -10537,13 +11107,21 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         description: 'RDS ingress only from the ECS service (R-11 SG isolation)',
         allowAllOutbound: false,
       });
+      // B6's Testcontainers image is postgres 18.6. aws-cdk-lib 2.216.0 has no VER_18_6 constant
+      // (its newest PostgreSQL constant is VER_17_6), so the version is named explicitly.
+      const pgEngine = rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.of('18.6', '18'),
+      });
       const dbParamGroup = new rds.ParameterGroup(this, 'DbParamGroup', {
-        engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_18_6 }),
+        engine: pgEngine,
         parameters: { 'rds.force_ssl': '1' },
       });
       const dbInstance = new rds.DatabaseInstance(this, 'Database', {
-        engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_18_6 }),
-        instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE4_GRAVITON, ec2.InstanceSize.MICRO),
+        engine: pgEngine,
+        instanceType: ec2.InstanceType.of(
+          ec2.InstanceClass.BURSTABLE4_GRAVITON,
+          config.dbInstanceSize === 'MEDIUM' ? ec2.InstanceSize.MEDIUM : ec2.InstanceSize.MICRO,
+        ),
         vpc,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
         multiAz: config.multiAz,
@@ -10551,14 +11129,20 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         storageEncrypted: true,
         parameterGroup: dbParamGroup,
         securityGroups: [dbSecurityGroup],
-        credentials: rds.Credentials.fromGeneratedSecret('sanchay_app', {
-          secretName: `sanchay/${envName}/db-credentials`,
+        // BRIEF D6: the master is not `sanchay_app`, the NOLOGIN role 0000_bootstrap creates and
+        // 0003_grants scopes; with that name the app would log in as rds_superuser.
+        credentials: rds.Credentials.fromGeneratedSecret(DB_MASTER_USER, {
+          secretName: `sanchay/${envName}/db-master`,
         }),
         databaseName: 'sanchay',
         deletionProtection: config.deletionProtection,
         backupRetention: Duration.days(config.backupRetentionDays),
         removalPolicy: config.deletionProtection ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
       });
+      const dbMasterSecret = dbInstance.secret;
+      if (dbMasterSecret === undefined) {
+        throw new Error('Credentials.fromGeneratedSecret always attaches a secret');
+      }
 
       // --- Logs, cluster, ECS Exec (R-16) ---------------------------------------------------
       const appLogGroup = new logs.LogGroup(this, 'AppLogGroup', {
@@ -10574,7 +11158,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       const cluster = new ecs.Cluster(this, 'Cluster', {
         vpc,
         clusterName: `sanchay-${envName}`,
-        containerInsights: true,
+        containerInsightsV2: ecs.ContainerInsights.ENABLED,
         executeCommandConfiguration: {
           logging: ecs.ExecuteCommandLogging.OVERRIDE,
           logConfiguration: { cloudWatchLogGroup: execLogGroup, cloudWatchEncryptionEnabled: true },
@@ -10586,6 +11170,16 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       });
       documentsBucket.grantReadWrite(taskRole);
+      // D6 SesEmailSender (SES v2 SendEmail): only from SANCHAY_SES_FROM. The resource is every identity
+      // because, while the account is in the SES sandbox, recipients are identities that IAM checks too.
+      taskRole.addToPolicy(
+        new iam.PolicyStatement({
+          sid: 'SesSendFromSanchayDomain',
+          actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          conditions: { StringEquals: { 'ses:FromAddress': config.sesFrom } },
+        }),
+      );
 
       const taskDef = new ecs.FargateTaskDefinition(this, 'AppTaskDef', {
         cpu: 1024,
@@ -10595,40 +11189,71 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
       const logging = ecs.LogDrivers.awsLogs({ streamPrefix: envName, logGroup: appLogGroup });
 
-      const dbHostEnv = {
+      // BRIEF D6: the migrate task logs in as the RDS master. F1 moves api and worker to the LOGIN role
+      // sanchay_app_login (secret sanchay/{env}/db-app); until then they share the master login.
+      const migrateDbLogin = { user: DB_MASTER_USER, secret: dbMasterSecret };
+      const appDbLogin = { user: DB_MASTER_USER, secret: dbMasterSecret };
+      const dbEnv = (user: string): Record<string, string> => ({
         SANCHAY_DB_HOST: dbInstance.instanceEndpoint.hostname,
         SANCHAY_DB_PORT: String(dbInstance.instanceEndpoint.port),
         SANCHAY_DB_NAME: 'sanchay',
-        SANCHAY_DB_USER: 'sanchay_app',
+        SANCHAY_DB_USER: user,
+      });
+      const dbPassword = (secret: secretsmanager.ISecret) => ({
+        SANCHAY_DB_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'password'),
+      });
+
+      // Every key parseEnv and assertBootInvariants demand of every API-image role (Plans 01-03),
+      // plain values only. SANCHAY_API_ORIGIN (E2) and SANCHAY_PLATFORM_ARN (E21) are set before
+      // those tasks make them required, so the dev stack keeps booting when they land.
+      const bootEnv: Record<string, string> = {
+        SANCHAY_APP_ENV: envName,
+        SANCHAY_APP_ORIGIN: appOrigin,
+        SANCHAY_API_ORIGIN: apiOrigin,
+        SANCHAY_CLIENT_IP_SOURCE: 'alb',
+        SANCHAY_KEY_SERVICE: 'secrets',
+        SANCHAY_PROVIDER_MODE_FP: config.fpProviderMode,
+        SANCHAY_PILOT_INVITE_ONLY: 'true',
+        SANCHAY_PLATFORM_ARN: config.platformArn,
       };
-      const dbPasswordSecret = { SANCHAY_DB_PASSWORD: ecs.Secret.fromSecretsManager(dbInstance.secret!, 'password') };
+      // api and worker send SMS and email (boot invariants 1, 11, 12); migrate sends nothing.
+      const senderEnv: Record<string, string> = {
+        SANCHAY_PROVIDER_MODE_SMS: 'msg91',
+        SANCHAY_PROVIDER_MODE_EMAIL: 'ses',
+        SANCHAY_SES_FROM: config.sesFrom,
+      };
 
       taskDef.addContainer('web', {
         image: ecs.ContainerImage.fromEcrRepository(webRepo, 'latest'),
         logging,
-        portMappings: [{ containerPort: 3001 }],
+        portMappings: [{ containerPort: WEB_PORT }],
         environment: {
           SANCHAY_APP_ENV: envName,
-          SANCHAY_API_ORIGIN: `https://api.${domain}`,
+          // Next.js standalone listens on PORT (default 3000, the api's port in the shared task network).
+          PORT: String(WEB_PORT),
+          HOSTNAME: '0.0.0.0',
+          // apps/web/src/proxy.ts routes by host (H-1): www -> /site, app -> the app.
+          SANCHAY_WWW_ORIGIN: wwwOrigin,
+          SANCHAY_APP_ORIGIN: appOrigin,
+          SANCHAY_API_ORIGIN: apiOrigin,
         },
       });
 
       taskDef.addContainer('api', {
         image: ecs.ContainerImage.fromEcrRepository(apiRepo, 'latest'),
         logging,
-        portMappings: [{ containerPort: 3000 }],
+        portMappings: [{ containerPort: API_PORT }],
         environment: {
-          SANCHAY_APP_ENV: envName,
+          ...bootEnv,
+          ...senderEnv,
+          ...dbEnv(appDbLogin.user),
           SANCHAY_APP_ROLE: 'api',
           HOST: '0.0.0.0',
-          PORT: '3000',
-          SANCHAY_APP_ORIGIN: `https://app.${domain}`,
-          SANCHAY_CLIENT_IP_SOURCE: 'alb',
-          SANCHAY_KEY_SERVICE: 'secrets',
-          ...dbHostEnv,
+          PORT: String(API_PORT),
+          SANCHAY_SMS_RETRIEVER_HASH: config.smsRetrieverHash,
         },
         secrets: {
-          ...dbPasswordSecret,
+          ...dbPassword(appDbLogin.secret),
           SANCHAY_KEYRING_JSON: ecs.Secret.fromSecretsManager(keyringSecret),
           SANCHAY_FP_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(fpWebhookSecret),
           SANCHAY_MSG91_CREDENTIALS_JSON: ecs.Secret.fromSecretsManager(msg91Secret),
@@ -10639,14 +11264,14 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         image: ecs.ContainerImage.fromEcrRepository(apiRepo, 'latest'),
         logging,
         environment: {
-          SANCHAY_APP_ENV: envName,
+          ...bootEnv,
+          ...senderEnv,
+          ...dbEnv(appDbLogin.user),
           SANCHAY_APP_ROLE: 'worker',
-          SANCHAY_CLIENT_IP_SOURCE: 'alb',
-          SANCHAY_KEY_SERVICE: 'secrets',
-          ...dbHostEnv,
+          SANCHAY_FP_BASE_URL: config.fpBaseUrl,
         },
         secrets: {
-          ...dbPasswordSecret,
+          ...dbPassword(appDbLogin.secret),
           SANCHAY_KEYRING_JSON: ecs.Secret.fromSecretsManager(keyringSecret),
           SANCHAY_FP_CREDENTIALS_JSON: ecs.Secret.fromSecretsManager(fpSecret),
           SANCHAY_MSG91_CREDENTIALS_JSON: ecs.Secret.fromSecretsManager(msg91Secret),
@@ -10663,8 +11288,11 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       migrateTaskDef.addContainer('migrate', {
         image: ecs.ContainerImage.fromEcrRepository(apiRepo, 'latest'),
         logging,
-        environment: { SANCHAY_APP_ENV: envName, SANCHAY_APP_ROLE: 'migrate', ...dbHostEnv },
-        secrets: { ...dbPasswordSecret, SANCHAY_KEYRING_JSON: ecs.Secret.fromSecretsManager(keyringSecret) },
+        environment: { ...bootEnv, ...dbEnv(migrateDbLogin.user), SANCHAY_APP_ROLE: 'migrate' },
+        secrets: {
+          ...dbPassword(migrateDbLogin.secret),
+          SANCHAY_KEYRING_JSON: ecs.Secret.fromSecretsManager(keyringSecret),
+        },
         command: ['node', 'dist/cli/migrate.js'],
       });
 
@@ -10679,10 +11307,18 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         'ECS service only (R-11 SG isolation)',
       );
 
+      // First deploy (ADR-0014): this stack creates the ECR repositories empty and the secrets with
+      // placeholder values, so `-c firstDeploy=true` creates the service with no tasks. Every later
+      // deploy runs config.desiredCount.
+      const firstDeployFlag: unknown = this.node.tryGetContext('firstDeploy');
+      const firstDeploy = firstDeployFlag === true || firstDeployFlag === 'true';
       const service = new ecs.FargateService(this, 'Service', {
+        serviceName: SERVICE_NAME,
         cluster,
         taskDefinition: taskDef,
-        desiredCount: config.desiredCount,
+        desiredCount: firstDeploy ? 0 : config.desiredCount,
+        // Start the new task before stopping the old one (1 task in dev would otherwise drop to 0).
+        minHealthyPercent: 100,
         securityGroups: [serviceSecurityGroup],
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         enableExecuteCommand: true,
@@ -10695,8 +11331,12 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       });
       alb.setAttribute('routing.http.xff_header_processing.mode', 'append');
-      serviceSecurityGroup.addIngressRule(alb.connections.securityGroups[0]!, ec2.Port.tcp(3000));
-      serviceSecurityGroup.addIngressRule(alb.connections.securityGroups[0]!, ec2.Port.tcp(3001));
+      const [albSecurityGroup] = alb.connections.securityGroups;
+      if (albSecurityGroup === undefined) {
+        throw new Error('an ApplicationLoadBalancer always has a security group');
+      }
+      serviceSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.tcp(API_PORT));
+      serviceSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.tcp(WEB_PORT));
 
       const zone = route53.HostedZone.fromLookup(this, 'Zone', { domainName: config.rootDomain });
       const cert = new acm.Certificate(this, 'Cert', {
@@ -10718,22 +11358,28 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
       const apiTargetGroup = new elbv2.ApplicationTargetGroup(this, 'ApiTargetGroup', {
         vpc,
-        port: 3000,
+        port: API_PORT,
         protocol: elbv2.ApplicationProtocol.HTTP,
         targetType: elbv2.TargetType.IP,
         healthCheck: HEALTH_CHECK,
       });
       const webTargetGroup = new elbv2.ApplicationTargetGroup(this, 'WebTargetGroup', {
         vpc,
-        port: 3001,
+        port: WEB_PORT,
         protocol: elbv2.ApplicationProtocol.HTTP,
         targetType: elbv2.TargetType.IP,
         healthCheck: HEALTH_CHECK,
       });
-      apiTargetGroup.addTarget(service.loadBalancerTarget({ containerName: 'api', containerPort: 3000 }));
-      webTargetGroup.addTarget(service.loadBalancerTarget({ containerName: 'web', containerPort: 3001 }));
+      apiTargetGroup.addTarget(
+        service.loadBalancerTarget({ containerName: 'api', containerPort: API_PORT }),
+      );
+      webTargetGroup.addTarget(
+        service.loadBalancerTarget({ containerName: 'web', containerPort: WEB_PORT }),
+      );
 
-      httpsListener.addAction('DefaultToWeb', { action: elbv2.ListenerAction.forward([webTargetGroup]) });
+      httpsListener.addAction('DefaultToWeb', {
+        action: elbv2.ListenerAction.forward([webTargetGroup]),
+      });
       new elbv2.ApplicationListenerRule(this, 'ApiHostAllPaths', {
         listener: httpsListener,
         priority: 10,
@@ -10753,47 +11399,38 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       // --- Route 53 (noindex on dev hosts is applied at the app layer, not here) -----------
       const albTarget = route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(alb));
       for (const sub of ['www', 'app', 'api']) {
-        new route53.ARecord(this, `${sub[0]!.toUpperCase()}${sub.slice(1)}Record`, {
+        new route53.ARecord(this, `${sub.charAt(0).toUpperCase()}${sub.slice(1)}Record`, {
           zone,
           recordName: config.envSubdomain === '' ? sub : `${sub}.${config.envSubdomain}`,
           target: albTarget,
         });
       }
 
-      // --- CloudWatch alarm on NAV age (R-12; metric published starting at F1/catalogue sync) --
-      new cloudwatch.Alarm(this, 'NavAgeAlarm', {
-        metric: new cloudwatch.Metric({
-          namespace: 'Sanchay',
-          metricName: 'nav.newest_age_days',
-          dimensionsMap: { env: envName },
-          statistic: 'Maximum',
-          period: Duration.hours(1),
-        }),
-        threshold: 2,
-        evaluationPeriods: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-        alarmDescription:
-          'NAV age >= 2 days (R-12): the per-scheme AGED grade blocks new purchases and AMOUNT redemptions in the affected schemes only.',
-      });
+      // R-12's NAV-age alarm is not built here: no task before F1 publishes a NAV metric, and an alarm
+      // without data is either always in ALARM or never fires. F1 (Plan 04) adds the metric source
+      // (the worker's ops.gauges.emit job and its log metric filters) and the alarm, in both envs.
 
       // --- GitHub OIDC deploy role -----------------------------------------------------------
-      let deployRole: iam.Role;
-      if (config.createGithubOidcProvider) {
+      // Trusts only the repository named by the deploy input SANCHAY_GITHUB_REPOSITORY (bin/sanchay.ts
+      // refuses a deploy without it); a template synthesised without it (the tests) has no deploy role.
+      const githubRepo = config.githubRepo;
+      if (config.createGithubOidcProvider && githubRepo !== undefined) {
         const oidcProvider = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
           url: 'https://token.actions.githubusercontent.com',
           clientIds: ['sts.amazonaws.com'],
         });
-        deployRole = new iam.Role(this, 'GithubDeployRole', {
+        const deployRole = new iam.Role(this, 'GithubDeployRole', {
           roleName: `sanchay-${envName}-github-deploy`,
           assumedBy: new iam.WebIdentityPrincipal(oidcProvider.openIdConnectProviderArn, {
             StringEquals: { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' },
-            StringLike: { 'token.actions.githubusercontent.com:sub': `repo:${config.githubRepo}:*` },
+            StringLike: { 'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:*` },
           }),
           description: 'Assumed by .github/workflows/deploy.yml via OIDC (no long-lived AWS keys).',
         });
         // Dev sandbox only; F1 (prod) must scope this to the exact actions the prod deploy needs.
-        deployRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'));
+        deployRole.addManagedPolicy(
+          iam.ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'),
+        );
         new CfnOutput(this, 'GithubDeployRoleArn', { value: deployRole.roleArn });
       }
 
@@ -10807,29 +11444,41 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       new CfnOutput(this, 'MigrateTaskDefinitionArn', { value: migrateTaskDef.taskDefinitionArn });
       new CfnOutput(this, 'ApiRepoUri', { value: apiRepo.repositoryUri });
       new CfnOutput(this, 'WebRepoUri', { value: webRepo.repositoryUri });
+      // The network configuration of every one-off run-task (migrate here; F7's ops CLIs later).
+      new CfnOutput(this, 'AppSubnetIds', {
+        value: vpc
+          .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
+          .subnetIds.join(','),
+      });
+      new CfnOutput(this, 'ServiceSecurityGroupId', { value: serviceSecurityGroup.securityGroupId });
     }
   }
   ```
 
-  **3.11 — `infra/bin/sanchay.ts`:**
+  **3.7 `infra/bin/sanchay.ts`:**
   ```typescript
   import { App } from 'aws-cdk-lib';
-  import { loadStackConfig } from '../lib/config.js';
+  import { assertDeployInputs, loadStackConfig } from '../lib/config.js';
   import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
 
   const app = new App();
+  // Reads SANCHAY_PLATFORM_ARN, SANCHAY_SMS_RETRIEVER_HASH and SANCHAY_GITHUB_REPOSITORY from this
+  // process's environment; a real synth or deploy also needs the repository the deploy role trusts.
   const config = loadStackConfig('dev');
+  assertDeployInputs(config);
 
   new SanchayMvpStack(app, 'SanchayMvpStack-dev', {
     env: {
       account: process.env.CDK_DEFAULT_ACCOUNT,
-      region: process.env.CDK_DEFAULT_REGION ?? 'ap-south-1',
+      // Spec §2.4: ap-south-1 only. The cdk CLI overwrites CDK_DEFAULT_REGION with the caller's AWS
+      // default region (us-east-1 when none is configured), so the region is pinned, not read.
+      region: 'ap-south-1',
     },
     config,
   });
   ```
 
-  **3.12 — fetch the RDS CA bundle** (a real, published AWS certificate file, not authored code):
+  **3.8 Fetch the RDS CA bundle** (a published AWS certificate file, not authored code):
   PowerShell:
   ```
   New-Item -ItemType Directory -Force infra/certs | Out-Null
@@ -10841,7 +11490,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   curl -o infra/certs/rds-global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
   ```
 
-  **3.13 — `apps/api/docker-entrypoint.sh`:**
+  **3.9 `apps/api/docker-entrypoint.sh`:**
   ```bash
   #!/bin/sh
   set -eu
@@ -10857,10 +11506,29 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   exec "$@"
   ```
 
-  **3.14 — `apps/api/Dockerfile`:**
+  **3.10 `.dockerignore`** (repo root; the build context of both Dockerfiles). Without it the context carries every `node_modules` and, worse, `COPY apps/api apps/api` would copy a developer's `apps/api/.env` (sandbox credentials) into the image.
+  ```
+  # Build context for apps/api/Dockerfile and apps/web/Dockerfile (E25). Images build from source.
+  .git
+  **/node_modules
+  **/dist
+  **/.next
+  **/.turbo
+  **/.expo
+  **/coverage
+  **/*.tsbuildinfo
+  infra/cdk.out
+  **/.env
+  **/.env.*
+  ```
+
+  **3.11 `apps/api/Dockerfile`.** `nodeLinker: hoisted` puts the dependencies in `/repo/node_modules`, the workspace links in `apps/api/node_modules` point at `/repo/packages`, and `dist/db/migrate.js` reads `../../drizzle`, so the runtime keeps the `/repo` layout (ESM resolution ignores `NODE_PATH`). The workspace packages are built here because their `exports` point at `dist/`. Node is `.node-version`'s 24.21.0, pinned by digest: under `engineStrict` 24.13.1 is refused (`jsdom` 30 in the lockfile needs `^24.15.0`).
   ```dockerfile
   # syntax=docker/dockerfile:1.7
-  FROM node:24.13.1-bookworm-slim AS base
+  # Same Node as .node-version (engineStrict: jsdom 30 in the lockfile needs ^24.15.0); arm64 variant used by the Fargate task.
+  ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+
+  FROM ${NODE_IMAGE} AS base
   RUN corepack enable && corepack prepare pnpm@11.27.0 --activate
   WORKDIR /repo
 
@@ -10873,18 +11541,30 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   FROM deps AS build
   COPY tsconfig.json ./
   COPY apps/api apps/api
-  RUN pnpm --filter=@sanchay/api build
+  # The api and the workspace packages it imports, whose package.json exports point at dist/.
+  RUN pnpm --filter=@sanchay/api... build
 
-  FROM node:24.13.1-bookworm-slim AS runtime
+  FROM base AS prod-deps
+  COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+  COPY packages ./packages
+  COPY apps/api/package.json apps/api/package.json
+  RUN pnpm install --frozen-lockfile --prod --filter=@sanchay/api...
+
+  FROM ${NODE_IMAGE} AS runtime
   RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-  WORKDIR /app
   ENV NODE_ENV=production
-
+  # Keep the monorepo layout: nodeLinker is hoisted (dependencies live in /repo/node_modules), the
+  # workspace links in apps/api/node_modules point at /repo/packages, and dist/db/migrate.js reads
+  # the migrations from ../../drizzle.
+  WORKDIR /repo/apps/api
+  COPY --from=prod-deps /repo/node_modules /repo/node_modules
+  COPY --from=build /repo/packages /repo/packages
+  COPY --from=prod-deps /repo/apps/api/node_modules ./node_modules
+  COPY --from=build /repo/apps/api/package.json ./package.json
   COPY --from=build /repo/apps/api/dist ./dist
-  COPY --from=build /repo/apps/api/node_modules ./node_modules
-  COPY --from=build /repo/node_modules /repo_node_modules
+  COPY --from=build /repo/apps/api/drizzle ./drizzle
   # docs/legal/ is copied here once D8-D10 (catalogue seed, plan-03) creates that directory.
   COPY infra/certs/rds-global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
   COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -10896,10 +11576,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   CMD ["node", "dist/main.js"]
   ```
 
-  **3.15 — `apps/web/Dockerfile`:**
+  **3.12 `apps/web/Dockerfile`:**
   ```dockerfile
   # syntax=docker/dockerfile:1.7
-  FROM node:24.13.1-bookworm-slim AS base
+  # Same Node as .node-version (engineStrict: jsdom 30 in the lockfile needs ^24.15.0); arm64 variant used by the Fargate task.
+  ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+
+  FROM ${NODE_IMAGE} AS base
   RUN corepack enable && corepack prepare pnpm@11.27.0 --activate
   WORKDIR /repo
 
@@ -10912,11 +11595,21 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   FROM deps AS build
   COPY tsconfig.json ./
   COPY apps/web apps/web
-  RUN pnpm --filter=@sanchay/web build
+  # /site is prerendered here (C10/C11): its DSC-02 line needs the ARN and its validity date, and
+  # its links need the hosts. Build arguments are visible to RUN as environment variables.
+  ARG SANCHAY_PLATFORM_ARN
+  ARG SANCHAY_PLATFORM_ARN_VALID_TILL
+  ARG SANCHAY_APP_ORIGIN
+  ARG SANCHAY_WWW_ORIGIN
+  # The web app and the workspace packages it imports (api-client and tokens export dist/).
+  RUN pnpm --filter=@sanchay/web... build
 
-  FROM node:24.13.1-bookworm-slim AS runtime
+  FROM ${NODE_IMAGE} AS runtime
   WORKDIR /app
   ENV NODE_ENV=production
+  # Next.js standalone reads PORT and HOSTNAME; 3000 is the api's port in the shared task network.
+  ENV PORT=3001
+  ENV HOSTNAME=0.0.0.0
   COPY --from=build /repo/apps/web/.next/standalone ./
   COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
   COPY --from=build /repo/apps/web/public ./apps/web/public
@@ -10924,7 +11617,12 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   CMD ["node", "apps/web/server.js"]
   ```
 
-  **3.16 — `.github/workflows/deploy.yml`:**
+  **3.13 `apps/web/public/.well-known/assetlinks.json`** (served by the web container on the app host; F18 replaces it with the Play App Signing payload, and until then the web image needs the `public/` directory it copies):
+  ```json
+  []
+  ```
+
+  **3.14 `.github/workflows/deploy.yml`:**
   ```yaml
   name: deploy
 
@@ -10947,7 +11645,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   jobs:
     deploy:
       runs-on: ubuntu-24.04
-      timeout-minutes: 30
+      timeout-minutes: 60
       environment: ${{ inputs.environment }}
       permissions:
         contents: read
@@ -10981,19 +11679,25 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
               --role-arn "${{ vars.SANCHAY_DEPLOY_ROLE_ARN }}" \
               --role-session-name "gha-deploy-${{ github.run_id }}" \
               --web-identity-token "$ID_TOKEN" \
-              --duration-seconds 1800 \
+              --duration-seconds 3600 \
               --query 'Credentials' --output json)
             echo "AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.AccessKeyId')" >> "$GITHUB_ENV"
             echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.SecretAccessKey')" >> "$GITHUB_ENV"
             echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.SessionToken')" >> "$GITHUB_ENV"
+
+        # The task definition is ARM64 (spec §2.4) and ubuntu-24.04 runners are x86_64, so the image
+        # build runs under QEMU. The binfmt installer is pinned by digest, like the action SHAs above.
+        - name: Register arm64 emulation
+          run: docker run --privileged --rm tonistiigi/binfmt:qemu-v10.0.4@sha256:8f58e6214f4cc9dc83ce8f5acad1ece508eb6b20e696a8c1e9f274481982c541 --install arm64
 
         - name: Build and push images to ECR
           run: |
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
             REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
             aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
-            docker build -f apps/api/Dockerfile -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:latest" .
-            docker build -f apps/web/Dockerfile -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:latest" .
+            docker build --platform linux/arm64 -f apps/api/Dockerfile -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:latest" .
+            if [ "${{ inputs.environment }}" = prod ]; then DOMAIN=sanchay.in; else DOMAIN="${{ inputs.environment }}.sanchay.in"; fi
+            docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN="${{ vars.SANCHAY_PLATFORM_ARN }}" --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL="${{ vars.SANCHAY_PLATFORM_ARN_VALID_TILL }}" --build-arg SANCHAY_APP_ORIGIN="https://app.$DOMAIN" --build-arg SANCHAY_WWW_ORIGIN="https://www.$DOMAIN" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:latest" .
             docker push "$REGISTRY/sanchay-${{ inputs.environment }}-api" --all-tags
             docker push "$REGISTRY/sanchay-${{ inputs.environment }}-web" --all-tags
 
@@ -11002,14 +11706,23 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
           env:
             CDK_DEFAULT_ACCOUNT: ${{ vars.SANCHAY_AWS_ACCOUNT_ID }}
             CDK_DEFAULT_REGION: ap-south-1
+            # Deploy inputs: infra/lib/config.ts refuses to synthesise without them.
+            SANCHAY_PLATFORM_ARN: ${{ vars.SANCHAY_PLATFORM_ARN }}
+            SANCHAY_SMS_RETRIEVER_HASH: ${{ vars.SANCHAY_SMS_RETRIEVER_HASH }}
+            # The repository the deploy role trusts (bin/sanchay.ts refuses a deploy without it), in
+            # the exact owner/repo case that IAM's StringLike compares.
+            SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}
 
         - name: Force a new deployment (pick up the :latest images)
-          run: |
-            aws ecs update-service --cluster "sanchay-${{ inputs.environment }}" --service Service --force-new-deployment
-  ```
-  `vars.SANCHAY_DEPLOY_ROLE_ARN` and `vars.SANCHAY_AWS_ACCOUNT_ID` are GitHub Actions repository/environment variables set once by hand from this stack's `GithubDeployRoleArn` output after the first `cdk deploy` run from a developer machine (documented in ADR-0014, §"first deploy is manual").
+          run: aws ecs update-service --cluster "sanchay-${{ inputs.environment }}" --service sanchay-app --force-new-deployment
 
-  **3.17 — `docs/adr/0014-minimal-aws-topology.md`:**
+        # The circuit breaker rolls a failed deployment back; this step makes the run fail with it.
+        - name: Wait for the service to stabilise
+          run: aws ecs wait services-stable --cluster "sanchay-${{ inputs.environment }}" --services sanchay-app
+  ```
+  `vars.SANCHAY_DEPLOY_ROLE_ARN`, `vars.SANCHAY_AWS_ACCOUNT_ID`, `vars.SANCHAY_PLATFORM_ARN`, `vars.SANCHAY_PLATFORM_ARN_VALID_TILL` and `vars.SANCHAY_SMS_RETRIEVER_HASH` are GitHub environment variables on the `dev` environment, set once by hand (ADR-0014 "First deploy"). `SANCHAY_GITHUB_REPOSITORY` is not a variable: the workflow passes `github.repository`. Under QEMU the two image builds take several minutes each (the api image built in about 7 minutes on Docker Desktop), hence the 60-minute job timeout and the one-hour OIDC session.
+
+  **3.15 `docs/adr/0014-minimal-aws-topology.md`:**
   ```markdown
   # ADR-0014: Minimal AWS topology — single ECS service, ALB only
 
@@ -11024,21 +11737,36 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
   ## Decision
   - One VPC (2 AZs, 1 NAT with a stable EIP for Cybrilla's sandbox IP allowlist), one ALB, one ECS
-    Fargate ARM64 service running three containers (`web`, `api`, `worker`) from one task
-    definition — not three services — to keep the dev stack cheap and the ALB routing simple.
+    Fargate ARM64 service, `sanchay-app`, running three containers (`web`, `api`, `worker`) from one
+    task definition — not three services — to keep the dev stack cheap and the ALB routing simple.
   - Host-based ALB listener rules (R-11): `api.dev.sanchay.in` (any path) and
     `app.dev.sanchay.in` + `/api/v1/*` both forward to the api target group; everything else on
     `app.dev.sanchay.in` and all of `www.dev.sanchay.in` forwards to the web target group.
-  - `/api/v1/health` is the only health-check path (liveness only, R-12); NAV staleness is a
-    CloudWatch alarm plus a per-scheme AGED grade, not a readiness probe, so a stale catalogue sync
-    never takes the whole app down.
-  - RDS PostgreSQL, `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS
-    service security group; the app itself connects with `sslmode=verify-full` against the RDS
-    global CA bundle baked into the api image (R-15).
-  - FP credentials (`sanchay/{env}/fp`) go into the `worker` container's secrets only; the
-    keyring (`sanchay/{env}/keyring`) goes into `api` and `worker` (R-19 owning containers).
+  - `/api/v1/health` is the only health-check path (liveness only, R-12). Both target groups probe it
+    on the task's api port: the web container (Next.js) serves no `/api/v1/*` route in AWS, and a
+    crashed web process still stops the task because every container is essential. NAV staleness is
+    a CloudWatch alarm plus a per-scheme AGED grade, not a readiness probe, so a stale catalogue sync
+    never takes the whole app down; the alarm and its metric source arrive with F1 (Plan 04).
+  - RDS PostgreSQL 18.6, `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS
+    service security group; the app connects with `sslmode=verify-full` against the RDS global CA
+    bundle baked into the api image (R-15). The master login is `sanchay_master` (secret
+    `sanchay/{env}/db-master`), never `sanchay_app`, the NOLOGIN role the migrations grant to. The
+    migrate task uses the master; api and worker share it until F1 adds the `sanchay_app_login`
+    LOGIN role (secret `sanchay/{env}/db-app`).
+  - FP credentials (`sanchay/{env}/fp`) go into the `worker` container only; the FP webhook secret
+    and the SMS Retriever hash into `api` only; the keyring (`sanchay/{env}/keyring`) into `api`,
+    `worker` and the one-off `migrate` task, whose boot guard checks it too (R-19 owning containers).
+  - Values that differ per deploy and that the boot guard needs (`SANCHAY_PLATFORM_ARN`,
+    `SANCHAY_SMS_RETRIEVER_HASH`) are read from the deploy environment at synth; the stack refuses
+    to synthesise without them.
+  - The GitHub deploy role trusts only the repository named by the deploy input
+    `SANCHAY_GITHUB_REPOSITORY` (`deploy.yml` passes `github.repository`). The owner is never written
+    into code, and `bin/sanchay.ts` refuses a synth or deploy without it.
   - ECS Exec is enabled with command logging to CloudWatch (R-16); a one-off Fargate task
-    definition (not a `Service`) runs `db:migrate` by hand with `aws ecs run-task --overrides`.
+    definition (not a `Service`) runs `db:migrate` with `aws ecs run-task` before each deploy that
+    carries migrations.
+  - Images are linux/arm64. `deploy.yml` builds them on x86_64 runners under QEMU (the
+    `tonistiigi/binfmt` installer, pinned by digest).
   - `.github/workflows/deploy.yml` is manual dispatch only in the MVP; it authenticates over
     GitHub OIDC (no long-lived AWS keys) via a scripted `sts assume-role-with-web-identity` call,
     reusing `ci.yml`'s already-pinned `actions/checkout`/`pnpm/action-setup`/`actions/setup-node`
@@ -11052,59 +11780,86 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   A fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the
   local API for sandbox webhooks and payment returns, if the CDK dev stack slips past 10-23.
 
-  ## First deploy is manual
-  `cdk deploy` is run once from a developer machine with local AWS credentials to create the
-  `GithubDeployRole`; its ARN is then set as the `SANCHAY_DEPLOY_ROLE_ARN` repository variable so
-  `deploy.yml` can take over for every deploy after that.
+  ## First deploy (manual, once per environment)
+  The stack creates the ECR repositories empty and the provider secrets with placeholder values,
+  so the first deploy creates the service with no tasks. One command per line; replace each `<...>`
+  by hand and keep secret files outside the repository. Run from the repo root with AWS credentials
+  for the target account.
+
+  1. Once per account and region: `pnpm --filter=@sanchay/infra exec cdk bootstrap aws://<account-id>/ap-south-1`
+  2. Create the stack with the service at 0 tasks. `<owner>/<repo>` is this repository exactly as
+     GitHub prints it (the `origin` remote's path), the value `deploy.yml` later passes:
+     - PowerShell: `$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<ARN-digits>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<hash>'; pnpm --filter=@sanchay/infra exec cdk deploy -c firstDeploy=true`
+     - Git Bash: `SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<ARN-digits>' SANCHAY_SMS_RETRIEVER_HASH='<hash>' pnpm --filter=@sanchay/infra exec cdk deploy -c firstDeploy=true`
+  3. Put the real values into the four provider secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`,
+     `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`), one command per secret:
+     `aws secretsmanager put-secret-value --secret-id sanchay/dev/keyring --secret-string file://<path-outside-the-repo>`
+  4. On the GitHub `dev` environment, set the variables `SANCHAY_DEPLOY_ROLE_ARN` (stack output
+     `GithubDeployRoleArn`), `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`,
+     `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image prerenders `/site` with both ARN values) and
+     `SANCHAY_SMS_RETRIEVER_HASH`.
+  5. Build and push both images (outputs `ApiRepoUri`, `WebRepoUri`; Docker Desktop emulates arm64):
+     - `aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.ap-south-1.amazonaws.com`
+     - `docker build --platform linux/arm64 -f apps/api/Dockerfile -t <ApiRepoUri>:latest .`
+     - `docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN=<ARN-digits> --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL=<yyyy-mm-dd> --build-arg SANCHAY_APP_ORIGIN=https://app.dev.sanchay.in --build-arg SANCHAY_WWW_ORIGIN=https://www.dev.sanchay.in -t <WebRepoUri>:latest .`
+     - `docker push <ApiRepoUri>:latest`
+     - `docker push <WebRepoUri>:latest`
+  6. Run the migrate task and check its exit code (outputs `MigrateTaskDefinitionArn`,
+     `AppSubnetIds`, `ServiceSecurityGroupId`):
+     - `aws ecs run-task --cluster sanchay-dev --launch-type FARGATE --task-definition <MigrateTaskDefinitionArn> --network-configuration "awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}" --query 'tasks[0].taskArn' --output text`
+     - `aws ecs wait tasks-stopped --cluster sanchay-dev --tasks <taskArn>`
+     - `aws ecs describe-tasks --cluster sanchay-dev --tasks <taskArn> --query 'tasks[0].containers[0].exitCode'` (expect `0`)
+  7. Dispatch `deploy.yml` for `dev`: it rebuilds and pushes the images, runs `cdk deploy` without
+     the flag (one task), forces a new deployment and waits for the service to stabilise.
+  8. Commit `infra/cdk.context.json` (the hosted-zone and availability-zone lookups from step 2)
+     after `pnpm exec biome check --write infra/cdk.context.json`.
+
+  Every later deploy: run step 6 first when the release carries migrations, then dispatch `deploy.yml`.
 
   ## Consequences
   - F1 (Plan 04) reuses `SanchayMvpStack` with prod config (Multi-AZ, PITR 14 days, deletion
-    protection, 2 tasks) instead of a second, duplicated stack file.
+    protection, `db.t4g.medium`, 2 tasks) instead of a second, duplicated stack file.
   - Everything in `infra/lib/sanchay-mvp-stack.ts` is covered by `infra/test/sanchay-mvp-stack.test.ts`
     CDK assertions, so a prod-config regression (for example a dropped `StorageEncrypted`) fails
     before any `cdk deploy`.
   ```
 
-  Run:
-  ```
-  pnpm install
-  ```
-
 - [ ] **Step 4: Run tests to confirm they pass**
 
-  PowerShell:
+  PowerShell and Git Bash:
   ```
   pnpm --filter=@sanchay/infra typecheck
   pnpm --filter=@sanchay/infra test
-  ```
-  Git Bash:
-  ```
-  pnpm --filter=@sanchay/infra typecheck
-  pnpm --filter=@sanchay/infra test
-  ```
-  Expected: `tsc` exits 0; the 9 tests in `infra/test/sanchay-mvp-stack.test.ts` pass (`FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `health check path /api/v1/health`, `SG: RDS reachable only from service`, `log retention 400`, `ECS Exec logging configured`, `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`).
-
-  Also confirm the monorepo still lints and builds after the shared-file fragments:
-  ```
-  pnpm exec biome check infra apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/web/Dockerfile .github/workflows/deploy.yml docs/adr
+  pnpm --filter=@sanchay/api test src/config/env.test.ts
+  pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/web typecheck
   ```
+  Expected: `tsc` exits 0; the 19 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
 
-  **Post-deploy verification checklist** (run once `deploy.yml` has been dispatched against a real AWS account; not part of `pnpm test`):
+  Then the two images (Docker; not part of `pnpm test`), from the repo root:
   ```
-  curl -s -o /dev/null -w '%{http_code}\n' https://app.dev.sanchay.in/api/v1/health
-  curl -s -o /dev/null -w '%{http_code}\n' https://api.dev.sanchay.in/api/v1/health
-  curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://app.dev.sanchay.in/.well-known/assetlinks.json
+  docker build --platform linux/arm64 -f apps/api/Dockerfile -t sanchay-api:local .
+  docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN=ARN-000000 --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL=2099-12-31 -t sanchay-web:local .
   ```
-  Expected: `200` for both health checks; `200 application/json` for `assetlinks.json` (E24 registers the real Android App Links payload; until then this returns 200 with an empty array so the well-known path itself is proven reachable). `POST https://api.dev.sanchay.in/api/v1/webhooks/fp` reachability is checked with the FP sandbox's own webhook test-send tool once Cybrilla has the URL (10-23 milestone), since the fake FP module (D4) is what registers that route.
+  Expected: both build (Docker Desktop emulates arm64); without the two `--build-arg`s the web build stops at `Error occurred prerendering page "/site"`. Optional local smoke of the api image against `pnpm db:up`'s Postgres: the image runs `node dist/cli/migrate.js`, then `node dist/main.js` answers `GET /api/v1/health` with 200.
+
+  **Post-deploy verification checklist** (after the ADR-0014 first deploy and a `deploy.yml` run; not part of `pnpm test`). PowerShell and Git Bash, the same lines (RV-02-32): `curl.exe` is the real curl in both shells (in PowerShell 5.1 `curl` is an alias of `Invoke-WebRequest`), and `NUL` discards the body on Windows in both:
+  ```
+  curl.exe -s -o NUL -w "%{http_code}\n" https://app.dev.sanchay.in/api/v1/health
+  curl.exe -s -o NUL -w "%{http_code}\n" https://api.dev.sanchay.in/api/v1/health
+  curl.exe -s -o NUL -w "%{http_code} %{content_type}\n" https://app.dev.sanchay.in/.well-known/assetlinks.json
+  aws ecs execute-command --cluster sanchay-dev --task <task-id> --container api --interactive --command "node --version"
+  ```
+  Expected: `200` for both health checks; `200 application/json` for `assetlinks.json`; the ECS Exec session prints the Node version and the command appears in `/sanchay/dev/ecs-exec` (R-16). If the session is refused with "encryption is not set up on the selected CloudWatch log group", the exec log group needs a KMS key for `cloudWatchEncryptionEnabled: true`; record it and raise it with the lead before changing the setting. `POST https://api.dev.sanchay.in/api/v1/webhooks/fp` reachability is checked with the FP sandbox's own webhook test-send tool once Cybrilla has the URL (10-23 milestone).
 
 - [ ] **Step 5: Commit**
   ```
-  pnpm exec biome check --write infra apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/web/Dockerfile apps/web/next.config.ts .github/workflows/deploy.yml docs/adr pnpm-workspace.yaml
+  pnpm exec biome check --write infra apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/web/next.config.ts apps/web/public docs/adr
   pnpm --filter=@sanchay/infra typecheck
   pnpm --filter=@sanchay/infra test
+  pnpm --filter=@sanchay/api test src/config/env.test.ts
   pnpm lint
-  git add infra .github/workflows/deploy.yml apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/web/Dockerfile apps/web/next.config.ts docs/adr/0001-versions.md docs/adr/0014-minimal-aws-topology.md docs/adr/README.md pnpm-workspace.yaml pnpm-lock.yaml
-  git commit -m "feat(infra): add SanchayMvpStack-dev — VPC, ALB, ECS Fargate, RDS, dev AWS (R-05, E25)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+  git add infra .dockerignore .gitignore .github/workflows/deploy.yml apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/web/Dockerfile apps/web/next.config.ts apps/web/public/.well-known/assetlinks.json docs/adr/0001-versions.md docs/adr/0014-minimal-aws-topology.md docs/adr/README.md pnpm-workspace.yaml pnpm-lock.yaml
+  git commit -m "feat(infra): add SanchayMvpStack-dev, arm64 images and the dev deploy workflow (R-05, E25)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   If lefthook re-stages files (`stage_fixed`), re-run the Step 4 `typecheck`/`test` commands before committing again.
