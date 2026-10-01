@@ -65,6 +65,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-12: one creator for `packages/test-fixtures`.** D9 creates the full package shell (the repo's `node-lib` tsconfig pattern, `vitest run --passWithNoTests`, an empty barrel); Plan 03's golden-vector tasks only add files and barrel exports. `Jobs.enqueue` builds its pg-boss options without explicit `undefined`s (`exactOptionalPropertyTypes`).
 - **RV-02-13: ORDER machine.** FP can fail a purchase straight out of review (custom checkout: `under_review` → `pending` or `failed`), so D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`); Plan 03 E20 uses it.
 - **RV-02-14: PLAN machine.** An ONDC purchase plan can end `failed` out of review, or be refused at the confirm `PATCH`, and the 7-day saga can lapse while FP is reviewing. D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`), `UNDER_REVIEW → CONSENT_EXPIRED` (`saga_expired_under_review`) and `CONFIRMING → REJECTED` (`fp_confirm_rejected`) and, as for orders, `SUBMITTING → REJECTED` (`live_check_failed`) for an FP 4xx on create. The MANDATE machine gains `CONSENTED → CONSENT_EXPIRED` (`execute_before_missed`: approved but never submitted in time) and `SUBMITTING → REJECTED` (`live_check_failed`). Plan 04 F2 uses them.
+- **RV-02-15: D4 sandbox probe sends `expand` (found against the live sandbox, 2026-10-01).** `GET /v2/mf_scheme_plans/cybrillapoa` without `expand` returns `400 parameter_missing` ("required request parameter 'expand'"). D3's `FpRead` already sent it; D4's `tools/fp-probes` client did not, so the sandbox smoke would have failed at its catalogue step. D4 now requests `?expand=mf_scheme,mf_fund&page=0&size=100`, and its stub only matches when `expand` is present. Also confirmed in the sandbox: the list is under `data` (482 orderable plans); the POA token is issued only by the FP host (`{SANCHAY_FP_BASE_URL}/v2/auth/cybrillarta/token`; the POA host answers 404), and both hosts serve `/poa/pre_verifications/{id}`, so `liveBaseUrls` mapping every audience to `SANCHAY_FP_BASE_URL` is correct.
 - **RV-02-8: `Jobs` is injectable.** D2's `Jobs` is an `@Injectable()` service exported by the global `JobsModule`, with an instance `enqueue(exec, name, data, opts)`. It was static; every consumer (D6 `Notify`, D9, and Plan 03/04) injects it, and unit tests stub it. D6 used `JOB_NAMES.NOTIFICATIONS_SEND`, which never existed; job names are dotted string literals checked against `JobName`.
 
 **Verify at execution time (not changed here):**
@@ -4413,7 +4414,13 @@ export function createFakeServer(urls: FakeServerUrls): MockAgent {
 
   agent
     .get(urls.fp)
-    .intercept({ path: '/v2/mf_scheme_plans/cybrillapoa', method: 'GET' })
+    .intercept({
+      // RV-02-15: FP answers 400 parameter_missing without `expand`, so the stub only matches when it is sent.
+      path: (p) =>
+        p.startsWith('/v2/mf_scheme_plans/cybrillapoa?') &&
+        new URLSearchParams(p.slice(p.indexOf('?') + 1)).get('expand') === 'mf_scheme,mf_fund',
+      method: 'GET',
+    })
     .reply(200, {
       object: 'list',
       data: [
@@ -4586,7 +4593,12 @@ export async function buildClient(options: RunOptions): Promise<ChainContext> {
       }),
     getPreVerification: (id) => call(urls.poa, poaToken, `/poa/pre_verifications/${id}`, 'GET'),
     schemePlans: async () => {
-      const result = await call(urls.fp, fpToken, '/v2/mf_scheme_plans/cybrillapoa', 'GET');
+      const result = await call(
+        urls.fp,
+        fpToken,
+        '/v2/mf_scheme_plans/cybrillapoa?expand=mf_scheme,mf_fund&page=0&size=100',
+        'GET',
+      );
       return Array.isArray(result.data) ? (result.data as Array<Record<string, unknown>>) : [];
     },
     createPurchase: (input) => call(urls.fp, fpToken, '/v2/mf_purchases', 'POST', input),

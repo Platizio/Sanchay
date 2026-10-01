@@ -11,7 +11,7 @@ Probes answer questions the plans cannot settle from the documentation. Each res
 | [Lumpsum flow](lumpsum-flow.md) | Does the H-2 custom checkout work end to end in the sandbox? | `fp.lumpsumFlow`; the 11-06 lumpsum milestone; the PB-17 demo fallback | Fri 10-09 |
 
 ## Before any probe
-1. Fill in `.env.sandbox` (git-ignored), then run `node scripts/sandbox-check.mjs`. The fp token line (and poa, for pre-verification) must say OK.
+1. Credentials live in `apps/api/.env` (git-ignored; v1 names `FINPRIM_*`, `CYBRILLA_PRE_VERIFICATION_*` are accepted until Plan 02 renames them). Run `node scripts/sandbox-check.mjs`: the FP tenant token and POA token lines must say OK.
 2. Create a sandbox investor with an `mf_investment_account` (existing-KYC path; `docs/research/fp-api.md` §4). These are sandbox records: never use a real person's PAN.
 3. Sandbox rules (research §3): **amounts ending in 0 succeed and amounts ending in 1 fail** after ONDC submission, and only **ABSL and ICICI Pru** schemes exist.
 4. Send `consent` exactly as Plan 03 E20 will (email, mobile, isd_code), so the probe exercises the real shape.
