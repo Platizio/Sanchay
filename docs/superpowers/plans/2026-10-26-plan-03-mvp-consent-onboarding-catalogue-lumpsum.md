@@ -126,6 +126,14 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 - **E22:** owns its edit to `purchase.service.ts`; E22 appends to the `test-fixtures` barrel rather than recreating the package.
 - Also: absolute paths removed; commit trailers corrected to Opus 5.5.
 
+Later errata (found while writing Plan 04; already applied below):
+- **RV-03-1 (2026-10-01): consent approve, `markUnused`, expiry sweep (E3/E4).**
+  - `approve` rebuilt the snapshot with `destinationsMasked: []` and only the four `render_*` fields, while `create` hashed the resolved masks and the caller's full `fields`. `create` refuses zero destinations, so every approval failed with `CONSENT_MISMATCH`. `approve` now decrypts the challenge's stored snapshot and passes its `destinationsMasked` and `fields` back into the builder. A builder that derives facts from subject rows still re-reads them and overwrites the echoed fields, so a changed subject still mismatches (E3's `SnapshotBuilderContext` documents this).
+  - New `ConsentEngine.markUnused(exec, challengeId, reason)`: CONSUMED → CONSUMED_UNUSED plus an `AUDIT_ACTIONS.CONSENT_MARKED_UNUSED` row. It is idempotent and refuses any other status. A saga calls it only when no P/M write happened, for example when a live pre-check fails inside `useConsumed` before any FP write. `useConsumed` now refuses a CONSUMED_UNUSED challenge.
+  - `consent.expiry.sweep` marks CONSUMED → CONSUMED_UNUSED only when the `consent_records` row has `first_attempt_at IS NULL` and `execute_before < now`. A saga whose first attempt happened runs to `saga_expires_at` and is never swept. Each sweep update and its audit row share one transaction.
+  - `legalDocuments: []` (E3 generic builder) against `ConsentSnapshotV2Schema`'s `.min(1)`: no conflict in practice, because builder output is never schema-parsed. Only E3's tests parse hand-built snapshots. `approve` reads the stored snapshot with a narrow echo schema, not `ConsentSnapshotV2Schema`, so it does not create a conflict either.
+  - E4's test setup no longer calls `ta.app.get('Crypto' as never)`, a string token that does not exist. `seedLegalDoc` is `onConflictDoNothing`, because `legal_documents_key_version_uq` rejected the second test's seed.
+
 ## Known gaps (fix at the start of the named task, before Step 1)
 
 - **E8–E10 test harness (fixed in place).** Their tests called a nonexistent `authedRequest` and `bootTestApp(db)`. They now use `signedInInvestor(app)` (new helper created by E8, built on Plan 01's `signInWeb`), `bootTestApp()` and `app.db.db`. (`insertInvestor` in Plan 01's `test/int/factories.ts` is real; E14's use of it is correct.) The production code in E8–E10 was reviewed for Plan 02 drift only.
@@ -2341,6 +2349,12 @@ import { CONSENT_SUBJECT_TYPES, type ConsentSubjectType } from '@sanchay/domain'
 import { SNAPSHOT_VERSION, type ConsentSnapshotV2 } from '@sanchay/domain';
 import type { DbExecutor } from '../../db/client.js';
 
+/**
+ * At `create`, `destinationsMasked` is the resolver's live masks and `fields` is the caller's input.
+ * At `approve` (RV-03-1), both are echoed from the challenge's stored snapshot: `fields` is the
+ * builder's own earlier output. A builder that derives a fact from a subject row must therefore spread
+ * `ctx.fields` FIRST and write the live value over it, so a changed subject row changes the hash.
+ */
 export interface SnapshotBuilderContext {
   investorId: string;
   subjects: Array<{ table: string; id: string }>;
@@ -2358,7 +2372,9 @@ export type SnapshotBuilder = (
 /** A builder that reads no subject-specific rows yet: it renders the fields the caller already resolved
  * (amount, units, scheme, ...) into the standard envelope. Each subject task (E20 orders, F2 plans and
  * mandates, E6/E11 onboarding attest, ...) replaces its own registry entry once its tables exist; until
- * then every CONSENT_SUBJECT_TYPES key uses this shared builder so ConsentEngine (E4) has a total map. */
+ * then every CONSENT_SUBJECT_TYPES key uses this shared builder so ConsentEngine (E4) has a total map.
+ * `legalDocuments` is [] here although `ConsentSnapshotV2Schema` says `.min(1)`: builder output is never
+ * schema-parsed (RV-03-1), and a subject task's own builder lists the documents it binds. */
 function genericBuilder(subjectType: ConsentSubjectType): SnapshotBuilder {
   return async (_exec, ctx) => ({
     version: SNAPSHOT_VERSION,
@@ -3022,17 +3038,21 @@ git commit -m "feat(legal-consent): sanchay.consent.v2 snapshot, JCS hashing and
 
 **Files:**
 - **Create:** `apps/api/src/modules/legal-consent/consent-engine.ts`, `apps/api/src/modules/legal-consent/destination-resolver.ts`, `apps/api/src/modules/legal-consent/consent.router.ts`, `apps/api/src/modules/legal-consent/consent-sweep.job.ts`, `apps/api/src/modules/legal-consent/drafts-abandon.job.ts`, `packages/contract/src/consents.ts`, `apps/api/test/int/consent-first.ts`, `apps/api/test/int/bola.ts`, `apps/api/test/int/consent-engine.int.test.ts`, `apps/api/test/int/consent-guard-trigger.int.test.ts`.
-- **Modify:** `apps/api/src/modules/legal-consent/legal-consent.module.ts` (wire `ConsentEngine`, `ConsentDestinationResolver`, `ConsentRouter`, the two jobs, `SUITABILITY_HOOK`), `apps/api/src/modules/platform/jobs/schedules.ts` (append the two sweep schedules), `apps/api/src/modules/platform/audit.service.ts` (append `AUDIT_ACTIONS.CONSENT_CHALLENGE_CREATED`, `CONSENT_OTP_SENT`, `CONSENT_APPROVED`, `CONSENT_MISMATCH`, `CONSENT_CANCELLED`, `CONSENT_EXPIRED_SWEPT`, `CONSENT_DRAFT_ABANDONED`; append `'subjectType'`, `'subjectIds'` to `AUDIT_DATA_ALLOWLIST`), `packages/contract/src/index.ts` (`consentsContract` import/export, add `consents: consentsContract` to `contract`), `apps/api/openapi.json` (regenerated, B10 drift test).
+- **Modify:** `apps/api/src/modules/legal-consent/legal-consent.module.ts` (wire `ConsentEngine`, `ConsentDestinationResolver`, `ConsentRouter`, the two jobs, `SUITABILITY_HOOK`), `apps/api/src/modules/platform/jobs/schedules.ts` (append the two sweep schedules), `apps/api/src/modules/platform/audit.service.ts` (append `AUDIT_ACTIONS.CONSENT_CHALLENGE_CREATED`, `CONSENT_OTP_SENT`, `CONSENT_APPROVED`, `CONSENT_MISMATCH`, `CONSENT_CANCELLED`, `CONSENT_EXPIRED_SWEPT`, `CONSENT_DRAFT_ABANDONED`, `CONSENT_MARKED_UNUSED`; append `'subjectType'`, `'subjectIds'` to `AUDIT_DATA_ALLOWLIST`), `packages/contract/src/index.ts` (`consentsContract` import/export, add `consents: consentsContract` to `contract`), `apps/api/openapi.json` (regenerated, B10 drift test).
 
 **Interfaces:**
 - Prerequisites: E3 (`legal_documents`, `consent_challenges`, `consent_records`, `consent_subjects`, `LegalDocs`, `SNAPSHOT_BUILDERS`, `canonicalize`, `snapshotSha256`, `requiredFactorsFor`).
 - Consumes (Plan-01 ground truth): `OtpService.issue(input: IssueOtpInput): Promise<IssuedOtp>` and `OtpService.verify(exec, {challengeId, purpose, code}): Promise<VerifiedOtp>` — note `challengeId` here is the **otp_codes row id**, not the consent challenge id (`apps/api/src/modules/identity/otp.service.ts`); `type ConsentSms`, `renderConsentSms`, `SMS_TEMPLATE_IDS` (`apps/api/src/integrations/sms/templates.ts`); `AuditService.record`, `AUDIT_ACTIONS`; `Crypto`; `CLOCK`/`Clock`/`FakeClock`, `MINUTE`/`HOUR`/`DAY`/`SECOND`; `AppError`; `newId`/`asRowId`; `investors`, `investorContacts` (`apps/api/src/modules/identity/identity.schema.ts`); `bootTestApp`; `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`, `ERROR_CATALOGUE` (`@sanchay/contract`); `route`/`oc` contract pattern from `packages/contract/src/auth.ts`.
 - Consumes (Plan 02, as built): `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler`, `type Job<N>`, `type JobName` (`jobs/job-registry.ts`; `consent.expiry.sweep` and `drafts.abandon` are already in `JOB_NAMES`), `registerSchedules` (`jobs/schedules.ts`); `type ConsumedConsent`, `assertConsumed` (D3, `apps/api/src/integrations/fp/consumed-consent.ts`); `CHALLENGE_STATUSES`, `type ChallengeStatus` (D5, `@sanchay/domain`); `bootFpTestApp`, `type FpTestApp`, `FakeFp.calls()` (D4, `apps/api/test/int/fake-fp.ts`; call-log `at` is stamped from the app `Clock`); `AppConfig` (Plan 01).
-- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
+- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void>` (RV-03-1), `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
 - Review fix (Plan 02 as built): `ConsumedConsent`/`assertConsumed` come from D3 and `CHALLENGE_STATUSES` from D5; there are no local copies. `useConsumed` mints the D3 brand (`subjectIds` are the subject row ids) and checks it with `assertConsumed`. It refuses unless `SANCHAY_APP_ROLE === 'worker'` (from `AppConfig`), replacing the draft's `asWorker()` object-copy.
 - Review fix: `ConsentRouter` uses Plan 01's `@Controller` + `@Implement` pattern (the draft's `implement(...).router(...)` object on an `@Injectable` would never have been mounted), checks that every challenge belongs to the signed-in investor (the draft let any investor read, send, approve or cancel any challenge), and applies `requireIdempotency(idem, cls)` to `cancel` (the draft called it with no arguments).
 - Review fix: both sweeps are `@JobHandler` classes whose `handle(job)` calls `run()`, scheduled through `registerSchedules` (`consent.expiry.sweep` `*/5 * * * *`, `drafts.abandon` `0 * * * *`). `LegalConsentModule` injects real tokens (`DB`, `CLOCK`, `Crypto`, `OtpService` from `IdentityModule`, the global `Jobs`), not string tokens and not a no-op `JOBS`. Tests boot the worker app with FakeFp and spy on the injected `Jobs`.
 - Review fix: one shared `consent.approved` queue cannot fan out; pg-boss hands each job to exactly one worker. `approve` therefore enqueues the job registered for the challenge's subject type in `CONSENT_SUBJECT_JOBS`, or nothing when none is registered. The registering file must be loaded in the **api** role too, since `approve` runs in the request.
+- Review fix (RV-03-1):
+  - `approve` decrypts the challenge's `snapshot_enc` (AAD `consent_challenges.snapshot_enc:<challengeId>`). It passes that snapshot's `destinationsMasked` and `fields` into the builder; before, it passed `[]` and only the four `render_*` columns, so the hash never matched.
+  - `markUnused` moves CONSUMED → CONSUMED_UNUSED with a `CONSENT_MARKED_UNUSED` audit row. Only a saga that made no P/M write calls it. `useConsumed` refuses a CONSUMED_UNUSED challenge.
+  - `consent.expiry.sweep` skips any challenge whose `consent_records.first_attempt_at` is set.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3111,7 +3131,7 @@ export async function expectBola(app: TestApp, procedureKey: string, foreignIdAr
 `apps/api/test/int/consent-engine.int.test.ts` (the full suite; boots the worker app with FakeFp and takes the real `ConsentEngine` from DI; abridged setup shown once, every outline test bullet present):
 ```ts
 import { randomUUID } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { otpCodes } from '../../src/modules/identity/identity.schema.js';
 import { investors, investorContacts } from '../../src/modules/identity/identity.schema.js';
@@ -3128,11 +3148,14 @@ import {
   type SuitabilityHook,
 } from '../../src/modules/legal-consent/consent-engine.js';
 import { ConsentSweepJob } from '../../src/modules/legal-consent/consent-sweep.job.js';
+import { SNAPSHOT_BUILDERS, type SnapshotBuilder } from '../../src/modules/legal-consent/snapshot-builders.js';
+import { Crypto } from '../../src/modules/platform/crypto.js';
+import { auditEvents } from '../../src/modules/platform/platform.schema.js';
 import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
 import type { JobName } from '../../src/modules/platform/jobs/job-registry.js';
 import { ConsentDestinationResolver } from '../../src/modules/legal-consent/destination-resolver.js';
 import { LegalDocs } from '../../src/modules/legal-consent/legal-docs.service.js';
-import { newId } from '../../src/modules/platform/ids.js';
+import { asRowId, newId } from '../../src/modules/platform/ids.js';
 import { bootTestApp } from './app.js';
 import { expectNoPmWritesBeforeConsumed } from './consent-first.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
@@ -3145,7 +3168,6 @@ let investorId: string;
 
 async function seedInvestor(): Promise<string> {
   const id = newId('investors');
-  const crypto = ta.app.get('Crypto' as never);
   await ta.db.db.insert(investors).values({
     id,
     createdBy: 'test',
@@ -3169,7 +3191,7 @@ async function seedLegalDoc(key: string): Promise<void> {
     sha256: Buffer.alloc(32, 1),
     status: 'PUBLISHED',
     effectiveFrom: ta.clock.now(),
-  });
+  }).onConflictDoNothing(); // legal_documents_key_version_uq: every test's beforeEach seeds the same (key, version)
 }
 
 beforeAll(async () => {
@@ -3200,6 +3222,21 @@ async function createChallenge() {
     amount: '25000.00',
     fields: { amount: '25000.00', schemeShort: 'Parag Flexi', action: 'invest' },
   });
+}
+
+async function approvedChallenge() {
+  const c = await createChallenge();
+  await engine.sendOtp(c.challengeId, 'SMS');
+  await engine.approve(c.challengeId, { smsCode: ta.sms.latestCode('9999999999') ?? '000000' });
+  return c;
+}
+
+async function challengeStatus(challengeId: string): Promise<string | undefined> {
+  const [row] = await ta.db.db
+    .select({ status: consentChallenges.status })
+    .from(consentChallenges)
+    .where(eq(consentChallenges.id, challengeId));
+  return row?.status;
 }
 
 describe('ConsentEngine.sendOtp', () => {
@@ -3299,6 +3336,92 @@ describe('ConsentEngine.approve', () => {
     expect(enqueued).toHaveLength(0);
   });
 
+  it('rebuilds from the stored snapshot: real destinations and non-render fields still approve (RV-03-1)', async () => {
+    const c = await engine.create(ta.db.db, {
+      investorId,
+      subjectType: 'PURCHASE',
+      subjects: [{ table: 'orders', id: newId('orders' as never) }],
+      templateKey: 'TPL_PURCHASE',
+      folioId: null,
+      amount: '25000.00',
+      fields: {
+        amount: '25000.00',
+        schemeShort: 'Parag Flexi',
+        action: 'invest',
+        schemeIsin: 'INF879O01027',
+        navDateLine: 'NAV of the day of payment',
+      },
+    });
+    const [row] = await ta.db.db
+      .select({ snapshotEnc: consentChallenges.snapshotEnc })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, c.challengeId));
+    if (row === undefined) throw new Error('challenge row missing');
+    const stored = JSON.parse(
+      ta.app.get(Crypto).decrypt(row.snapshotEnc, {
+        table: 'consent_challenges',
+        column: 'snapshot_enc',
+        rowId: asRowId('consent_challenges', c.challengeId),
+      }),
+    ) as { destinationsMasked: string[]; fields: Record<string, string> };
+    expect(stored.destinationsMasked.length).toBeGreaterThan(0);
+    expect(stored.fields.schemeIsin).toBe('INF879O01027');
+    await engine.sendOtp(c.challengeId, 'SMS');
+    const approved = await engine.approve(c.challengeId, { smsCode: ta.sms.latestCode('9999999999') ?? '000000' });
+    expect(approved.challengeId).toBe(c.challengeId);
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED');
+  });
+
+  it('a builder that reads its subject row still catches a changed row: CONSENT_MISMATCH (RV-03-1)', async () => {
+    await ta.db.db.execute(
+      sql`CREATE TABLE IF NOT EXISTS app.consent_builder_scratch (id uuid PRIMARY KEY, amount text NOT NULL)`,
+    );
+    const generic = SNAPSHOT_BUILDERS.PURCHASE;
+    // Shaped like a real subject builder: spread ctx.fields first, then overwrite with the live row.
+    const readsRow: SnapshotBuilder = async (exec, ctx) => {
+      const base = await generic(exec, ctx);
+      const live = await exec.execute<{ amount: string }>(
+        sql`SELECT amount FROM app.consent_builder_scratch WHERE id = ${ctx.subjects[0]?.id ?? null}`,
+      );
+      return { ...base, fields: { ...ctx.fields, amount: live.rows[0]?.amount ?? '' } };
+    };
+    SNAPSHOT_BUILDERS.PURCHASE = readsRow;
+    try {
+      const draft = async () => {
+        const subjectId = randomUUID();
+        await ta.db.db.execute(sql`INSERT INTO app.consent_builder_scratch (id, amount) VALUES (${subjectId}, '25000.00')`);
+        const c = await engine.create(ta.db.db, {
+          investorId,
+          subjectType: 'PURCHASE',
+          subjects: [{ table: 'consent_builder_scratch', id: subjectId }],
+          templateKey: 'TPL_PURCHASE',
+          folioId: null,
+          amount: '25000.00',
+          fields: { amount: '25000.00', schemeShort: 'Parag Flexi', action: 'invest' },
+        });
+        await engine.sendOtp(c.challengeId, 'SMS');
+        return { c, subjectId, code: ta.sms.latestCode('9999999999') ?? '000000' };
+      };
+
+      const unchanged = await draft();
+      await engine.approve(unchanged.c.challengeId, { smsCode: unchanged.code });
+      expect(await challengeStatus(unchanged.c.challengeId)).toBe('CONSUMED');
+
+      const changed = await draft();
+      await ta.db.db.execute(
+        sql`UPDATE app.consent_builder_scratch SET amount = '90000.00' WHERE id = ${changed.subjectId}`,
+      );
+      await expect(engine.approve(changed.c.challengeId, { smsCode: changed.code })).rejects.toMatchObject({
+        code: 'CONSENT_MISMATCH',
+      });
+      expect(await challengeStatus(changed.c.challengeId)).toBe('SUPERSEDED');
+      expect(enqueued).toHaveLength(0);
+    } finally {
+      SNAPSHOT_BUILDERS.PURCHASE = generic;
+      await ta.db.db.execute(sql`DROP TABLE IF EXISTS app.consent_builder_scratch`);
+    }
+  });
+
   it('suitability changed between create and approve: SUITABILITY_CHANGED', async () => {
     const hook = ta.app.get<SuitabilityHook>(SUITABILITY_HOOK);
     const check = vi.spyOn(hook, 'check').mockResolvedValue(false);
@@ -3385,6 +3508,41 @@ describe('ConsentEngine.useConsumed', () => {
     await ta.app.get(ConsentSweepJob).handle(jobOf('consent.expiry.sweep', {}));
     const [challenge] = await ta.db.db.select().from(consentChallenges).where(eq(consentChallenges.id, c.challengeId));
     expect(challenge?.status).toBe('CONSUMED_UNUSED');
+  });
+
+  it('the sweep never touches a saga whose first attempt happened; it runs on to saga_expires_at (RV-03-1)', async () => {
+    const c = await approvedChallenge();
+    await engine.useConsumed(c.challengeId, async () => 'first FP write'); // stamps first_attempt_at
+    ta.clock.advance(10 * 60_000 + 1); // past execute_before, inside saga_expires_at (60 min)
+    await ta.app.get(ConsentSweepJob).handle(jobOf('consent.expiry.sweep', {}));
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED');
+    await expect(engine.useConsumed(c.challengeId, async () => 'resumed')).resolves.toBe('resumed');
+  });
+});
+
+describe('ConsentEngine.markUnused (RV-03-1)', () => {
+  it('moves CONSUMED to CONSUMED_UNUSED with one audit row, is idempotent, and useConsumed refuses afterwards', async () => {
+    const c = await approvedChallenge();
+    // F5's shape: the live pre-check fails inside useConsumed before any FP write.
+    await engine.useConsumed(c.challengeId, async () => {
+      await engine.markUnused(ta.db.db, c.challengeId, 'live_check_failed');
+    });
+    await engine.markUnused(ta.db.db, c.challengeId, 'live_check_failed'); // a job retry
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED_UNUSED');
+    const audits = await ta.db.db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.entityId, c.challengeId), eq(auditEvents.action, 'CONSENT_MARKED_UNUSED')));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.data).toMatchObject({ challengeId: c.challengeId, reason: 'live_check_failed' });
+    await expect(engine.useConsumed(c.challengeId, async () => 'x')).rejects.toMatchObject({ code: 'CONSENT_EXPIRED' });
+    await expectNoPmWritesBeforeConsumed(ta, c.challengeId);
+  });
+
+  it('refuses a challenge that is not CONSUMED', async () => {
+    const c = await createChallenge();
+    await expect(engine.markUnused(ta.db.db, c.challengeId, 'live_check_failed')).rejects.toThrow(/not CONSUMED/);
+    expect(await challengeStatus(c.challengeId)).toBe('PENDING');
   });
 });
 
@@ -3546,6 +3704,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { ConsentSubjectType } from '@sanchay/domain';
 import { canonicalize, type JcsValue, requiredFactorsFor, snapshotSha256 } from '@sanchay/domain';
+import { z } from 'zod';
 import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { assertConsumed, type ConsumedConsent } from '../../integrations/fp/consumed-consent.js';
@@ -3577,6 +3736,16 @@ const SMS_COOLDOWN_MS = 30_000;
 const CONSENT_SENDS_PER_HOUR = 10;
 
 export type { ConsumedConsent };
+
+/**
+ * What `approve` echoes from the stored snapshot back into the builder (RV-03-1). Deliberately not
+ * `ConsentSnapshotV2Schema`: builder output is never schema-parsed at `create` (the generic builder's
+ * `legalDocuments` is []), so `approve` must not reject on a rule `create` never applied.
+ */
+const StoredSnapshotEchoSchema = z.object({
+  destinationsMasked: z.array(z.string()),
+  fields: z.record(z.string(), z.string()),
+});
 
 /**
  * Subject type -> the worker job `approve` enqueues in its own transaction. Registered at module load by
@@ -3834,19 +4003,26 @@ export class ConsentEngine {
         .select()
         .from(consentSubjects)
         .where(eq(consentSubjects.challengeId, challengeId));
+      // RV-03-1: rebuild from what `create` hashed. The masks and the caller's fields live only in the
+      // encrypted snapshot. A builder that reads subject rows still overwrites the echoed fields with
+      // live values, so a changed subject still fails the hash below.
+      const stored = StoredSnapshotEchoSchema.parse(
+        JSON.parse(
+          this.crypto.decrypt(row.snapshotEnc, {
+            table: 'consent_challenges',
+            column: 'snapshot_enc',
+            rowId: asRowId('consent_challenges', challengeId),
+          }),
+        ),
+      );
       const builder = SNAPSHOT_BUILDERS[row.subjectType as ConsentSubjectType];
       const snapshot = await builder(tx, {
         investorId: row.investorId,
         subjects: subjects.map((s) => ({ table: s.subjectTable, id: s.subjectId })),
         templateKey: row.templateKey,
         moneyParamsVersion: row.moneyParamsVersion,
-        destinationsMasked: [],
-        fields: {
-          ...(row.renderAction !== null ? { action: row.renderAction } : {}),
-          ...(row.renderAmount !== null ? { amount: row.renderAmount } : {}),
-          ...(row.renderUnits !== null ? { units: row.renderUnits } : {}),
-          ...(row.renderSchemeShort !== null ? { schemeShort: row.renderSchemeShort } : {}),
-        },
+        destinationsMasked: stored.destinationsMasked,
+        fields: stored.fields,
       });
       const recomputedHex = await snapshotSha256(snapshot);
       const recomputed = Buffer.from(recomputedHex, 'hex');
@@ -3960,6 +4136,37 @@ export class ConsentEngine {
     });
   }
 
+  /**
+   * CONSUMED -> CONSUMED_UNUSED for a saga that gives up before any P/M write, for example when a live
+   * pre-check fails inside `useConsumed` before the first FP write (RV-03-1). Only the caller knows
+   * that no write happened, so it must never call this after one. Idempotent for job retries.
+   * `useConsumed` refuses the challenge from then on.
+   */
+  async markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void> {
+    const [row] = await exec
+      .select({ status: consentChallenges.status })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, challengeId))
+      .for('update')
+      .limit(1);
+    if (row === undefined) throw new AppError('NOT_FOUND');
+    if (row.status === 'CONSUMED_UNUSED') return;
+    if (row.status !== 'CONSUMED') {
+      throw new Error(`ConsentEngine.markUnused: challenge ${challengeId} is ${row.status}, not CONSUMED`);
+    }
+    await exec
+      .update(consentChallenges)
+      .set({ status: 'CONSUMED_UNUSED' as ChallengeStatus })
+      .where(and(eq(consentChallenges.id, challengeId), eq(consentChallenges.status, 'CONSUMED')));
+    await this.audit.record(exec, {
+      action: AUDIT_ACTIONS.CONSENT_MARKED_UNUSED,
+      actorType: 'SYSTEM',
+      entityType: 'consent_challenges',
+      entityId: challengeId,
+      data: { challengeId, reason },
+    });
+  }
+
   /** Worker only. P/M writes run only inside `useConsumed`, and `fn` runs with no open transaction, so an
    * FP call inside it never trips D3's `ProviderCallInTransactionError`. */
   async useConsumed<T>(challengeId: string, fn: (consent: ConsumedConsent) => Promise<T>): Promise<T> {
@@ -3976,6 +4183,12 @@ export class ConsentEngine {
     if (record === undefined || record.kind !== 'CHALLENGE' || record.executeBefore === null) {
       throw new AppError('CONSENT_REQUIRED');
     }
+    const [challenge] = await db
+      .select({ status: consentChallenges.status })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, challengeId))
+      .limit(1);
+    if (challenge?.status === 'CONSUMED_UNUSED') throw new AppError('CONSENT_EXPIRED'); // swept or markUnused
     const deadline = record.firstAttemptAt === null ? record.executeBefore : record.sagaExpiresAt;
     if (deadline === null || now.getTime() > deadline.getTime()) {
       throw new AppError('CONSENT_EXPIRED');
@@ -4051,17 +4264,18 @@ function requiredFactorsFrom(subjectType: ConsentSubjectType, amount: string | n
 `apps/api/src/modules/legal-consent/consent-sweep.job.ts`:
 ```ts
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lt, notExists } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
-import { consentChallenges } from './legal-consent.schema.js';
+import { consentChallenges, consentRecords } from './legal-consent.schema.js';
 
-/** `consent.expiry.sweep` (*/5): a CONSUMED challenge whose `execute_before` has passed with no
- * successful first FP write becomes CONSUMED_UNUSED — no further P/M write is ever allowed against it
- * (`useConsumed` already refuses once `execute_before`/`saga_expires_at` has passed; this job only
- * makes that terminal state visible for support and reporting). */
+/** `consent.expiry.sweep` (*/5): a CONSUMED challenge whose saga never started (its `consent_records`
+ * row has `first_attempt_at IS NULL`) and whose `execute_before` has passed becomes CONSUMED_UNUSED.
+ * `useConsumed` already refuses it; this job makes that terminal state visible for support and
+ * reporting. A saga whose first attempt happened runs on to `saga_expires_at` and is never swept
+ * (RV-03-1); one that gives up before any P/M write calls `ConsentEngine.markUnused` itself. */
 @Injectable()
 @JobHandler('consent.expiry.sweep')
 export class ConsentSweepJob {
@@ -4078,23 +4292,48 @@ export class ConsentSweepJob {
   async run(): Promise<number> {
     const now = this.clock.now();
     const stale = await this.dbh.db
-      .select({ id: consentChallenges.id, investorId: consentChallenges.investorId })
+      .select({ id: consentChallenges.id })
       .from(consentChallenges)
-      .where(and(eq(consentChallenges.status, 'CONSUMED'), lt(consentChallenges.executeBefore, now)));
+      .innerJoin(consentRecords, eq(consentRecords.challengeId, consentChallenges.id))
+      .where(
+        and(
+          eq(consentChallenges.status, 'CONSUMED'),
+          lt(consentRecords.executeBefore, now),
+          isNull(consentRecords.firstAttemptAt),
+        ),
+      );
+    let swept = 0;
     for (const row of stale) {
-      await this.dbh.db
-        .update(consentChallenges)
-        .set({ status: 'CONSUMED_UNUSED' })
-        .where(eq(consentChallenges.id, row.id));
-      await this.audit.record(this.dbh.db, {
-        action: AUDIT_ACTIONS.CONSENT_EXPIRED_SWEPT,
-        actorType: 'SYSTEM',
-        entityType: 'consent_challenges',
-        entityId: row.id,
-        data: { challengeId: row.id },
+      await this.dbh.db.transaction(async (tx) => {
+        // Re-checked in the UPDATE itself: a saga may have stamped first_attempt_at since the SELECT.
+        const updated = await tx
+          .update(consentChallenges)
+          .set({ status: 'CONSUMED_UNUSED' })
+          .where(
+            and(
+              eq(consentChallenges.id, row.id),
+              eq(consentChallenges.status, 'CONSUMED'),
+              notExists(
+                tx
+                  .select({ id: consentRecords.id })
+                  .from(consentRecords)
+                  .where(and(eq(consentRecords.challengeId, row.id), isNotNull(consentRecords.firstAttemptAt))),
+              ),
+            ),
+          )
+          .returning({ id: consentChallenges.id });
+        if (updated.length === 0) return;
+        await this.audit.record(tx, {
+          action: AUDIT_ACTIONS.CONSENT_EXPIRED_SWEPT,
+          actorType: 'SYSTEM',
+          entityType: 'consent_challenges',
+          entityId: row.id,
+          data: { challengeId: row.id },
+        });
+        swept += 1;
       });
     }
-    return stale.length;
+    return swept;
   }
 }
 
@@ -4390,10 +4629,12 @@ Modify `apps/api/src/modules/platform/audit.service.ts` — append to `AUDIT_ACT
   CONSENT_MISMATCH: 'CONSENT_MISMATCH',
   /** An investor cancelled a not-yet-consumed challenge (E4, R-20). */
   CONSENT_CANCELLED: 'CONSENT_CANCELLED',
-  /** consent.expiry.sweep moved a CONSUMED challenge past execute_before to CONSUMED_UNUSED (E4). */
+  /** consent.expiry.sweep moved a CONSUMED challenge past execute_before, whose saga never started, to CONSUMED_UNUSED (E4, RV-03-1). */
   CONSENT_EXPIRED_SWEPT: 'CONSENT_EXPIRED_SWEPT',
   /** drafts.abandon expired a PENDING challenge nobody approved within 24 h (E4). */
   CONSENT_DRAFT_ABANDONED: 'CONSENT_DRAFT_ABANDONED',
+  /** A saga gave up before any P/M write and moved its CONSUMED challenge to CONSUMED_UNUSED; data.reason says why (E4, RV-03-1). */
+  CONSENT_MARKED_UNUSED: 'CONSENT_MARKED_UNUSED',
 ```
 and add `'subjectType'`, `'subjectIds'` to the `AUDIT_DATA_ALLOWLIST` array (both already-primitive-safe: `subjectType` is a string; `subjectIds` is written through `data` only as a count in practice — the allowlist keeps `data` primitive-only, so callers that need the list itself use `entityId`/`entityType`, not `data.subjectIds`; this line documents the reservation without changing `allowListed`'s behaviour, since `subjectIds` is an array and `allowListed` already drops non-primitive values silently).
 
