@@ -39,7 +39,7 @@ Probes answer questions the plans cannot settle from the documentation. Each res
 |---|---|---|
 | P-04 | **FAIL** | FP auto-fills one tenant-default EUIN on every order type even when `euin`/`partner` are omitted. |
 | P-05 | **INCONCLUSIVE** | No ARN in any FP object or report; FP has no per-order ARN field. Needs Cybrilla's ONDC-message evidence or the canary RTA statement. |
-| P-07 | **PENDING** | Three paid orders are `submitted`; ONDC orders cannot be force-settled ("ONDC gateway orders can't be simulated"). Watcher running. |
+| P-07 | **PENDING** | The three orders paid through the simulator failed at 23:00 IST on 10-01 with `fp_payment_url_unused`: a simulated payment does not count as using the payment URL. ONDC orders cannot be force-settled ("ONDC gateway orders can't be simulated"). Next: pay through the payment URL itself. |
 | P-09 | **(a) FAIL, (b) answered** | Units redemption fails at the ONDC gateway (`order_failure_at_gateway`), so T5 is forced; an amount redemption succeeded in 10 s. First instalment now: supported; pause: supported; quarterly: rejected; step-up: not exposed; UPI Autopay: supported. |
 | Lumpsum flow | **PASS to `submitted`; settlement pending** | Plan 03's H-2 order works as written (review ~3 s); string amount `"1000.00"` accepted. |
 
