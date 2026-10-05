@@ -5,6 +5,7 @@ import {
   ComingSoonScreen,
   HomeScreen,
   LoginScreen,
+  RedeemScreen,
 } from '@sanchay/features';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -24,6 +25,10 @@ export function AccountRoute() {
 
 export function ComingSoonRoute({ title }: { title: string }) {
   return <ComingSoonScreen title={title} />;
+}
+
+export function RedeemRoute({ folioId, isin }: { folioId: string; isin: string }) {
+  return <RedeemScreen folioId={folioId} isin={isin} />;
 }
 
 /**

@@ -15,6 +15,7 @@
     "@hookform/resolvers": "catalog:",
     "@sanchay/api-client": "workspace:*",
     "@sanchay/app-core": "workspace:*",
+    "@sanchay/money": "workspace:*",
     "@sanchay/tokens": "workspace:*",
     "@sanchay/ui": "workspace:*",
     "react-hook-form": "catalog:",

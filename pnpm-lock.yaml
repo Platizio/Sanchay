@@ -670,6 +670,9 @@ importers:
       '@sanchay/app-core':
         specifier: workspace:*
         version: link:../app-core
+      '@sanchay/money':
+        specifier: workspace:*
+        version: link:../money
       '@sanchay/tokens':
         specifier: workspace:*
         version: link:../tokens

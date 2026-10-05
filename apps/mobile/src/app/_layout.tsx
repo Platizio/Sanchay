@@ -26,6 +26,7 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="redeem/[folioId]/[isin]" />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="welcome" />
