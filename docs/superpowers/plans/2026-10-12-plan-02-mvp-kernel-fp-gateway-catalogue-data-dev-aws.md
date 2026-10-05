@@ -12,6 +12,7 @@
 
 | Order | Task | Lane | Needs |
 |---|---|---|---|
+| 0 | D0 Plan 01 fixes from the errata backlog (EF8-5, query parameters in logs, AppShell hydration) | Dev A | Plan 01 |
 | 1 | D1 platform kernel tables, idempotency | Dev A | Plan 01 |
 | 2 | D2 JobsModule (pg-boss), worker role | Dev A | D1 |
 | 3 | D3 FpGateway base | Dev A | D1, D2 |
@@ -24,7 +25,7 @@
 | 10 | E25 CDK `SanchayMvpStack-dev` (protected, S2 week 2, R-05) | Dev A | D2, D3, D6, D7 |
 | 11 | D4 FakeFp and smoke harness (starts S3 week 1, outline §0.3) | Dev A | D3 |
 
-The task sections below appear in chunk order (D1–D4, D5–D7, D8–D10, E25); run them in the order above.
+The task sections below appear in chunk order (D0, D1–D4, D5–D7, D8–D10, E25); run them in the order above.
 
 ## Migration numbers
 
@@ -94,14 +95,350 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-34: D8 passes `biome ci`.** `ops-catalogue-seed.ts` had 28 non-null assertions (`row.name!` and the like) and an unused `eq` import, and `catalogue-schema.int.test.ts` had 8 (`amc!.id` and the like) and five unused imports. `biome ci` (`pnpm lint`) rejects every one, and `biome check --write` fixes none. The seed now reads required cells through `cell(row, key)`, which throws with the column's name when a cell is missing or empty, and the test reads `.returning()` rows through `only()`. `navSyncRuns`' unused extra-config parameter became `() => [...]`. Also fixed (outside the assigned list): the test's "40 SEBI categories" case counted 42, because the two CHECK cases before it insert their own `TC_*` categories into the same database; it now counts only the seeded rows. Verified: `biome ci` clean on D8's files, `typecheck` clean, and the six D8 int tests pass (the seed runs twice).
 - **RV-02-35: D8 and D10 rebuild the workspace packages they change (found while verifying; the FR-6/FR-7 class).** `apps/api` reads `@sanchay/domain` and `@sanchay/contract` from `dist/`, and `pnpm --filter=@sanchay/api ...` does not rebuild them. Without a build, D8's `typecheck` failed with TS2305 on `SCHEME_STATUSES` and its `db:generate` stopped with `TypeError: Cannot read properties of undefined (reading 'map')`; D10's api `typecheck` failed with TS2339 on `contract.catalogue`, and `pnpm --filter=@sanchay/api openapi` would have written a document without the catalogue paths (reproduced). Step 4 and Step 5 of both tasks now start with `pnpm exec turbo run build --filter=@sanchay/api^...`. No other Plan 02 task changes a package that `apps/api` reads: D5's new domain exports have no `apps/api` consumer in this plan, and D9 reads its fixtures by file path.
 - **RV-02-36: D10's router reaches the database (found while verifying).** `CatalogueRouter` injected `DB` as a Drizzle `Database`, but `PlatformModule` provides a `DbHandle` (`createDb`), so every catalogue call answered 500 (`this.db.select is not a function`; reproduced by booting the app with the router mounted). It now injects `DbHandle` and passes `this.dbh.db`, the D1 pattern, and answers 200 with the 40 seeded categories. `listSchemes` takes the contract's `ListSchemesInput`, because its `{ q?: string }` parameter failed `typecheck` with TS2379 under `exactOptionalPropertyTypes`. The non-null assertions in the queries (`page[page.length - 1]!`) and in the int test (`amc!`, `cat!`) are gone. Plan 03 E14 replaces this router with the same `Database` injection, so it needs the same fix.
+- **RV-02-37: `requireIdempotency` releases the key of every refusal, not only of a 5xx (backlog round 1, F28; major).** A handler that threw a 4xx left its key `IN_PROGRESS` for 24 h, so a retry after a lost 4xx response, or any client that reused a refused key, got 409 `IDEMPOTENCY_IN_PROGRESS` ("We are still processing your earlier request") for a day, against target design §B.5's "In progress → 409 with `Retry-After: 1`". Now any error the handler throws, 4xx or 5xx, deletes the row and only a returned result is completed and replayed: every [K] handler in Plans 02–04 refuses before it writes or inside a transaction that rolls back (the OTP attempt that `me.verifyEmail` counts and F5's singleton `folio.sync` enqueue are meant to repeat), so a re-run cannot duplicate a write; a failed `complete()` keeps the row, because the handler has run; and the 409 carries `retryAfterSeconds: 1` (D-3). A new int case (429 `OTP_COOLDOWN` leaves no row, and the same key answers 200 once the cooldown passes) fails on the old middleware and passes on the new one against PostgreSQL 18. The clients keep F28's rule (a new key after a final 4xx, one key per intent); F12 and F16 already follow it (Plan 04 FR-17, so the backlog's "F12 reuses the key after a 403" is stale), and only their comments change (RV-03-20, RV-04-F12-1).
+- **RV-02-38: D1 imports `pgErrorCodeOf` (backlog round 2; major).** `pg-errors.ts` on main exports `pgErrorCodeOf` and `pgConstraintOf`, but `idempotency.service.ts` and `runtime-config.ts` imported `pgErrorCode`, so `typecheck` failed with TS2724, and under Vitest every conflict path threw `pgErrorCode is not a function`: the replay, 422, in-flight, expiry and `ReconBreaks.open` cases failed (5 of D1's 10 int cases, reproduced). Both files now import `pgErrorCodeOf`, the "inline it if it is missing" contingency is gone, and the Consumes list names `pgErrorCodeOf` instead of the test helper `pgErrorCode` (`test/int/pg.ts`), which D1 never used. No other Plan 02, 03 or 04 task imports the wrong name: D8's `pgErrorCode` is that test helper, imported from `./pg.js`, and F4's later `ReconBreaks` rewrite drops the import.
+- **RV-02-39: D1's middleware typechecks and lints (found while verifying; major).** `requireIdempotency` returned `Middleware<Record<never, never>, …, never, never>`, so `context.reqHeaders` and `context.resHeaders` were TS2339 and both `.use(...)` calls in `me.router.ts` were TS2345 (the `never` error map rejects the procedure's), and its untyped `let outcome;` is a `noImplicitAnyLet` error that `biome check --write` cannot fix, so Step 4's `typecheck` and Step 5's `pnpm lint` failed (reproduced). It is now built with `os.$context<ORPCGlobalContext>().middleware(...)`, oRPC's form for a middleware that fits any procedure, and a small `beginOrRefuse` maps `begin()`'s two refusals. Verified: `typecheck` exits 0, and after `biome check --write` `biome ci` reports only the existing `noStaticOnlyClass` warnings on every D1 file; the `requireIdempotency(idem, cls)` call that Plans 03 and 04 make is unchanged.
+- **RV-02-40: D1's own tests and staging (found while verifying; major).** The "5xx" case called `t.sms.script?.()` (TS2339: the capture sender has no `script`), claimed an email with a key-less call that got 428, filtered on `actor_id = ''` and asserted nothing about release; it now fails the send with Plan 01's `t.email.failNext` (503 `PROVIDER_UNAVAILABLE`) and retries the same key to 200. The in-flight case raced two `inject`s, and against PostgreSQL 18 the first request finished before the second reached the middleware in 5 of 5 runs (a replayed 200, not a 409); it now parks the first call in the email send until the second is answered. `me-email.int.test.ts` fails 4 of 4 with 428 once the routes are [K] (reproduced), yet it was missing from Files, Step 2 said it stays unedited and no code was given; Step 1 now gives every post a fresh key, and Step 5 stages explicit paths instead of `git add apps/api` (AGENTS.md). Verified on the fixed task: `idempotency.int.test.ts` 11/11 in three runs, the whole `test:int` suite 20 files and 141 tests, `runtime-config.test.ts` 6/6.
+- **RV-02-41: D2 widens `drizzle.config.ts`'s schema globs (D2 review 2026-10-05; blocker).** `schema: './src/modules/*/*.schema.ts'` matches one directory level, and drizzle-kit 0.31.11 imports only the files its globs match, so with D2's `jobs/jobs.schema.ts` in place `db:generate --name=worker_heartbeats` printed "No schema changes, nothing to migrate" while `drizzle-kit check` still passed; D3's `integrations/fp/provider-calls.schema.ts` was missed the same way (both reproduced on a copy of `apps/api`). D2 now sets `schema` to `./src/modules/*/*.schema.ts`, `./src/modules/*/*/*.schema.ts` and `./src/integrations/*/*.schema.ts`, which covers every schema file Plans 02 to 04 create, and adds `src/db/drizzle-config.test.ts`, which fails when a `src/**/*.schema.ts` file is outside the globs (under the old config it named `jobs.schema.ts`). Verified: `db:generate` then wrote `worker_heartbeats` and, with D3's file, `provider_calls`, and a second generate found no drift. D2's Files list also names `jobs.schema.ts` and `migrations.int.test.ts`, which its steps already wrote, and this closes the verify-list item on the glob.
+- **RV-02-42: `/health/ready` fails with 500 and ages the heartbeat by the app clock (D2 review 2026-10-05; major).** D2 expected 503 from `AppError('INTERNAL', {retryable: true})`, but `ERROR_CATALOGUE` maps `INTERNAL` to 500 and `retryable` only sets `data.retryable`; `INTERNAL` is the one error the contract declares for `health.ready`, spec §1.5 makes the route diagnostic and F24's runbook only tells 200 from anything else, so D2 keeps 500 and now says so. The age was `Date.now()` minus a beat stamped by the test `FakeClock` (2026-10-12T04:30Z), so the stale case passed or failed by the calendar (on 2026-10-05 it got 200); `HealthRouter` now injects `CLOCK`. D2 also broke Plan 01's readiness case in `health.int.test.ts` (500: the api role never beats; reproduced), so that file now seeds a fresh beat and expects the three checks, plus a stale case that pins the 500, and `jobs.int.test.ts` keeps one worker-role beat check, which also uses the `workerHeartbeats` import that `biome ci` rejected as unused.
+- **RV-02-43: pg-boss needs no DDL as the D6 app login, and a case pins it (D2 review 2026-10-05; verified, guard added).** In pg-boss 12.34.0, `start` with `migrate: false` installs nothing (it checks the schema version), `createQueue` without `partition: true` is an `INSERT … ON CONFLICT DO NOTHING` into `pgboss.queue` (idempotent across boots), and `send`, `work`, `schedule` and maintenance are DML; only `partition: true` (a table per queue) and `persistQueueStats` (daily `queue_stats` partitions) run DDL. On a database that a non-superuser master migrated with D2's `runMigrations`, a `sanchay_app` member without CREATE on `pgboss` ran `start`, the nine `createQueue`s twice, a BYODB `send` in a committed transaction, `work`, `schedule` and `supervise` without an error, while `createQueue(…, {partition: true})` and `persistQueueStats` failed with 42501. So the migrate task need not create queues and `pgboss` needs no CREATE grant; `JobsService` names the two options that must stay off, and `jobs.int.test.ts` asserts no queue is partitioned (it failed with one `partition: true` queue). This settles the verify-list items on `createQueue` idempotency and the api role's `pgboss` privileges, and Plan 04 F7's open note (RV-04-F7-1).
+- **RV-02-44: D2's `main.ts` passes `typecheck` (D2 review 2026-10-05; major).** After the `migrate` block ends in `process.exit(0)`, TypeScript has narrowed `SANCHAY_APP_ROLE` to `'api' | 'worker'`, so D2's unreachable `else if (env.SANCHAY_APP_ROLE === 'migrate')` was TS2367 and Step 4's `typecheck` failed (reproduced with the repo's TypeScript 6.0.3). The branch is removed; F7 still inserts its `ops` block after the `migrate` block, and the trailing `else` still starts Fastify only for `api`.
+- **RV-02-45: `Jobs` sends through its own application's `JobsService` (D2 review 2026-10-05; major).** `Jobs.enqueue` read a module-level `activeBoss` that every `JobsService.onApplicationShutdown` cleared, so closing a second Nest application in the process broke enqueueing in the first: after D2's `runWorker` and api-role cases closed theirs, the `identity.cleanup` case failed with "Jobs.enqueue called before JobsService started pg-boss" (reproduced), and F7's ops runner boots a second application the same way. `Jobs` now injects `JobsService` and calls its `started()`; consumers still inject `Jobs`, and unit stubs are unchanged.
+- **RV-02-46: D2's worker cases wait for the worker (D2 review 2026-10-05; major).** pg-boss workers poll every 2 s by default, but the `processed once` and `identity.cleanup` cases slept a fixed 500 ms and failed in every run, also with RV-02-45 applied (reproduced). They now poll the outcome for up to 10 s through an `eventually` helper. Verified by running D2's steps from this plan text on a copy of Plan 01's `apps/api` (without D1, so the migration was `0004`) against PostgreSQL 18.2: Step 2 failed as listed, and Steps 4 and 5 passed (`typecheck`, every unit and int file, no drift, and `biome ci` without errors).
+- **RV-02-47: D3, D4 and D9 pass `biome ci` (LNT review A; blocker).** The three tasks still carried 11 non-null assertions, which `pnpm lint` rejects at Step 5 and `biome check --write` leaves alone (the rule's fix is unsafe): `row!` four times in D3's `fp-provider-calls.int.test.ts`, `body.data[0]!`, `actualParts[i]!` and `params.id!` twice in D4, and `DAYS_IN_MONTH[monthIndex]!`, `run!.id` and `parsed.rows[parsed.rows.length - 1]!` in D9. Each is now a guard that `noUncheckedIndexedAccess` accepts: `if (row === undefined) throw`, `?.` inside an assertion, an `undefined` check in `matchPath`, `params.id ?? ''`, `?? 0`, a guard on the inserted run, and `parsed.rows.at(-1)?.navDate ?? null`. D3's `rowId: row!.id` also becomes `asRowId('provider_calls', row.id)` (a plain `string` is not the `RowId` that `AadRef` wants, TS2322), and D9's one-line `scheme_navs` insert is written the way biome formats it, because biome needed two passes for it and Step 5 runs one. Verified on scratch copies: after one `biome check --write`, `biome ci` over every TypeScript block of D3-D7 and D9 reports only partial-file fragments (17 real errors before), and `tsc` is clean on the rewritten files.
+- **RV-02-48: D6's integration test reads `ta.db.db` (LNT review B; blocker).** `notifications.int.test.ts` read `ta.db.database` five times, but `TestDatabase` extends `DbHandle` (`{db, pool, close}`), so D6's `typecheck` failed with five TS2339 errors (reproduced with `tsc` against Plan 01's `test/int/db.ts`) and the test would have thrown at run time. All five now read `ta.db.db`, the RV-02-29 fix in D7, and the unused `notificationDeliveries` import, which `biome ci` rejects, is gone. Verified: `tsc` clean, and the three cases pass on PostgreSQL 18.6 (Testcontainers) with D6's tables migrated.
+- **RV-02-49: D9 counts NAV age in IST calendar days and never uses a future-dated NAV (LNT review C, D-MONEY-067; major).** `NavService.latest` took `floor((now − navDate 00:00 UTC) / 1 day)`, so from 00:00 to 05:30 IST a NAV eight IST days old still graded OK and a NAV dated after today graded OK too, while `runNavSync` parsed with a bound two UTC days ahead although D-MONEY-067 rejects future-dated NAVs at ingest. `NavService` now compares against `istToday(now)`, built on Plan 01's `istDayStart` (`identity/otp.service.ts`; `@sanchay/domain` has no IST date helper before Plan 04 F4), grades a row dated after today IST `UNAVAILABLE`, and `runNavSync` parses with `bound = istToday(now)`; the unused `schemeNavs` import and `todayIso` variable that `biome ci` rejects are gone. New cases at 00:30 IST (8 IST days STALE, 7 OK, today OK, tomorrow UNAVAILABLE) and a 25 Aug row in a 24 Aug sync fail on the old code and pass on the new (PostgreSQL 18.6). Consumers need no change: Plan 03 E22's grade adapter, F5's AMOUNT check and F19's R7 accept only OK, F11's `valueHolding` already leaves a NAV that is `UNAVAILABLE` or dated after today IST unvalued, and their tests run at 10:00 IST.
+- **RV-02-50: D9's own tests can pass (found while verifying LNT review C; blocker).** Run on PostgreSQL 18.6 against D9's own code, Step 4 failed four ways: the parser test's `FIXTURES` URL climbed six directories and left the repo (ENOENT in both fixture cases), the grading case expected STALE for a NAV six days old, the sync case re-inserted the grading case's ISIN into the same database (23505), and its one-row feed tripped NAV-06's 1,000-row floor, so the run ended FAILED. The URL now climbs five, the grading cases use their own ISINs and an 8-day NAV, and the sync feed carries 1,000 filler ISINs. The parser's `DAYS_IN_MONTH` also gave February 29 days, so `29-Feb-2027` parsed and would have failed the `date` insert; it now gives 28, with a new case. Step 4 expects 31 parser cases and three integration cases, and all pass.
+- **RV-02-51: D5's `gen:states` can run (found while verifying LNT review A; blocker).** `node scripts/gen-states.ts` stopped with `ERR_MODULE_NOT_FOUND`, because Node's type stripping does not map `states/index.ts`'s `./mandate.js` imports to `.ts`; and since `states.test.ts` imported the script, the domain `typecheck` failed with TS5097 (an import path ending in `.ts`) and the test ran `main()`, which wrote into a `docs/specs/` that does not exist yet (ENOENT). `renderStatesDoc()` now lives in `packages/domain/src/states/index.ts`, where the test calls it; the script imports it from the built `packages/domain/dist` and creates `docs/specs/` when needed, and the root `gen:states` script builds `@sanchay/domain` first (CI's drift step already runs after `pnpm build`; Plan 04 F4 and F28 keep calling `pnpm gen:states`). Verified: domain `tsc` clean; after a build the first run writes `docs/specs/states.md` and the second writes nothing.
+- **RV-02-52: D5's tests and commands (found while verifying LNT review A; blocker).** The 'terminal states have no exits' case failed on spec §4.2's `SETTLED → REVERSED` (`fp_reversed`) edge, which the transition case above it requires; it now exempts that one edge. `pnpm --filter=@sanchay/domain test states.test.ts` exits 1 even when every case passes, because the package's 95% coverage gate counts every `src` file (reproduced: a filtered run on Plan 01's domain package fails all four thresholds), so Steps 2, 4 and 5 run the suite unfiltered. The unused `fpStateToOrderStatus` import in `states/index.ts` and `PLAN_STATUSES` in the test, which `biome ci` rejects, are gone. Verified: 146 domain tests pass, with 100% statements and lines and 96.77% branches.
+- **RV-02-53: D4 typechecks against undici's types (found while verifying LNT review A; blocker).** `FakeFp`'s router handed `MockInterceptor.reply` a `FakeReply` whose `data` was `unknown`, but undici's `MockReplyOptions.data` is `object | Buffer | string` (TS2769), and `tools/fp-probes`' client passed `body: undefined` to `request`, which `exactOptionalPropertyTypes` refuses (TS2379). `FakeReply.data` and the scripted `FpScriptMode` body are now `object` (every FakeFp reply and script in Plans 02-04 is a JSON object), and the client passes `null`. Verified with undici 8.10.2, which the workspace already installs (D3's catalog pin is chosen at execution): `tsc` is clean on `fake-fp.ts` and on `tools/fp-probes`, whose two harness tests and four `--env=fake` chains pass.
+- **RV-02-54: D9's `NavSyncJob` typechecks (found while verifying LNT review C; blocker).** `NavSyncDeps.reconBreaks` declared `severity: string` and a required `detail`, so the addendum's `reconBreaks: ReconBreaks` failed D9's `typecheck` with TS2322: D1's `ReconBreaks.open` takes `severity: 'WARNING' | 'CRITICAL'` and an optional `detail` (reproduced against D1's and D2's signatures). The structural type now matches D1's input. Verified: `nav-sync.job.ts`, assembled with the addendum as Step 3 says, typechecks, and the three integration cases still pass.
+- **RV-02-55: SIP availability comes from FP's monthly SIP row (errata backlog, round 1, F18-F19; major).** D10's `toThresholds` copied the lumpsum limits into the SIP fields when FP listed no monthly SIP row, so on the wire "has SIP" meant "has a lumpsum row": F19's FUND-01 offered "Start SIP" on such a scheme and F10's quote refused it with `SCHEME_NOT_ORDERABLE`, against D-MONEY-026 ("a scheme with no SIP threshold is not SIP-eligible"). Nothing wrote `schemes.sip_dates` either, so F2's `sipSchemeOf` would have refused every synced scheme. D8's `SchemeThresholds` SIP fields are now nullable, `toThresholds` leaves them null without the monthly row, the new `toSipDates` stores that row's days in 1..28, and `sip_allowed` is FP's flag with both present; E14 serves it as `sipAllowed` (RV-03-22), F2 refuses null limits (RV-04-F2-4) and F19's "Start SIP" reads the flag (RV-04-F19-1). Verified in a scratch build of D8 and D10 on Plan 01's code: `tsc` clean and `fp-sync.job.test.ts` 5/5, whose two new cases fail on the old code; in the FP sandbox export, 14 of 482 plans (7 Regular-Growth) have a lumpsum row and no monthly SIP row, and all 344 monthly rows carry `dates`.
+- **RV-02-56: D10's int test uses helpers that exist and collision-free seeds (errata backlog, round 2; blocker).** The test imported `httpGet` and `signIn` from `test/int/http.ts`, which exports neither, so D10's `typecheck` failed with TS2305 (reproduced on Plan 01's code); a bare `inject` would also get 403 `ORIGIN_REJECTED` from `ClientGuard`, not 401. It now signs in once with Plan 01's `signInWeb` and sends `webHeaders`. `seedOneScheme` took its category code and ISIN from `Date.now()`, and 200 back-to-back calls against PostgreSQL 18 hit `sebi_categories_code_uq` 3 times and `schemes_isin_uq` twice; it now numbers them from a per-file counter (each test file has its own database). The rewritten file passes 4/4 against PostgreSQL 18.2 with D8 and D10 built on Plan 01's code, and 5/5 with E14's appended case (RV-03-23).
+- **RV-02-57: D8 keeps the `SchemeStatus` re-export that F19 imports (found while verifying; major).** D8's Step 3 told the executor to drop `export { SCHEME_STATUSES, type SchemeStatus } from '@sanchay/domain'` from `catalogue.schema.ts`, but Plan 04 F19's `publish-gate.apply.ts` imports `type SchemeStatus` from that file, so following D8 made F19 fail with TS2305 (reproduced with a copy without the line). The instruction now keeps the line, and its comment says why. Checked: the `SCHEME_STATUSES` import and the re-export together pass `tsc` and `biome ci`.
+- **RV-02-58: D10's unit test settles in one `biome check --write` (found while verifying; minor).** biome 2.5.14 formats the one-line `fundScheme: vi.fn().mockResolvedValue({ … })` mocks differently on its first and second `--write` passes, so after Step 5's single write `pnpm lint` (`biome ci`) still failed on `fp-sync.job.test.ts` (reproduced with the repo's biome). The mocks are now written in the multi-line form biome converges to, and `biome ci` is clean after one write. F19's appended case gets the same change (RV-04-F19-2).
+- **RV-02-59: the api image loads Plan 03 E9's JSON import (2026-10-05 review, item A; blocker from E9 on).** E9's `risk-profile.service.ts` imports `../../../../../data/risk-questionnaire-v1.0.0.json` `with { type: 'json' }` when its module loads, in api and worker; from `dist/modules/onboarding` that is `/repo/data`, which E25's image did not have (`ERR_MODULE_NOT_FOUND`). Worse, the api's `.swcrc` lets SWC drop the attribute, so Node 24.21 refuses the module even when the file is there (`ERR_IMPORT_ATTRIBUTE_MISSING`, reproduced with the repo's Nest CLI 11.0.24 and `@swc/core` 1.16.2), while E9's typecheck and its Vitest runs (`swcrc: false`) stay green. E25 now copies `data/` (D8 creates it first) and sets `jsc.experimental.keepImportAttributes` (the Plan 01 api's 52 compiled files are byte-identical with it), and a new infra test pins both. `docs/legal` stays with F1 (RV-04-F1-1): E3 creates it in Plan 03, nothing reads it at module load, and a `COPY` of a missing path fails the build (`"/docs/legal": not found`, Docker 29.8.1).
+- **RV-02-60: E25's master-user test can fail (2026-10-05 review, item B; minor).** `expect(JSON.stringify(template.toJSON())).not.toContain('"username":"sanchay_app"')` could never fail, because `SecretStringTemplate` is a JSON string whose quotes `JSON.stringify` escapes. With aws-cdk-lib 2.216.0 and `DB_MASTER_USER` mutated to `sanchay_app`, the old assertion still passed. The test now parses every generated secret's `SecretStringTemplate` and expects `sanchay_master` and no `sanchay_app`; it fails on the mutated stack and still passes once F1 adds `sanchay_app_login` and `sanchay_readonly_login`.
+- **RV-02-61: E25's `deploy.yml` runs the migrate task and fails on a rolled-back deployment (2026-10-05 review, item C; major).** Spec §2.4 runs the one-off migrate task before each deploy, but `deploy.yml` never ran it and ADR-0014 left it to a manual step. RV-02-22 had fixed the service name and added `aws ecs wait services-stable`, but that waiter also succeeds once the circuit breaker has rolled the deployment back (it only needs one deployment with `runningCount == desiredCount`), so a failed rollout still ended green. E25 now carries F1's `ENV_NAME`, its `Run the migrate task` step between the image push and `cdk deploy`, and its last step, which fails unless the forced deployment's `rolloutState` is `COMPLETED`; ADR-0014's decision, step 7 and "every later deploy" line follow. Every `run:` block passes `bash -n`, and the workflow F1 produces is unchanged apart from two comments (RV-04-F1-1).
+- **RV-02-62: the document bucket follows spec §2.4 (2026-10-05 review, item D; minor).** The spec's bucket is `sanchay-{env}-docs` with public access blocked, SSE and versioning; E25 built `sanchay-{env}-documents` without versioning, and F1 added nothing. The bucket now has the spec's name and `versioned: true` (no plan names it), and a new test pins the name, SSE, the public access block and versioning. It fails on the old code; F1's prod template shows `sanchay-prod-docs`, versioned.
+- **RV-02-63: the apex answers 301 to www (2026-10-05 review, item D; minor).** Spec §2.4, H-1, ADR-0005 and PB-41 send the apex to `www` with a 301 at the ALB, but neither E25 nor F1 built it (the certificate already covered the apex), and once the apex points at the ALB, `apps/web`'s routing (any host other than app is www) would serve the www pages there instead of redirecting. E25 adds the HTTPS listener rule `ApexToWww` (apex host to `www.<domain>`, `HTTP_301`, path and query kept) and an apex A-alias record. A new dev test pins both and fails on the old code; F1's prod template gets `sanchay.in` with the same redirect, and F1's own 35 tests still pass. The post-deploy checklist gains `curl.exe -s -o NUL -w "%{http_code} %{redirect_url}\n" https://dev.sanchay.in/`, which printed `301 https://www.dev.sanchay.in/` from PowerShell 5.1 and Git Bash against a local stand-in.
+- **RV-02-64: two spec §2.4 deviations recorded for an owner ruling (2026-10-05 review, item D; owner decision).** E25 sends every container to one log group, `/sanchay/{env}/app`, separated by awslogs stream prefix, instead of `/sanchay/{env}/{web,api,worker}`. It also pushes two ECR repositories per env (`sanchay-{env}-api`, `sanchay-{env}-web`) instead of `sanchay/app`. F1's metric filters and alarms and the F7, F20, F23, F24 and F27 runbook lines (`/sanchay/prod/app`, prefixes `prod/ops`, `prod/worker` and `prod/api`) depend on the first, and `deploy.yml`, ADR-0014 and F1's `grantPullPush` on the second. Both stay, and E25's Interfaces now lists them as deviations awaiting a ruling.
+- **RV-02-65: E25's Step 5 re-runs every Step 4 check (AGENTS.md; minor).** AGENTS.md has Step 5 re-run the Step 4 test and typecheck commands after `biome check --write`, which here rewrites `env.ts`, `env.test.ts` and `next.config.ts`. E25's Step 5 re-ran the infra typecheck, the infra test and the api env test, but not the api and web typechecks that Step 4 runs. It now re-runs all five, in Step 4's order, before `pnpm lint`.
+- **RV-02-66: Task D0 fixes three Plan 01 defects from the errata backlog (2026-10-05; major).** EF8-5: `ContactEmailService.verify` let another investor's wrong codes bump, and at the fifth lock, a `VERIFY_EMAIL` challenge, because `OtpService.verify` commits its attempt bump before the in-transaction owner check (reproduced on `main`: investor B's fifth wrong code answered `OTP_LOCKED`). B4: the `err` serializer, and the `msg` pino copies from a message-less error, logged a `DrizzleQueryError`'s bound parameters (reproduced: a mobile number in `msg`, `err.message`, `err.stack` and `err.params`). C9: at desktop width `AppShell` rendered the sidebar on the client's first render while the server rendered the bottom nav, so React reported "Hydration failed" (reproduced under jsdom by rendering at width 0 and hydrating at 1280). D0 refuses a foreign challenge before `OtpService.verify`, redacts bound parameters in the serializer and in a `logMethod` hook, and reads the width through `useSyncExternalStore` with a server snapshot of 0. Each test failed on `main` and passes with its fix (scratch worktree of `main`: api unit 133/133, api integration 130/130, features 23/23, typechecks and `pnpm lint` clean). D1's `me-email.int.test.ts` counts include D0's case.
+- **RV-02-67: D1 `ReconBreaks.open` never aborts its caller's transaction (2026-10-05 backlog review, the D1 agent's finding G; major).** It caught `23505` from `recon_breaks_open_uq`, but a failed INSERT aborts the whole PostgreSQL transaction and the caller's COMMIT then silently becomes a ROLLBACK, so the first repeat of a break inside a transaction (D9's NAV sync, Plan 03's handlers, Plan 04's daily folio checks) would discard that transaction's writes without an error. Plan 04 F4 carried the fix (`ON CONFLICT … DO NOTHING` on the index predicate) for S4; D1 now has it from the start, with F4's in-transaction case added to `idempotency.int.test.ts` (12 cases), and F4 no longer edits `runtime-config.ts` (Plan 04 RV-04-F4-3). `runtime-config.ts` no longer imports `pg-errors`. Verified on PostgreSQL 18 in a scratch worktree of `main` plus D0: the new case fails on the old class ("current transaction is aborted") and passes on the new one.
+- **RV-02-68: D6 `Notify.enqueue` uses `ON CONFLICT DO NOTHING` (2026-10-05 backlog review; major).** It caught `23505` from `notifications_dedupe_uq` the same way, and its callers enqueue inside their own transactions with per-entity keys (Plan 03 `order-placed:` and `refund:`, Plan 04 `order-allotted:`, `sip-active:`, `redemption-processed:` and others), so a duplicate from a retried job or a racing worker would have rolled the caller's writes back silently. It now inserts with `.onConflictDoNothing({ target: notifications.dedupeKey }).returning({ id })` and enqueues `notifications.send` only when a row was inserted; the unit mocks follow the new chain, and `notify.service.ts` no longer imports `pg-errors`. The drizzle-orm 0.45.3 chain was checked on PostgreSQL 18: the duplicate returns no row and the transaction commits its other writes.
 
 **Verify at execution time (not changed here):**
-- `biome ci` rejects non-null assertions, and three tasks whose code the 2026-10-01 round did not change still carry them: D3's `fp-provider-calls.int.test.ts` (`row!` in three places), D4 (`body.data[0]!` in its unit test, `actualParts[i]!` in `tools/fp-probes`, and `params.id!` twice in `FakeFp`) and D9 (`DAYS_IN_MONTH[monthIndex]!`, `run!.id` and `parsed.rows[parsed.rows.length - 1]!`). Replace each with a guard, as RV-02-34 and RV-02-36 do, before that task's Step 5 `pnpm lint`.
-- `apps/api/drizzle.config.ts` reads `schema: './src/modules/*/*.schema.ts'`, which matches one directory level only. Checked with drizzle-kit itself (2026-10-01): it ignores D2's `src/modules/platform/jobs/jobs.schema.ts` and D3's `src/integrations/fp/provider-calls.schema.ts`, so D2's and D3's `db:generate` steps would create neither `worker_heartbeats` nor `provider_calls`, and `db:check`, which runs the same config, cannot notice. Open item raised with the assembler, not changed here: before D2's `db:generate`, the config must also cover those two paths (a `schema` array), or the two files must move to one-level module directories.
-- D6's `notifications.int.test.ts` reads `ta.db.database` five times; `TestDatabase` extends `DbHandle`, whose Drizzle instance is `ta.db.db` (TS2339 in D6's `typecheck`, by inspection). RV-02-29 made the same fix in D7.
-- `boss.createQueue` must be idempotent in pg-boss 12.34.0; the D2 integration tests boot twice.
-- The api-role DB user needs privileges on the `pgboss` schema for `send`.
+- D2 creates every queue with pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises: two `send`s with the same key both create a job, and one `fetch` activates both (checked against pg-boss 12.34.0). The other policies differ: `singleton` and `key_strict_fifo` activate one job per key at a time, and `stately`, `short` and `exclusive` drop a second send while the first is queued, keyless sends included. Target design T5, Plan 03 (E1, E4, E6, E7, E20, E21) and Plan 04 (F2, F5, F7, F28) rely on `singletonKey` = aggregate id to keep one job per aggregate, and D2's case `singletonKey serialises jobs for the same aggregate` only checks that the second enqueue does not throw. Owner decision before D2 first runs against a shared database: a policy per job name, passed to `createQueue`, and a case that pins it. It cannot be changed in place later: `createQueue` on an existing queue keeps the old policy (`ON CONFLICT DO NOTHING`), and `updateQueue` refuses `policy`.
 - `Money.toWire()` must format whole rupees as `'500.00'` (D10's new test assumes it).
+
+---
+
+### Task D0: Plan 01 fixes from the errata backlog: email-OTP lockout (EF8-5), query parameters in logs, AppShell hydration (Dev A, 3 h)
+
+> Added 2026-10-05 (RV-02-66) from the Plan 01 section of `docs/delivery/plan-errata-backlog.md`. Each defect was reproduced on `main` (`a75ae03`), and each fix was verified test-first in a scratch worktree: api unit 133 passed (132 before), api integration 130 passed (129 before), features 23 passed (22 before), both typechecks clean, `pnpm lint` clean. No migration, no contract change, no new dependency.
+
+**Files:**
+- Create:
+  - `packages/features/src/home/AppShell.hydration.test.tsx`
+- Modify:
+  - `apps/api/src/modules/identity/contact-email.service.ts` (EF8-5)
+  - `apps/api/test/int/me-email.int.test.ts`
+  - `apps/api/src/modules/platform/logging.ts` (B4's `err` serializer)
+  - `apps/api/src/modules/platform/logging.test.ts`
+  - `packages/features/src/home/AppShell.tsx` (C9)
+
+**Interfaces:**
+- Prerequisites: Plan 01 only (B4 `buildPinoOptions`, B19/B20 `ContactEmailService`, C9 `AppShell`). D0 runs first in Dev A's lane, so the suite counts below are `main`'s plus D0's three new cases.
+- Consumes:
+  - `OtpService.verify` (unchanged). It bumps `otp_codes.attempts` on its own bookkeeping pool, already committed, before it compares the code; at the fifth wrong code it burns the code `LOCKED`, and three locked codes in 60 min lock the destination for 30 min. `otpCodes`, `UUID_RE` (`platform/ids.ts`), `AppError('OTP_INVALID')`.
+  - pino 10.3.1 with pino-std-serializers 7.1.0: `stdSerializers.err` copies every enumerable property of the error (a `DrizzleQueryError`'s `query` and `params`) and appends the causes' messages and stacks. With no message argument, pino copies `err.message` into the line's `msg`.
+  - drizzle-orm 0.45.3 `DrizzleQueryError` (exported from `drizzle-orm`): its message is `Failed query: <sql>`, a newline, then `params: ${params}`.
+  - react-native-web 0.21.2 `Dimensions`: the window width is 0 without a DOM (Next's server render) and the real width in the browser; under jsdom it reads `document.documentElement.clientWidth` and updates on `resize`. React 19.2 `useSyncExternalStore` uses the server snapshot while hydrating.
+- Produces:
+  - `serializeErr(err)` and `redactBoundParams(text, err)`, exported from `logging.ts`, plus a pino `hooks.logMethod` in `buildPinoOptions`. No log line carries a value bound to a failing query: not in `err.message`, `err.stack`, `err.params` or the line's `msg`. The SQL text (`err.query`) stays.
+  - `ContactEmailService.verify` answers `OTP_INVALID` for a challenge that is not the caller's `VERIFY_EMAIL` challenge before `OtpService.verify` runs, so another investor's wrong codes never bump its attempts. The in-transaction check stays as defence in depth.
+  - `AppShell` reads the width through `useSyncExternalStore(subscribeToWindow, windowWidth, serverWidth)`: hydration renders the server's layout (width 0) and React re-renders with the real width straight after; a client-only mount (and native) reads the real width at once.
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/api/src/modules/platform/logging.test.ts` (modify: one import after `node:stream`'s, and one case before "leaves non-plain objects untouched and bounds depth"):
+```ts
+import { DrizzleQueryError } from 'drizzle-orm';
+```
+
+```ts
+  it('never logs the bound parameters of a failed query (EF-B4)', () => {
+    const { logger, lines } = capture();
+    const failed = () =>
+      new DrizzleQueryError(
+        'update "app"."investors" set "mobile" = $1 where "id" = $2',
+        ['9876543210', 'inv-1'],
+        new Error('duplicate key value violates unique constraint "investors_mobile_bidx_uq"'),
+      );
+    logger.error({ err: failed() });
+    logger.error(failed());
+    logger.error({ err: failed() }, 'orpc');
+    expect(lines).toHaveLength(3);
+    for (const raw of lines) {
+      expect(raw).not.toContain('9876543210');
+      const line = JSON.parse(raw);
+      expect(line.err.type).toBe('DrizzleQueryError');
+      expect(line.err.message).toContain('Failed query: update "app"."investors"');
+      expect(line.err.message).toContain(`params: ${REDACTED}`);
+      expect(line.err.message).toContain('duplicate key value violates unique constraint');
+      expect(line.err.stack).toContain(`params: ${REDACTED}`);
+      expect(line.err.params).toBe(REDACTED);
+    }
+  });
+```
+
+`apps/api/test/int/me-email.int.test.ts` (modify: `otpCodes` joins the schema import, and one case is appended inside `describe('/me/email', …)` after the BOLA case):
+```ts
+import { investorContacts, investors, otpCodes } from '../../src/db/schema.js';
+```
+
+```ts
+  it("never lets another investor's wrong codes lock a challenge (EF8-5)", async () => {
+    const a = await signedIn('9844400007');
+    const b = await signedIn('9844400008');
+    const sent = await post('/me/email/otp', a.h, { email: 'ef85.a@example.com' });
+    const challengeId = sent.json().challengeId as string;
+    const code = t.email.latestCode('ef85.a@example.com');
+    const wrong = code === '000000' ? '111111' : '000000';
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const res = await post('/me/email/verify', b.h, { challengeId, code: wrong });
+      expect([res.statusCode, res.json().code]).toEqual([401, 'OTP_INVALID']);
+    }
+    const [row] = await t.db.db
+      .select({ attempts: otpCodes.attempts, consumedAt: otpCodes.consumedAt })
+      .from(otpCodes)
+      .where(eq(otpCodes.id, challengeId));
+    expect(row).toEqual({ attempts: 0, consumedAt: null });
+    const own = await post('/me/email/verify', a.h, { challengeId, code });
+    expect(own.statusCode).toBe(200);
+  });
+```
+
+`packages/features/src/home/AppShell.hydration.test.tsx` (create):
+```tsx
+import { createWebApiClient } from '@sanchay/api-client';
+import { AppText } from '@sanchay/ui';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
+import { afterEach, describe, expect, it } from 'vitest';
+import { ApiProvider } from '../api/ApiContext';
+import { NavProvider } from '../nav/NavContext';
+import { PlatformProvider } from '../platform/PlatformContext';
+import { makeNav, makePlatform, TEST_ORIGIN } from '../test-utils';
+import { AppShell } from './AppShell';
+
+/** jsdom has no layout: react-native-web reads the window width from documentElement.clientWidth. */
+function setViewportWidth(width: number) {
+  Object.defineProperty(document.documentElement, 'clientWidth', {
+    configurable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event('resize'));
+}
+
+function shell() {
+  const client = createWebApiClient({
+    origin: () => TEST_ORIGIN,
+    onUnauthenticated: () => undefined,
+  });
+  return (
+    <QueryClientProvider client={new QueryClient()}>
+      <ApiProvider client={client}>
+        <PlatformProvider value={makePlatform()}>
+          <NavProvider value={makeNav()}>
+            <AppShell navigation={{ active: 'home' }}>
+              <AppText>Body</AppText>
+            </AppShell>
+          </NavProvider>
+        </PlatformProvider>
+      </ApiProvider>
+    </QueryClientProvider>
+  );
+}
+
+afterEach(() => {
+  setViewportWidth(0);
+});
+
+describe('AppShell hydration (C9)', () => {
+  it('hydrates the server HTML at desktop width without a mismatch, then shows the sidebar', async () => {
+    // The server has no window, so react-native-web reports width 0 there.
+    setViewportWidth(0);
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(shell());
+    expect(container.querySelector('[data-testid="app-nav-bottom"]')).not.toBeNull();
+    document.body.appendChild(container);
+    setViewportWidth(1280);
+    const errors: unknown[] = [];
+    await act(async () => {
+      hydrateRoot(container, shell(), { onRecoverableError: (error) => errors.push(error) });
+    });
+    expect(errors).toEqual([]);
+    expect(container.querySelector('[data-testid="app-nav-sidebar"]')).not.toBeNull();
+    container.remove();
+  });
+});
+```
+
+- [ ] **Step 2: Run them to confirm they fail**
+
+```
+pnpm exec turbo run build --filter=@sanchay/api^... --filter=@sanchay/features^...
+pnpm --filter=@sanchay/api test logging
+```
+Expected failure: 1 failed, 6 passed. "never logs the bound parameters of a failed query (EF-B4)" fails on `expected '{"level":50,…' not to contain '9876543210'`: the line carries the value in `msg`, `err.message`, `err.stack` and `err.params`.
+
+```
+pnpm --filter=@sanchay/api test:int me-email
+```
+Expected failure: 1 failed, 4 passed: `expected [ 401, 'OTP_LOCKED' ] to deeply equal [ 401, 'OTP_INVALID' ]`. Investor B's fifth wrong code has locked investor A's code.
+
+```
+pnpm --filter=@sanchay/features test AppShell
+```
+Expected failure: 1 failed. `errors` holds React's recoverable error "Hydration failed because the server rendered HTML didn't match the client" (server `app-nav-bottom`, client `app-nav-sidebar`).
+
+- [ ] **Step 3: Minimal implementation**
+
+`apps/api/src/modules/identity/contact-email.service.ts` (modify):
+- `import { eq } from 'drizzle-orm';` becomes `import { and, eq } from 'drizzle-orm';`, and `import { UUID_RE } from '../platform/ids.js';` follows the `errors.js` import.
+- `verify` gains these lines at the top of its body, before `const result = await this.dbh.db.transaction(`:
+```ts
+    // EF8-5: OtpService.verify commits its attempt bump on its own pool before it compares the code, so a
+    // challenge that is not this investor's is refused here, untouched. Another investor's wrong codes
+    // would otherwise lock the owner's code, and three locked codes in 60 min lock the owner's email.
+    if (!(await this.isOwnChallenge(auth.investorId, challengeId)))
+      throw new AppError('OTP_INVALID');
+```
+- The class gains, after `verify`:
+```ts
+  private async isOwnChallenge(investorId: string, challengeId: string): Promise<boolean> {
+    if (!UUID_RE.test(challengeId)) return false;
+    const [row] = await this.dbh.db
+      .select({ referenceId: otpCodes.referenceId })
+      .from(otpCodes)
+      .where(and(eq(otpCodes.id, challengeId), eq(otpCodes.purpose, 'VERIFY_EMAIL')))
+      .limit(1);
+    return row?.referenceId === investorId;
+  }
+```
+
+`apps/api/src/modules/platform/logging.ts` (modify):
+- Insert after `stripQuery`:
+```ts
+/**
+ * The "params: <values>" texts of every DrizzleQueryError in an error's cause chain. drizzle's message
+ * is "Failed query: <sql>", a newline, then "params: " + String(params), so the same String(params)
+ * finds them exactly in the message and the stack (EF-B4: a value bound to a failing query may be PII).
+ */
+function boundParamsTexts(err: Error): string[] {
+  const texts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; current instanceof Error && depth < MAX_DEPTH; depth++) {
+    const params: unknown = (current as { params?: unknown }).params;
+    if (Array.isArray(params) && params.length > 0) texts.push(`params: ${String(params)}`);
+    current = current.cause;
+  }
+  return texts;
+}
+
+export function redactBoundParams(text: string, err: Error): string {
+  let out = text;
+  for (const found of boundParamsTexts(err)) out = out.split(found).join(`params: ${REDACTED}`);
+  return out;
+}
+
+/** pino's standard error serializer, minus bound query parameters (EF-B4). */
+export function serializeErr(err: Error): ReturnType<typeof stdSerializers.err> {
+  const out = stdSerializers.err(err);
+  if (!(err instanceof Error)) return out;
+  if (out.params !== undefined) out.params = REDACTED;
+  out.message = redactBoundParams(out.message, err);
+  if (typeof out.stack === 'string') out.stack = redactBoundParams(out.stack, err);
+  return out;
+}
+
+function errorOf(value: unknown): Error | undefined {
+  if (value instanceof Error) return value;
+  if (isPlainObject(value) && value.err instanceof Error && value.msg === undefined)
+    return value.err;
+  return undefined;
+}
+```
+- In `buildPinoOptions`, `err: stdSerializers.err,` becomes `err: serializeErr,` and `hooks` follows `serializers`:
+```ts
+    serializers: {
+      req: (req: SerializableReq) => ({ id: req.id, method: req.method, url: stripQuery(req.url) }),
+      res: (res: SerializableRes) => ({ statusCode: res.statusCode }),
+      err: serializeErr,
+    },
+    hooks: {
+      // With no message, pino copies err.message into the line's msg; redact it there too (EF-B4).
+      logMethod(args, method) {
+        const err = args.length === 1 ? errorOf(args[0]) : undefined;
+        if (err === undefined) return method.apply(this, args);
+        return method.apply(this, [args[0], redactBoundParams(err.message, err)] as Parameters<
+          typeof method
+        >);
+      },
+    },
+```
+
+`packages/features/src/home/AppShell.tsx` (modify):
+- The imports become `import { type ReactNode, useSyncExternalStore } from 'react';` and `import { Dimensions, StyleSheet, View } from 'react-native';` (`useWindowDimensions` goes).
+- Insert before `export function AppShell(`:
+```tsx
+function subscribeToWindow(onChange: () => void): () => void {
+  const subscription = Dimensions.addEventListener('change', onChange);
+  return () => subscription.remove();
+}
+
+const windowWidth = (): number => Dimensions.get('window').width;
+
+/**
+ * The server has no window (react-native-web reports width 0), so hydration renders with 0 like the
+ * server HTML and React re-renders with the real width straight after; a client-only mount reads the
+ * real width at once (C9 hydration fix).
+ */
+const serverWidth = (): number => 0;
+```
+- In `AppShell`, `const { width } = useWindowDimensions();` becomes `const width = useSyncExternalStore(subscribeToWindow, windowWidth, serverWidth);`.
+
+- [ ] **Step 4: Run tests to confirm they pass**
+
+```
+pnpm exec turbo run build --filter=@sanchay/api^... --filter=@sanchay/features^...
+pnpm --filter=@sanchay/api test
+pnpm --filter=@sanchay/api typecheck
+pnpm --filter=@sanchay/api test:int
+pnpm --filter=@sanchay/features test
+pnpm --filter=@sanchay/features typecheck
+```
+Expected: api unit 133 passed (19 files; 132 before); api integration 130 passed (19 files; 129 before), including the existing BOLA case; features 23 passed (8 files; 22 before); both typechecks clean.
+
+- [ ] **Step 5: Commit**
+
+```
+pnpm exec biome check --write apps/api/src/modules/identity/contact-email.service.ts apps/api/test/int/me-email.int.test.ts apps/api/src/modules/platform/logging.ts apps/api/src/modules/platform/logging.test.ts packages/features/src/home/AppShell.tsx packages/features/src/home/AppShell.hydration.test.tsx
+pnpm exec turbo run build --filter=@sanchay/api^... --filter=@sanchay/features^...
+pnpm --filter=@sanchay/api test
+pnpm --filter=@sanchay/api typecheck
+pnpm --filter=@sanchay/api test:int
+pnpm --filter=@sanchay/features test
+pnpm --filter=@sanchay/features typecheck
+pnpm lint
+git add apps/api/src/modules/identity/contact-email.service.ts apps/api/test/int/me-email.int.test.ts apps/api/src/modules/platform/logging.ts apps/api/src/modules/platform/logging.test.ts packages/features/src/home/AppShell.tsx packages/features/src/home/AppShell.hydration.test.tsx
+git commit -m "fix: stop cross-investor email-OTP lockout, keep query parameters out of logs, hydrate AppShell" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands, then re-add and re-commit.
 
 ---
 
@@ -121,13 +458,14 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
   - `apps/api/src/db/schema.ts`
   - `apps/api/src/modules/identity/me.router.ts`
   - `apps/api/test/int/migrations.int.test.ts`
+  - `apps/api/test/int/me-email.int.test.ts` (every POST sends a fresh `Idempotency-Key`, RV-02-40)
 - Generated: `apps/api/drizzle/0004_platform_kernel.sql` and `drizzle/meta/*` (the number is assigned at merge, in DAG order, per §0.1 of the outline; this task assumes `0004` since `0003_grants.sql` is the current head — renumber if another Plan-02 task's migration merges first).
 
 **Interfaces:**
 - Prerequisites: Plan 01 in full (B1 `newId`/`TableName`, B6 `appSchema`/`bytea`/`tstz`/`stdColumns`/`inList`/`dbUuidv7`/`createDb`/`createTestDatabase`, B7 grants pattern, B8 `AppError`/`normalizeOrpcError`, B9 `buildOrpcConfig`, B12/B19 `me.requestEmailOtp`/`me.verifyEmail` with the `IDEMPOTENCY_ERRORS` already declared in the contract, B18 `bootTestApp`).
 - Consumes:
   - From `@sanchay/contract` (already shipped, no change needed): `ERROR_CATALOGUE.IDEMPOTENCY_KEY_REQUIRED = 428`, `.IDEMPOTENCY_KEY_REUSED = 422`, `.IDEMPOTENCY_IN_PROGRESS = 409` — `packages/contract/src/me.ts` already declares these three codes on `requestEmailOtp` and `verifyEmail` with the comment *"The Idempotency-Key codes are declared now; the S2 kernel interceptor enforces them."* This task is that interceptor; **no contract file changes**.
-  - From the API: `appSchema`, `bytea`, `tstz`, `inList`, `dbUuidv7` (`db/app-schema.ts`); `Database`, `DbExecutor`, `DB`, `DbHandle` (`db/client.ts`); `newId`, `TableName` (`platform/ids.ts`); `AppError` (`platform/errors.ts`); `CLOCK`, `Clock` (`platform/clock.ts`); `PlatformModule` (`platform/platform.module.ts`); `SanchayClsStore` (`platform/request-context.ts`); `requireAuth` (`identity/request-auth.ts`); `bootTestApp`, `TestApp` (`test/int/app.ts`); `signInNative` (`test/int/flows.ts`); `nativeHeaders` (`test/int/http.ts`); `pgErrorCode` (`test/int/pg.ts`).
+  - From the API: `appSchema`, `bytea`, `tstz`, `inList`, `dbUuidv7` (`db/app-schema.ts`); `Database`, `DbExecutor`, `DB`, `DbHandle` (`db/client.ts`); `newId`, `TableName` (`platform/ids.ts`); `AppError` (`platform/errors.ts`); `CLOCK`, `Clock` (`platform/clock.ts`); `PlatformModule` (`platform/platform.module.ts`); `SanchayClsStore` (`platform/request-context.ts`); `requireAuth` (`identity/request-auth.ts`); `bootTestApp`, `TestApp` (`test/int/app.ts`); `signInNative` (`test/int/flows.ts`); `nativeHeaders` (`test/int/http.ts`); `pgErrorCodeOf` (`platform/pg-errors.ts`, Plan 01, unchanged; RV-02-38); `ORPCGlobalContext` (`@orpc/nest`, extended by B9's `orpc.ts`) and `os` (`@orpc/server`) for the middleware (RV-02-39).
   - **Deviation from outline:** `orpc.ts` is **not** modified. `buildOrpcConfig` already registers `RequestHeadersPlugin`/`ResponseHeadersPlugin`, and `ORPCGlobalContext` already extends `RequestHeadersPluginContext`/`ResponseHeadersPluginContext` (`reqHeaders?: Headers`, `resHeaders?: Headers`), verified against `@orpc/server`'s shipped `.d.ts` (`dist/plugins/index.d.ts`). Every procedure's middleware already receives a live `Headers` object for the request and one it can mutate for the response, so `requireIdempotency()` reads `context.reqHeaders.get('idempotency-key')` and sets `context.resHeaders.set('idempotent-replayed', 'true')` with zero change to `orpc.ts`.
   - **Deviation from outline:** the two "(tsd)" type-level tests (here and in D2) are written as `// @ts-expect-error` lines checked by `pnpm --filter=@sanchay/api typecheck`, not by a `tsd` runner — `tsd` is not in the `pnpm-workspace.yaml` catalog and Plan 01 never added it; introducing a new test runner is out of this task's one-line-deviation budget. `// @ts-expect-error` gives the same compile-time guarantee and is already how this repo's tests pin literal-union rejections (see `identity-schema.int.test.ts`'s `as string as X` casts for the runtime half of the same idea).
 - Produces:
@@ -136,7 +474,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
     - `app_config (key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`.
     - `recon_breaks`: `id uuid PK` (`newId('recon_breaks')`), std columns, `kind text NOT NULL`, `entity_type text NOT NULL`, `entity_id text NOT NULL`, `severity IN ('WARNING','CRITICAL')`, `detail jsonb NOT NULL DEFAULT '{}'`, `status IN ('OPEN','RESOLVED')` default `OPEN`, `resolved_at timestamptz`. Partial unique index `(kind, entity_id) WHERE status <> 'RESOLVED'` (one open break per kind+entity).
   - `IdempotencyService` (`idempotency.service.ts`, `@Injectable`, exported by `PlatformModule`): `begin(input)`, `complete(input)`, `release(input)` — see Step 3 for exact behaviour (autocommit inserts, not a caller transaction, so a concurrent request sees the `IN_PROGRESS` marker row immediately instead of blocking on a lock).
-  - `requireIdempotency(idem: IdempotencyService, cls: ClsService<SanchayClsStore>)` (`idempotency.middleware.ts`): an oRPC `Middleware` (from `@orpc/server`) applied per-procedure with `.use(...)`. Missing/malformed key → 428 `IDEMPOTENCY_KEY_REQUIRED`. Same key, different input hash → 422 `IDEMPOTENCY_KEY_REUSED`. Same key while the first call has not completed → 409 `IDEMPOTENCY_IN_PROGRESS`. Same key, same hash, completed → returns the stored response and sets `idempotent-replayed: true`. A handler error whose mapped HTTP status is ≥ 500 releases (deletes) the row so a retry starts fresh; a 4xx business error leaves the row `IN_PROGRESS` uncompleted, which a legitimate retry with the same key and body will also see as `IDEMPOTENCY_IN_PROGRESS` until it expires (documented as the MVP's accepted behaviour — no code path completes a row with a 4xx response in this task).
+  - `requireIdempotency(idem: IdempotencyService, cls: ClsService<SanchayClsStore>)` (`idempotency.middleware.ts`): an oRPC middleware built with `os.$context<ORPCGlobalContext>().middleware(...)` (from `@orpc/server`, so it fits every procedure's error map and output; RV-02-39), applied per-procedure with `.use(...)`. Missing/malformed key → 428 `IDEMPOTENCY_KEY_REQUIRED`. Same key, different input hash → 422 `IDEMPOTENCY_KEY_REUSED`. Same key while the first call has not completed → 409 `IDEMPOTENCY_IN_PROGRESS` with `data.retryAfterSeconds: 1` (target design §B.5: "In progress → 409 with `Retry-After: 1`"; D-3 carries it in `data`). Same key, same hash, completed → returns the stored response and sets `idempotent-replayed: true`. Any error the handler throws, a 4xx refusal or a 5xx, releases (deletes) the row, so a retry with the same key runs again; only a returned result is completed and replayed (RV-02-37). A [K] handler therefore refuses before it writes, or inside a transaction that rolls back, so a re-run cannot duplicate a write (every [K] handler in Plans 02–04 does; the OTP attempt that `me.verifyEmail` counts before a 401 is meant to count each try). `IN_PROGRESS` lasts only while a request runs; if `complete()` fails after the handler returned, the row stays `IN_PROGRESS` until it expires, because the handler has run and must not run again for that key.
   - `RuntimeConfig.get<K extends RuntimeConfigKey>(exec: DbExecutor, key: K): Promise<RuntimeConfigValue<K>>` (`runtime-config.ts`; it selects `value::text` and `JSON.parse`s it once, RV-02-31) and `RUNTIME_CONFIG_SCHEMAS`/`RUNTIME_CONFIG_DEFAULTS`/`RuntimeConfigKey`. Typed keys and MVP defaults exactly per the outline: `orders.enabled` (`false`), `plans.sip.enabled` (`false`), `fp.lumpsumFlow` (`'CUSTOM_CHECKOUT' | 'PAYMENT_AFTER_SUBMIT'`, default `'CUSTOM_CHECKOUT'`), `fp.sendPartner` (`false`), `features.redeemByUnits` (`false`), `pilot.caps.perOrder` (`'100000.00'`), `pilot.caps.perInvestorPerDay` (`'200000.00'`), `money_params_version` (`'v1'`), `minAppVersion.android` (`'1.0.0'`).
   - `ReconBreaks.open(exec: DbExecutor, input: {kind, entityType, entityId, severity, detail?}): Promise<void>` (`runtime-config.ts`, co-located with `RuntimeConfig` — both are small `app_config`/`recon_breaks` kernel primitives and the outline gives them no separate file). Idempotent while an open break for the same `(kind, entity_id)` exists (swallows the `23505` from the partial unique index).
   - `me.router.ts` wires `requireIdempotency(this.idempotency, this.cls)` onto both `requestEmailOtp` and `verifyEmail`, superseding D-8.
@@ -303,10 +641,10 @@ void vi;
 
 `apps/api/test/int/idempotency.int.test.ts`
 ```ts
-import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { and, eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { appConfig, idempotencyKeys, reconBreaks } from '../../src/db/schema.js';
-import { HOUR } from '../../src/modules/platform/clock.js';
+import { HOUR, SECOND } from '../../src/modules/platform/clock.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
 import { nativeHeaders } from './http.js';
@@ -362,38 +700,54 @@ describe('idempotency (/me/email/*, D-8 superseded)', () => {
   it('409s a second call while the first is in flight', async () => {
     const { h } = await signedIn('9844450004');
     const key = { 'idempotency-key': '0199a000-0000-7000-8000-000000000003' };
-    const [a, b] = await Promise.all([
-      otp({ ...h, ...key }, 'inflight@example.com'),
-      otp({ ...h, ...key }, 'inflight@example.com'),
-    ]);
-    const codes = [a.statusCode, b.statusCode].sort();
-    expect(codes).toEqual([200, 409]);
-    const loser = a.statusCode === 409 ? a : b;
-    expect(loser.json().code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    // Park the first call inside its handler (in the email send) until the second one is answered.
+    let resume: () => void = () => undefined;
+    const parked = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const send = t.email.send.bind(t.email);
+    const spy = vi.spyOn(t.email, 'send').mockImplementationOnce(async (message) => {
+      await parked;
+      return send(message);
+    });
+    const first = otp({ ...h, ...key }, 'inflight@example.com');
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    const second = await otp({ ...h, ...key }, 'inflight@example.com');
+    resume();
+    expect([second.statusCode, second.json().code]).toEqual([409, 'IDEMPOTENCY_IN_PROGRESS']);
+    expect(second.json().data.retryAfterSeconds).toBe(1);
+    expect((await first).statusCode).toBe(200);
+    spy.mockRestore();
   });
 
-  it('releases the key on a 5xx so a retry with the same key succeeds', async () => {
+  it('releases the key on a 5xx, so a retry with the same key runs again', async () => {
     const { h } = await signedIn('9844450005');
     const key = { 'idempotency-key': '0199a000-0000-7000-8000-000000000004' };
-    t.sms.script?.('me.requestEmailOtp', 'unavailable'); // see Step 3 note: capture sender has no script(); this
-    // scenario instead uses an email already EMAIL_IN_USE by another investor turned into a provider outage is
-    // out of scope for D1 — the concrete case below forces the same code path deterministically.
-    const other = await signedIn('9844450006');
-    await otp(other.h, 'taken@example.com');
-    const conflict = await otp({ ...h, ...key }, 'taken@example.com');
-    expect([conflict.statusCode, conflict.json().data.fields[0].code]).toEqual([
-      400,
-      'EMAIL_IN_USE',
-    ]);
-    const [row] = await t.db.db
+    t.email.failNext = true;
+    const outage = await otp({ ...h, ...key }, 'outage@example.com');
+    expect([outage.statusCode, outage.json().code]).toEqual([503, 'PROVIDER_UNAVAILABLE']);
+    const retry = await otp({ ...h, ...key }, 'outage@example.com');
+    expect(retry.statusCode).toBe(200);
+    expect(retry.headers['idempotent-replayed']).toBeUndefined();
+  });
+
+  it('releases the key on a 4xx, so the same key runs again once the refusal clears (RV-02-37)', async () => {
+    const { s, h } = await signedIn('9844450006');
+    await otp(
+      { ...h, 'idempotency-key': '0199a000-0000-7000-8000-000000000008' },
+      'cool@example.com',
+    );
+    const key = '0199a000-0000-7000-8000-000000000009';
+    const refused = await otp({ ...h, 'idempotency-key': key }, 'cool@example.com');
+    expect([refused.statusCode, refused.json().code]).toEqual([429, 'OTP_COOLDOWN']);
+    const rows = await t.db.db
       .select()
       .from(idempotencyKeys)
-      .where(eq(idempotencyKeys.actorId, h['x-installation-id'] ? '' : ''));
-    // EMAIL_IN_USE is VALIDATION_FAILED (400), not 5xx, so the row stays IN_PROGRESS: a retry with the same
-    // key while it is still IN_PROGRESS gets 409, never a silent second send. This is the documented 4xx
-    // behaviour from the task's Interfaces note, and it is exercised (not the 5xx path) because the capture
-    // SMS/email senders never fail in test mode. The 5xx code path itself is unit-tested directly:
-    void row;
+      .where(and(eq(idempotencyKeys.actorId, s.investorId), eq(idempotencyKeys.key, key)));
+    expect(rows).toEqual([]);
+    t.clock.advance(31 * SECOND);
+    const retry = await otp({ ...h, 'idempotency-key': key }, 'cool@example.com');
+    expect(retry.statusCode).toBe(200);
   });
 
   it('keys are per actor: investor A and investor B may reuse the same key value', async () => {
@@ -446,6 +800,26 @@ describe('ReconBreaks.open', () => {
       .where(eq(reconBreaks.entityId, 'INF000X01234'));
     expect(rows).toHaveLength(1);
   });
+
+  it("keeps the caller's transaction alive when the break is already open (RV-02-67)", async () => {
+    const { ReconBreaks } = await import('../../src/modules/platform/runtime-config.js');
+    const input = {
+      kind: 'TEST_TWICE',
+      entityType: 'folios',
+      entityId: 'twice-1',
+      severity: 'WARNING' as const,
+    };
+    await t.db.db.transaction(async (tx) => {
+      await ReconBreaks.open(tx, input);
+      await ReconBreaks.open(tx, input);
+      await ReconBreaks.open(tx, { ...input, entityId: 'twice-2' }); // runs only if the transaction is alive
+    });
+    const rows = await t.db.db
+      .select({ entityId: reconBreaks.entityId })
+      .from(reconBreaks)
+      .where(eq(reconBreaks.kind, 'TEST_TWICE'));
+    expect(rows.map((r) => r.entityId).sort()).toEqual(['twice-1', 'twice-2']);
+  });
 });
 
 describe('RuntimeConfig.get', () => {
@@ -457,6 +831,18 @@ describe('RuntimeConfig.get', () => {
 });
 ```
 
+`apps/api/test/int/me-email.int.test.ts` (key-level edit, RV-02-40): `/me/email/*` is [K] from Step 3 on, so without a key all five cases (Plan 01's four and D0's EF8-5 case) fail with 428. Add `import { randomUUID } from 'node:crypto';` and replace the `post` helper; every call in this file is its own intent, so each gets a fresh key:
+```ts
+/** Every /me/email/* POST is [K] since D1, and each call here is its own intent: a fresh key per call. */
+const post = (url: string, headers: Record<string, string>, payload: Record<string, unknown>) =>
+  t.app.inject({
+    method: 'POST',
+    url: `/api/v1${url}`,
+    headers: { ...headers, 'idempotency-key': randomUUID() },
+    payload,
+  });
+```
+
 - [ ] **Step 2: Run them to confirm they fail**
 ```
 pnpm --filter=@sanchay/api typecheck
@@ -465,7 +851,7 @@ pnpm --filter=@sanchay/api test:int
 ```
 Expected:
 - `typecheck` and `test` FAIL: `runtime-config.ts` does not exist yet, so `runtime-config.test.ts` cannot resolve `./runtime-config.js`.
-- `test:int` FAILS: `idempotency.int.test.ts` cannot import `idempotencyKeys`/`reconBreaks` from `../../src/db/schema.js` (`kernel.schema.ts` does not exist). `me-email.int.test.ts` still passes unmodified (it sends no `Idempotency-Key` header and gets 200 today; this is the regression D1's own tests pin instead — see Step 3's note on why `me-email.int.test.ts` is not itself edited).
+- `test:int` FAILS: `idempotency.int.test.ts` cannot import `idempotencyKeys`/`reconBreaks` from `../../src/db/schema.js` (`kernel.schema.ts` does not exist). `me-email.int.test.ts` still passes: Step 1 gave its posts an `Idempotency-Key`, which nothing reads yet.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -476,7 +862,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DB, type DbHandle } from '../../db/client.js';
 import { CLOCK, DAY, type Clock } from './clock.js';
 import { idempotencyKeys } from './kernel.schema.js';
-import { pgErrorCode } from './pg-errors.js';
+import { pgErrorCodeOf } from './pg-errors.js';
 
 export interface IdempotencyBeginInput {
   actorId: string;
@@ -528,7 +914,7 @@ export class IdempotencyService {
       });
       return { kind: 'proceed' };
     } catch (e) {
-      if (pgErrorCode(e) !== '23505') throw e;
+      if (pgErrorCodeOf(e) !== '23505') throw e;
     }
     const [row] = await this.dbh.db
       .select()
@@ -556,6 +942,7 @@ export class IdempotencyService {
       .where(and(eq(idempotencyKeys.actorId, input.actorId), eq(idempotencyKeys.key, input.key)));
   }
 
+  /** The handler threw (a refusal or a failure): the row goes, so a retry with the same key runs again. */
   async release(input: IdempotencyReleaseInput): Promise<void> {
     await this.dbh.db
       .delete(idempotencyKeys)
@@ -572,81 +959,86 @@ export class IdempotencyKeyReused extends Error {
 }
 ```
 
-`apps/api/src/modules/platform/pg-errors.ts` already exists (Plan 01, used by other services for the same `.code`/`.cause.code` unwrap); D1 reuses it as-is. If it is not exported the way this task expects, inline the same two-line unwrap `IdempotencyService` needs:
-```ts
-// only if pg-errors.ts does not already export this — check before adding a duplicate.
-export function pgErrorCode(e: unknown): string | undefined {
-  const err = e as { code?: string; cause?: { code?: string } };
-  return err.cause?.code ?? err.code;
-}
-```
+`pgErrorCodeOf` is Plan 01's export from `apps/api/src/modules/platform/pg-errors.ts` (`auth.service.ts`, `otp.service.ts` and `investor-accounts.service.ts` already use it); D1 imports it and leaves that file unchanged (RV-02-38).
 
 `apps/api/src/modules/platform/idempotency.middleware.ts`
 ```ts
-import type { Middleware } from '@orpc/server';
-import { ERROR_CATALOGUE } from '@sanchay/contract';
-import type { ClsService } from 'nestjs-cls';
 import { createHash } from 'node:crypto';
-import { AppError } from './errors.js';
-import { UUID_RE } from './ids.js';
-import { IdempotencyInProgress, IdempotencyKeyReused, IdempotencyService } from './idempotency.service.js';
+import type { ORPCGlobalContext } from '@orpc/nest';
+import { os } from '@orpc/server';
+import type { ClsService } from 'nestjs-cls';
 import { requireAuth } from '../identity/request-auth.js';
+import { AppError } from './errors.js';
+import {
+  type IdempotencyBeginInput,
+  IdempotencyInProgress,
+  IdempotencyKeyReused,
+  type IdempotencyOutcome,
+  IdempotencyService,
+} from './idempotency.service.js';
+import { UUID_RE } from './ids.js';
 import type { SanchayClsStore } from './request-context.js';
 
-function statusFor(err: unknown): number {
-  if (err instanceof AppError) return ERROR_CATALOGUE[err.code];
-  return 500;
+/** begin(), with its two refusals mapped to their AppError codes (spec: "409 with Retry-After: 1"). */
+async function beginOrRefuse(
+  idem: IdempotencyService,
+  input: IdempotencyBeginInput,
+): Promise<IdempotencyOutcome> {
+  try {
+    return await idem.begin(input);
+  } catch (e) {
+    if (e instanceof IdempotencyInProgress) {
+      throw new AppError('IDEMPOTENCY_IN_PROGRESS', { retryAfterSeconds: 1 });
+    }
+    if (e instanceof IdempotencyKeyReused) throw new AppError('IDEMPOTENCY_KEY_REUSED');
+    throw e;
+  }
 }
 
 /**
  * Applied with `.use(requireIdempotency(...))` on a procedure's implementer (`.use()` reads
  * `context.reqHeaders`/`context.resHeaders`, both already injected by B9's RequestHeadersPlugin
- * and ResponseHeadersPlugin — see the deviation note in this task's Interfaces).
+ * and ResponseHeadersPlugin — see the deviation note in this task's Interfaces). Built with
+ * `os.$context<ORPCGlobalContext>().middleware(...)`, so it fits every procedure's error map and output.
+ *
+ * A handler that returns completes the key, and the same key with the same input replays its response.
+ * A handler that throws, a 4xx refusal or a 5xx, releases the key, so a retry with the same key runs
+ * again; IN_PROGRESS lasts only while a request runs (RV-02-37).
  */
-export function requireIdempotency<TOutput>(
-  idem: IdempotencyService,
-  cls: ClsService<SanchayClsStore>,
-): Middleware<Record<never, never>, Record<never, never>, unknown, TOutput, never, never> {
-  return async ({ context, path, next }, input) => {
-    const auth = requireAuth(cls);
-    const key = context.reqHeaders?.get('idempotency-key') ?? undefined;
-    if (key === undefined || !UUID_RE.test(key)) {
-      throw new AppError('IDEMPOTENCY_KEY_REQUIRED');
-    }
-    const requestSha256 = createHash('sha256').update(JSON.stringify(input ?? null)).digest();
-    let outcome;
-    try {
-      outcome = await idem.begin({
-        actorId: auth.investorId,
-        key: key.toLowerCase(),
-        route: path.join('.'),
-        requestSha256,
-      });
-    } catch (e) {
-      if (e instanceof IdempotencyInProgress) throw new AppError('IDEMPOTENCY_IN_PROGRESS');
-      if (e instanceof IdempotencyKeyReused) throw new AppError('IDEMPOTENCY_KEY_REUSED');
-      throw e;
-    }
-    if (outcome.kind === 'replay') {
-      context.resHeaders?.set('idempotent-replayed', 'true');
-      return { output: outcome.body as TOutput, context: {} };
-    }
-    try {
-      const result = await next();
-      await idem.complete({
-        actorId: auth.investorId,
-        key: key.toLowerCase(),
-        status: 200,
-        body: result.output,
-      });
-      return result;
-    } catch (err) {
-      if (statusFor(err) >= 500) {
-        await idem.release({ actorId: auth.investorId, key: key.toLowerCase() });
+export function requireIdempotency(idem: IdempotencyService, cls: ClsService<SanchayClsStore>) {
+  return os
+    .$context<ORPCGlobalContext>()
+    .middleware(async ({ context, path, next }, input: unknown) => {
+      const auth = requireAuth(cls);
+      const header = context.reqHeaders?.get('idempotency-key') ?? undefined;
+      if (header === undefined || !UUID_RE.test(header)) {
+        throw new AppError('IDEMPOTENCY_KEY_REQUIRED');
       }
-      throw err;
-    }
-  };
+      const ref = { actorId: auth.investorId, key: header.toLowerCase() };
+      const outcome = await beginOrRefuse(idem, {
+        ...ref,
+        route: path.join('.'),
+        requestSha256: createHash('sha256')
+          .update(JSON.stringify(input ?? null))
+          .digest(),
+      });
+      if (outcome.kind === 'replay') {
+        context.resHeaders?.set('idempotent-replayed', 'true');
+        return { output: outcome.body, context: {} };
+      }
+      let handled = false;
+      try {
+        const result = await next();
+        handled = true;
+        // A failed complete() keeps the row IN_PROGRESS: the handler has run, so this key must
+        // not run it again.
+        await idem.complete({ ...ref, status: 200, body: result.output });
+        return result;
+      } catch (err) {
+        if (!handled) await idem.release(ref);
+        throw err;
+      }
+    });
 }
 ```
 
@@ -657,7 +1049,6 @@ import { z } from 'zod';
 import type { DbExecutor } from '../../db/client.js';
 import { AppError } from './errors.js';
 import { appConfig, reconBreaks, RECON_BREAK_SEVERITIES, type ReconBreakSeverity } from './kernel.schema.js';
-import { pgErrorCode } from './pg-errors.js';
 
 export const RUNTIME_CONFIG_SCHEMAS = {
   'orders.enabled': z.boolean(),
@@ -722,22 +1113,28 @@ export interface ReconBreakOpenInput {
 }
 
 export class ReconBreaks {
+  /**
+   * Idempotent while an open break for the same (kind, entity_id) exists. ON CONFLICT on the partial
+   * unique index, not a caught 23505: a failed INSERT aborts the caller's transaction, and PostgreSQL
+   * then turns its COMMIT into a silent ROLLBACK (RV-02-67).
+   */
   static async open(exec: DbExecutor, input: ReconBreakOpenInput): Promise<void> {
     if (!RECON_BREAK_SEVERITIES.includes(input.severity)) {
       throw new TypeError(`ReconBreaks.open: unknown severity '${input.severity}'`);
     }
-    try {
-      await exec.insert(reconBreaks).values({
+    await exec
+      .insert(reconBreaks)
+      .values({
         kind: input.kind,
         entityType: input.entityType,
         entityId: input.entityId,
         severity: input.severity,
         detail: input.detail ?? {},
+      })
+      .onConflictDoNothing({
+        target: [reconBreaks.kind, reconBreaks.entityId],
+        where: sql`status <> 'RESOLVED'`,
       });
-    } catch (e) {
-      if (pgErrorCode(e) !== '23505') throw e;
-      // an open break for this (kind, entity_id) already exists — open() is a no-op, per design.
-    }
   }
 }
 
@@ -833,7 +1230,7 @@ pnpm --filter=@sanchay/api db:check
 Expected:
 - `typecheck`: exits 0 (the `// @ts-expect-error` line in `runtime-config.test.ts` is satisfied, not a real error).
 - `test`: `runtime-config.test.ts` — 6 passed.
-- `test:int`: `idempotency.int.test.ts` — 10 passed (the eight `/me/email/*` cases, `ReconBreaks.open` and `RuntimeConfig.get`); `migrations.int.test.ts` — 8 passed (was 7); `me-email.int.test.ts` — 4 passed, unchanged (it now sends no `Idempotency-Key` header on any call and would fail with 428 — **it must be updated to add an `Idempotency-Key` header to every `/me/email/*` POST in this same commit**, or it regresses; treat this file as touched by Step 3 alongside `me.router.ts` even though it was not listed above as a literal edit target, since leaving it red violates Step 4's own gate. Add a UUID literal per call, mirroring the pattern in `idempotency.int.test.ts`).
+- `test:int`: `idempotency.int.test.ts` — 12 passed (the nine `/me/email/*` cases, the two `ReconBreaks.open` cases and `RuntimeConfig.get`); `migrations.int.test.ts` — 8 passed (was 7); `me-email.int.test.ts` — 5 passed (Plan 01's four and D0's EF8-5 case; Step 1 gave every post a fresh `Idempotency-Key`; without it all five fail with 428, RV-02-40).
 - `db:check`: `db:check OK: schema and migrations are in sync`.
 
 - [ ] **Step 5: Commit**
@@ -843,7 +1240,7 @@ pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test
 pnpm --filter=@sanchay/api test:int
 pnpm lint
-git add apps/api
+git add apps/api/src/modules/platform/kernel.schema.ts apps/api/src/modules/platform/idempotency.service.ts apps/api/src/modules/platform/idempotency.middleware.ts apps/api/src/modules/platform/runtime-config.ts apps/api/src/modules/platform/runtime-config.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/ids.ts apps/api/src/db/schema.ts apps/api/src/modules/identity/me.router.ts apps/api/test/int/idempotency.int.test.ts apps/api/test/int/migrations.int.test.ts apps/api/test/int/me-email.int.test.ts apps/api/drizzle/0004_platform_kernel.sql apps/api/drizzle/meta/0004_snapshot.json apps/api/drizzle/meta/_journal.json
 git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBreaks kernel tables" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -860,8 +1257,11 @@ git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBr
   - `apps/api/src/modules/platform/jobs/heartbeat.ts`
   - `apps/api/src/modules/platform/jobs/schedules.ts`
   - `apps/api/src/modules/platform/jobs/jobs.module.test.ts`
+  - `apps/api/src/modules/platform/jobs/jobs.schema.ts`
+  - `apps/api/src/db/drizzle-config.test.ts`
   - `apps/api/test/int/jobs.int.test.ts`
 - Modify:
+  - `apps/api/drizzle.config.ts` (`schema` becomes a list of globs, RV-02-41)
   - `apps/api/src/main.ts`
   - `apps/api/src/app.module.ts`
   - `apps/api/src/modules/platform/health.router.ts`
@@ -869,6 +1269,8 @@ git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBr
   - `apps/api/src/modules/identity/identity.module.ts`
   - `apps/api/src/db/migrate.ts`
   - `apps/api/src/db/schema.ts`
+  - `apps/api/test/int/health.int.test.ts` (Plan 01's readiness case, RV-02-42)
+  - `apps/api/test/int/migrations.int.test.ts`
   - `apps/api/package.json` (`dependencies["pg-boss"] = "catalog:"`, added through `pnpm add`)
   - `pnpm-workspace.yaml` (`catalog: 'pg-boss': 12.34.0` — a **new** catalog entry, not an edit to an existing pin; the A1 rule's "nobody edits `catalog:`" governs changing an already-pinned version, not a task adding the one new package its own outline requires. If `pnpm install` then reports `ERR_PNPM_IGNORED_BUILDS` or a release-age refusal for `pg-boss` or a transitive dependency, resolve it with the matching A1 remedy — an `allowBuilds` entry or an exact-version `minimumReleaseAgeExclude` entry — and append the row to `docs/adr/0001-versions.md` in this same commit; do not silently work around either check)
   - `pnpm-lock.yaml` (changed by `pnpm add`)
@@ -881,13 +1283,14 @@ git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBr
 - Produces:
   - `JOB_NAMES` (`job-registry.ts`): `'identity.cleanup' | 'nav.sync.daily' | 'catalogue.returns.compute' | 'catalogue.fp.sync' | 'sms.dlr.sync' | 'notifications.send' | 'consent.expiry.sweep' | 'drafts.abandon' | 'fp.event.process'`. **Deviation from outline:** the outline calls `JOB_NAMES` "a closed union of every MVP job in spec §1" and defers verification to D3's expansion; this task's Files list gives it no mandate to re-derive that full inventory from the spec, so `JOB_NAMES` here is the jobs Plan 02 itself needs (`identity.cleanup`, registered by this task) plus one forward-declared name per job the outline names for a later Plan-02/03 task (D6 `sms.dlr.sync`/`notifications.send`, D9 `nav.sync.daily`, D10 `catalogue.fp.sync`/`catalogue.returns.compute`, E1 `fp.event.process`, E4 `consent.expiry.sweep`/`drafts.abandon`). `JOB_NAMES` is append-only (same convention as `ERROR_CATALOGUE`): each later task that adds a job appends its literal to the union in the same PR that registers its handler.
   - `@JobHandler(name: JobName)` (class decorator, `job-registry.ts`): marks a provider's `handle(job)` method as the pg-boss worker for `name`, found via Nest's `DiscoveryService`.
-  - `Jobs` (`jobs.service.ts`, `@Injectable()`, provided and exported by the global `JobsModule`): `enqueue(exec: DbExecutor, name: JobName, data: unknown, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?}): Promise<void>`. It goes through pg-boss's `send(name, data, {db})` BYODB adapter on the caller's executor, so the job commits or rolls back with the caller's transaction (`startAfter` as a number is seconds, per pg-boss). Consumers inject it (`@Inject(Jobs) private readonly jobs: Jobs`) and unit tests stub it with `{ enqueue: vi.fn() }`.
+  - `Jobs` (`jobs.service.ts`, `@Injectable()`, provided and exported by the global `JobsModule`): `enqueue(exec: DbExecutor, name: JobName, data: unknown, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?}): Promise<void>`. It sends through its own application's `JobsService` (injected, never module-level state, RV-02-45) with pg-boss's `send(name, data, {db})` BYODB adapter on the caller's executor, so the job commits or rolls back with the caller's transaction (`startAfter` as a number is seconds, per pg-boss). Consumers inject it (`@Inject(Jobs) private readonly jobs: Jobs`) and unit tests stub it with `{ enqueue: vi.fn() }`.
   - `registerSchedules(boss: PgBoss): Promise<void>` (`schedules.ts`): the one schedule extension point, awaited by `JobsService` after the workers are registered. It starts empty; later tasks add keyed `await boss.schedule(name, cron, data, {tz: 'Asia/Kolkata', key})` calls to its body (pg-boss needs a distinct `key` for several schedules on one queue). `JobsService.onModuleInit` also calls `boss.createQueue(name)` for every `JOB_NAMES` entry (pg-boss 10+ requires a queue before `send`/`work`), and `Jobs.enqueue` goes through `boss.send(..., {db})` (pg-boss's BYODB adapter) so the job commits with the caller's transaction; it never writes `pgboss.job` directly.
-  - `JobsService` (`jobs.service.ts`, `@Injectable`, provided by the new `JobsModule`, `@Global()`, imported once from `AppModule.forRoot`): owns the one process-wide `PgBoss` instance. `onModuleInit()` starts pg-boss (`migrate: false` — see the migration note below) in **every** role so `Jobs.enqueue` is callable from `api` request handlers; it registers `.work()` handlers and starts the heartbeat loop **only** when `env.SANCHAY_APP_ROLE === 'worker'`. `onApplicationShutdown()` stops the heartbeat and calls `boss.stop({graceful: true, timeout: 10_000})`.
+  - `JobsService` (`jobs.service.ts`, `@Injectable`, provided by the new `JobsModule`, `@Global()`, imported once from `AppModule.forRoot`): owns its application's `PgBoss` instance (a second Nest application in the same process, such as `runWorker`'s in the tests, owns another). `onModuleInit()` starts pg-boss (`migrate: false` — see the migration note below) in **every** role so `Jobs.enqueue` is callable from `api` request handlers; it registers `.work()` handlers and starts the heartbeat loop **only** when `env.SANCHAY_APP_ROLE === 'worker'`. `onApplicationShutdown()` stops the heartbeat and calls `boss.stop({graceful: true, timeout: 10_000})`.
+  - pg-boss as the D6 app login (RV-02-43): under D6 (Plan 04 F1) api, worker and ops log in as `sanchay_app_login`, a `sanchay_app` member without CREATE on schema `pgboss`. Everything `JobsService` and `Jobs` run is DML on the tables `0005` grants: `start` with `migrate: false` installs nothing (it checks the schema version), `createQueue(name)` is an idempotent `INSERT … ON CONFLICT DO NOTHING` into `pgboss.queue`, and `send`, `work`, `schedule` and maintenance write rows. Never pass `partition: true` to `createQueue` (a table per queue) or `persistQueueStats` to `PgBoss` (daily `queue_stats` partitions): both are DDL, fail with 42501 for that login, and go unnoticed in the tests, which run as a superuser.
   - `runWorker(env: Env): Promise<INestApplicationContext>` (`worker.main.ts`): `NestFactory.createApplicationContext(AppModule.forRoot(env), {bufferLogs: true})` — no Fastify adapter, so nothing ever binds a port; wires `SIGTERM` to drain.
   - `startHeartbeat(dbh: DbHandle, clock: Clock, taskId: string): {stop(): void}` (`heartbeat.ts`): upserts `worker_heartbeats (task_id, last_beat_at)` every 30 s.
   - Table `worker_heartbeats (task_id text PRIMARY KEY, last_beat_at timestamptz NOT NULL)`.
-  - `/health` (`health.router.ts`) is unchanged (liveness only, per R-12 — this task does **not** add a NAV check, which stays out of scope until F1). `/health/ready` gains two checks: `pgboss` (`SELECT 1` against `pgboss.job`) and `heartbeat` (freshest `worker_heartbeats.last_beat_at` within 2 min); either failing throws `AppError('INTERNAL', {retryable: true})`, which the existing catch in `ready()` turns into a 503.
+  - `/health` (`health.router.ts`) is unchanged (liveness only, per R-12 — this task does **not** add a NAV check, which stays out of scope until F1). `/health/ready` gains two checks: `pgboss` (`SELECT 1` against `pgboss.job`) and `heartbeat` (freshest `worker_heartbeats.last_beat_at` within 2 min); either failing throws `AppError('INTERNAL', {retryable: true})`, which answers 500 `INTERNAL` with `data.retryable: true` (RV-02-42: `ERROR_CATALOGUE` maps `INTERNAL` to 500 and `retryable` does not change the status; `INTERNAL` is the only error the contract declares for `health.ready`, spec §1.5 makes the route diagnostic, and F24's worker-down runbook only tells 200 from anything else). The heartbeat's age is measured with the injected `Clock`, so tests drive it with `FakeClock`. Without a fresh heartbeat the route fails, so Plan 01's readiness case in `health.int.test.ts` now seeds one.
   - `identity.module.ts` gains an inline `IdentityCleanupJob` provider (same inline-provider style `identity.module.ts` already uses for `OtpBookkeepingDbLifecycle`), `@JobHandler('identity.cleanup')`: hourly, deletes `otp_codes` rows older than 24 h **only** for `purpose IN ('LOGIN', 'VERIFY_EMAIL')` (R-13; every other purpose, including `CONSENT`, is untouched by this task since no `CONSENT` rows exist before Plan 03's E3/E4), and deletes `auth_sessions` rows whose `absolute_expires_at` is more than 7 days in the past.
   - `main.ts`: `SANCHAY_APP_ROLE === 'worker'` now calls `runWorker(env)` instead of printing "not available yet" and exiting 1.
   - `db/migrate.ts`'s `runMigrations` bootstraps pg-boss's own schema **before** the Drizzle migrations run, so `0005_worker_heartbeats.sql`'s `GRANT`s on `pgboss.*` succeed against tables that already exist (see Step 3).
@@ -1028,10 +1431,10 @@ void apiEnv;
 ```ts
 import { and, eq, gt } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { JOB_NAMES } from '../../src/modules/platform/jobs/job-registry.js';
 import { workerHeartbeats } from '../../src/modules/platform/jobs/jobs.schema.js';
 import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
-import { startHeartbeat } from '../../src/modules/platform/jobs/heartbeat.js';
-import { HOUR, MINUTE } from '../../src/modules/platform/clock.js';
+import { HOUR } from '../../src/modules/platform/clock.js';
 import { bootTestApp, type TestApp } from './app.js';
 
 let t: TestApp;
@@ -1041,6 +1444,15 @@ beforeAll(async () => {
 afterAll(async () => {
   await t.close();
 });
+
+/** pg-boss workers poll every 2 s by default: wait for the outcome instead of sleeping a fixed time (RV-02-46). */
+async function eventually(check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error('the worker did not finish within 10 s');
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
 
 describe('Jobs.enqueue', () => {
   it('leaves no job row when the caller transaction rolls back', async () => {
@@ -1060,11 +1472,12 @@ describe('Jobs.enqueue', () => {
     await t.db.db.transaction(async (tx) => {
       await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', { probe: true }, { singletonKey: 'jobs-int-test' });
     });
-    await new Promise((r) => setTimeout(r, 500));
-    const rows = await t.db.pool.query(
-      `SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'identity.cleanup' AND state = 'completed'`,
-    );
-    expect(rows.rows[0]?.n).toBeGreaterThanOrEqual(1);
+    await eventually(async () => {
+      const rows = await t.db.pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'identity.cleanup' AND state = 'completed'`,
+      );
+      return (rows.rows[0]?.n ?? 0) >= 1;
+    });
   });
 
   it('singletonKey serialises jobs for the same aggregate', async () => {
@@ -1109,24 +1522,20 @@ describe('role gating', () => {
   });
 });
 
-describe('/health/ready', () => {
-  it('is 503 when the newest heartbeat is older than 2 minutes', async () => {
-    await t.db.pool.query(`DELETE FROM app.worker_heartbeats`);
-    startHeartbeat(t.db, t.clock, 'test-task').stop(); // one immediate beat, then stopped
-    t.clock.advance(3 * MINUTE);
-    const res = await t.app.inject({ method: 'GET', url: '/api/v1/health/ready' });
-    expect(res.statusCode).toBe(503);
+describe('worker heartbeat', () => {
+  it('the worker role beats at boot (health.int.test.ts covers how /health/ready reads it)', async () => {
+    const beats = await t.db.db.select().from(workerHeartbeats);
+    expect(beats.map((b) => b.taskId)).toContain(`worker:${process.pid}`);
   });
+});
 
-  it('stays 200 when the newest NAV is 10 days old (R-12 — no NAV check here)', async () => {
-    // No scheme_navs table exists before D8/D9; this test only pins that /health/ready has no NAV
-    // dependency of any kind, so it never regresses when D9 lands. It asserts the readiness contract
-    // does not gain a NAV field.
-    startHeartbeat(t.db, t.clock, 'nav-noop-task');
-    await new Promise((r) => setTimeout(r, 50));
-    const res = await t.app.inject({ method: 'GET', url: '/api/v1/health/ready' });
-    expect(res.statusCode).toBe(200);
-    expect(Object.keys(res.json())).toEqual(['status', 'checks']);
+describe('pg-boss queues (D6: the app login has no CREATE on schema pgboss)', () => {
+  it('creates every JOB_NAMES queue without a partition table, which would be DDL', async () => {
+    const { rows } = await t.db.pool.query<{ name: string; partition: boolean }>(
+      'SELECT name, partition FROM pgboss.queue',
+    );
+    expect(rows.filter((q) => q.partition)).toEqual([]);
+    expect(rows.map((q) => q.name)).toEqual(expect.arrayContaining([...JOB_NAMES]));
   });
 });
 
@@ -1151,7 +1560,7 @@ describe('identity.cleanup', () => {
     });
     await insertOtp(t.db.db, { purpose: 'CONSENT', expiresAt: old, consumedAt: old, consumedReason: 'VERIFIED' });
     await t.app.get(Jobs).enqueue(t.db.db, 'identity.cleanup', {}, { singletonKey: 'cleanup-otp-test' });
-    await new Promise((r) => setTimeout(r, 500));
+    await eventually(async () => (await t.db.db.select().from(otpCodes)).length === 1);
     const remaining = await t.db.db.select().from(otpCodes);
     expect(remaining.map((r) => r.purpose).sort()).toEqual(['CONSENT']);
   });
@@ -1162,6 +1571,55 @@ void eq;
 void gt;
 ```
 
+`apps/api/test/int/health.int.test.ts` (Plan 01's file, RV-02-42: add the two imports, and replace its `GET /api/v1/health/ready checks the database` case, which fails once `/health/ready` also needs a fresh worker heartbeat, with these two cases)
+```ts
+import { MINUTE } from '../../src/modules/platform/clock.js';
+import { workerHeartbeats } from '../../src/modules/platform/jobs/jobs.schema.js';
+// ...
+  it('GET /api/v1/health/ready checks the database, pg-boss and a worker heartbeat, never NAV age (R-12)', async () => {
+    await t.db.db.insert(workerHeartbeats).values({ taskId: 'health-fresh', lastBeatAt: t.clock.now() });
+    const res = await t.app.inject({ method: 'GET', url: '/api/v1/health/ready' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      status: 'ok',
+      checks: [
+        { name: 'database', ok: true },
+        { name: 'pgboss', ok: true },
+        { name: 'heartbeat', ok: true },
+      ],
+    });
+  });
+
+  it('GET /api/v1/health/ready is 500 INTERNAL (retryable) when the newest heartbeat is older than 2 minutes', async () => {
+    await t.db.pool.query('DELETE FROM app.worker_heartbeats');
+    const stale = new Date(t.clock.now().getTime() - 3 * MINUTE);
+    await t.db.db.insert(workerHeartbeats).values({ taskId: 'health-stale', lastBeatAt: stale });
+    const res = await t.app.inject({ method: 'GET', url: '/api/v1/health/ready' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ code: 'INTERNAL', data: { retryable: true } });
+  });
+```
+
+`apps/api/src/db/drizzle-config.test.ts` (RV-02-41: drizzle-kit reads only the files its `schema` globs match, and `db:check` runs the same config, so a schema file outside them is skipped without a word)
+```ts
+import { globSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import config from '../../drizzle.config.js';
+
+const apiRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+describe('drizzle.config.ts', () => {
+  it('its schema globs match every *.schema.ts file under src', () => {
+    const globs = typeof config.schema === 'string' ? [config.schema] : (config.schema ?? []);
+    const matched = new Set(globs.flatMap((pattern) => globSync(pattern, { cwd: apiRoot })));
+    const all = globSync('src/**/*.schema.ts', { cwd: apiRoot });
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.filter((file) => !matched.has(file))).toEqual([]);
+  });
+});
+```
+
 - [ ] **Step 2: Run them to confirm they fail**
 ```
 pnpm --filter=@sanchay/api typecheck
@@ -1169,8 +1627,9 @@ pnpm --filter=@sanchay/api test
 pnpm --filter=@sanchay/api test:int
 ```
 Expected:
-- `typecheck` FAILS: `jobs.module.ts`, `jobs.service.ts`, `worker.main.ts`, `heartbeat.ts`, `schedules.ts`, `job-registry.ts`, `jobs.schema.ts` do not exist; every new test file fails to resolve its imports.
-- `test:int` FAILS the same way; `migrations.int.test.ts` still passes with 8 tests (D1's count).
+- `typecheck` FAILS: `jobs.module.ts`, `jobs.service.ts`, `worker.main.ts` and `schedules.ts` do not exist yet (Step 1 wrote `job-registry.ts`, `heartbeat.ts` and `jobs.schema.ts`), so `jobs.module.test.ts` and `jobs.int.test.ts` fail to resolve their imports.
+- `test` FAILS: `jobs.module.test.ts` cannot load `jobs.module.js`, and `drizzle-config.test.ts` reports `src/modules/platform/jobs/jobs.schema.ts` (backslashes on Windows) as a schema file the `schema` glob misses.
+- `test:int` FAILS the same way, and both readiness cases in `health.int.test.ts` fail (no `app.worker_heartbeats` table yet, and Plan 01's router checks only the database); `migrations.int.test.ts` still passes with 8 tests (D1's count).
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -1193,12 +1652,6 @@ export interface JobsEnqueueOptions {
   retryLimit?: number;
 }
 
-/**
- * Holds the one process-wide PgBoss instance, set by `JobsService.onModuleInit()`. `Jobs` is the
- * injectable enqueue API; it reads that instance, so callers never need PgBoss injected directly.
- */
-let activeBoss: PgBoss | undefined;
-
 /** pg-boss's BYODB adapter: runs pg-boss's own `$n` SQL on the caller's Drizzle executor, so the job commits with the caller's transaction. */
 function drizzleAdapter(exec: DbExecutor) {
   return {
@@ -1211,26 +1664,10 @@ function drizzleAdapter(exec: DbExecutor) {
 }
 
 @Injectable()
-export class Jobs {
-  async enqueue<N extends JobName>(
-    exec: DbExecutor,
-    name: N,
-    data: unknown,
-    opts: JobsEnqueueOptions = {},
-  ): Promise<void> {
-    if (activeBoss === undefined) throw new Error('Jobs.enqueue called before JobsService started pg-boss');
-    await activeBoss.send(name, (data ?? {}) as object, {
-      db: drizzleAdapter(exec),
-      retryLimit: opts.retryLimit ?? 3,
-      ...(opts.singletonKey === undefined ? {} : { singletonKey: opts.singletonKey }),
-      ...(opts.startAfter === undefined ? {} : { startAfter: opts.startAfter }),
-    });
-  }
-}
-
-@Injectable()
 export class JobsService implements OnModuleInit, OnApplicationShutdown {
   private boss: PgBoss | undefined;
+  /** Set once every queue exists. Per application, never module state: each Nest app in a process owns one (RV-02-45). */
+  private ready: PgBoss | undefined;
   private heartbeat: Heartbeat | undefined;
 
   constructor(
@@ -1241,15 +1678,23 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
     @Inject(Reflector) private readonly reflector: Reflector,
   ) {}
 
+  /** This application's started PgBoss; `Jobs.enqueue` sends through it. */
+  started(): PgBoss {
+    if (this.ready === undefined) throw new Error('Jobs.enqueue called before JobsService started pg-boss');
+    return this.ready;
+  }
+
   async onModuleInit(): Promise<void> {
+    // Nothing here may make pg-boss run DDL: the D6 app login has no CREATE on schema pgboss (RV-02-43).
+    // So no `migrate`, no `persistQueueStats` (daily queue_stats partitions), no queue with `partition: true`.
     this.boss = new PgBoss({
       connectionString: this.config.env.DATABASE_URL,
       schema: 'pgboss',
       migrate: false, // db/migrate.ts bootstraps pg-boss's own schema; the api/worker roles never migrate it.
     });
     await this.boss.start();
-    for (const name of JOB_NAMES) await this.boss.createQueue(name);
-    activeBoss = this.boss;
+    for (const name of JOB_NAMES) await this.boss.createQueue(name); // no options: an idempotent INSERT into pgboss.queue
+    this.ready = this.boss;
     if (this.config.env.SANCHAY_APP_ROLE !== 'worker') return;
     for (const wrapper of this.discovery.getProviders()) {
       const { instance, metatype } = wrapper;
@@ -1266,9 +1711,28 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
   }
 
   async onApplicationShutdown(): Promise<void> {
+    this.ready = undefined;
     this.heartbeat?.stop();
     await this.boss?.stop({ graceful: true, timeout: 10_000 });
-    activeBoss = undefined;
+  }
+}
+
+@Injectable()
+export class Jobs {
+  constructor(@Inject(JobsService) private readonly service: JobsService) {}
+
+  async enqueue<N extends JobName>(
+    exec: DbExecutor,
+    name: N,
+    data: unknown,
+    opts: JobsEnqueueOptions = {},
+  ): Promise<void> {
+    await this.service.started().send(name, (data ?? {}) as object, {
+      db: drizzleAdapter(exec),
+      retryLimit: opts.retryLimit ?? 3,
+      ...(opts.singletonKey === undefined ? {} : { singletonKey: opts.singletonKey }),
+      ...(opts.startAfter === undefined ? {} : { startAfter: opts.startAfter }),
+    });
   }
 }
 ```
@@ -1330,15 +1794,13 @@ export async function runWorker(env: Env): Promise<INestApplicationContext> {
 if (env.SANCHAY_APP_ROLE === 'worker') {
   const { runWorker } = await import('./modules/platform/jobs/worker.main.js');
   await runWorker(env);
-} else if (env.SANCHAY_APP_ROLE === 'migrate') {
-  // unreachable: the migrate branch above already returned via process.exit(0).
 } else {
   const { createApp } = await import('./bootstrap.js');
   const app = await createApp(env);
   await app.listen(env.PORT, env.HOST);
 }
 ```
-(the existing `if (env.SANCHAY_APP_ROLE === 'migrate') { ...; process.exit(0); }` block stays exactly as-is above this; only the `worker` branch's body and the trailing unconditional `createApp`/`listen` lines change, the latter now guarded by `else`.)
+(the existing `if (env.SANCHAY_APP_ROLE === 'migrate') { ...; process.exit(0); }` block stays exactly as-is above this; only the `worker` branch's body and the trailing unconditional `createApp`/`listen` lines change, the latter now guarded by `else`. There is no `else if` for `migrate`: after that block TypeScript has narrowed the role to `'api' | 'worker'`, so comparing it with `'migrate'` is TS2367 and fails `typecheck`, RV-02-44.)
 
 `apps/api/src/app.module.ts` (add `JobsModule` to imports, once, so both roles get `JobsService`)
 ```ts
@@ -1359,17 +1821,24 @@ import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { desc } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
+import { CLOCK, type Clock } from './clock.js';
 import { workerHeartbeats } from './jobs/jobs.schema.js';
 import { AppError } from './errors.js';
 import { InfraRoute } from './http-decorators.js';
 
 const HEARTBEAT_STALE_MS = 2 * 60_000;
 
-/** D-11: /health stays liveness-only forever (R-12). /health/ready adds pg-boss + heartbeat in D2. */
+/**
+ * D-11: /health stays liveness-only forever (R-12). /health/ready adds pg-boss + heartbeat in D2.
+ * A failed check answers 500 INTERNAL (retryable), the one error the contract declares (RV-02-42).
+ */
 @InfraRoute('APP_AND_API_HOSTS')
 @Controller()
 export class HealthRouter {
-  constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+  constructor(
+    @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   @Implement(contract.health.live)
   live() {
@@ -1404,7 +1873,7 @@ export class HealthRouter {
         .orderBy(desc(workerHeartbeats.lastBeatAt))
         .limit(1);
       const staleOrMissing =
-        latest === undefined || Date.now() - latest.lastBeatAt.getTime() > HEARTBEAT_STALE_MS;
+        latest === undefined || this.clock.now().getTime() - latest.lastBeatAt.getTime() > HEARTBEAT_STALE_MS;
       if (staleOrMissing) {
         throw new AppError('INTERNAL', { retryable: true });
       }
@@ -1540,6 +2009,25 @@ export async function runMigrations(databaseUrl: string): Promise<void> {
 }
 ```
 
+`apps/api/drizzle.config.ts` (full file; RV-02-41: `schema` becomes a list. The one-level glob missed `jobs/jobs.schema.ts`, so `db:generate` printed "No schema changes, nothing to migrate" and `db:check` still passed; the `integrations` glob is for D3's `provider-calls.schema.ts`.)
+```ts
+import { defineConfig } from 'drizzle-kit';
+
+export default defineConfig({
+  dialect: 'postgresql',
+  schema: [
+    './src/modules/*/*.schema.ts',
+    './src/modules/*/*/*.schema.ts',
+    './src/integrations/*/*.schema.ts',
+  ],
+  out: './drizzle',
+  schemaFilter: ['app'],
+  migrations: { schema: 'drizzle', table: '__drizzle_migrations' },
+  strict: true,
+  verbose: true,
+});
+```
+
 Generate the custom migration:
 ```
 pnpm --filter=@sanchay/api db:generate --name=worker_heartbeats
@@ -1576,8 +2064,8 @@ pnpm --filter=@sanchay/api db:check
 ```
 Expected:
 - `typecheck`: exits 0.
-- `test`: `jobs.module.test.ts` — 2 passed.
-- `test:int`: `jobs.int.test.ts` — 9 passed; `migrations.int.test.ts` — 9 passed (was 8 after D1); every other `test/int/*.int.test.ts` file still passes (worker-role heartbeat and job processing only start when `SANCHAY_APP_ROLE=worker`, which `bootTestApp()`'s default `testEnv` does not set, so the existing api-role suites are unaffected).
+- `test`: `jobs.module.test.ts` — 2 passed; `drizzle-config.test.ts` — 1 passed.
+- `test:int`: `jobs.int.test.ts` — 9 passed; `health.int.test.ts` — 8 passed (was 7); `migrations.int.test.ts` — 9 passed (was 8 after D1); every other `test/int/*.int.test.ts` file still passes (worker-role heartbeat and job processing only start when `SANCHAY_APP_ROLE=worker`, which `bootTestApp()`'s default `testEnv` does not set; the one api-role change, `/health/ready` needing a fresh heartbeat, is covered by `health.int.test.ts`).
 - `db:check`: `db:check OK: schema and migrations are in sync`.
 
 - [ ] **Step 5: Commit**
@@ -2044,6 +2532,7 @@ import { describe, expect, it } from 'vitest';
 import { FP_DISPATCHER, FpTransport } from '../../src/integrations/fp/fp-transport.js';
 import { providerCalls } from '../../src/integrations/fp/provider-calls.schema.js';
 import { Crypto } from '../../src/modules/platform/crypto.js';
+import { asRowId } from '../../src/modules/platform/ids.js';
 import { bootTestApp } from './app.js';
 
 describe('provider_calls (worker role)', () => {
@@ -2071,8 +2560,8 @@ describe('provider_calls (worker role)', () => {
         .select()
         .from(providerCalls)
         .where(eq(providerCalls.operation, 'schemePlans.list'));
-      expect(row).toBeDefined();
-      expect(JSON.stringify(row!.responseMeta)).not.toMatch(/9876543210|AAAPA3751A/);
+      if (row === undefined) throw new Error('no provider_calls row for schemePlans.list');
+      expect(JSON.stringify(row.responseMeta)).not.toMatch(/9876543210|AAAPA3751A/);
     } finally {
       await t.close();
     }
@@ -2093,12 +2582,14 @@ describe('provider_calls (worker role)', () => {
         .select()
         .from(providerCalls)
         .where(eq(providerCalls.operation, 'schemePlans.list'));
+      if (row === undefined) throw new Error('no provider_calls row for schemePlans.list');
       const crypto = t.app.get(Crypto);
+      const rowId = asRowId('provider_calls', row.id);
       expect(() =>
-        crypto.decrypt(row!.bodyEnc, { table: 'provider_calls', column: 'body_enc', rowId: row!.id }),
+        crypto.decrypt(row.bodyEnc, { table: 'provider_calls', column: 'body_enc', rowId }),
       ).not.toThrow();
       expect(() =>
-        crypto.decrypt(row!.bodyEnc, {
+        crypto.decrypt(row.bodyEnc, {
           table: 'provider_calls',
           column: 'body_enc',
           rowId: 'not-the-row-id' as never,
@@ -3666,7 +4157,7 @@ describe('FakeFp', () => {
     const list = await transport.call('purchase.list', { query: { source_ref_id: 'order-lookup-1' } });
     const body = list.body as { data: Array<{ source_ref_id: string; state: string }> };
     expect(body.data).toHaveLength(1);
-    expect(body.data[0]!.state).toBe('under_review');
+    expect(body.data[0]?.state).toBe('under_review');
   });
 
   it('H-2 lumpsum state path: under_review -> pending -> submitted -> successful', async () => {
@@ -3903,7 +4394,7 @@ export const FAKE_SCHEME_FIXTURES: readonly FakeSchemeFixture[] = [
   { isin: 'INF769K01AX1', schemeName: 'Mirae Asset Short Duration Fund', amcName: 'Mirae Asset', category: 'DEBT' },
 ];
 
-export type FpScriptMode = 'timeout' | '5xx' | '409-dup' | { status: number; body: unknown };
+export type FpScriptMode = 'timeout' | '5xx' | '409-dup' | { status: number; body: object };
 
 export interface FakeFpScript {
   mode: FpScriptMode;
@@ -3923,7 +4414,7 @@ import { FakeFpState, type StoredPurchase } from './fake-fp.state.js';
 
 interface FakeReply {
   readonly statusCode: number;
-  readonly data: unknown;
+  readonly data: object;
 }
 
 interface CallLogEntry {
@@ -3938,7 +4429,8 @@ function matchPath(template: string, actual: string): Record<string, string> | n
   if (templateParts.length !== actualParts.length) return null;
   const params: Record<string, string> = {};
   for (const [i, templatePart] of templateParts.entries()) {
-    const actualPart = actualParts[i]!;
+    const actualPart = actualParts[i];
+    if (actualPart === undefined) return null;
     if (templatePart.startsWith('{') && templatePart.endsWith('}')) {
       params[templatePart.slice(1, -1)] = decodeURIComponent(actualPart);
     } else if (templatePart !== actualPart) {
@@ -4164,7 +4656,7 @@ export class FakeFp {
         return { statusCode: 200, data: preVerificationPayload(id, 'completed') };
       }
       case 'preVerification.get': {
-        const record = this.state.preVerifications.get(params.id!);
+        const record = this.state.preVerifications.get(params.id ?? '');
         if (record === undefined) {
           return { statusCode: 404, data: { error: { status: 404, code: 'NOT_FOUND', message: `pre_verification ${params.id} not found` } } };
         }
@@ -4194,7 +4686,7 @@ export class FakeFp {
         return { statusCode: 200, data: purchasePayload(purchase) };
       }
       case 'purchase.get': {
-        const purchase = this.state.purchases.get(params.id!);
+        const purchase = this.state.purchases.get(params.id ?? '');
         if (purchase === undefined) {
           return { statusCode: 404, data: { error: { status: 404, code: 'NOT_FOUND', message: `mf_purchase ${params.id} not found` } } };
         }
@@ -4630,7 +5122,7 @@ export async function buildClient(options: RunOptions): Promise<ChainContext> {
         'content-type': 'application/json',
         'x-tenant-id': credentials.tenantId,
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? null : JSON.stringify(body),
     });
     const text = await response.body.text();
     return text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : {};
@@ -4950,7 +5442,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage befor
   - `TERMINAL: Record<MachineName, readonly string[]>`.
   - `STATE_MACHINES: Record<MachineName, StateMachineDef<string>>` (the registry `gen-states.ts` renders).
   - `fpStateToOrderStatus(fpState: FpOrderState, ctx: { unitsAllotted: boolean }): OrderStatus`.
-  - `gen:states` root script regenerating `docs/specs/states.md` deterministically from `STATE_MACHINES`.
+  - `renderStatesDoc(): string` (the Markdown rendering of `STATE_MACHINES`) and the `gen:states` root script, which builds the package and writes `renderStatesDoc()` to `docs/specs/states.md` (RV-02-51).
 
 Deviation from outline: the outline lists `ORDER_STATUSES`, `PLAN_STATUSES` etc. by name but does not spell out their members or transition edges. §4.2/§4.3/§4.4 of the binding spec (`docs/superpowers/specs/2026-09-25-sanchay-mvp-spec.md`) give the ORDER, PLAN and MANDATE tables verbatim; `CHALLENGE_STATUSES` transitions (in particular the `PENDING → APPROVED → CONSUMED` split) are inferred from the `consent_challenges` columns `required_factors`/`send_count` (spec §2.3 line 190) and the `SECOND_FACTOR_REQUIRED` error code already present in `packages/contract/src/errors.ts` (H-21 dual-factor for redemption/attest/≥₹1L purchase), since Plan 03's E3/E4 (which own the consent engine) had not landed at drafting time. `ONBOARDING_STAGES` is inferred from spec §4.5's prose (`onboarding.provision`, `provisioning_step`, the re-attest path R-17, the `can_purchase`/`can_exit` readiness trigger); Plan 03's E11 (which builds the real onboarding chain) may refine these names, in which case this task's exports are additive, never renamed (nothing outside `@sanchay/domain` depends on them yet).
 
@@ -4968,7 +5460,7 @@ import {
   ONBOARDING_STAGES,
   ORDER_STATUSES,
   PAYMENT_ATTEMPT_STATUSES,
-  PLAN_STATUSES,
+  renderStatesDoc,
   STATE_MACHINES,
   TERMINAL,
 } from '../src/states/index.js';
@@ -5049,11 +5541,13 @@ describe('state machine registry', () => {
     expect(canTransition('ORDER', 'SUBMITTING', 'REJECTED', 'live_check_failed')).toBe(true);
   });
 
-  it('terminal states have no exits', () => {
+  it('terminal states have no exits, except the spec §4.2 reversal SETTLED → REVERSED (fp_reversed)', () => {
     for (const name of MACHINE_NAMES) {
       const def = STATE_MACHINES[name];
       for (const state of TERMINAL[name]) {
-        const outgoing = def.transitions.filter((t) => t.from === state);
+        const outgoing = def.transitions.filter(
+          (t) => t.from === state && !(name === 'ORDER' && state === 'SETTLED' && t.trigger === 'fp_reversed'),
+        );
         expect(outgoing, `${name}.${state} must have zero outgoing transitions`).toHaveLength(0);
       }
     }
@@ -5144,8 +5638,7 @@ describe('state machine registry', () => {
     expect(canTransition('ORDER', 'NOT_A_STATE', 'SETTLED')).toBe(false);
   });
 
-  it('gen:states output is deterministic across two renders', async () => {
-    const { renderStatesDoc } = await import('../../../scripts/gen-states.js');
+  it('renderStatesDoc is deterministic across two renders', () => {
     expect(renderStatesDoc()).toBe(renderStatesDoc());
   });
 });
@@ -5154,9 +5647,9 @@ describe('state machine registry', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test states.test.ts
+pnpm --filter=@sanchay/domain test
 ```
-Expected failure: `Error: Cannot find module '../src/states/index.js'` (the `states/` directory does not exist yet), so every `it` in the file fails at the top-level `import`.
+Expected failure: `Error: Cannot find module '../src/states/index.js'` (the `states/` directory does not exist yet), so every `it` in `states.test.ts` fails at the top-level `import`. The domain suite always runs unfiltered: its `vitest run --coverage` gate (95%) counts every `src` file, so a filtered run fails even when its tests pass (RV-02-52).
 
 - [ ] **Step 3: Minimal implementation** (complete code for every file)
 
@@ -5525,7 +6018,7 @@ export const ONBOARDING_TRANSITIONS: readonly Transition<OnboardingStage>[] = [
 ```ts
 import { MANDATE_STATUSES, MANDATE_TERMINAL, MANDATE_TRANSITIONS } from './mandate.js';
 import { ONBOARDING_STAGES, ONBOARDING_TERMINAL, ONBOARDING_TRANSITIONS } from './onboarding.js';
-import { fpStateToOrderStatus, ORDER_STATUSES, ORDER_TERMINAL, ORDER_TRANSITIONS } from './order.js';
+import { ORDER_STATUSES, ORDER_TERMINAL, ORDER_TRANSITIONS } from './order.js';
 import {
   PAYMENT_ATTEMPT_STATUSES,
   PAYMENT_ATTEMPT_TERMINAL,
@@ -5575,6 +6068,42 @@ export function canTransition(machine: MachineName, from: string, to: string, tr
   );
 }
 
+const MACHINE_ORDER: readonly MachineName[] = [
+  'ORDER',
+  'PLAN',
+  'MANDATE',
+  'PAYMENT_ATTEMPT',
+  'CHALLENGE',
+  'ONBOARDING',
+];
+
+function renderMachine(name: MachineName, def: StateMachineDef<string>): string {
+  const lines: string[] = [`## ${name}`, ''];
+  lines.push(`States: ${def.states.join(', ')}`, '');
+  lines.push(`Terminal: ${def.terminal.length > 0 ? def.terminal.join(', ') : '(none)'}`, '');
+  lines.push('| From | Trigger | To |', '|---|---|---|');
+  const sorted = [...def.transitions].sort((a, b) =>
+    a.from === b.from ? a.trigger.localeCompare(b.trigger) : a.from.localeCompare(b.from),
+  );
+  for (const t of sorted) {
+    lines.push(`| ${t.from} | ${t.trigger} | ${t.to} |`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** `docs/specs/states.md`, rendered from STATE_MACHINES; `scripts/gen-states.ts` writes it (RV-02-51). */
+export function renderStatesDoc(): string {
+  const header = [
+    '<!-- GENERATED by scripts/gen-states.ts (D5). Do not edit by hand; run `pnpm gen:states`. -->',
+    '',
+    '# Sanchay state machines',
+    '',
+  ].join('\n');
+  const body = MACHINE_ORDER.map((name) => renderMachine(name, STATE_MACHINES[name])).join('\n');
+  return `${header}\n${body}`;
+}
+
 export {
   ORDER_STATUSES,
   ORDER_TERMINAL,
@@ -5618,78 +6147,40 @@ export * from './states/index.js';
 export * from './transactions.js';
 ```
 
-`scripts/gen-states.ts` (root; run with plain Node 24 type stripping, matching `scripts/check-brand.ts`'s own doc comment):
+`scripts/gen-states.ts` (root; plain Node 24 type stripping, like `scripts/check-brand.ts`; it reads the built package, RV-02-51):
 ```ts
 /**
- * Renders `docs/specs/states.md` from `packages/domain/src/states/index.ts`'s STATE_MACHINES registry
- * (D5). Run with plain Node 24 (type stripping): `node scripts/gen-states.ts` or `pnpm gen:states`.
- * CI's "states drift" step runs this then `git diff --exit-code docs/specs/states.md`.
+ * Writes `docs/specs/states.md` from `renderStatesDoc()` (D5). It reads the built package: plain Node 24
+ * (type stripping) cannot load `packages/domain/src`, whose relative imports end in `.js`
+ * (RV-02-51). Run `pnpm gen:states`, which builds `@sanchay/domain` first. CI's "States drift" step
+ * runs it, then `git diff --exit-code docs/specs/states.md`.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  type MachineName,
-  STATE_MACHINES,
-  type StateMachineDef,
-} from '../packages/domain/src/states/index.ts';
+import { renderStatesDoc } from '../packages/domain/dist/index.js';
 
-const MACHINE_ORDER: readonly MachineName[] = [
-  'ORDER',
-  'PLAN',
-  'MANDATE',
-  'PAYMENT_ATTEMPT',
-  'CHALLENGE',
-  'ONBOARDING',
-];
-
-function renderMachine(name: MachineName, def: StateMachineDef<string>): string {
-  const lines: string[] = [`## ${name}`, ''];
-  lines.push(`States: ${def.states.join(', ')}`, '');
-  lines.push(`Terminal: ${def.terminal.length > 0 ? def.terminal.join(', ') : '(none)'}`, '');
-  lines.push('| From | Trigger | To |', '|---|---|---|');
-  const sorted = [...def.transitions].sort((a, b) =>
-    a.from === b.from ? a.trigger.localeCompare(b.trigger) : a.from.localeCompare(b.from),
-  );
-  for (const t of sorted) {
-    lines.push(`| ${t.from} | ${t.trigger} | ${t.to} |`);
-  }
-  lines.push('');
-  return lines.join('\n');
+const outPath = fileURLToPath(new URL('../docs/specs/states.md', import.meta.url));
+const next = renderStatesDoc();
+let current: string | null = null;
+try {
+  current = readFileSync(outPath, 'utf8');
+} catch {
+  // First run: neither the file nor docs/specs/ exists yet.
 }
-
-export function renderStatesDoc(): string {
-  const header = [
-    '<!-- GENERATED by scripts/gen-states.ts (D5). Do not edit by hand; run `pnpm gen:states`. -->',
-    '',
-    '# Sanchay state machines',
-    '',
-  ].join('\n');
-  const body = MACHINE_ORDER.map((name) => renderMachine(name, STATE_MACHINES[name])).join('\n');
-  return `${header}\n${body}`;
-}
-
-function main(): void {
-  const outPath = fileURLToPath(new URL('../docs/specs/states.md', import.meta.url));
-  const next = renderStatesDoc();
-  try {
-    const current = readFileSync(outPath, 'utf8');
-    if (current === next) return;
-  } catch {
-    // File does not exist yet; fall through to write it.
-  }
+if (current !== next) {
+  mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, next, 'utf8');
   console.log(`wrote ${outPath}`);
 }
-
-main();
 ```
 
-`docs/specs/states.md` — generated once by running `node scripts/gen-states.ts` and committed as-is (its exact content is whatever `renderStatesDoc()` above produces from `STATE_MACHINES`; it is never hand-edited).
+`docs/specs/states.md` — generated by the first `pnpm gen:states` in Step 4 (the script creates `docs/specs/`) and committed as-is (its exact content is whatever `renderStatesDoc()` above produces from `STATE_MACHINES`; it is never hand-edited).
 
 `package.json` (root, modify — one appended key in the `scripts` object, alphabetically placed):
 ```json
     "format": "biome check --write .",
-    "gen:states": "node scripts/gen-states.ts",
+    "gen:states": "pnpm --filter=@sanchay/domain build && node scripts/gen-states.ts",
     "lint": "biome ci .",
 ```
 
@@ -5704,18 +6195,18 @@ main();
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/domain test states.test.ts
+pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/domain typecheck
-node scripts/gen-states.ts
-git status --porcelain docs/specs/states.md
+pnpm gen:states
+pnpm gen:states
 ```
-Expected: all `states.test.ts` cases green; `typecheck` clean; `gen-states.ts` prints nothing (file already matches) or `wrote .../docs/specs/states.md` on the first run, and after that first run `git status --porcelain docs/specs/states.md` is empty (no working-tree diff), matching the CI drift check.
+Expected: the whole domain suite green, `states.test.ts` included, with the 95% coverage gate met; `typecheck` clean; the first `pnpm gen:states` builds `@sanchay/domain` and prints `wrote .../docs/specs/states.md`, and the second writes nothing (no `wrote` line) because the file already matches, which is what CI's "States drift" step checks after the commit.
 
 - [ ] **Step 5: Commit**
 
 ```
 pnpm exec biome check --write packages/domain/src/states packages/domain/test/states.test.ts scripts/gen-states.ts docs/specs/states.md packages/domain/src/index.ts package.json .github/workflows/ci.yml
-pnpm --filter=@sanchay/domain test states.test.ts
+pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/domain typecheck
 pnpm lint
 git add packages/domain/src/states packages/domain/test/states.test.ts scripts/gen-states.ts docs/specs/states.md packages/domain/src/index.ts package.json .github/workflows/ci.yml
@@ -5894,7 +6385,9 @@ function buildNotify() {
     insert: () => ({
       values: (row: unknown) => {
         inserted.push(row);
-        return Promise.resolve();
+        return {
+          onConflictDoNothing: () => ({ returning: () => Promise.resolve([{ id: 'n-1' }]) }),
+        };
       },
     }),
   };
@@ -5924,11 +6417,11 @@ describe('Notify.enqueue', () => {
     expect(enqueued).toEqual([{ name: 'notifications.send', data: { notificationId: expect.any(String) } }]);
   });
 
-  it('is a silent no-op on a dedupeKey conflict (23505)', async () => {
+  it('is a silent no-op when the dedupeKey already exists (ON CONFLICT DO NOTHING, RV-02-68)', async () => {
     const { notify, enqueued } = buildNotify();
     const exec = {
       insert: () => ({
-        values: () => Promise.reject(Object.assign(new Error('dup'), { code: '23505' })),
+        values: () => ({ onConflictDoNothing: () => ({ returning: () => Promise.resolve([]) }) }),
       }),
     };
     await expect(
@@ -5995,7 +6488,7 @@ describe('NotificationsSendJob', () => {
 ```ts
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { notificationDeliveries, notifications } from '../../src/db/schema.js';
+import { notifications } from '../../src/db/schema.js';
 import { REDACT_KEY_PATTERNS } from '../../src/modules/platform/logging.js';
 import { bootTestApp } from './app.js';
 import { insertDevice, insertInvestor } from './factories.js';
@@ -6004,14 +6497,14 @@ describe('notifications (D6)', () => {
   it('a known device does not enqueue SECURITY_NEW_SIGN_IN; a new device does', async () => {
     const ta = await bootTestApp();
     try {
-      const investor = await insertInvestor(ta.db.database, {
+      const investor = await insertInvestor(ta.db.db, {
         emailEnc: Buffer.from('ct'),
         emailBidx: Buffer.from('bidx'),
         emailMasked: 'i***@example.com',
         emailVerifiedAt: ta.clock.now(),
       });
-      await insertDevice(ta.db.database, investor.id, { deviceRefHash: Buffer.from('known-device') });
-      const before = await ta.db.database
+      await insertDevice(ta.db.db, investor.id, { deviceRefHash: Buffer.from('known-device') });
+      const before = await ta.db.db
         .select()
         .from(notifications)
         .where(and(eq(notifications.investorId, investor.id), eq(notifications.templateKey, 'SECURITY_NEW_SIGN_IN')));
@@ -6020,7 +6513,7 @@ describe('notifications (D6)', () => {
       // from a NEW device (new device-ref-hash) must. Exercised through AuthService.verifyLoginOtp via
       // the /auth/otp + /auth/otp/verify HTTP round trip in the full E2E suite (Plan 03); this
       // integration test asserts the DB-level contract Notify.enqueue relies on: dedupeKey uniqueness.
-      const rows = await ta.db.database
+      const rows = await ta.db.db
         .select()
         .from(notifications)
         .where(eq(notifications.dedupeKey, 'SECURITY_NEW_SIGN_IN:some-device-id'));
@@ -6041,7 +6534,7 @@ describe('notifications (D6)', () => {
   it('notifications.send retries 3x then FAILED', async () => {
     const ta = await bootTestApp();
     try {
-      const investor = await insertInvestor(ta.db.database, {
+      const investor = await insertInvestor(ta.db.db, {
         emailEnc: Buffer.from('ct'),
         emailBidx: Buffer.from('bidx'),
         emailMasked: 'i***@example.com',
@@ -6356,7 +6849,6 @@ import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { newId } from '../platform/ids.js';
 import { Jobs } from '../platform/jobs/jobs.service.js';
-import { pgErrorCodeOf } from '../platform/pg-errors.js';
 import {
   type NotificationCategory,
   notifications,
@@ -6395,7 +6887,9 @@ export class Notify {
 
   /**
    * Idempotent by dedupeKey (notifications_dedupe_uq): a second enqueue for the same key is a silent
-   * no-op, so a caller never needs its own "have I already notified this?" check.
+   * no-op, so a caller never needs its own "have I already notified this?" check. ON CONFLICT, not a
+   * caught 23505: callers enqueue inside their own transaction, which a failed INSERT would abort and
+   * PostgreSQL would then silently roll back at COMMIT (RV-02-68).
    */
   async enqueue(
     exec: DbExecutor,
@@ -6404,8 +6898,9 @@ export class Notify {
   ): Promise<void> {
     const id = newId('notifications');
     const now = this.clock.now();
-    try {
-      await exec.insert(notifications).values({
+    const inserted = await exec
+      .insert(notifications)
+      .values({
         id,
         createdAt: now,
         updatedAt: now,
@@ -6418,11 +6913,10 @@ export class Notify {
           column: 'payload_enc',
           rowId: id,
         }),
-      });
-    } catch (error) {
-      if (pgErrorCodeOf(error) === '23505') return;
-      throw error;
-    }
+      })
+      .onConflictDoNothing({ target: notifications.dedupeKey })
+      .returning({ id: notifications.id });
+    if (inserted.length === 0) return;
     await this.jobs.enqueue(exec, 'notifications.send', { notificationId: id });
   }
 }
@@ -8042,8 +8536,8 @@ import {
 import { appSchema, dbUuidv7, inList, stdColumns, tstz } from '../../db/app-schema.js';
 import { newId } from '../platform/ids.js';
 
-/** D8: schemes.status. Not yet in @sanchay/domain's catalogue.ts, so declared and re-exported here
- *  until a later task moves it (mirrors the SCHEME_STATUSES addition made to catalogue.ts in this task). */
+/** D8: schemes.status. SCHEME_STATUSES is added to @sanchay/domain's catalogue.ts in this task and
+ *  re-exported here, because Plan 04 F19 imports `type SchemeStatus` from this file (RV-02-57). */
 export { SCHEME_STATUSES, type SchemeStatus } from '@sanchay/domain';
 
 /** Not modelled in @sanchay/domain yet (no consumer before this task); local to the catalogue schema. */
@@ -8065,14 +8559,18 @@ export type NavSyncStatus = (typeof NAV_SYNC_STATUSES)[number];
 export const MARKET_HOLIDAY_KINDS = ['EQUITY', 'MONEY_MARKET', 'BANK'] as const;
 export type MarketHolidayKind = (typeof MARKET_HOLIDAY_KINDS)[number];
 
-/** Money-wire strings (parsed with @sanchay/validation's moneyWireSchema at the write boundary, D10). */
+/**
+ * Money-wire strings (parsed with @sanchay/validation's moneyWireSchema at the write boundary, D10).
+ * The SIP fields come only from FP's monthly SIP row. Without one they are all null (D-MONEY-026:
+ * no SIP threshold, no SIP), never the lumpsum limits (RV-02-55).
+ */
 export interface SchemeThresholds {
   purchaseMin: string;
   purchaseMax: string | null;
   purchaseMultiple: string;
-  sipMin: string;
+  sipMin: string | null;
   sipMax: string | null;
-  sipMultiple: string;
+  sipMultiple: string | null;
 }
 
 export const amcs = appSchema.table(
@@ -8339,7 +8837,7 @@ Then in `catalogue.schema.ts`, replace the local `['DRAFT', 'PUBLISHED', 'SUSPEN
 import { ASSET_CLASSES, CUTOFF_CLASSES, SCHEME_OPTIONS, SCHEME_PLAN_TYPES, SCHEME_STATUSES, VOLATILITY_CLASSES } from '@sanchay/domain';
 ```
 
-and use `text('status', { enum: SCHEME_STATUSES }).notNull().default('DRAFT')` / `inList('status', SCHEME_STATUSES)` — drop the re-export shim shown in Step 1's scaffold.
+and use `text('status', { enum: SCHEME_STATUSES }).notNull().default('DRAFT')` / `inList('status', SCHEME_STATUSES)`. Keep the `export { SCHEME_STATUSES, type SchemeStatus } from '@sanchay/domain';` line: Plan 04 F19's `publish-gate.apply.ts` imports `type SchemeStatus` from this file, so dropping it is a TS2305 there (RV-02-57).
 
 `apps/api/src/modules/platform/ids.ts` (modify — extend the union):
 
@@ -8796,10 +9294,10 @@ git commit -m "feat(catalogue): add catalogue schema, seed data and ops:catalogu
 
 **Interfaces:**
 - Prerequisites: D8 (`schemeNavs`, `navHistory`, `navSyncRuns` tables, `Database` type); D1 (`ReconBreaks.open`, `RuntimeConfig`); D2 (`Jobs.enqueue`, `@JobHandler`, `JOB_NAMES`, `schedule(name, cron, {tz})`).
-- Consumes (Plan-01, verified): `@sanchay/money` — `Nav` (scale 6, `Nav.parse`), `formatIsoDate`; `@sanchay/domain` — `NAV_GRADES`, `type NavGrade`, `isIsin`, `toIsin`, `type Isin`, `isIsoDate`, `toIsoDate`, `type IsoDate`, `ISIN_REGEX`; `apps/api/src/modules/platform/clock.ts` — `CLOCK`, `Clock`; `apps/api/src/db/client.ts` — `DbExecutor`. Consumes (D1/D2, outline-specified names — no real code exists yet to verify against, per Prerequisites table in the Plan 02 outline intro): `Jobs.enqueue`, `@JobHandler`, `ReconBreaks.open`.
+- Consumes (Plan-01, verified): `@sanchay/money` — `Nav` (scale 6, `Nav.parse`), `formatIsoDate`; `@sanchay/domain` — `NAV_GRADES`, `type NavGrade`, `isIsin`, `toIsin`, `type Isin`, `isIsoDate`, `toIsoDate`, `type IsoDate`, `ISIN_REGEX`; `apps/api/src/modules/platform/clock.ts` — `CLOCK`, `Clock`, `DAY`; `apps/api/src/modules/identity/otp.service.ts` — `istDayStart` (NAV age counts IST calendar days from it, RV-02-49); `apps/api/src/db/client.ts` — `DbExecutor`. Consumes (D1/D2, outline-specified names — no real code exists yet to verify against, per Prerequisites table in the Plan 02 outline intro): `Jobs.enqueue`, `@JobHandler`, `ReconBreaks.open`.
 - Consumes (v1 port source, read-only): `C:/Users/pc/Desktop/WeathTech_v2/investor/platiziowealthtech-Back_end/src/main/java/com/platizio/wealthtech/integration/nav/AmfiNavParser.java` and `AmfiNavParserTest.java`.
-- Produces: `parseAmfiNav(body, {bound})`, `NAV_UNBOUNDED_DATE`, `type NavRow`, `type ParsedNavFeed`, `NavFeedFormatError`; `NAV_ROW_MIN_COUNT`, `NAV_MATCHED_FRACTION_FLOOR`, `NAV_JUMP_FLOOR_PCT`, `assertRunFloors`, `NavSyncFloorBreachedError`, `quarantineDecision`; `AmfiClient.fetchDaily()/fetchHistory(from, to)`; `NavService.latest(exec, isin) -> {nav, navDate, grade} | null`; job `nav.sync.daily`; `backfillNavHistory(exec, client, {from, to})`; `pnpm ops:nav-backfill --from <date> --to <date>`; `pnpm ops:nav-release --isin <i> --approver1 <a> --approver2 <b>`.
-- Deviation from outline: the outline's grade names (`FRESH|AGED|UNDATED`) match the **v1 research doc** (`docs/research/rules-compliance-nav.md`), but Plan-01's real `@sanchay/domain` already ships `NAV_GRADES = ['OK', 'STALE', 'UNAVAILABLE']` (`packages/domain/src/catalogue.ts`). This task uses the real enum: `OK` (fresh, matches v1 `FRESH`), `STALE` (matches v1 `AGED`), `UNAVAILABLE` (no row, or `quarantined = true` — a quarantined row keeps its last good `nav` value per NAV-09 but is not trustworthy until `ops:nav-release`, so it reports `UNAVAILABLE` regardless of age rather than falling back to `STALE`). The "future-dated → quarantined" v2 fix in the outline's test list is expressed here as: a future-dated row from the daily feed is never applied to `scheme_navs` at all (it lands in `ParsedNavFeed.futureDated`, per the v1 parser's own design, and is never quarantine-written).
+- Produces: `parseAmfiNav(body, {bound})`, `NAV_UNBOUNDED_DATE`, `type NavRow`, `type ParsedNavFeed`, `NavFeedFormatError`; `NAV_ROW_MIN_COUNT`, `NAV_MATCHED_FRACTION_FLOOR`, `NAV_JUMP_FLOOR_PCT`, `assertRunFloors`, `NavSyncFloorBreachedError`, `quarantineDecision`; `AmfiClient.fetchDaily()/fetchHistory(from, to)`; `NavService.latest(exec, isin) -> {nav, navDate, grade} | null` (age in IST calendar days; a NAV dated after today IST grades `UNAVAILABLE`, D-MONEY-067) and `istToday(now)`; job `nav.sync.daily` (rejects a NAV dated after today IST at ingest); `backfillNavHistory(exec, client, {from, to})`; `pnpm ops:nav-backfill --from <date> --to <date>`; `pnpm ops:nav-release --isin <i> --approver1 <a> --approver2 <b>`.
+- Deviation from outline: the outline's grade names (`FRESH|AGED|UNDATED`) match the **v1 research doc** (`docs/research/rules-compliance-nav.md`), but Plan-01's real `@sanchay/domain` already ships `NAV_GRADES = ['OK', 'STALE', 'UNAVAILABLE']` (`packages/domain/src/catalogue.ts`). This task uses the real enum: `OK` (fresh, matches v1 `FRESH`), `STALE` (matches v1 `AGED`), `UNAVAILABLE` (no row, a row dated after today IST (D-MONEY-067; v1 graded it fresh), or `quarantined = true` — a quarantined row keeps its last good `nav` value per NAV-09 but is not trustworthy until `ops:nav-release`, so it reports `UNAVAILABLE` regardless of age rather than falling back to `STALE`). The "future-dated → quarantined" v2 fix in the outline's test list is expressed here as: a future-dated row from the daily feed is never applied to `scheme_navs` at all (it lands in `ParsedNavFeed.futureDated`, per the v1 parser's own design, and is never quarantine-written).
 - Deviation from outline: the outline gives one signature, `parseAmfiNav(body, {bound: IsoDate})`. The v1 parser's test suite also needs the two-argument `parse(body)` "no bound" mode, and — critically — a test that a **null** bound is refused rather than silently meaning unbounded. Rather than add a second overload (which the outline does not list), this port keeps the one exported name and adds an explicit sentinel, `NAV_UNBOUNDED_DATE = '9999-12-31' as IsoDate`, that a caller must pass on purpose; `options.bound` being `null`/`undefined` throws `TypeError`. `parseAmfiNav(body)` with `options` omitted also throws, for the same reason.
 - Review fix (RV-02-4/5): D2 is a hard prerequisite (no stub fallback). The job needs a `@JobHandler('nav.sync.daily')` class (`NavSyncJob`) registered in a module, and the four crons need distinct pg-boss `key`s, each passing its `kind` as job data; see "D9 Step 3 addendum".
 - Row/matched-fraction/plausibility floors (`NAV-06`, `NAV-09` in `docs/research/rules-compliance-nav.md`, ported from v1): `rowsParsed < 1000` or (cold start) `matched/tracked < 0.10` fails the whole run before any write; a per-ISIN day-over-day move `> 25%` quarantines that ISIN instead of writing it. These floor values are not in the outline (which only says "quarantine: `|Δ| > floor`"); the 1000/0.10/25% figures are taken from the v1 research doc and are the run's defaults, overridable later via `RuntimeConfig` — not done in this task, which hardcodes them as named constants.
@@ -8914,7 +9412,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { NAV_UNBOUNDED_DATE, NavFeedFormatError, parseAmfiNav } from './amfi-nav-parser.js';
 
-const FIXTURES = fileURLToPath(new URL('../../../../../../packages/test-fixtures/src/amfi/', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../../../../../packages/test-fixtures/src/amfi/', import.meta.url));
 
 const DAILY_HEADER =
   'Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date';
@@ -8995,6 +9493,11 @@ describe('parseAmfiNav: junk rows are skipped', () => {
   it('skipsRowsWhoseDateWillNotParse', () => {
     const feed = `${DAILY_HEADER}\n100001;INF209KA1K47;-;Good;Direct;Growth;25.3631;24-Aug-2026\n100008;INF209KB1008;-;Bad month;Direct;Growth;11.1111;31-Foo-2026\n100009;INF209KB1009;-;Wrong shape;Direct;Growth;11.1111;2026-08-24\n100010;INF209KB1010;-;Placeholder date;Direct;Growth;11.1111;-\n`;
     expect(unbounded(feed).map((r) => r.isin)).toEqual(['INF209KA1K47']);
+  });
+
+  it('skipsAFebruary29thOutsideALeapYear', () => {
+    const feed = `${DAILY_HEADER}\n100011;INF209KB1011;-;Leap year;Direct;Growth;11.1111;29-Feb-2028\n100012;INF209KB1012;-;Not a leap year;Direct;Growth;11.1111;29-Feb-2027\n`;
+    expect(unbounded(feed).map((r) => [r.isin, r.navDate])).toEqual([['INF209KB1011', '2028-02-29']]);
   });
 
   it('skipsAmcSectionTitlesBlankLinesAndTheHeaderItself', () => {
@@ -9125,10 +9628,10 @@ describe('parseAmfiNav: the format-change signal', () => {
 
 ```typescript
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { FakeClock } from '../../src/modules/platform/clock.js';
 import { navSyncRuns, schemeNavs } from '../../src/db/schema.js';
-import { NavService } from '../../src/modules/catalogue/nav/nav.service.js';
 import { runNavSync } from '../../src/modules/catalogue/nav/nav-sync.job.js';
+import { NavService } from '../../src/modules/catalogue/nav/nav.service.js';
+import { FakeClock } from '../../src/modules/platform/clock.js';
 import { createTestDatabase, type TestDatabase } from './db.js';
 
 let t: TestDatabase;
@@ -9141,30 +9644,60 @@ afterAll(async () => {
   await t.drop();
 });
 
-describe('NavService.latest grading', () => {
-  it('grade OK for a nav 0 and 5 days old; STALE beyond 7 days; UNAVAILABLE when no row or quarantined', async () => {
-    const clock = new FakeClock('2026-08-24T05:00:00.000Z');
-    await t.db.insert(schemeNavs).values({ isin: 'INF209KA1K47', nav: '25.363100', navDate: '2026-08-24' });
-    await t.db.insert(schemeNavs).values({ isin: 'INF209KB12S4', nav: '12.945600', navDate: '2026-08-19' });
-    await t.db.insert(schemeNavs).values({ isin: 'INF209KB1234', nav: '18.250000', navDate: '2026-08-18' });
-    await t.db.insert(schemeNavs).values({ isin: 'INF209KB1235', nav: '18.250000', navDate: '2026-08-24', quarantined: true });
+// One database for the whole file and scheme_navs is keyed by ISIN, so every case uses its own ISINs.
+describe('NavService.latest grading (D-MONEY-067)', () => {
+  it('grades OK at 0 and 7 IST days, STALE at 8, UNAVAILABLE when quarantined, null without a row', async () => {
+    const clock = new FakeClock('2026-08-24T05:00:00.000Z'); // 10:30 IST, Mon 24 Aug 2026
+    await t.db.insert(schemeNavs).values([
+      { isin: 'INF209KG0001', nav: '25.363100', navDate: '2026-08-24' },
+      { isin: 'INF209KG0002', nav: '12.945600', navDate: '2026-08-17' },
+      { isin: 'INF209KG0003', nav: '18.250000', navDate: '2026-08-16' },
+      { isin: 'INF209KG0004', nav: '18.250000', navDate: '2026-08-24', quarantined: true },
+    ]);
 
     const svc = new NavService(clock);
-    expect((await svc.latest(t.db, 'INF209KA1K47' as never))?.grade).toBe('OK');
-    expect((await svc.latest(t.db, 'INF209KB12S4' as never))?.grade).toBe('OK');
-    expect((await svc.latest(t.db, 'INF209KB1234' as never))?.grade).toBe('STALE');
-    expect((await svc.latest(t.db, 'INF209KB1235' as never))?.grade).toBe('UNAVAILABLE');
+    expect((await svc.latest(t.db, 'INF209KG0001' as never))?.grade).toBe('OK');
+    expect((await svc.latest(t.db, 'INF209KG0002' as never))?.grade).toBe('OK');
+    expect((await svc.latest(t.db, 'INF209KG0003' as never))?.grade).toBe('STALE');
+    expect((await svc.latest(t.db, 'INF209KG0004' as never))?.grade).toBe('UNAVAILABLE');
     expect(await svc.latest(t.db, 'INF999NOROW1' as never)).toBeNull();
+  });
+
+  it('counts IST days between 00:00 and 05:30 IST; a NAV dated after today IST is UNAVAILABLE', async () => {
+    const clock = new FakeClock('2026-08-24T19:00:00.000Z'); // 00:30 IST, Tue 25 Aug 2026 (still 24 Aug in UTC)
+    await t.db.insert(schemeNavs).values([
+      { isin: 'INF209KG0005', nav: '10.000000', navDate: '2026-08-17' },
+      { isin: 'INF209KG0006', nav: '10.000000', navDate: '2026-08-18' },
+      { isin: 'INF209KG0007', nav: '10.000000', navDate: '2026-08-25' },
+      { isin: 'INF209KG0008', nav: '10.000000', navDate: '2026-08-26' },
+    ]);
+
+    const svc = new NavService(clock);
+    expect((await svc.latest(t.db, 'INF209KG0005' as never))?.grade).toBe('STALE'); // 8 IST days (7 by UTC dates)
+    expect((await svc.latest(t.db, 'INF209KG0006' as never))?.grade).toBe('OK'); // 7 IST days, inclusive
+    expect((await svc.latest(t.db, 'INF209KG0007' as never))?.grade).toBe('OK'); // today IST is not the future
+    expect((await svc.latest(t.db, 'INF209KG0008' as never))?.grade).toBe('UNAVAILABLE'); // after today IST
   });
 });
 
 describe('nav.sync.daily', () => {
-  it('writes nav_sync_runs with counts and opens a recon break on quarantine', async () => {
+  it('writes nav_sync_runs with counts, opens a recon break on quarantine, and rejects a NAV dated after today IST', async () => {
     await t.db.insert(schemeNavs).values({ isin: 'INF209KA1K47', nav: '25.363100', navDate: '2026-08-23' });
-    const fakeClient = { fetchDaily: vi.fn().mockResolvedValue([`Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date`, `1;INF209KA1K47;-;A;Direct;Growth;253.6310;24-Aug-2026`].join('\n')) };
+    // NAV-06 fails a run that parses fewer than 1,000 rows, so 1,000 new ISINs pad the feed (inserted, never quarantined).
+    const filler = Array.from(
+      { length: 1000 },
+      (_, i) => `${2000 + i};INF999F${String(i).padStart(5, '0')};-;Filler;Direct;Growth;10.0000;24-Aug-2026`,
+    );
+    const feed = [
+      'Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date',
+      '1;INF209KA1K47;-;A;Direct;Growth;253.6310;24-Aug-2026',
+      '2;INF209KC0001;-;B;Direct;Growth;10.0000;25-Aug-2026',
+      ...filler,
+    ].join('\n');
+    const fakeClient = { fetchDaily: vi.fn().mockResolvedValue(feed) };
     const reconBreaks = { open: vi.fn() };
     const jobs = { enqueue: vi.fn() };
-    const clock = new FakeClock('2026-08-24T16:00:00.000Z');
+    const clock = new FakeClock('2026-08-24T16:00:00.000Z'); // 21:30 IST, Mon 24 Aug 2026
 
     await runNavSync(t.db, { client: fakeClient as never, reconBreaks: reconBreaks as never, jobs: jobs as never, clock, kind: 'DAILY_2130' });
 
@@ -9172,11 +9705,14 @@ describe('nav.sync.daily', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]?.status).toBe('SUCCEEDED');
     expect(runs[0]?.rowsQuarantined).toBe(1);
+    expect(runs[0]?.rowsFutureDated).toBe(1);
     expect(reconBreaks.open).toHaveBeenCalledOnce();
     expect(jobs.enqueue).toHaveBeenCalledWith(t.db, 'catalogue.returns.compute', {});
     const row = await t.db.query.schemeNavs.findFirst({ where: (s, { eq }) => eq(s.isin, 'INF209KA1K47') });
     expect(row?.nav).toBe('25.363100');
     expect(row?.quarantined).toBe(true);
+    const future = await t.db.query.schemeNavs.findFirst({ where: (s, { eq }) => eq(s.isin, 'INF209KC0001') });
+    expect(future).toBeUndefined();
   });
 });
 ```
@@ -9228,7 +9764,7 @@ const NAV_DATE_RE = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/;
 const PREVIEW_LIMIT = 200;
 const MIN_HEADER_CELLS = 3;
 const PLACEHOLDERS = new Set(['-', '--', 'N.A.', 'N.A', 'NA', 'N/A', 'NULL']);
-const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function headerKey(cell: string): string {
   return cell.toLowerCase().replace(NON_ALPHANUMERIC, '');
@@ -9261,7 +9797,7 @@ function parseNavDateCell(cell: string): string | null {
   const day = Number(dRaw);
   const year = Number(yRaw);
   const monthIndex = Number(month) - 1;
-  const maxDay = monthIndex === 1 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[monthIndex]!;
+  const maxDay = monthIndex === 1 && isLeapYear(year) ? 29 : (DAYS_IN_MONTH[monthIndex] ?? 0);
   if (day < 1 || day > maxDay) return null;
   return `${yRaw}-${month}-${String(day).padStart(2, '0')}`;
 }
@@ -9460,10 +9996,19 @@ export class AmfiClient {
 ```typescript
 import type { Isin, NavGrade } from '@sanchay/domain';
 import type { DbExecutor } from '../../../db/client.js';
-import { schemeNavs } from '../catalogue.schema.js';
-import type { Clock } from '../../platform/clock.js';
+import { istDayStart } from '../../identity/otp.service.js';
+import { type Clock, DAY } from '../../platform/clock.js';
 
+/** D-MONEY-067: OK while the NAV is at most 7 IST calendar days old (inclusive), STALE after that. */
 const STALE_AFTER_DAYS = 7;
+
+/**
+ * Today's IST calendar date (YYYY-MM-DD), from Plan 01's `istDayStart`: an IST day ends at 18:30 UTC
+ * on its own date, so the day's last instant carries that date in UTC too.
+ */
+export function istToday(now: Date): string {
+  return new Date(istDayStart(now).getTime() + DAY - 1).toISOString().slice(0, 10);
+}
 
 export interface NavLatest {
   nav: string;
@@ -9474,15 +10019,20 @@ export interface NavLatest {
 export class NavService {
   constructor(private readonly clock: Clock) {}
 
+  /**
+   * D-MONEY-067 (RV-02-49): age counts IST calendar days, so from 00:00 IST the new day already
+   * counts. A quarantined row, or one dated after today IST (never used), grades UNAVAILABLE and keeps
+   * its last value.
+   */
   async latest(exec: DbExecutor, isin: Isin): Promise<NavLatest | null> {
     const row = await exec.query.schemeNavs.findFirst({ where: (t, { eq }) => eq(t.isin, isin) });
     if (!row) return null;
-    if (row.quarantined) return { nav: row.nav, navDate: row.navDate, grade: 'UNAVAILABLE' };
-    const today = this.clock.now();
-    const navDate = new Date(`${row.navDate}T00:00:00Z`);
-    const ageDays = Math.floor((today.getTime() - navDate.getTime()) / 86_400_000);
-    const grade: NavGrade = ageDays > STALE_AFTER_DAYS ? 'STALE' : 'OK';
-    return { nav: row.nav, navDate: row.navDate, grade };
+    const today = istToday(this.clock.now());
+    if (row.quarantined || row.navDate > today) {
+      return { nav: row.nav, navDate: row.navDate, grade: 'UNAVAILABLE' };
+    }
+    const ageDays = (Date.parse(today) - Date.parse(row.navDate)) / DAY;
+    return { nav: row.nav, navDate: row.navDate, grade: ageDays > STALE_AFTER_DAYS ? 'STALE' : 'OK' };
   }
 }
 ```
@@ -9497,10 +10047,16 @@ import type { Clock } from '../../platform/clock.js';
 import type { Database } from '../../../db/client.js';
 import { navSyncRuns, schemeNavs, schemes } from '../catalogue.schema.js';
 import { eq, sql } from 'drizzle-orm';
+import { istToday } from './nav.service.js';
 
 export interface NavSyncDeps {
   client: Pick<AmfiClient, 'fetchDaily'>;
-  reconBreaks: { open(tx: unknown, input: { kind: string; entityType: string; entityId: string; severity: string; detail: unknown }): Promise<void> };
+  reconBreaks: {
+    open(
+      tx: unknown,
+      input: { kind: string; entityType: string; entityId: string; severity: 'WARNING' | 'CRITICAL'; detail?: Record<string, unknown> },
+    ): Promise<void>;
+  };
   jobs: { enqueue(tx: unknown, name: string, data: unknown): Promise<void> };
   clock: Clock;
   kind: 'DAILY_2130' | 'DAILY_2330' | 'DAILY_0700' | 'DAILY_1030';
@@ -9508,9 +10064,10 @@ export interface NavSyncDeps {
 
 export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void> {
   const [run] = await db.insert(navSyncRuns).values({ kind: deps.kind, status: 'RUNNING' }).returning();
-  const runId = run!.id;
-  const todayIso = deps.clock.now().toISOString().slice(0, 10);
-  const bound = new Date(deps.clock.now().getTime() + 2 * 86_400_000).toISOString().slice(0, 10);
+  if (run === undefined) throw new Error('runNavSync: the nav_sync_runs insert returned no row');
+  const runId = run.id;
+  // D-MONEY-067 (RV-02-49): a NAV dated after today IST is rejected at ingest (it lands in futureDated).
+  const bound = istToday(deps.clock.now());
 
   let body: string;
   try {
@@ -9538,7 +10095,13 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
   for (const row of parsed.rows) {
     const existing = await db.query.schemeNavs.findFirst({ where: (t, { eq: eqOp }) => eqOp(t.isin, row.isin) });
     if (!existing) {
-      await db.insert(schemeNavs).values({ isin: row.isin, nav: row.nav, navDate: row.navDate, schemeNameSnapshot: row.schemeName, quarantined: false });
+      await db.insert(schemeNavs).values({
+        isin: row.isin,
+        nav: row.nav,
+        navDate: row.navDate,
+        schemeNameSnapshot: row.schemeName,
+        quarantined: false,
+      });
       continue;
     }
     if (quarantineDecision(existing.nav, row.nav)) {
@@ -9568,7 +10131,7 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
       rowsMatched: matched,
       rowsQuarantined: quarantinedCount,
       rowsFutureDated: parsed.futureDated.length,
-      maxNavDate: parsed.rows.length > 0 ? parsed.rows[parsed.rows.length - 1]!.navDate : null,
+      maxNavDate: parsed.rows.at(-1)?.navDate ?? null,
     })
     .where(eq(navSyncRuns.id, runId));
 
@@ -9751,7 +10314,7 @@ pnpm --filter=@sanchay/api test:int nav-sync
 pnpm --filter=@sanchay/api typecheck
 ```
 
-Expected: all 30 parser cases and both NAV-sync/grade integration tests pass; `typecheck` is clean.
+Expected: all 31 parser cases and the three NAV grade/sync integration tests pass; `typecheck` is clean.
 
 - [ ] **Step 5: Commit**
 
@@ -9788,15 +10351,18 @@ git commit -m "feat(catalogue): port AMFI NAV parser, add nav.sync.daily and NAV
 **Interfaces:**
 - Prerequisites: D8 (`schemes`, `sebiCategories`, `fundFactsRevisions` tables); D3 (`FpRead`, `fpJson`); D2 (`@JobHandler`, `Jobs.enqueue`, `schedule`).
 - Consumes: D8's `schemes`, `sebiCategories`, `fundFactsRevisions`, `SchemeThresholds`; `@sanchay/domain` — `LAUNCH_SCHEME_OPTIONS`; `@sanchay/validation` — `moneyWireSchema`; Plan-01 `packages/contract/src/errors.ts` — `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`; `apps/api/src/modules/identity/request-auth.ts` — `requireAuth`; Plan-01 router pattern (`@Implement`/`implement` from `@orpc/nest`, `ClsService<SanchayClsStore>`), mirrored from `apps/api/src/modules/identity/me.router.ts`. Consumes (D3, outline-specified names — no real code to verify against yet): `FpRead.schemePlans`, `FpRead.fundScheme`, `fpJson.money`.
-- Produces: job `catalogue.fp.sync`; procedures `catalogue.categories` GET `/catalogue/categories`, `catalogue.listSchemes` GET `/catalogue/schemes?q&category&cursor`; `CatalogueModule`.
+- Produces: job `catalogue.fp.sync`, which writes `schemes.{fpActive, purchaseAllowed, redemptionAllowed, sipAllowed, lockInMonths, thresholds, sipDates, status}`; `toThresholds(plan)` and `toSipDates(plan)` (exported for the unit test); procedures `catalogue.categories` GET `/catalogue/categories`, `catalogue.listSchemes` GET `/catalogue/schemes?q&category&cursor`; `CatalogueModule`.
 - Deviation from outline: the outline's `(P)` tag after these two procedures is ambiguous — §0.1 defines `P` as an **FP-write operation class** (`investor_profiles`, `mf_investment_accounts`, …), which does not apply to a read-only catalogue browse. The real Plan-01 auth convention (verified in `apps/api/src/app.module.ts`: `SessionGuard` is a global `APP_GUARD`, opted out per-route only by `@Public()`) is that every procedure is investor-authenticated by default. This task reads `(P)` as "no `@Public()`" — i.e. both procedures require a session, following the same undecorated-controller pattern as `MeRouter`. No `Public()` decorator is applied.
 - Review fix (RV-02-5): `catalogue.module.ts` is created by D9 (for `NavSyncJob`). D10 turns it into `CatalogueModule.forRoot(env)`, which adds `CatalogueRouter` and, only when `SANCHAY_APP_ROLE === 'worker'`, `CatalogueFpSyncJob` (it injects `FpRead`, which exists only in the worker via the global `FpModule`).
 - Deviation/assumption: no Plan-01 procedure yet binds a GET route to query-string input (`LoginRouter`/`MeRouter` are all POST; `ref.pincode` — D6 — uses a path param). `catalogue.listSchemes`'s input schema is written as a flat `z.object({ q, category, cursor })`, which `@orpc/openapi`'s GET binding maps to the query string; this is the documented oRPC convention, not something verified against existing Plan-01 code, since none exists yet.
-- Review fix (RV-02-6): the job uses D3's real `FpRead` (no local interface). Limits come from `FpSchemePlan.raw.thresholds[]` as documented in `docs/research/fp-api.md` §8A: `type: 'lumpsum'` gives `amount_min/amount_max/amount_multiples`; `type: 'sip'` with `frequency: 'monthly'` gives the SIP limits (falls back to lumpsum when absent). Each value goes through `fpJson.money(value, field)` and then `moneyWireSchema`. `schemePlans` is paged (size 100) until a short page. Eligibility flags come from `fundScheme(isin)` (§8B).
+- Review fix (RV-02-6): the job uses D3's real `FpRead` (no local interface). Limits come from `FpSchemePlan.raw.thresholds[]` as documented in `docs/research/fp-api.md` §8A: `type: 'lumpsum'` gives `amount_min/amount_max/amount_multiples`; `type: 'sip'` with `frequency: 'monthly'` gives the SIP limits and days (without that row the SIP limits are null and the scheme takes no SIP, RV-02-55). Each value goes through `fpJson.money(value, field)` and then `moneyWireSchema`. `schemePlans` is paged (size 100) until a short page. Eligibility flags come from `fundScheme(isin)` (§8B).
 - Review fix (RV-02-30): this task adds the first new top-level contract key (`catalogue`), so it relaxes Plan 01's `packages/contract/src/auth.test.ts` test "exposes exactly the 9 MVP procedures", whose exact `['auth', 'health', 'me']` check would otherwise fail (reproduced). The fragment is the one Plan 03 E2 carried as RV-03-5 (the top-level and `me` keys become `expect.arrayContaining`); E2, E4 and E5 then add `meta`, `consents` and `me.get` without editing the test, and E2's fragment is already applied.
 - Review fix (RV-02-28): `fp-sync.job.ts` imports `moneyWireSchema` from `@sanchay/validation`, which `apps/api` did not depend on (TS2307), so Step 3 adds the workspace link.
 - Review fix (RV-02-35): this task changes `packages/contract`, which `apps/api` reads from `dist/` (its typecheck and `pnpm --filter=@sanchay/api openapi`). Step 4 and Step 5 start with `pnpm exec turbo run build --filter=@sanchay/api^...`; without it the api typecheck fails with TS2339 on `contract.catalogue` and `openapi.json` misses the new paths (reproduced).
 - Review fix (RV-02-36): `CatalogueRouter` injects `DB` as the `DbHandle` that `PlatformModule` provides (`createDb`) and passes `this.dbh.db` to the queries. Typed as `Database`, every call answered 500 (`this.db.select is not a function`, reproduced). `listSchemes` takes the contract's `ListSchemesInput` (its `{ q?: string }` parameter failed TS2379 under `exactOptionalPropertyTypes`), and the non-null assertions that `biome ci` refuses are gone from the queries and the int test.
+- Review fix (RV-02-55): SIP availability comes from FP's monthly SIP row, never from the lumpsum row. `toThresholds` copied the lumpsum limits into the SIP fields when FP listed no monthly SIP row, so F19's FUND-01 offered "Start SIP" on schemes that F10's quote then refused (`SCHEME_NOT_ORDERABLE`); D-MONEY-026 says a scheme with no SIP threshold is not SIP-eligible. The SIP limits are now null without that row (D8's `SchemeThresholds`). `toSipDates` writes the row's days in 1..28 to `schemes.sip_dates`, which nothing wrote before, so F2's `sipSchemeOf` would have refused every synced scheme. `schemes.sip_allowed` is FP's `sip_allowed` with both present (fail closed); Plan 03 E14 serves it as `SchemeDetail.sipAllowed`, and Plan 04 F19's "Start SIP" reads it.
+- Review fix (RV-02-56): the int test imported `httpGet` and `signIn` from `test/int/http.ts`, which has neither (TS2305 in `typecheck`). It now signs in once with Plan 01's `signInWeb` and sends `webHeaders`. `seedOneScheme` derived its category code and ISIN from `Date.now()`, and two calls in one millisecond collide on `sebi_categories_code_uq` or `schemes_isin_uq`; it now numbers them from a per-file counter (each test file has its own database).
+- Review fix (RV-02-58): the unit test's `fundScheme` mocks are written multi-line. biome 2.5.14 formats the one-line `vi.fn().mockResolvedValue({ … })` differently on its second `--write` pass, so after Step 5's single `biome check --write` the file still failed `pnpm lint` (`biome ci`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9812,33 +10378,45 @@ export {};
 
 ```typescript
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bootTestApp, type TestApp } from './app.js';
 import { amcs, schemes, sebiCategories } from '../../src/db/schema.js';
-import { insertInvestor } from './factories.js';
-import { httpGet, signIn } from './http.js';
+import { bootTestApp, type TestApp } from './app.js';
+import { signInWeb } from './flows.js';
+import { webHeaders } from './http.js';
 
 let app: TestApp;
+/** One web session for the file, from Plan 01's real sign-in flow. */
+let cookies: Record<string, string>;
 
 beforeAll(async () => {
   app = await bootTestApp();
+  ({ cookies } = await signInWeb(app, '9844400101'));
 });
 
 afterAll(async () => {
   await app.close();
 });
 
+/** A web GET (Plan 01's `webHeaders`); without cookies it carries no session. */
+const get = (url: string, jar: Record<string, string> = {}) =>
+  app.app.inject({ method: 'GET', url: `/api/v1${url}`, headers: webHeaders({ cookies: jar }) });
+
+/** Each test file has its own database, so a per-file counter keeps codes, slugs and ISINs unique (RV-02-56). */
+let seq = 0;
+
 async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
-  const [amc] = await app.db.db.insert(amcs).values({ name: 'Test AMC', slug: `amc-${Date.now()}-${Math.random()}` }).returning();
+  seq += 1;
+  const n = String(seq).padStart(5, '0');
+  const [amc] = await app.db.db.insert(amcs).values({ name: 'Test AMC', slug: `amc-${n}` }).returning();
   const [cat] = await app.db.db
     .insert(sebiCategories)
-    .values({ code: `CAT_${Date.now()}`, assetClass: 'EQUITY', name: 'Cat', slug: `cat-${Date.now()}-${Math.random()}`, cutoffClass: 'STANDARD', volatilityClass: 'V_EQUITY' })
+    .values({ code: `CAT_${n}`, assetClass: 'EQUITY', name: 'Cat', slug: `cat-${n}`, cutoffClass: 'STANDARD', volatilityClass: 'V_EQUITY' })
     .returning();
   if (amc === undefined || cat === undefined) throw new Error('seedOneScheme: an insert returned no row');
   await app.db.db.insert(schemes).values({
-    isin: `INF${String(Date.now()).slice(-9)}`,
+    isin: `INFTEST${n}`,
     amcId: amc.id,
     name: 'Parag Parikh Flexi Cap Fund - Regular - Growth',
-    slug: `scheme-${Date.now()}-${Math.random()}`,
+    slug: `scheme-${n}`,
     categoryCode: cat.code,
     status,
     curated,
@@ -9847,17 +10425,15 @@ async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
 
 describe('catalogue.categories / catalogue.listSchemes', () => {
   it('requires a session', async () => {
-    const res = await httpGet(app, '/api/v1/catalogue/categories');
-    expect(res.statusCode).toBe(401);
+    const res = await get('/catalogue/categories');
+    expect([res.statusCode, res.json().code]).toEqual([401, 'AUTH_REQUIRED']);
   });
 
   it('listSchemes returns only PUBLISHED curated REGULAR GROWTH', async () => {
     await seedOneScheme('DRAFT', true);
     await seedOneScheme('PUBLISHED', false);
     await seedOneScheme('PUBLISHED', true);
-    const investor = await insertInvestor(app.db.db);
-    const session = await signIn(app, investor);
-    const res = await httpGet(app, '/api/v1/catalogue/schemes', session);
+    const res = await get('/catalogue/schemes', cookies);
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body) as { items: Array<{ status: string; curated: boolean }> };
     expect(body.items).toHaveLength(1);
@@ -9866,21 +10442,17 @@ describe('catalogue.categories / catalogue.listSchemes', () => {
 
   it('trigram search matches "parag flexi"', async () => {
     await seedOneScheme('PUBLISHED', true);
-    const investor = await insertInvestor(app.db.db);
-    const session = await signIn(app, investor);
-    const res = await httpGet(app, '/api/v1/catalogue/schemes?q=parag%20flexi', session);
+    const res = await get('/catalogue/schemes?q=parag%20flexi', cookies);
     const body = JSON.parse(res.body) as { items: unknown[] };
     expect(body.items.length).toBeGreaterThan(0);
   });
 
   it('cursor pagination stable', async () => {
     for (let i = 0; i < 3; i++) await seedOneScheme('PUBLISHED', true);
-    const investor = await insertInvestor(app.db.db);
-    const session = await signIn(app, investor);
-    const page1 = JSON.parse((await httpGet(app, '/api/v1/catalogue/schemes?cursor=', session)).body) as { items: { isin: string }[]; nextCursor: string | null };
+    const page1 = JSON.parse((await get('/catalogue/schemes?cursor=', cookies)).body) as { items: { isin: string }[]; nextCursor: string | null };
     expect(page1.items.length).toBeGreaterThan(0);
     if (page1.nextCursor) {
-      const page2 = JSON.parse((await httpGet(app, `/api/v1/catalogue/schemes?cursor=${page1.nextCursor}`, session)).body) as { items: { isin: string }[] };
+      const page2 = JSON.parse((await get(`/catalogue/schemes?cursor=${page1.nextCursor}`, cookies)).body) as { items: { isin: string }[] };
       const isins1 = new Set(page1.items.map((i) => i.isin));
       for (const item of page2.items) expect(isins1.has(item.isin)).toBe(false);
     }
@@ -9888,20 +10460,27 @@ describe('catalogue.categories / catalogue.listSchemes', () => {
 });
 ```
 
-Note: this test assumes `apps/api/test/int/http.ts` grows a `signIn(app, investor)` helper by the time D10 runs (added by whichever earlier D-task first needs an authenticated integration-test call — not yet present in the Plan-01 code this task read). If it is still missing when D10 starts, this task adds it as a small addition to `http.ts` rather than duplicating session bootstrapping per test file.
+Note (RV-02-56): the test uses only Plan 01 helpers that exist on `main`: `bootTestApp` (`test/int/app.ts`), `signInWeb` (`test/int/flows.ts`, the real OTP sign-in) and `webHeaders` (`test/int/http.ts`), so it adds nothing to `http.ts`. Plan 03 E2 makes `webHeaders` send the app host, so these requests keep passing once HostGuard is live. A bare `inject` without `x-sanchay-client` gets 403 `ORIGIN_REJECTED` from Plan 01's `ClientGuard`, not 401.
 
 `apps/api/src/modules/catalogue/fp-sync.job.test.ts` (full file):
 
 ```typescript
 import { describe, expect, it, vi } from 'vitest';
 import { fpJson } from '../../integrations/fp/fp-json.js';
-import { runCatalogueFpSync, toThresholds } from './fp-sync.job.js';
+import { runCatalogueFpSync, toSipDates, toThresholds } from './fp-sync.job.js';
 
 describe('catalogue.fp.sync', () => {
   it('only touches curated ISINs', async () => {
     const db = { query: { schemes: { findMany: vi.fn().mockResolvedValue([{ id: 's1', isin: 'INF000P01011', curated: true }]) } }, update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockResolvedValue(undefined), insert: vi.fn().mockReturnThis(), values: vi.fn().mockResolvedValue(undefined) };
     const fpRead = {
-      fundScheme: vi.fn().mockResolvedValue({ purchase_allowed: true, redemption_allowed: true, sip_allowed: true, lock_in: false, lock_in_period: null }),
+      // Multi-line on purpose: biome 2.5.14 needs two --write passes to settle the one-line form (RV-02-58).
+      fundScheme: vi.fn().mockResolvedValue({
+        purchase_allowed: true,
+        redemption_allowed: true,
+        sip_allowed: true,
+        lock_in: false,
+        lock_in_period: null,
+      }),
       schemePlans: vi.fn().mockResolvedValue({ items: [{ isin: 'INF000P01011', raw: { thresholds: [] } }], raw: {} }),
     };
     await runCatalogueFpSync(db as never, fpRead as never);
@@ -9913,7 +10492,13 @@ describe('catalogue.fp.sync', () => {
     const setSpy = vi.fn().mockReturnThis();
     const db = { query: { schemes: { findMany: vi.fn().mockResolvedValue([{ id: 's1', isin: 'INF000P01011', curated: true }]) } }, update: vi.fn().mockReturnThis(), set: setSpy, where: vi.fn().mockResolvedValue(undefined), insert: vi.fn().mockReturnThis(), values: vi.fn().mockResolvedValue(undefined) };
     const fpRead = {
-      fundScheme: vi.fn().mockResolvedValue({ purchase_allowed: false, redemption_allowed: true, sip_allowed: false, lock_in: false, lock_in_period: null }),
+      fundScheme: vi.fn().mockResolvedValue({
+        purchase_allowed: false,
+        redemption_allowed: true,
+        sip_allowed: false,
+        lock_in: false,
+        lock_in_period: null,
+      }),
       schemePlans: vi.fn().mockResolvedValue({ items: [{ isin: 'INF000P01011', raw: { thresholds: [] } }], raw: {} }),
     };
     await runCatalogueFpSync(db as never, fpRead as never);
@@ -9932,6 +10517,52 @@ describe('catalogue.fp.sync', () => {
       sipMax: null,
       sipMultiple: '100.00',
     });
+  });
+
+  it('has no SIP limits or dates without a monthly SIP row, never the lumpsum ones (D-MONEY-026)', () => {
+    const raw = fpJson.parse(
+      '{"thresholds":[{"type":"lumpsum","amount_min":500,"amount_max":null,"amount_multiples":1},{"type":"sip","frequency":"daily","amount_min":100,"amount_max":null,"amount_multiples":1,"dates":[1,2]}]}',
+    ) as Record<string, unknown>;
+    const plan = { isin: 'INF000P01011', raw } as never;
+    expect(toThresholds(plan)).toEqual({
+      purchaseMin: '500.00',
+      purchaseMax: null,
+      purchaseMultiple: '1.00',
+      sipMin: null,
+      sipMax: null,
+      sipMultiple: null,
+    });
+    expect(toSipDates(plan)).toBeNull();
+  });
+
+  it('allows SIP only with the monthly SIP row, and stores its dates (D-MONEY-026)', async () => {
+    const setSpy = vi.fn().mockReturnThis();
+    const findMany = vi.fn().mockResolvedValue([
+      { id: 's1', isin: 'INF000P01011', curated: true },
+      { id: 's2', isin: 'INF000P02022', curated: true },
+    ]);
+    const db = { query: { schemes: { findMany } }, update: vi.fn().mockReturnThis(), set: setSpy, where: vi.fn().mockResolvedValue(undefined), insert: vi.fn().mockReturnThis(), values: vi.fn().mockResolvedValue(undefined) };
+    const lumpsum = '{"type":"lumpsum","amount_min":500,"amount_max":null,"amount_multiples":1}';
+    const plan = (isin: string, sip: string) => ({ isin, raw: fpJson.parse(`{"thresholds":[${lumpsum},${sip}]}`) as Record<string, unknown> });
+    const fpRead = {
+      fundScheme: vi.fn().mockResolvedValue({
+        purchase_allowed: true,
+        redemption_allowed: true,
+        sip_allowed: true,
+        lock_in: false,
+        lock_in_period: null,
+      }),
+      schemePlans: vi.fn().mockResolvedValue({
+        items: [
+          plan('INF000P01011', '{"type":"sip","frequency":"monthly","amount_min":1000,"amount_max":null,"amount_multiples":100,"dates":[28,5,1,5,30]}'),
+          plan('INF000P02022', '{"type":"sip","frequency":"daily","amount_min":100,"amount_max":null,"amount_multiples":1,"dates":[1,2]}'),
+        ],
+        raw: {},
+      }),
+    };
+    await runCatalogueFpSync(db as never, fpRead as never);
+    expect(setSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ sipAllowed: true, sipDates: [1, 5, 28] }));
+    expect(setSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ sipAllowed: false, sipDates: null }));
   });
 });
 ```
@@ -10204,15 +10835,28 @@ function wireOrNull(value: unknown, field: string) {
 export function toThresholds(plan: FpSchemePlan): SchemeThresholds | null {
   const lumpsum = thresholdOf(plan, 'lumpsum');
   if (lumpsum === undefined) return null;
-  const sip = thresholdOf(plan, 'sip') ?? lumpsum;
+  // D-MONEY-026 (RV-02-55): the SIP limits come only from FP's monthly SIP row. Without one the
+  // scheme takes no SIP, so they stay null; never the lumpsum limits.
+  const sip = thresholdOf(plan, 'sip');
   return {
     purchaseMin: wire(lumpsum.amount_min, 'amount_min'),
     purchaseMax: wireOrNull(lumpsum.amount_max, 'amount_max'),
     purchaseMultiple: wire(lumpsum.amount_multiples, 'amount_multiples'),
-    sipMin: wire(sip.amount_min, 'amount_min'),
-    sipMax: wireOrNull(sip.amount_max, 'amount_max'),
-    sipMultiple: wire(sip.amount_multiples, 'amount_multiples'),
+    sipMin: sip === undefined ? null : wire(sip.amount_min, 'amount_min'),
+    sipMax: sip === undefined ? null : wireOrNull(sip.amount_max, 'amount_max'),
+    sipMultiple: sip === undefined ? null : wire(sip.amount_multiples, 'amount_multiples'),
   };
+}
+
+/** The monthly SIP row's `dates` in 1..28 (D-MONEY-026: the SIP day is 1-28 ∩ the scheme's dates), ascending and unique; null when none is left. */
+export function toSipDates(plan: FpSchemePlan): number[] | null {
+  const dates = thresholdOf(plan, 'sip')?.dates;
+  if (!Array.isArray(dates)) return null;
+  // fpJson.parse keeps each JSON number as a LosslessNumber, whose string form is the source text.
+  const days = dates
+    .map((day) => Number(String(day)))
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 28);
+  return days.length === 0 ? null : [...new Set(days)].sort((a, b) => a - b);
 }
 
 async function allSchemePlans(fpRead: FpSchemeReader): Promise<Map<string, FpSchemePlan>> {
@@ -10232,10 +10876,13 @@ export async function runCatalogueFpSync(db: Database, fpRead: FpSchemeReader): 
     const raw = await fpRead.fundScheme(scheme.isin);
     const purchaseAllowed = raw.purchase_allowed === true;
     const redemptionAllowed = raw.redemption_allowed === true;
-    const sipAllowed = raw.sip_allowed === true;
     const lockInMonths = raw.lock_in === true ? Number(String(raw.lock_in_period)) : null;
     const plan = plans.get(scheme.isin);
     const thresholds = plan === undefined ? null : toThresholds(plan);
+    const sipDates = plan === undefined ? null : toSipDates(plan);
+    // D-MONEY-026 fails closed: a SIP needs FP's sip_allowed, the monthly SIP limits and their dates.
+    const sipAllowed =
+      raw.sip_allowed === true && thresholds !== null && thresholds.sipMin !== null && sipDates !== null;
 
     await db
       .update(schemes)
@@ -10246,6 +10893,7 @@ export async function runCatalogueFpSync(db: Database, fpRead: FpSchemeReader): 
         sipAllowed,
         lockInMonths,
         thresholds,
+        sipDates,
         status: purchaseAllowed ? 'PUBLISHED' : 'SUSPENDED',
       })
       .where(eq(schemes.id, scheme.id));
@@ -10253,7 +10901,7 @@ export async function runCatalogueFpSync(db: Database, fpRead: FpSchemeReader): 
     await db.insert(fundFactsRevisions).values({
       schemeId: scheme.id,
       source: 'CYBRILLA',
-      payload: { purchaseAllowed, redemptionAllowed, sipAllowed, lockInMonths, thresholds },
+      payload: { purchaseAllowed, redemptionAllowed, sipAllowed, lockInMonths, thresholds, sipDates },
     });
   }
 }
@@ -10308,13 +10956,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
 **Why S2 (unchanged from the outline):** FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06 demo all need a public dev host. Funded by taking E18 [T2] and E19 [T4] out of the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1. **Fallback:** a fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the local API, recorded in ADR-0014 and registered with Cybrilla by 10-23.
 
-> **Amended 2026-10-01 (RV-02-16 to RV-02-23).** The earlier text could not install, compile, synthesise, boot or deploy. This version was checked with a real `pnpm install` under the workspace's supply-chain policies, `tsc`, the CDK assertion tests, `cdk synth` from PowerShell 5.1 and Git Bash, each container's synthesised environment run through the boot guard, an arm64 api image that migrated a Postgres 18.6 database and answered `/api/v1/health` with 200, and an arm64 web image that served `/site` on the www host and `assetlinks.json` on the app host. What changed and why is in the errata at the top of this plan. RV-02-32 and RV-02-33 (also 2026-10-01) made the post-deploy checks run in both shells and moved the repository the deploy role trusts to the deploy input `SANCHAY_GITHUB_REPOSITORY`.
+> **Amended 2026-10-01 (RV-02-16 to RV-02-23).** The earlier text could not install, compile, synthesise, boot or deploy. This version was checked with a real `pnpm install` under the workspace's supply-chain policies, `tsc`, the CDK assertion tests, `cdk synth` from PowerShell 5.1 and Git Bash, each container's synthesised environment run through the boot guard, an arm64 api image that migrated a Postgres 18.6 database and answered `/api/v1/health` with 200, and an arm64 web image that served `/site` on the www host and `assetlinks.json` on the app host. What changed and why is in the errata at the top of this plan. RV-02-32 and RV-02-33 (also 2026-10-01) made the post-deploy checks run in both shells and moved the repository the deploy role trusts to the deploy input `SANCHAY_GITHUB_REPOSITORY`. The 2026-10-05 errata (RV-02-59, RV-02-60, RV-02-61, RV-02-62, RV-02-63, RV-02-64, RV-02-65) copy `data/` into the api image and keep JSON import attributes in its build (Plan 03 E9 reads its questionnaire when its module loads), make the master-user test able to fail, run the migrate task before `cdk deploy` and fail the run on a rolled-back deployment, name and version the document bucket as spec §2.4 does, answer the apex with a 301 to www, record the two remaining spec §2.4 deviations, and make Step 5 re-run all five Step 4 commands.
 
 **Files:**
 - Create: `infra/package.json`, `infra/tsconfig.json`, `infra/cdk.json`, `infra/vitest.config.ts`, `infra/bin/sanchay.ts`, `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts`
 - Create (fetched asset, Step 3): `infra/certs/rds-global-bundle.pem`
 - Create: `.github/workflows/deploy.yml`, `.dockerignore`, `apps/api/Dockerfile`, `apps/api/docker-entrypoint.sh`, `apps/web/Dockerfile`, `apps/web/public/.well-known/assetlinks.json`, `docs/adr/0014-minimal-aws-topology.md`
-- Modify (key-level fragments only): `pnpm-workspace.yaml` (`packages:` list, `catalog:` map), `.gitignore` (one line), `apps/api/src/config/env.ts` (B2 invariants 1 and 7 follow the R-19 owning containers), `apps/api/src/config/env.test.ts` (two cases), `docs/adr/0001-versions.md` (append three rows), `docs/adr/README.md` (ADR-0014 row: `Planned` → `Accepted`), `apps/web/next.config.ts` (add `output: 'standalone'`)
+- Modify (key-level fragments only): `pnpm-workspace.yaml` (`packages:` list, `catalog:` map), `.gitignore` (one line), `apps/api/src/config/env.ts` (B2 invariants 1 and 7 follow the R-19 owning containers), `apps/api/src/config/env.test.ts` (two cases), `docs/adr/0001-versions.md` (append three rows), `docs/adr/README.md` (ADR-0014 row: `Planned` → `Accepted`), `apps/web/next.config.ts` (add `output: 'standalone'`), `apps/api/.swcrc` (one key: `jsc.experimental.keepImportAttributes`, RV-02-59)
 
 **Interfaces:**
 - **Prerequisites:** B6 (`createDb`, compose, Testcontainers harness: `postgres:18.6-trixie`, the version this stack's RDS engine matches), B2/env.ts (`EnvSchema`, `parseEnv`, `assertBootInvariants`, invariants 1-7), B18 (`HealthRouter` at `@InfraRoute('APP_AND_API_HOSTS')`), D2 (`db/migrate.ts` reads the migrations from `../../drizzle` relative to `dist/db`), D3 (`SANCHAY_PROVIDER_MODE_FP`, `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON`, invariants 8 and 9), D6 (`SANCHAY_PROVIDER_MODE_SMS=msg91`, `SANCHAY_PROVIDER_MODE_EMAIL=ses`, `SANCHAY_MSG91_CREDENTIALS_JSON`, `SANCHAY_SES_FROM`, invariants 11 and 12, `SesEmailSender` (SES v2 `SendEmail`, task-role credentials)), D7 (`SANCHAY_PILOT_INVITE_ONLY`, invariant 10). The only `apps/api/src` changes are the two-condition edit to B2's invariants 1 and 7 and two cases in `env.test.ts`.
@@ -10332,21 +10980,22 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   - `infra/bin/sanchay.ts`: `SanchayMvpStack-dev`, region pinned to `ap-south-1`; it calls `assertDeployInputs(config)` before building the stack (RV-02-33).
   - CDK context flag `-c firstDeploy=true`: the service is created with 0 tasks (ADR-0014 "First deploy").
   - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`.
-  - Listener rules (R-11): host `api.dev.sanchay.in` (any path) → api target group (3000); host `app.dev.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.dev.sanchay.in` and the rest of `app.dev.sanchay.in`) → web target group (3001). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
+  - Listener rules (R-11): host `api.dev.sanchay.in` (any path) → api target group (3000); host `app.dev.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.dev.sanchay.in` and the rest of `app.dev.sanchay.in`) → web target group (3001); host `dev.sanchay.in` (the apex) → 301 to `https://www.dev.sanchay.in`, path and query kept (rule `ApexToWww`; spec §2.4 and H-1, RV-02-63). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
   - One ECS Fargate ARM64 service, containers `web`, `api`, `worker`, plus the one-off `MigrateTaskDef` (container `migrate`, run with `aws ecs run-task`). `SANCHAY_FP_CREDENTIALS_JSON` goes only into `worker`; `SANCHAY_FP_WEBHOOK_SECRET` and `SANCHAY_SMS_RETRIEVER_HASH` only into `api`; `SANCHAY_KEYRING_JSON` into `api`, `worker` and `migrate` (the boot guard's keyring check runs in every role).
   - RDS PostgreSQL 18.6 with `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group; `db.t4g.micro` in dev, `db.t4g.medium` from `dbInstanceSize` (spec §2.4); master login `sanchay_master`, secret `sanchay/{env}/db-master` (BRIEF D6). The migrate task logs in as the master; api and worker share that login until F1 adds `sanchay_app_login` (secret `sanchay/{env}/db-app`) and moves `appDbLogin` to it.
   - Task role statement `SesSendFromSanchayDomain` (`ses:SendEmail`, `ses:SendRawEmail`, condition `ses:FromAddress` = `SANCHAY_SES_FROM`).
-  - S3 document bucket, ECR repos (`sanchay-dev-api`, `sanchay-dev-web`), Secrets Manager secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`, `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`, `sanchay/dev/db-master`), CloudWatch log groups `/sanchay/dev/app` and `/sanchay/dev/ecs-exec` at 400-day retention, ECS Exec logging (R-16), Route 53 A-alias records for `www.dev`, `app.dev`, `api.dev`.
+  - S3 document bucket `sanchay-dev-docs` (public access blocked, SSE, versioning; spec §2.4, RV-02-62), ECR repos (`sanchay-dev-api`, `sanchay-dev-web`), Secrets Manager secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`, `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`, `sanchay/dev/db-master`), CloudWatch log groups `/sanchay/dev/app` and `/sanchay/dev/ecs-exec` at 400-day retention, ECS Exec logging (R-16), Route 53 A-alias records for `www.dev`, `app.dev`, `api.dev` and the apex `dev` (RV-02-63).
+  - **Deviations from spec §2.4, recorded for an owner ruling (RV-02-64).** One log group per env, `/sanchay/{env}/app`, whose awslogs stream prefix `{env}` gives each container its own streams (`{env}/web/…`, `{env}/api/…`, `{env}/worker/…`, `{env}/migrate/…`), instead of `/sanchay/{env}/{web,api,worker}`: F1's metric filters and alarms and the F7, F20, F23, F24 and F27 runbook lines read that group by stream prefix. Two ECR repositories per env, `sanchay-{env}-api` and `sanchay-{env}-web`, instead of `sanchay/app`, because the task runs two images: `deploy.yml`, ADR-0014's first deploy and F1's prod deploy role (`grantPullPush` on both) use them. Either change touches F1 and those runbooks, so neither is made without the ruling.
   - No CloudWatch alarm. R-12's NAV-age alarm needs a published metric, and no task before F1 publishes one; F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm with its metric source in both envs.
-  - GitHub OIDC provider and the dev deploy role (output `GithubDeployRoleArn`), which trusts only `repo:<SANCHAY_GITHUB_REPOSITORY>:*` and is built only when that deploy input is set (RV-02-33), consumed by `.github/workflows/deploy.yml`, which reads the GitHub `dev` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs `cdk deploy`, forces a new deployment of `sanchay-app` and waits for it to stabilise.
-  - `apps/api/Dockerfile` (keeps the `/repo` layout, bakes in `infra/certs/rds-global-bundle.pem`, sets `NODE_EXTRA_CA_CERTS`), `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL=...?sslmode=verify-full` from the split `SANCHAY_DB_*` pieces), `apps/web/Dockerfile` (Next.js standalone, port 3001), `.dockerignore`, `apps/web/public/.well-known/assetlinks.json` (`[]` until F18 writes the App Links payload).
+  - GitHub OIDC provider and the dev deploy role (output `GithubDeployRoleArn`), which trusts only `repo:<SANCHAY_GITHUB_REPOSITORY>:*` and is built only when that deploy input is set (RV-02-33), consumed by `.github/workflows/deploy.yml`, which reads the GitHub `dev` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs the one-off migrate task and stops unless it exits 0 (spec §2.4), runs `cdk deploy`, forces a new deployment of `sanchay-app` and fails unless that deployment's rollout completes (RV-02-61).
+  - `apps/api/Dockerfile` (keeps the `/repo` layout, copies `data/` to `/repo/data`, bakes in `infra/certs/rds-global-bundle.pem`, sets `NODE_EXTRA_CA_CERTS`) and `apps/api/.swcrc` (`jsc.experimental.keepImportAttributes`): from Plan 03 E9 on, `risk-profile.service.ts` imports `data/risk-questionnaire-v1.0.0.json` `with { type: 'json' }` when its module loads, in api and worker, so the image needs `/repo/data` and the SWC output needs the attribute (RV-02-59), `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL=...?sslmode=verify-full` from the split `SANCHAY_DB_*` pieces), `apps/web/Dockerfile` (Next.js standalone, port 3001), `.dockerignore`, `apps/web/public/.well-known/assetlinks.json` (`[]` until F18 writes the App Links payload).
   - B2 `assertBootInvariants`: the constants `role` and `sends` (`role === 'api' || role === 'worker'`); invariant 1 binds api and worker, invariant 7 binds api. E1 (Plan 03) must scope invariant 13 to `role === 'api'` the same way (open item for Plan 03).
   - `docs/adr/0014-minimal-aws-topology.md` (accepted; dev hosts, tunnel fallback, first-deploy runbook).
   - **Deviation from outline: the RDS connection string is not injected as one Secrets-Manager-composed `DATABASE_URL` value.** CDK/Secrets Manager cannot concatenate a generated-secret field with plain strings into one ECS secret at deploy time without a custom resource. Instead the containers get plain env `SANCHAY_DB_HOST`/`SANCHAY_DB_PORT`/`SANCHAY_DB_NAME`/`SANCHAY_DB_USER` plus one ECS secret `SANCHAY_DB_PASSWORD` (the login secret's `password` field), and `apps/api/docker-entrypoint.sh` composes `DATABASE_URL` with `?sslmode=verify-full` before `exec`ing the container command. `EnvSchema.DATABASE_URL` is unaffected.
-  - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist yet; the Dockerfile omits the line and a comment states which task adds it.
+  - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist until Plan 03 E3, and a `COPY` of a missing path fails the build (`"/docs/legal": not found`), so the Dockerfile omits the line and a comment names F1 (Plan 04), whose migrate task seeds it. It does copy `data/`, which D8 creates before E25 (RV-02-59).
   - **Deviation from outline: `.github/workflows/deploy.yml` authenticates to AWS by scripting the OIDC token exchange (`aws sts assume-role-with-web-identity`) and pushes to ECR with the AWS CLI and `docker build`, instead of the `aws-actions/configure-aws-credentials` / `aws-actions/amazon-ecr-login` marketplace actions.** It reuses only the three action pins `ci.yml` already carries; the arm64 emulation installer (`tonistiigi/binfmt`) is a container image pinned by digest, not an action.
-- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log retention 400`, `ECS Exec logging configured`, `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`, `RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service named sanchay-app; -c firstDeploy=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `RDS instance class follows config.dbInstanceSize (spec §2.4: db.t4g.medium)`, `the GitHub deploy role trusts only SANCHAY_GITHUB_REPOSITORY, and exists only with it`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
-- **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to dev: /api/v1/health 200 on app.dev and api.dev`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.dev.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
+- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `the apex dev.sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log retention 400`, `S3 document bucket sanchay-dev-docs: SSE, public access blocked, versioned (spec §2.4)`, `ECS Exec logging configured`, `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service named sanchay-app; -c firstDeploy=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `RDS instance class follows config.dbInstanceSize (spec §2.4: db.t4g.medium)`, `the GitHub deploy role trusts only SANCHAY_GITHUB_REPOSITORY, and exists only with it`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
+- **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to dev: /api/v1/health 200 on app.dev and api.dev`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.dev.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; `https://dev.sanchay.in/ answers 301 to https://www.dev.sanchay.in/` (RV-02-63); an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
 
 ---
 
@@ -10555,6 +11204,28 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
     });
 
+    it('the apex dev.sanchay.in answers 301 to www (spec §2.4, H-1)', () => {
+      const template = synthDevTemplate();
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
+        Conditions: [
+          Match.objectLike({
+            Field: 'host-header',
+            HostHeaderConfig: { Values: ['dev.sanchay.in'] },
+          }),
+        ],
+        Actions: [
+          Match.objectLike({
+            Type: 'redirect',
+            RedirectConfig: Match.objectLike({ Host: 'www.dev.sanchay.in', StatusCode: 'HTTP_301' }),
+          }),
+        ],
+      });
+      template.hasResourceProperties('AWS::Route53::RecordSet', {
+        Name: 'dev.sanchay.in.',
+        Type: 'A',
+      });
+    });
+
     it('health check path /api/v1/health on the api port, for both target groups (R-12)', () => {
       const groups = Object.values(
         synthDevTemplate().findResources('AWS::ElasticLoadBalancingV2::TargetGroup'),
@@ -10581,6 +11252,24 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       synthDevTemplate().hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 400 });
     });
 
+    it('S3 document bucket sanchay-dev-docs: SSE, public access blocked, versioned (spec §2.4)', () => {
+      synthDevTemplate().hasResourceProperties('AWS::S3::Bucket', {
+        BucketName: 'sanchay-dev-docs',
+        BucketEncryption: {
+          ServerSideEncryptionConfiguration: [
+            { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
+          ],
+        },
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: true,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: true,
+        },
+        VersioningConfiguration: { Status: 'Enabled' },
+      });
+    });
+
     it('ECS Exec logging configured', () => {
       synthDevTemplate().hasResourceProperties('AWS::ECS::Cluster', {
         Configuration: {
@@ -10598,6 +11287,15 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       expect(existsSync(path.join(repoRoot, 'infra/certs/rds-global-bundle.pem'))).toBe(true);
     });
 
+    it('the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)', () => {
+      const dockerfile = readFileSync(path.join(repoRoot, 'apps/api/Dockerfile'), 'utf8');
+      expect(dockerfile).toContain('COPY data /repo/data');
+      const swcrc = JSON.parse(readFileSync(path.join(repoRoot, 'apps/api/.swcrc'), 'utf8')) as {
+        jsc?: { experimental?: { keepImportAttributes?: unknown } };
+      };
+      expect(swcrc.jsc?.experimental?.keepImportAttributes).toBe(true);
+    });
+
     it('RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)', () => {
       const template = synthDevTemplate();
       template.hasResourceProperties('AWS::SecretsManager::Secret', {
@@ -10606,7 +11304,18 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
           SecretStringTemplate: '{"username":"sanchay_master"}',
         }),
       });
-      expect(JSON.stringify(template.toJSON())).not.toContain('"username":"sanchay_app"');
+      // Parse each generated secret's SecretStringTemplate: JSON.stringify(template) escapes the quotes
+      // inside it, so a substring search for '"username":"sanchay_app"' could never fail.
+      const usernames = Object.values(template.findResources('AWS::SecretsManager::Secret')).flatMap(
+        (secret) => {
+          const raw: unknown = secret.Properties.GenerateSecretString?.SecretStringTemplate;
+          return typeof raw === 'string'
+            ? [(JSON.parse(raw) as { username?: unknown }).username]
+            : [];
+        },
+      );
+      expect(usernames).toContain('sanchay_master');
+      expect(usernames).not.toContain('sanchay_app');
       expect(envOf(containersOf(template).get('migrate')).SANCHAY_DB_USER).toBe('sanchay_master');
     });
 
@@ -11063,11 +11772,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
 
       // --- S3, ECR -------------------------------------------------------------------------
+      // Spec §2.4: sanchay-{env}-docs with public access blocked, SSE and versioning.
       const documentsBucket = new s3.Bucket(this, 'DocumentsBucket', {
-        bucketName: `sanchay-${envName}-documents`,
+        bucketName: `sanchay-${envName}-docs`,
         encryption: s3.BucketEncryption.S3_MANAGED,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         enforceSSL: true,
+        versioned: true,
         removalPolicy: config.deletionProtection ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
       });
       const apiRepo = new ecr.Repository(this, 'ApiRepo', {
@@ -11395,6 +12106,14 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         ],
         action: elbv2.ListenerAction.forward([apiTargetGroup]),
       });
+      // Spec §2.4 and H-1: the apex (dev.sanchay.in; sanchay.in in prod) answers 301 to www, keeping the
+      // path and query. Port 80 sends it to HTTPS first, like every host; the certificate covers it.
+      new elbv2.ApplicationListenerRule(this, 'ApexToWww', {
+        listener: httpsListener,
+        priority: 5,
+        conditions: [elbv2.ListenerCondition.hostHeaders([domain])],
+        action: elbv2.ListenerAction.redirect({ host: `www.${domain}`, permanent: true }),
+      });
 
       // --- Route 53 (noindex on dev hosts is applied at the app layer, not here) -----------
       const albTarget = route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(alb));
@@ -11405,6 +12124,12 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
           target: albTarget,
         });
       }
+      // The apex itself (the zone root in prod): the ALB answers it with ApexToWww's 301.
+      new route53.ARecord(this, 'ApexRecord', {
+        zone,
+        recordName: config.envSubdomain === '' ? undefined : config.envSubdomain,
+        target: albTarget,
+      });
 
       // R-12's NAV-age alarm is not built here: no task before F1 publishes a NAV metric, and an alarm
       // without data is either always in ALARM or never fires. F1 (Plan 04) adds the metric source
@@ -11565,7 +12290,11 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   COPY --from=build /repo/apps/api/package.json ./package.json
   COPY --from=build /repo/apps/api/dist ./dist
   COPY --from=build /repo/apps/api/drizzle ./drizzle
-  # docs/legal/ is copied here once D8-D10 (catalogue seed, plan-03) creates that directory.
+  # data/ at /repo/data, where dist/ resolves it as src/ does from the repo root: D8's catalogue CSVs and,
+  # from Plan 03, E6/E7's reference CSVs and E9's risk questionnaire, which risk-profile.service.ts
+  # imports when its module loads (without it api and worker exit at boot with ERR_MODULE_NOT_FOUND).
+  COPY data /repo/data
+  # docs/legal/ is copied here by F1 (Plan 04), whose migrate task seeds it; E3 (Plan 03) creates it.
   COPY infra/certs/rds-global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
   COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
   RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -11574,6 +12303,11 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   EXPOSE 3000
   ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
   CMD ["node", "dist/main.js"]
+  ```
+
+  **`apps/api/.swcrc` (Plan 01's file; one key, RV-02-59).** The api's SWC build (`nest build -b swc` in the image and in `pnpm --filter=@sanchay/api build`, `nest start -b swc -w` in `dev`) drops `with { type: 'json' }` unless SWC keeps import attributes, and Node 24.21 then refuses the JSON module (`ERR_IMPORT_ATTRIBUTE_MISSING`). Plan 03 E9's `risk-profile.service.ts` is the first such import, and it runs when the module loads, in api and worker. Vitest is unaffected (`vitest.shared.ts` passes `swcrc: false`), and the key changes none of the Plan 01 api's compiled files. Read the file first; in `jsc`, after `"keepClassNames": true` (which gains a comma), add:
+  ```json
+  "experimental": { "keepImportAttributes": true }
   ```
 
   **3.12 `apps/web/Dockerfile`:**
@@ -11652,6 +12386,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         id-token: write
       env:
         AWS_REGION: ap-south-1
+        ENV_NAME: ${{ inputs.environment }}
         TURBO_TELEMETRY_DISABLED: 1
       steps:
         - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -11701,6 +12436,30 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
             docker push "$REGISTRY/sanchay-${{ inputs.environment }}-api" --all-tags
             docker push "$REGISTRY/sanchay-${{ inputs.environment }}-web" --all-tags
 
+        # Spec §2.4: the one-off migrate task runs before each deploy, on the api image just pushed
+        # (its task definition reads :latest) and before any new api or worker task starts. It runs the
+        # task definition of the stack as deployed now; a non-zero exit stops the deploy.
+        - name: Run the migrate task
+          run: |
+            set -euo pipefail
+            output() {
+              aws cloudformation describe-stacks --stack-name "SanchayMvpStack-$ENV_NAME" \
+                --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue | [0]" --output text
+            }
+            TASK_DEF=$(output MigrateTaskDefinitionArn)
+            SUBNETS=$(output AppSubnetIds)
+            SECURITY_GROUP=$(output ServiceSecurityGroupId)
+            TASK=$(aws ecs run-task --cluster "sanchay-$ENV_NAME" --launch-type FARGATE \
+              --task-definition "$TASK_DEF" \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUP],assignPublicIp=DISABLED}" \
+              --query 'tasks[0].taskArn' --output text)
+            echo "migrate task: $TASK"
+            aws ecs wait tasks-stopped --cluster "sanchay-$ENV_NAME" --tasks "$TASK"
+            CODE=$(aws ecs describe-tasks --cluster "sanchay-$ENV_NAME" --tasks "$TASK" \
+              --query 'tasks[0].containers[0].exitCode' --output text)
+            echo "migrate exit code: $CODE (log group /sanchay/$ENV_NAME/app, stream prefix $ENV_NAME/migrate)"
+            test "$CODE" = "0"
+
         - name: cdk deploy
           run: pnpm --filter=@sanchay/infra exec cdk deploy --require-approval never
           env:
@@ -11713,14 +12472,20 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
             # the exact owner/repo case that IAM's StringLike compares.
             SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}
 
-        - name: Force a new deployment (pick up the :latest images)
-          run: aws ecs update-service --cluster "sanchay-${{ inputs.environment }}" --service sanchay-app --force-new-deployment
-
-        # The circuit breaker rolls a failed deployment back; this step makes the run fail with it.
-        - name: Wait for the service to stabilise
-          run: aws ecs wait services-stable --cluster "sanchay-${{ inputs.environment }}" --services sanchay-app
+        # Wait for this rollout and fail unless it completed: `services-stable` alone also succeeds once
+        # the circuit breaker has rolled the new deployment back; the deployment's rolloutState does not.
+        - name: Force a new deployment (pick up the :latest images) and wait for it
+          run: |
+            set -euo pipefail
+            DEPLOYMENT=$(aws ecs update-service --cluster "sanchay-$ENV_NAME" --service sanchay-app \
+              --force-new-deployment --query "service.deployments[?status=='PRIMARY'].id | [0]" --output text)
+            aws ecs wait services-stable --cluster "sanchay-$ENV_NAME" --services sanchay-app
+            STATE=$(aws ecs describe-services --cluster "sanchay-$ENV_NAME" --services sanchay-app \
+              --query "services[0].deployments[?id=='$DEPLOYMENT'].rolloutState | [0]" --output text)
+            echo "deployment $DEPLOYMENT: $STATE"
+            test "$STATE" = "COMPLETED"
   ```
-  `vars.SANCHAY_DEPLOY_ROLE_ARN`, `vars.SANCHAY_AWS_ACCOUNT_ID`, `vars.SANCHAY_PLATFORM_ARN`, `vars.SANCHAY_PLATFORM_ARN_VALID_TILL` and `vars.SANCHAY_SMS_RETRIEVER_HASH` are GitHub environment variables on the `dev` environment, set once by hand (ADR-0014 "First deploy"). `SANCHAY_GITHUB_REPOSITORY` is not a variable: the workflow passes `github.repository`. Under QEMU the two image builds take several minutes each (the api image built in about 7 minutes on Docker Desktop), hence the 60-minute job timeout and the one-hour OIDC session.
+  `vars.SANCHAY_DEPLOY_ROLE_ARN`, `vars.SANCHAY_AWS_ACCOUNT_ID`, `vars.SANCHAY_PLATFORM_ARN`, `vars.SANCHAY_PLATFORM_ARN_VALID_TILL` and `vars.SANCHAY_SMS_RETRIEVER_HASH` are GitHub environment variables on the `dev` environment, set once by hand (ADR-0014 "First deploy"). `SANCHAY_GITHUB_REPOSITORY` is not a variable: the workflow passes `github.repository`. Under QEMU the two image builds take several minutes each (the api image built in about 7 minutes on Docker Desktop), hence the 60-minute job timeout and the one-hour OIDC session. The migrate step reads the stack outputs `MigrateTaskDefinitionArn`, `AppSubnetIds` and `ServiceSecurityGroupId`, so it needs the stack from ADR-0014's "First deploy" step 2; it runs the migrate task definition as deployed, on the `:latest` api image just pushed, before `cdk deploy` changes anything (spec §2.4, RV-02-61). A release whose boot guard needs a key that the deployed migrate task definition lacks therefore deploys the stack first by hand, as F1's dev rollout does with `-c paused=true`.
 
   **3.15 `docs/adr/0014-minimal-aws-topology.md`:**
   ```markdown
@@ -11741,7 +12506,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     task definition — not three services — to keep the dev stack cheap and the ALB routing simple.
   - Host-based ALB listener rules (R-11): `api.dev.sanchay.in` (any path) and
     `app.dev.sanchay.in` + `/api/v1/*` both forward to the api target group; everything else on
-    `app.dev.sanchay.in` and all of `www.dev.sanchay.in` forwards to the web target group.
+    `app.dev.sanchay.in` and all of `www.dev.sanchay.in` forwards to the web target group. The apex
+    `dev.sanchay.in` answers 301 to `www.dev.sanchay.in` (spec §2.4, H-1).
   - `/api/v1/health` is the only health-check path (liveness only, R-12). Both target groups probe it
     on the task's api port: the web container (Next.js) serves no `/api/v1/*` route in AWS, and a
     crashed web process still stops the task because every container is essential. NAV staleness is
@@ -11763,8 +12529,9 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     `SANCHAY_GITHUB_REPOSITORY` (`deploy.yml` passes `github.repository`). The owner is never written
     into code, and `bin/sanchay.ts` refuses a synth or deploy without it.
   - ECS Exec is enabled with command logging to CloudWatch (R-16); a one-off Fargate task
-    definition (not a `Service`) runs `db:migrate` with `aws ecs run-task` before each deploy that
-    carries migrations.
+    definition (not a `Service`) runs `db:migrate` with `aws ecs run-task` before each deploy:
+    `deploy.yml` runs it after pushing the images and before `cdk deploy`, and a non-zero exit
+    stops the deploy (spec §2.4).
   - Images are linux/arm64. `deploy.yml` builds them on x86_64 runners under QEMU (the
     `tonistiigi/binfmt` installer, pinned by digest).
   - `.github/workflows/deploy.yml` is manual dispatch only in the MVP; it authenticates over
@@ -11809,12 +12576,14 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
      - `aws ecs run-task --cluster sanchay-dev --launch-type FARGATE --task-definition <MigrateTaskDefinitionArn> --network-configuration "awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}" --query 'tasks[0].taskArn' --output text`
      - `aws ecs wait tasks-stopped --cluster sanchay-dev --tasks <taskArn>`
      - `aws ecs describe-tasks --cluster sanchay-dev --tasks <taskArn> --query 'tasks[0].containers[0].exitCode'` (expect `0`)
-  7. Dispatch `deploy.yml` for `dev`: it rebuilds and pushes the images, runs `cdk deploy` without
-     the flag (one task), forces a new deployment and waits for the service to stabilise.
+  7. Dispatch `deploy.yml` for `dev`: it rebuilds and pushes the images, runs the migrate task
+     again (step 6 left nothing to apply), runs `cdk deploy` without the flag (one task), forces a
+     new deployment and fails unless that rollout completes.
   8. Commit `infra/cdk.context.json` (the hosted-zone and availability-zone lookups from step 2)
      after `pnpm exec biome check --write infra/cdk.context.json`.
 
-  Every later deploy: run step 6 first when the release carries migrations, then dispatch `deploy.yml`.
+  Every later deploy: dispatch `deploy.yml`. It runs the migrate task (step 6) itself, after pushing
+  the images and before `cdk deploy`, and stops on a non-zero exit.
 
   ## Consequences
   - F1 (Plan 04) reuses `SanchayMvpStack` with prod config (Multi-AZ, PITR 14 days, deletion
@@ -11834,7 +12603,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/web typecheck
   ```
-  Expected: `tsc` exits 0; the 19 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
+  Expected: `tsc` exits 0; the 22 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
 
   Then the two images (Docker; not part of `pnpm test`), from the repo root:
   ```
@@ -11848,9 +12617,10 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   curl.exe -s -o NUL -w "%{http_code}\n" https://app.dev.sanchay.in/api/v1/health
   curl.exe -s -o NUL -w "%{http_code}\n" https://api.dev.sanchay.in/api/v1/health
   curl.exe -s -o NUL -w "%{http_code} %{content_type}\n" https://app.dev.sanchay.in/.well-known/assetlinks.json
+  curl.exe -s -o NUL -w "%{http_code} %{redirect_url}\n" https://dev.sanchay.in/
   aws ecs execute-command --cluster sanchay-dev --task <task-id> --container api --interactive --command "node --version"
   ```
-  Expected: `200` for both health checks; `200 application/json` for `assetlinks.json`; the ECS Exec session prints the Node version and the command appears in `/sanchay/dev/ecs-exec` (R-16). If the session is refused with "encryption is not set up on the selected CloudWatch log group", the exec log group needs a KMS key for `cloudWatchEncryptionEnabled: true`; record it and raise it with the lead before changing the setting. `POST https://api.dev.sanchay.in/api/v1/webhooks/fp` reachability is checked with the FP sandbox's own webhook test-send tool once Cybrilla has the URL (10-23 milestone).
+  Expected: `200` for both health checks; `200 application/json` for `assetlinks.json`; `301 https://www.dev.sanchay.in/` for the apex (RV-02-63; the same line printed that from both shells against a local stand-in); the ECS Exec session prints the Node version and the command appears in `/sanchay/dev/ecs-exec` (R-16). If the session is refused with "encryption is not set up on the selected CloudWatch log group", the exec log group needs a KMS key for `cloudWatchEncryptionEnabled: true`; record it and raise it with the lead before changing the setting. `POST https://api.dev.sanchay.in/api/v1/webhooks/fp` reachability is checked with the FP sandbox's own webhook test-send tool once Cybrilla has the URL (10-23 milestone).
 
 - [ ] **Step 5: Commit**
   ```
@@ -11858,8 +12628,10 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   pnpm --filter=@sanchay/infra typecheck
   pnpm --filter=@sanchay/infra test
   pnpm --filter=@sanchay/api test src/config/env.test.ts
+  pnpm --filter=@sanchay/api typecheck
+  pnpm --filter=@sanchay/web typecheck
   pnpm lint
-  git add infra .dockerignore .gitignore .github/workflows/deploy.yml apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/web/Dockerfile apps/web/next.config.ts apps/web/public/.well-known/assetlinks.json docs/adr/0001-versions.md docs/adr/0014-minimal-aws-topology.md docs/adr/README.md pnpm-workspace.yaml pnpm-lock.yaml
+  git add infra .dockerignore .gitignore .github/workflows/deploy.yml apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/api/.swcrc apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/web/Dockerfile apps/web/next.config.ts apps/web/public/.well-known/assetlinks.json docs/adr/0001-versions.md docs/adr/0014-minimal-aws-topology.md docs/adr/README.md pnpm-workspace.yaml pnpm-lock.yaml
   git commit -m "feat(infra): add SanchayMvpStack-dev, arm64 images and the dev deploy workflow (R-05, E25)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   If lefthook re-stages files (`stage_fixed`), re-run the Step 4 `typecheck`/`test` commands before committing again.

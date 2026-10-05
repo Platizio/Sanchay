@@ -83,7 +83,7 @@ Every task's requirements include this section. It restates the Plan 02 and Plan
 - **Test filters (pnpm 11):** pass Vitest filters **without** `--` (`pnpm --filter=@sanchay/api test:int ledger`); with `--` the whole suite runs. `@sanchay/domain` has a 95% coverage gate, so its pass checks run the full suite, and filters appear only in Step 2.
 - **Pinned Plan 01 tests are relaxed once, by the first task that extends them:** `packages/contract/src/auth.test.ts` top-level keys by D10 (RV-02-30), `packages/contract/src/errors.test.ts` by E20 (RV-03-14) and `apps/api/test/int/audit.int.test.ts` by D7 (RV-02-29). Plan 04 tasks append keys, codes and audit fields without touching those tests.
 - **Consent (Plan 03 RV-03-1 onward):** `approve` echoes the stored snapshot's `destinationsMasked` and `fields`, and row-reading builders overwrite them with live values. `markUnused` serves sagas that made no provider write; the expiry sweep skips started sagas; the destination resolver decrypts.
-- **Catalogue wire:** `SchemeSummary.id` and `SchemeDetail.id` are the scheme uuid. FUND-01 links "Invest" to `/invest/{id}/lumpsum` and (F19) "Start SIP" to `/invest/{id}/sip`.
+- **Catalogue wire:** `SchemeSummary.id` and `SchemeDetail.id` are the scheme uuid. FUND-01 links "Invest" to `/invest/{id}/lumpsum` and (F19) "Start SIP" to `/invest/{id}/sip`, the latter only when `SchemeDetail.sipAllowed` (FP's `sip_allowed` with a monthly SIP row; the SIP limits in `thresholds` are null without that row, RV-04-F19-1).
 - **Sandbox facts (probe run 1, `docs/probes/`):**
   - FP auto-fills an EUIN (never assert it is blank).
   - Units redemption fails on ONDC, so T5 applies. Amount and ALL redemptions settle in about 10 s, and `redeemed_units` can have 4 dp.
@@ -116,13 +116,13 @@ F6 (SKIPPED) would add a generated `redemption_units` migration, numbered when a
 ## Review notes: Plan 02/03 errata found while expanding F4
 
 Applied in F4 (each has a regression test there):
-- **D1 `ReconBreaks.open` aborted its caller's transaction.** It caught `23505` from the partial unique index, but a failed statement aborts the whole PostgreSQL transaction, and the caller's `COMMIT` then silently becomes a `ROLLBACK`. The first repeat of a break inside a transaction (for example a daily `FOLIO_FEED_MISMATCH`) would have discarded that transaction's writes without an error. F4 replaces the catch with `ON CONFLICT … DO NOTHING` on the index predicate.
+- **D1 `ReconBreaks.open` aborted its caller's transaction.** It caught `23505` from the partial unique index, but a failed statement aborts the whole PostgreSQL transaction, and the caller's `COMMIT` then silently becomes a `ROLLBACK`. The first repeat of a break inside a transaction (for example a daily `FOLIO_FEED_MISMATCH`) would have discarded that transaction's writes without an error. F4 replaced the catch with `ON CONFLICT … DO NOTHING` on the index predicate; since 2026-10-05 D1 does this itself (Plan 02 RV-02-67), so F4 no longer edits `runtime-config.ts`.
 - **D5 had no `UNITS_PENDING → REVERSED`.** F4 appends it (`fp_reversed`).
 - **E21's `mf_purchase` handler** moved orders to SETTLED with no ledger, and nothing re-fetched a PROCESSING purchase when its webhook never came. F4 routes both paths through `PurchaseSettlement`.
 - **Drizzle cannot write `bytea().array()`.** It serialises each Buffer as raw bytes into the array literal, which PostgreSQL rejects (`22P02 malformed array literal`). F4 declares the folio blind-index arrays with a small `customType` that writes the literal in hex.
 
 Observed, not changed by F4 (for the owning task's executor):
-- **D6 `Notify.enqueue`** catches `23505` inside the caller's transaction in the same way. F4 never repeats a dedupe key inside one transaction, so it is not affected; `onConflictDoNothing` on `notifications_dedupe_uq` is the same fix.
+- **D6 `Notify.enqueue`** catches `23505` inside the caller's transaction in the same way. F4 never repeats a dedupe key inside one transaction, so it is not affected; `onConflictDoNothing` on `notifications_dedupe_uq` is the same fix, which D6 now has (Plan 02 RV-02-68).
 - **E21's** `rejects.toThrow(/payment_attempts_live_uq/)` cannot match under Drizzle 0.45 (see Global Constraints); it needs `pgConstraintOf`.
 - **E20's `orders.allotted_units`** is `numeric(20,4)` where spec §2.3 says units are `numeric(20,3)`. F4's `lots` use `(20,3)` and `parseAllotment` refuses more than 3 dp, so the extra digit is never populated.
 
@@ -130,7 +130,7 @@ Observed, not changed by F4 (for the owning task's executor):
 
 The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (consent approve echo, `markUnused`, the expiry sweep). Errata RV-03-1 to RV-03-19 also fix the defects Plan 04 depends on: the destination resolver decrypts, E22's adapters exist, the consent-first window uses the app clock, the catalogue exposes the scheme id, and the consent sheet and components work. Plan 02 errata RV-02-15 to RV-02-36 fix E25 (the dev stack F1 builds on), the schema registration cycle, the workspace dependencies and the pinned tests. The errata Plan 04 agents reported but did not apply are listed in `docs/delivery/plan-errata-backlog.md`; work through them before each sprint.
 
-## Review notes: Plan 04 errata applied during assembly (2026-10-01)
+## Review notes: Plan 04 errata (assembly 2026-10-01; Plan 02 backlog review 2026-10-05)
 
 - **RV-04-F2-1:** the consent mobile is normalised with `.replace(/\D/g, '').slice(-10)`; stripping a leading "91" ate two digits of a mobile that starts with 91.
 - **RV-04-F2-2:** `plans.schema.ts` is not re-exported from `db/app-schema.ts` (that created an ESM cycle).
@@ -138,6 +138,13 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F4-1:** the holdings report has `folios` at the top level with numeric units. The parser and FakeFp now use that shape, and the test fails on the old parser.
 - **RV-04-F4-2:** module identity (`NEST_APP_OPTIONS`), verified on the repo's Nest 11.2.6: three imports gave 3 modules with the default and 1 with deep-hash.
 - **RV-04-F24-1:** in `worker-down.md`, the api alarms bullet names its alarms first and the "API section" label last. With the label first, gitleaks' generic-api-key rule read the alarm name as a key and would block F24's commit.
+- **RV-04-F12-1 (2026-10-05): F12, F13, F16 and F28 cite D1's released key (Plan 02 RV-02-37; minor).** Eleven code comments and notes justified the clients' key rule with "D1 keeps a 4xx key IN_PROGRESS for 24 hours"; D1 now releases the key on any refusal or failure and replays only a returned result. The rule and its tests stay (FR-17: reuse the key after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS`, mint a new one after any other 4xx, one key per intent), so only the wording changes. The backlog item's claim that F12's test reuses the key after a 403 is stale: FR-17 already asserts a new key.
+- **RV-04-F4-3 (2026-10-05): F4 no longer edits `runtime-config.ts` (follows Plan 02 RV-02-67; minor).** D1's `ReconBreaks.open` now uses `ON CONFLICT … DO NOTHING` from the start, so F4's class replacement, its Files entry and its `git add` path are dropped. `ledger.int.test.ts` keeps its in-transaction case as a regression check; it passes from the start, and Step 4 still counts 15.
+- **RV-04-F7-1 (2026-10-05): F7's pg-boss DDL note is settled (D2 review 2026-10-05; minor).** F7 asked the owner to verify that `createQueue` needs CREATE on schema `pgboss` under D6, as every queue did in pg-boss 10. In pg-boss 12.34.0 only `partition: true` creates a table, and a `sanchay_app` member ran D2's whole pg-boss path without DDL (Plan 02 RV-02-43), so the note now records the check: F7's two new job names need neither the migrate task nor a CREATE grant.
+- **RV-04-F2-4 (2026-10-05): `sipSchemeOf` refuses a scheme without monthly SIP limits (F2; follows RV-02-55; blocker).** D8's `SchemeThresholds` SIP fields are nullable now, so F2's `Money.parse(row.thresholds.sipMin)` and `sipMultiple` were TS2345 (reproduced). `sipSchemeOf` reads the thresholds into a local and adds `sipMin === null || sipMultiple === null` to its `SCHEME_NOT_ORDERABLE` refusal, and the existing refusal case gains a null-limits check. `sip-eligibility.test.ts` passes 8/8 in the scratch build.
+- **RV-04-F19-1 (2026-10-05): FUND-01's "Start SIP" reads `sipAllowed` (F19; follows RV-02-55 and RV-03-22; major).** F19 showed "Start SIP" whenever `scheme.thresholds` was not null, which holds for every scheme with a lumpsum row, so a non-SIP scheme led to SIP-01 and F10's quote refused it. The CTA and the "Minimum SIP" row now depend on `scheme.sipAllowed`, the rules and contract-assumption text say so, and the no-SIP test uses a lumpsum-only scheme with `sipAllowed: false`. D10's unit file now counts 6/6 with F19's case (verified with F19's status edit applied over the new D10 code).
+- **RV-04-F19-2 (2026-10-05): F19's appended `fp-sync.job.test.ts` case settles in one biome pass (follows RV-02-58; minor).** Its one-line `fundScheme` mock needed a second `biome check --write`, so F19's Step 5 `pnpm lint` failed (reproduced). It is now written multi-line, like D10's mocks.
+- **RV-04-F1-1 (2026-10-05): F1 follows E25's amended image, workflow and tests (2026-10-05 review, items A and C; major).** E25 now copies `data/` and runs the migrate step and the rollout check itself (Plan 02 RV-02-59, RV-02-61). F1's Dockerfile edit therefore adds only `COPY docs/legal /repo/docs/legal`, and its `deploy.yml` edit only adds `prod` and its `cdk deploy` step. Its counts follow E25's three new tests (Step 2: 21 passed, 1 failed; Step 4: 57 = 22 + 24 + 11). Verified: F1's infra fragments applied to the amended E25 matched every anchor once, `tsc` exits 0 and 57/57 pass, and F1's final workflow equals the old one apart from two comments.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -172,7 +179,8 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 >   `-c firstDeploy=true` (ADR-0014) works beside F1's `-c paused=true`. Only `infra/bin/sanchay.ts` is
 >   replaced whole; E25's test file changes in one expectation (the migrate task's secrets).
 > - **Reference data in every deployed database (FR-3).** The api image now carries `docs/legal` and
->   `data/`. On every deploy, after the D6 logins, the migrate task loads E3's legal documents, E6/E7's
+>   `data/` (E25 already copies `data/`; RV-04-F1-1). On every deploy, after the D6 logins,
+>   the migrate task loads E3's legal documents, E6/E7's
 >   pincodes and IFSC codes, and D8's catalogue reference tables (AMCs, SEBI categories and their
 >   aliases, market holidays). The curated pilot list stays F19's ops command. E3's and E6's seeds
 >   become exported functions in compiled modules: E3 resolved `docs/legal` one directory too high,
@@ -187,7 +195,8 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 >   from SecureString parameters (never argv).
 > - **Kept from round 1:** D6's three logins and `ensureDbLogins` (SCRAM verifiers computed
 >   in-process); the ops task definition `sanchay-{env}-ops`; the paused bootstrap; the migrate step
->   and the rollout check in `deploy.yml`; the ten alarm names in `ALARM_SUFFIXES` and the gauges from
+>   and the rollout check in `deploy.yml` (both now E25's; RV-04-F1-1); the ten alarm names in
+>   `ALARM_SUFFIXES` and the gauges from
 >   `ops.gauges.emit` (BRIEF D5); the least-privilege prod deploy role, whose trust now matches the
 >   OIDC `sub` exactly (`StringEquals`); test filters without `--` (D8); `curl.exe`.
 
@@ -195,7 +204,7 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 - **Create (infra):** `infra/lib/alarms.ts`, `infra/test/stack-fixtures.ts`, `infra/test/prod-stack.test.ts`, `infra/test/alarms.test.ts`
 - **Create (api):** `apps/api/src/db/db-logins.ts`, `apps/api/src/db/db-logins.test.ts`, `apps/api/test/int/db-logins.int.test.ts`, `apps/api/src/cli/reference-data.ts`, `apps/api/test/int/reference-data.int.test.ts`, `apps/api/src/modules/platform/ops-gauges.job.ts`, `apps/api/src/modules/platform/ops-gauges.job.test.ts`, `apps/api/src/config/env-roles.test.ts`, `apps/api/test/int/ops-gauges.int.test.ts`, `apps/api/test/int/otp-send-metrics.int.test.ts`
 - **Create (docs):** `docs/runbooks/credential-rotation.md`, `docs/runbooks/db-access.md`
-- **Modify (E25, key-level; fragments in Step 3):** `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts` (one expectation), `.github/workflows/deploy.yml`, `apps/api/Dockerfile` (two `COPY` lines)
+- **Modify (E25, key-level; fragments in Step 3):** `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts` (one expectation), `.github/workflows/deploy.yml` (the `prod` choice and the `cdk deploy` step), `apps/api/Dockerfile` (one `COPY` line; RV-04-F1-1)
 - **Replace whole (E25's dev-only entry point):** `infra/bin/sanchay.ts`
 - **Replace whole (other owners; same behaviour, now exported and importable):** `apps/api/src/cli/migrate.ts` (Plan 01 B23, 8 lines), `apps/api/src/cli/ops-legal-seed.ts` (E3), `apps/api/src/cli/ops-ref-seed.ts` (E6 with E7's IFSC pass)
 - **Modify (other owners, key-level):** `apps/api/src/cli/ops-catalogue-seed.ts` (D8: its first four loops move into an exported function), `apps/api/src/config/env.ts` (B2: two keys and invariant 14), `apps/api/src/config/env.test.ts` (B2 pin list: two keys), `apps/api/src/modules/identity/otp.service.ts` (Plan 01 B13: two log lines), `apps/api/src/modules/platform/jobs/job-registry.ts` (D2: one name), `apps/api/src/modules/platform/jobs/schedules.ts` (D2: one schedule), `apps/api/src/modules/platform/platform.module.ts` (Plan 01: one provider), `apps/api/package.json` (two scripts), root `package.json` (two script values)
@@ -205,7 +214,7 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 - **Prerequisites:** E25 as amended by Plan 02 RV-02-16 to RV-02-23 and RV-02-33 (`SanchayMvpStack-dev` deployed, R-05); Plan 01 B2, B4, B6, B13, B23 (`0000_bootstrap`'s roles `sanchay_migrator`, `sanchay_app`, `sanchay_retention`, `sanchay_readonly`; `0003_grants`); Plan 02 D1, D2 (including `runMigrations`' pg-boss bootstrap and `0005_worker_heartbeats`' pgboss grants), D3, D6, D7, D8 (with RV-02-27 and RV-02-34), D9; Plan 03 E1 (with RV-03-10), E2, E3, E6, E7, E10, E20, E21. F1 needs none of F2-F4: its RECONCILING count reads the plan and mandate rows F2 will write, through `order_events` only.
 - **Consumes:**
   - E25 `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack`, `SanchayMvpStackProps`, `SERVICE_NAME` (`sanchay-app`), `DB_MASTER_USER` (`sanchay_master`), `ARM64_LINUX`, `HEALTH_CHECK` (`/api/v1/health` on port `'3000'`), the constructor locals `vpc`, `apiRepo`, `webRepo`, `keyringSecret`, `msg91Secret`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `logging`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `apiTargetGroup`; the web container's `PORT`, `HOSTNAME`, `SANCHAY_WWW_ORIGIN` and `SANCHAY_APP_ORIGIN`; `minHealthyPercent: 100`; the context flag `-c firstDeploy=true`; statement `SesSendFromSanchayDomain`; construct ids `NatEip`, `Database`, `AppTaskDef`, `MigrateTaskDef`, `Service`, `GithubOidc`, `GithubDeployRole`; outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`; secrets `sanchay/{env}/{keyring,fp,fp-webhook,msg91,db-master}`.
-  - E25 `infra/lib/config.ts`: `loadStackConfig(envName, source = process.env)` (refuses a missing or malformed `SANCHAY_PLATFORM_ARN` or `SANCHAY_SMS_RETRIEVER_HASH` and a malformed `SANCHAY_GITHUB_REPOSITORY`), `assertDeployInputs(config)` (refuses a missing repository), `SanchayStackConfig` (`githubRepo: string | undefined`, `createGithubOidcProvider`, `dbInstanceSize`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `StaticConfig`, `GITHUB_REPOSITORY`, `blankToUndefined`, `DeployInputSource`, `StackConfigError`, `SanchayEnvName`; `infra/tsconfig.json` (`exactOptionalPropertyTypes: false` for infra only, RV-02-17), `infra/cdk.json`, `.gitignore`'s `cdk.out/`; `infra/test/sanchay-mvp-stack.test.ts` (19 tests); `infra/certs/rds-global-bundle.pem`; `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL` from `SANCHAY_DB_HOST/PORT/NAME/USER` and `SANCHAY_DB_PASSWORD`); `apps/api/Dockerfile`'s runtime stage (the `/repo` layout, `dist/` under `/repo/apps/api`); `.github/workflows/deploy.yml` (QEMU, linux/arm64 builds, the web build arguments, `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`); ADR-0014's first-deploy runbook.
+  - E25 `infra/lib/config.ts`: `loadStackConfig(envName, source = process.env)` (refuses a missing or malformed `SANCHAY_PLATFORM_ARN` or `SANCHAY_SMS_RETRIEVER_HASH` and a malformed `SANCHAY_GITHUB_REPOSITORY`), `assertDeployInputs(config)` (refuses a missing repository), `SanchayStackConfig` (`githubRepo: string | undefined`, `createGithubOidcProvider`, `dbInstanceSize`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `StaticConfig`, `GITHUB_REPOSITORY`, `blankToUndefined`, `DeployInputSource`, `StackConfigError`, `SanchayEnvName`; `infra/tsconfig.json` (`exactOptionalPropertyTypes: false` for infra only, RV-02-17), `infra/cdk.json`, `.gitignore`'s `cdk.out/`; `infra/test/sanchay-mvp-stack.test.ts` (22 tests); `infra/certs/rds-global-bundle.pem`; `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL` from `SANCHAY_DB_HOST/PORT/NAME/USER` and `SANCHAY_DB_PASSWORD`); `apps/api/Dockerfile`'s runtime stage (the `/repo` layout, `dist/` under `/repo/apps/api`, `data/` at `/repo/data`); `.github/workflows/deploy.yml` (QEMU, linux/arm64 builds, the web build arguments, `ENV_NAME`, the `Run the migrate task` step before `cdk deploy`, the rollout check, `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`); ADR-0014's first-deploy runbook.
   - `parseEnv`, `assertBootInvariants`, `EnvError`, `EnvSchema`, `SANCHAY_APP_ROLE` (B2, `apps/api/src/config/env.ts`) and its pin test (`env.test.ts`); E25's constants `role` and `sends` with role-aware invariants 1 and 7 (RV-02-20); invariant 13 with `role === 'api'` (owner: Plan 03 E1, RV-03-10); `scrub` (B4, `platform/logging.ts`); `OtpService.issue`, `OTP_POLICY.smsPerIstDay` = 2,000, the IST-day window, `otpFixture`, `CaptureSmsSender.failNext` (B13); `createDb`, `Database`, `DbExecutor`, `DbHandle`, `DB` (B6); `loadDotEnvFile` (B23); `pgErrorCodeOf` (`platform/pg-errors.ts`); `CLOCK`, `Clock`, `FakeClock`; `PlatformModule`; `newId` and `TableName` (`platform/ids.ts`); `LEGAL_DOCUMENT_KEYS`, `isOneOf` (`@sanchay/domain`); `createTestDatabase`, `TestDatabase`, `insertOtp`, `inject('pgAdminUrl')` (Plan 01 test helpers)
   - `runMigrations` (D2: bootstraps schema `pgboss` as the migrating login), `GRANT … ON SCHEMA pgboss TO sanchay_app` (D2 `0005`), `JOB_NAMES`, `JobHandler`, `Job<N>`, `registerSchedules(boss)` with keyed `boss.schedule`, `worker_heartbeats`, `PgBoss` (D2); `ReconBreaks.open`, `recon_breaks`, `RUNTIME_CONFIG_DEFAULTS['orders.enabled'] = false`, `['plans.sip.enabled'] = false` (D1)
   - `SANCHAY_PROVIDER_MODE_FP` (`sandbox` | `production`), `SANCHAY_FP_BASE_URL`, invariants 8 and 9 (D3); `SANCHAY_PROVIDER_MODE_SMS = 'msg91'`, `SANCHAY_PROVIDER_MODE_EMAIL = 'ses'`, `SANCHAY_SES_FROM`, `SANCHAY_MSG91_CREDENTIALS_JSON`, invariants 11 and 12, `SesEmailSender` (D6); `SANCHAY_PILOT_INVITE_ONLY`, invariant 10 (D7); `seedCatalogue(db, dataDir)`, `DEFAULT_DATA_DIR`, its private `readCsv` and `cell`, its first four loops (`amcs.csv`, `sebi-categories.csv`, `category-aliases.csv`, `market-holidays-2026-2027.csv`), `amcs`, `sebiCategories`, `categoryAliases`, `marketHolidays`, `scheme_navs` (`nav_date`, `quarantined`), `market_holidays` (`holiday_date`) (D8); the NAV syncs at 21:30, 23:30, 07:00 and 10:30 IST (D9)
@@ -224,7 +233,7 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
   - Alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (one email and one SMS subscription per recipient, actions on ALARM and OK); dev keeps one alarm, `sanchay-dev-nav-age`, with no action.
   - Outputs (both envs): E25's eight plus `OpsTaskDefinitionArn`, `DbInstanceIdentifier`, `DbEndpointAddress` and `GithubDeployRoleArn` (whenever `SANCHAY_GITHUB_REPOSITORY` is set, which every real deploy requires; prod imports the account's OIDC provider); prod also `OpsAlertsTopicArn`.
   - Job `ops.gauges.emit` (`OpsGaugesJob`, worker, every minute, schedule key `ops-gauges`), `readOpsGauges(exec, now)`, `OPS_GAUGE_KEYS`, `OPS_GAUGES_MESSAGE`, `NAV_NEVER_SYNCED` (99), types `OpsGauges`, `OpsGaugeKey`. Log lines `otp.sent` (info) and `otp.send_failed` (warn) from `OtpService.issue`.
-  - `.github/workflows/deploy.yml`: `environment` choice `[dev, prod]`; steps build and push (E25), **run the migrate task**, `cdk deploy -c env=<env> SanchayMvpStack-<env>`, force a new deployment of `sanchay-app` and fail unless its rollout completes. GitHub environment variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image's `/site`), `SANCHAY_SMS_RETRIEVER_HASH` (dev and prod) and secrets `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS` (prod); `SANCHAY_GITHUB_REPOSITORY` is `${{ github.repository }}`.
+  - `.github/workflows/deploy.yml`: `environment` choice `[dev, prod]`; steps build and push, **run the migrate task** (both E25; with F1 the task also syncs the two logins and loads the reference data), `cdk deploy -c env=<env> SanchayMvpStack-<env>` (F1), force a new deployment of `sanchay-app` and fail unless its rollout completes (E25). GitHub environment variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image's `/site`), `SANCHAY_SMS_RETRIEVER_HASH` (dev and prod) and secrets `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS` (prod); `SANCHAY_GITHUB_REPOSITORY` is `${{ github.repository }}`.
   - `docs/runbooks/credential-rotation.md` (seven secrets, PITR restore test, alarm drill) and `docs/runbooks/db-access.md` (the logins, the migrate run-task form, what the migrate task loads, the ops task and its role, read-only SQL over SSM, the paused bootstrap).
 - **For later tasks (use exactly these):**
   - **F7:** run ops commands on `--task-definition sanchay-{env}-ops` with `"name": "ops"` in `containerOverrides` (its environment already sets `SANCHAY_APP_ROLE=ops`); network configuration `"awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}"`, or `describe-services --services sanchay-app`. The login is `sanchay_app_login`, so `opsDatabaseUrl`'s `-c role=sanchay_app` and `assertOpsPrivileges` pass (tested here). The ops task role is `OpsTaskRole`, not the service's task role: no document bucket, no SES, and `ssm:GetParameter` only on `/sanchay/{env}/invites/*`. `ops:invite --mobiles-param /sanchay/{env}/invites/<name>` reads a SecureString under the default `aws/ssm` key with `GetParameter` and `WithDecryption: true` (a customer-managed key would also need `kms:Decrypt`, which F1 does not grant). F7's EMF metrics are not needed (BRIEF D5): `criticalBreaksOpen` and `reconcilingOverSla` are F1's gauges. Its runbook links `db-access.md` for the read-only session.
@@ -233,7 +242,7 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
   - **F18:** `SANCHAY_SMS_RETRIEVER_HASH` reaches the `api` container only from the GitHub environment variable of the same name (dev and prod), read by `loadStackConfig` during `cdk deploy`.
 - **Deviations from the outline:**
   1. Metrics come from CloudWatch Logs metric filters on one JSON log line a minute, not EMF or `PutMetricData`: the worker needs no CloudWatch permission, and a dead worker is itself the missing-data signal.
-  2. D6's logins, the ops task definition with its own SSM-only task role, `-c paused` and the migrate step in `deploy.yml` are not in the outline; each is needed for R-16 and for a stack to deploy from nothing.
+  2. D6's logins, the ops task definition with its own SSM-only task role and `-c paused` are not in the outline; each is needed for R-16 and for a stack to deploy from nothing. The migrate step in `deploy.yml` is E25's (spec §2.4).
   3. Invariant 14 is new (`env.ts` is B2's file). Invariants 1 and 7 are E25's, 13 is E1's.
   4. The migrate task loads the reference data on every deploy (FR-3), and refuses to change the text of a published legal-document version. E3's and E6's seeds become exported functions, and their `pnpm` scripts run the compiled modules.
 
@@ -1887,7 +1896,7 @@ pnpm --filter=@sanchay/api test ops-gauges db-logins env
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics db-logins reference-data
 ```
 Expected:
-- infra: `prod-stack.test.ts` and `alarms.test.ts` fail to load (`stack-fixtures.ts` imports `stackConfigForDeploy`, and `../lib/alarms.js` does not exist yet); E25's `sanchay-mvp-stack.test.ts` 18 passed, 1 failed (the migrate task's secrets).
+- infra: `prod-stack.test.ts` and `alarms.test.ts` fail to load (`stack-fixtures.ts` imports `stackConfigForDeploy`, and `../lib/alarms.js` does not exist yet); E25's `sanchay-mvp-stack.test.ts` 21 passed, 1 failed (the migrate task's secrets).
 - api unit: `db-logins.test.ts` and `ops-gauges.job.test.ts` cannot load their modules; `env-roles.test.ts` 2 failed, 6 passed (the migrate boot reads `SANCHAY_DB_APP_PASSWORD`, and invariant 14); `env.test.ts` 1 failed (the pin list names the two new keys).
 - api int: `db-logins.int.test.ts`, `ops-gauges.int.test.ts` and `reference-data.int.test.ts` cannot load their modules (`db-logins.js`, `ops-gauges.job.js`, `reference-data.js` and E3's file has no `LegalSeedError`); `otp-send-metrics.int.test.ts` 2 failed, 1 passed (no `otp.sent` / `otp.send_failed` line yet; the cooldown case passes).
 
@@ -2527,35 +2536,9 @@ new SanchayMvpStack(app, `SanchayMvpStack-${config.envName}`, {
 });
 ```
 
-**3.5 `.github/workflows/deploy.yml` (E25's file, key-level).** E25's QEMU step, its `linux/arm64` builds with the web image's `/site` arguments, its OIDC step and its 60-minute timeout stay as they are.
+**3.5 `.github/workflows/deploy.yml` (E25's file, key-level).** E25's QEMU step, its `linux/arm64` builds with the web image's `/site` arguments, its OIDC step, its `ENV_NAME` and its 60-minute timeout stay as they are, and so do its `Run the migrate task` step between the image push and `cdk deploy` (spec §2.4; with F1's image the task also syncs the two DB logins and loads the reference data, D6 and FR-3) and its last step, which fails unless the forced deployment's `rolloutState` is `COMPLETED` (Plan 02 RV-02-61; RV-04-F1-1).
 
-`options: [dev]` becomes `options: [dev, prod]`, and the job's `env:` gains `ENV_NAME: ${{ inputs.environment }}` after `AWS_REGION`. Between `Build and push images to ECR` and `cdk deploy`, insert:
-```yaml
-      # F1 (spec §2.4 "migrate runs before each deploy"; D6, FR-3): migrations, the two DB logins and the
-      # reference data are applied with the new image before any new api or worker task starts. It runs the
-      # task definition of the stack as deployed now; a non-zero exit stops the deploy.
-      - name: Run the migrate task
-        run: |
-          set -euo pipefail
-          output() {
-            aws cloudformation describe-stacks --stack-name "SanchayMvpStack-$ENV_NAME" \
-              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue | [0]" --output text
-          }
-          TASK_DEF=$(output MigrateTaskDefinitionArn)
-          SUBNETS=$(output AppSubnetIds)
-          SECURITY_GROUP=$(output ServiceSecurityGroupId)
-          TASK=$(aws ecs run-task --cluster "sanchay-$ENV_NAME" --launch-type FARGATE \
-            --task-definition "$TASK_DEF" \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUP],assignPublicIp=DISABLED}" \
-            --query 'tasks[0].taskArn' --output text)
-          echo "migrate task: $TASK"
-          aws ecs wait tasks-stopped --cluster "sanchay-$ENV_NAME" --tasks "$TASK"
-          CODE=$(aws ecs describe-tasks --cluster "sanchay-$ENV_NAME" --tasks "$TASK" \
-            --query 'tasks[0].containers[0].exitCode' --output text)
-          echo "migrate exit code: $CODE (log group /sanchay/$ENV_NAME/app, stream prefix $ENV_NAME/migrate)"
-          test "$CODE" = "0"
-```
-E25's `cdk deploy` step becomes:
+`options: [dev]` becomes `options: [dev, prod]`. E25's `cdk deploy` step becomes:
 ```yaml
       - name: cdk deploy
         run: pnpm --filter=@sanchay/infra exec cdk deploy -c "env=$ENV_NAME" "SanchayMvpStack-$ENV_NAME" --require-approval never
@@ -2570,28 +2553,12 @@ E25's `cdk deploy` step becomes:
           SANCHAY_ALARM_EMAILS: ${{ secrets.SANCHAY_ALARM_EMAILS }}
           SANCHAY_ALARM_SMS_NUMBERS: ${{ secrets.SANCHAY_ALARM_SMS_NUMBERS }}
 ```
-E25's last two steps (`Force a new deployment (pick up the :latest images)` and `Wait for the service to stabilise`) become one:
-```yaml
-      # F1: wait for this rollout and fail unless it completed. `services-stable` alone also succeeds after
-      # the circuit breaker rolled the new task set back to the old one; the deployment's rolloutState does not.
-      - name: Force a new deployment (pick up the :latest images) and wait for it
-        run: |
-          set -euo pipefail
-          DEPLOYMENT=$(aws ecs update-service --cluster "sanchay-$ENV_NAME" --service sanchay-app \
-            --force-new-deployment --query "service.deployments[?status=='PRIMARY'].id | [0]" --output text)
-          aws ecs wait services-stable --cluster "sanchay-$ENV_NAME" --services sanchay-app
-          STATE=$(aws ecs describe-services --cluster "sanchay-$ENV_NAME" --services sanchay-app \
-            --query "services[0].deployments[?id=='$DEPLOYMENT'].rolloutState | [0]" --output text)
-          echo "deployment $DEPLOYMENT: $STATE"
-          test "$STATE" = "COMPLETED"
-```
 
-**3.6 `apps/api/Dockerfile` (E25's file, key-level).** In the runtime stage, E25's comment line `# docs/legal/ is copied here once D8-D10 (catalogue seed, plan-03) creates that directory.` becomes:
+**3.6 `apps/api/Dockerfile` (E25's file, key-level).** E25 already copies `data/` to `/repo/data` (Plan 02 RV-02-59: from Plan 03 E9 on, the api imports `data/risk-questionnaire-v1.0.0.json` when its module loads). In the runtime stage, E25's comment line `# docs/legal/ is copied here by F1 (Plan 04), whose migrate task seeds it; E3 (Plan 03) creates it.` becomes:
 ```dockerfile
-# F1 (FR-3): what the migrate task seeds on every deploy. dist/cli resolves both from /repo, as src/cli
-# does from the repo root: E3's legal documents, and data/ (E6/E7 reference tables, D8's catalogue data).
+# F1 (FR-3): E3's legal documents, which the migrate task seeds on every deploy. dist/cli resolves
+# docs/legal from /repo, as src/cli does from the repo root.
 COPY docs/legal /repo/docs/legal
-COPY data /repo/data
 ```
 
 **3.7 `apps/api/src/db/db-logins.ts` (new):**
@@ -3577,7 +3544,7 @@ pnpm --filter=@sanchay/api test ops-gauges db-logins env
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics otp-issue db-logins reference-data
 ```
 Expected:
-- infra typecheck exits 0; infra test: 54 passed (E25's 19, `prod-stack.test.ts` 24, `alarms.test.ts` 11).
+- infra typecheck exits 0; infra test: 57 passed (E25's 22, `prod-stack.test.ts` 24, `alarms.test.ts` 11).
 - api typecheck exits 0; unit: `ops-gauges.job.test.ts` 3, `db-logins.test.ts` 4, `env-roles.test.ts` 8; `env.test.ts` (B2, D3, D6, D7, E1, E2, E20 and E25 cases plus the pin) and `dotenv.test.ts` green.
 - api int: `ops-gauges.int.test.ts` 8, `otp-send-metrics.int.test.ts` 3, `otp-issue.int.test.ts` 14 (unchanged), `db-logins.int.test.ts` 8, `reference-data.int.test.ts` 6.
 
@@ -3640,7 +3607,8 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fak
 - **API, round 2 (Plan 01 code in an isolated worktree; PostgreSQL 18.6 through Testcontainers and Docker).** Prototype: E3's `legalDocuments`, E6/E7's `refPincodes`/`refIfsc` and D8's catalogue schema and seed (after RV-02-34) transcribed verbatim from the current plans, a drizzle-kit migration generated from them, and E3's 30 legal documents and the nine CSVs materialised from the plan texts. With F1's files: `pnpm --filter=@sanchay/api typecheck` clean; `reference-data.int.test.ts` 6/6; `env-roles.test.ts` 2 failed and 6 passed against the transcribed pre-F1 env (E25's `role`/`sends`, E1's RV-03-10 invariant 13), 8/8 with F1's edit, and no redeclared constant; `env.test.ts` and `db-logins.test.ts` 19/19; the full api suites with every F1 api change, unit 21 files / 144 tests and int 20 files / 135 tests, green.
 - **Ran (the compiled migrate CLI end to end).** `nest build`, then `node dist/cli/migrate.js` against PostgreSQL 18.6 with `SANCHAY_APP_ROLE=migrate` and both passwords: `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login`, `reference data seeded: 30 legal documents, 8 pincodes, 5 IFSC codes, catalogue reference tables` (8 AMCs, 40 categories, 18 aliases, 22 holidays, 0 schemes). A second run printed the same; role `api` only migrated; `sanchay_app_login` logged in; a changed text for a PUBLISHED version exited 1 with `LegalSeedError`. `dist/cli` resolves `docs/legal` and `data` from the repo root, which is `/repo` in the image. Both seed CLIs run their main block when started directly and nothing when imported. E3's and E6's `--experimental-strip-types` scripts fail with `ERR_MODULE_NOT_FOUND` (reproduced).
 - **Ran in round 1, unchanged since:** `db-logins.int.test.ts` 8/8 (pg-boss 12.34.0 from its tarball, D2's pgboss bootstrap and `0005` grants emulated); `db-logins.test.ts` 4/4 with the RFC 7677 known answer; `otp-send-metrics.int.test.ts` 2 failed then 3/3; the gauge query on every scenario of `ops-gauges.int.test.ts`, including a blocked pg-boss job.
-- **Not run:** the api image build with the two `COPY` lines (the Plans 02-03 code it compiles is not in the repo; the paths were checked by URL resolution and by the compiled run); `cdk synth` through the real CLI (aws-cdk 2.1143.0 is not in the scratch package); `ops-gauges.int.test.ts` and `ops-gauges.job.ts` inside a booted D2 worker; `deploy.yml` on GitHub; any AWS deploy, SNS delivery or SSM session.
+- **Re-checked 2026-10-05 (RV-04-F1-1), after Plan 02 RV-02-59, RV-02-61, RV-02-62 and RV-02-63 amended E25:** F1's infra fragments applied to the amended E25 matched every anchor once; `tsc` exits 0 and the infra suite passes 57/57 (E25's 22, 24, 11); the Step 2 shape gives E25's file 21 passed, 1 failed; and the workflow F1 now produces is identical to the one before apart from two comments (js-yaml parse, `bash -n` on every `run:` block).
+- **Not run:** the api image build with the `COPY docs/legal` line (the Plans 02-03 code it compiles is not in the repo; the paths were checked by URL resolution and by the compiled run); `cdk synth` through the real CLI (aws-cdk 2.1143.0 is not in the scratch package); `ops-gauges.int.test.ts` and `ops-gauges.job.ts` inside a booted D2 worker; `deploy.yml` on GitHub; any AWS deploy, SNS delivery or SSM session.
 
 **Open questions.**
 1. **Owner (with F7's open question 2):** `money-invariant-breach` stays in ALARM while any CRITICAL break is open, so a break nobody can resolve (no CLI resolves non-invariant breaks) masks the next one. An `ops:resolve-break` with two founders would close this.
@@ -3810,9 +3778,11 @@ describe('sipSchemeOf', () => {
     thresholds: { purchaseMin: '500.00', purchaseMax: null, purchaseMultiple: '1.00', sipMin: '500.00', sipMax: null, sipMultiple: '1.00' },
   };
   it('reads D8 thresholds', () => expect(sipSchemeOf(row).sipDates).toEqual([5]));
-  it('SCHEME_NOT_ORDERABLE when SIP is not allowed or has no dates', () => {
+  it('SCHEME_NOT_ORDERABLE when SIP is not allowed, has no dates or has no monthly SIP limits', () => {
     expect(() => sipSchemeOf({ ...row, sipAllowed: false })).toThrow(expect.objectContaining({ code: 'SCHEME_NOT_ORDERABLE' }));
     expect(() => sipSchemeOf({ ...row, sipDates: [] })).toThrow(expect.objectContaining({ code: 'SCHEME_NOT_ORDERABLE' }));
+    const noSipRow = { ...row.thresholds, sipMin: null, sipMax: null, sipMultiple: null };
+    expect(() => sipSchemeOf({ ...row, thresholds: noSipRow })).toThrow(expect.objectContaining({ code: 'SCHEME_NOT_ORDERABLE' }));
   });
 });
 ```
@@ -4525,13 +4495,15 @@ export function sipSchemeOf(row: {
   sipDates: number[] | null;
   thresholds: SchemeThresholds | null;
 }): SipScheme {
-  if (row.status !== 'PUBLISHED' || !row.sipAllowed || row.thresholds === null || row.sipDates === null || row.sipDates.length === 0) {
+  // Plan 02 D10 leaves the SIP limits null without FP's monthly SIP row (D-MONEY-026, RV-04-F2-4).
+  const t = row.thresholds;
+  if (row.status !== 'PUBLISHED' || !row.sipAllowed || t === null || t.sipMin === null || t.sipMultiple === null || row.sipDates === null || row.sipDates.length === 0) {
     throw new AppError('SCHEME_NOT_ORDERABLE');
   }
   return {
-    sipMin: Money.parse(row.thresholds.sipMin),
-    sipMax: row.thresholds.sipMax === null ? null : Money.parse(row.thresholds.sipMax),
-    sipMultiple: Money.parse(row.thresholds.sipMultiple),
+    sipMin: Money.parse(t.sipMin),
+    sipMax: t.sipMax === null ? null : Money.parse(t.sipMax),
+    sipMultiple: Money.parse(t.sipMultiple),
     sipDates: row.sipDates,
   };
 }
@@ -6380,7 +6352,7 @@ git commit -m "feat(api): eNACH mandate rail and limit ladder (F3, T6)" -m "Co-A
 - **Modify (api):** `apps/api/src/modules/portfolio/folios.schema.ts` (E20; the spec §2.3 columns), `apps/api/src/modules/orders/orders.schema.ts` (E20; `stamp_duty`, `units_source`, `units_pending_since`), `apps/api/src/modules/payments/fp-events.ts` (E21; the `mf_purchase` handler delegates to `PurchaseSettlement`), `apps/api/src/modules/payments/payments.module.ts` (E21; import `PortfolioModule`, register the new handler), `apps/api/test/int/payments.int.test.ts` (E21; its `mf_purchase` test now expects SETTLED and a lot)
 - **Modify (F2):** `apps/api/src/modules/plans/instalments-sync.job.ts` (instalments move past PROCESSING only through `PurchaseSettlement`), `apps/api/src/modules/plans/plans.module.ts` (import `PortfolioModule`), `apps/api/test/int/sip-mandate.int.test.ts` (one new instalment test)
 - **Modify (FakeFp, D4):** `apps/api/src/integrations/fp/fake/fake-fp.state.ts`, `apps/api/src/integrations/fp/fake/fake-fp.ts`
-- **Modify (kernel):** `apps/api/src/modules/platform/runtime-config.ts` (D1; `ReconBreaks.open` erratum), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'folio.sync'`, `'orders.units.reconcile'`), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/modules/platform/ids.ts` (append four table names), `apps/api/src/app.module.ts` (`PortfolioModule.forRoot(env)`)
+- **Modify (kernel):** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'folio.sync'`, `'orders.units.reconcile'`), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/modules/platform/ids.ts` (append four table names), `apps/api/src/app.module.ts` (`PortfolioModule.forRoot(env)`)
 - **Modify (module identity, RV-04-F4-2):** `apps/api/src/bootstrap.ts` (Plan 01; export `NEST_APP_OPTIONS` and use it in `createApp`), `apps/api/test/int/app.ts` (Plan 01; `bootTestApp` passes it), `apps/api/src/modules/platform/jobs/worker.main.ts` (D2; `runWorker` passes it)
 
 **Interfaces:**
@@ -8100,34 +8072,7 @@ export * from './fifo.js';
   { from: 'UNITS_PENDING', to: 'REVERSED', trigger: 'fp_reversed' },
 ```
 
-`apps/api/src/modules/platform/runtime-config.ts` (D1): replace the `ReconBreaks` class. In its imports, add `sql` to the `drizzle-orm` import and drop the `pg-errors` import, which this file no longer uses:
-```ts
-export class ReconBreaks {
-  /**
-   * Idempotent while an open break for the same (kind, entity_id) exists. ON CONFLICT on the partial
-   * unique index, not a caught 23505: a failed INSERT aborts the caller's transaction, and PostgreSQL
-   * then turns its COMMIT into a silent ROLLBACK (F4 erratum).
-   */
-  static async open(exec: DbExecutor, input: ReconBreakOpenInput): Promise<void> {
-    if (!RECON_BREAK_SEVERITIES.includes(input.severity)) {
-      throw new TypeError(`ReconBreaks.open: unknown severity '${input.severity}'`);
-    }
-    await exec
-      .insert(reconBreaks)
-      .values({
-        kind: input.kind,
-        entityType: input.entityType,
-        entityId: input.entityId,
-        severity: input.severity,
-        detail: input.detail ?? {},
-      })
-      .onConflictDoNothing({
-        target: [reconBreaks.kind, reconBreaks.entityId],
-        where: sql`status <> 'RESOLVED'`,
-      });
-  }
-}
-```
+`apps/api/src/modules/platform/runtime-config.ts` (D1) is not edited: since Plan 02 RV-02-67, D1's `ReconBreaks.open` already uses `ON CONFLICT … DO NOTHING` on `recon_breaks_open_uq` (RV-04-F4-3). The "ReconBreaks.open (Plan 02 D1 erratum)" case in `ledger.int.test.ts` stays as a regression check and passes from the start.
 
 `apps/api/src/modules/orders/orders.schema.ts` (E20; key-level additions):
 ```ts
@@ -9712,7 +9657,7 @@ pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test:int ledger folio-sync payments
 pnpm lint
-git add packages/domain/src/rules packages/domain/src/states/order.ts packages/domain/test/fifo.test.ts packages/domain/test/elss-lock.test.ts packages/domain/test/business-days.test.ts packages/domain/test/states.test.ts docs/specs/states.md packages/test-fixtures/src/golden/fifo.json packages/test-fixtures/src/golden/elss-lock.json apps/api/src/modules/portfolio apps/api/src/modules/orders/orders.schema.ts apps/api/src/modules/payments/fp-events.ts apps/api/src/modules/payments/payments.module.ts apps/api/src/integrations/fp/fake/fake-fp.state.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/platform/runtime-config.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/drizzle apps/api/test/int/ledger-seed.ts apps/api/test/int/ledger.int.test.ts apps/api/test/int/folio-sync.int.test.ts apps/api/test/int/payments.int.test.ts apps/api/src/modules/plans apps/api/test/int/sip-mandate.int.test.ts apps/api/src/bootstrap.ts apps/api/test/int/app.ts apps/api/src/modules/platform/jobs/worker.main.ts
+git add packages/domain/src/rules packages/domain/src/states/order.ts packages/domain/test/fifo.test.ts packages/domain/test/elss-lock.test.ts packages/domain/test/business-days.test.ts packages/domain/test/states.test.ts docs/specs/states.md packages/test-fixtures/src/golden/fifo.json packages/test-fixtures/src/golden/elss-lock.json apps/api/src/modules/portfolio apps/api/src/modules/orders/orders.schema.ts apps/api/src/modules/payments/fp-events.ts apps/api/src/modules/payments/payments.module.ts apps/api/src/integrations/fp/fake/fake-fp.state.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/drizzle apps/api/test/int/ledger-seed.ts apps/api/test/int/ledger.int.test.ts apps/api/test/int/folio-sync.int.test.ts apps/api/test/int/payments.int.test.ts apps/api/src/modules/plans apps/api/test/int/sip-mandate.int.test.ts apps/api/src/bootstrap.ts apps/api/test/int/app.ts apps/api/src/modules/platform/jobs/worker.main.ts
 git commit -m "feat(portfolio): FIFO ledger with ELSS lock and SHORTFALL-BREAK, folio.sync holdings snapshot, orders.units.reconcile (F4)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -21103,7 +21048,7 @@ A run uses the service security group, the only one the database accepts. If F1 
 - **E21: `payment_attempts` has no `refund_ref`** although spec §2.3 lists it, and `refund_status` is free text written as `IN_PROGRESS` where D-MONEY-040 names `REFUND_PENDING`/`REFUNDED`. F7 adds `refund_ref`/`refund_recorded_at` and accepts both pending spellings; a CHECK on `refund_status` is left to E21's owner.
 - **F2: `plans.sip.advance` had no backstop**, and **F5: the redemption saga had none either.** Both re-enqueue themselves; a job whose retries ran out (D2: 3, no delay) or a lost chain left the aggregate stuck, for a redemption with its units reserved forever. F7's `fp.reconcile.nonfinal` re-drives both every 5 minutes through their own singleton keys.
 - **D7 and D9: `ops:invite` and `ops:nav-release` were standalone scripts** that skipped R-16's role pin and DDL guard; D9 also audited as `SYSTEM` and kept the approvers in an unlisted `data` key. F7 folds both into the ops runner (deviation 7).
-- **D2 (for the owner to verify): queue creation needs DDL.** `JobsService.onModuleInit` calls `boss.createQueue` for every `JOB_NAMES` entry in every role; in pg-boss 10+ a new queue's `create_queue` creates a partition table. Under D6 the api, worker and ops logins are `sanchay_app` members without CREATE on schema `pgboss`, so each job name a later task appends must be created by the migrate task (as `sanchay_master`) before a non-migrate container starts, or `pgboss` needs a CREATE grant. F7 appends two names.
+- **D2 (checked, RV-04-F7-1): queue creation needs no DDL.** pg-boss 10 gave every queue its own partition table; in pg-boss 12.34.0 that happens only with `createQueue(name, {partition: true})`, and D2's `createQueue(name)` is an `INSERT … ON CONFLICT DO NOTHING` into `pgboss.queue`. As a `sanchay_app` member on a database a non-superuser master migrated, `start`, `createQueue` for every `JOB_NAMES` entry, `send`, `work`, `schedule` and `supervise` all succeed, while `partition: true` and `persistQueueStats` fail with 42501 (Plan 02 RV-02-43, which also pins that no queue is partitioned). F7's two new names therefore need neither the migrate task nor a CREATE grant.
 - **Outline vs D-MONEY-071: M-numbering differs** (see Deviation 1). F7 follows the register and keeps the outline's two checks.
 
 **Open questions for the owner.**
@@ -22096,12 +22041,12 @@ git commit -m "test(api): OTP abuse, host matrix and prod guard suites; HostGuar
 
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 
-**Review notes for F8 (errata found; EF8-1, EF8-2 and EF8-6 are fixed above, EF8-3 and EF8-4 are Plan 03 RV-03-5, EF8-5 belongs to Plan 01):**
+**Review notes for F8 (errata found; EF8-1, EF8-2 and EF8-6 are fixed above, EF8-3 and EF8-4 are Plan 03 RV-03-5, EF8-5 is fixed by Plan 02 D0):**
 - **EF8-1 (E2, fixed here):** E2's HostGuard made every non-infra route app-host-only, against H-1; every Android call on `api.sanchay.in` would 404.
 - **EF8-2 (E2, fixed here):** with `SANCHAY_APP_ORIGIN` and `SANCHAY_API_ORIGIN` sharing a hostname (`.env.example`: both `http://localhost:3000`), E2's `classify` returned APP first, so `POST /webhooks/fp` and `/pg/return/*` 404'd in local development.
 - **EF8-3 (E2, applied by Plan 03 RV-03-5, D9):** E2 says the existing int suite stays green, but these Plan 01 cases send no `Host` header and get 404 from E2's guard: `auth-login` "rejects a missing client header", `session-endpoint` "rejects requests without x-sanchay-client (ORIGIN_REJECTED)", `throttle` "never throttles the R-11 infra routes" (its webhook and return requests), `infra-routes` "keeps both guards on every other route (control)". RV-03-5 adds `host: appHost()` (ordinary routes) or `host: apiHost()` (webhook, returns) to those requests. Reproduced again on 2026-10-01: `auth-login` "rejects a missing client header" answers 404 `NOT_FOUND` instead of 403 `ORIGIN_REJECTED` with HostGuard in the chain.
 - **EF8-4 (E2, applied by Plan 03 RV-03-5, D9):** E2's "an android client below minAppVersion.android gets 426" sends `x-app-version: 1.0.0` against D1's default floor `'1.0.0'`, which is not below it; the case must first upsert `app_config` `minAppVersion.android = '1.1.0'`. E2's 4-row "cross-host matrix" asserts only `not 500`; F8's `hostguard.int.test.ts` is the real matrix.
-- **EF8-5 (Plan 01 B20, not fixed here):** `ContactEmailService.verify` calls `OtpService.verify` (which commits the attempt bump on the bookkeeping pool) before checking `reference_id = investorId`. Investor B can therefore send wrong codes against investor A's VERIFY_EMAIL `challengeId`: 5 lock A's code, and 3 locked codes in 60 min lock A's email destination for 30 min. Nothing leaks, but it is a cross-investor denial of service. Fix: read the row's `reference_id` first and answer `OTP_INVALID` for a foreign challenge without touching it. (Still present in `main`'s `contact-email.service.ts`, checked 2026-10-01.)
+- **EF8-5 (Plan 01 B20; fixed by Plan 02 D0, RV-02-66):** `ContactEmailService.verify` calls `OtpService.verify` (which commits the attempt bump on the bookkeeping pool) before checking `reference_id = investorId`. Investor B can therefore send wrong codes against investor A's VERIFY_EMAIL `challengeId`: 5 lock A's code, and 3 locked codes in 60 min lock A's email destination for 30 min. Nothing leaks, but it is a cross-investor denial of service. Fix: read the row's `reference_id` first and answer `OTP_INVALID` for a foreign challenge without touching it. (Still present in `main`'s `contact-email.service.ts`, checked 2026-10-01; Plan 02 D0 applies exactly this fix, test first.)
 - **EF8-6 (E2, fixed here):** E2's own case "an ordinary (non-infra) route on the api host is 404" sends only a `Host` header. Under H-1 HostGuard lets it through and ClientGuard answers 403 `ORIGIN_REJECTED` (reproduced 2026-10-01), so Step 4 would have failed on E2's file. Step 1 rewrites the case to send the web client.
 
 **Verification (2026-10-01, scratch worktree; nothing committed):** Plan 01's real app plus E2's `SANCHAY_API_ORIGIN`, `TEST_API_ORIGIN` default and HostGuard registration (first `APP_GUARD`), with this task's `host.guard.ts` and `http.ts` and PostgreSQL 18 through Testcontainers. Run as written: `host.guard.test.ts` 23/23; `hostguard.int.test.ts` 11/11, booted with Plan 01's `InfraRoutesTestModule` (the E1/E21 raw routes) and 29 Plan 03/04-shaped oRPC procedures under their real keys and paths, so the sweep covered every route × 4 hosts × 3 shapes; `otp-abuse` 8/8; `session-endpoint` 8/8 and `client-roundtrip` 3/3; `auth-login` 13/13 and `accounts-devices` 8/8 (with RV-03-5's host fix on the one EF8-3 case); the rewritten E2 case under both rules. With E2's original rule swapped back in, Step 2's expectations held: `hostguard` 3 of 11 fail, `session-endpoint` 1 fails (401 on the app host), `client-roundtrip` 3 fail, `otp-abuse` 8 pass. `pnpm --filter=@sanchay/api typecheck` and `biome check` on these files were clean. Not run: `prod-image-guard` (it needs D3/D6/D7/E1's env keys), `infra-routes` and `throttle` (they need E1's and E2's edits to those files).
@@ -26189,7 +26134,7 @@ What was run:
   - e2e (Plan 03 E24, RV-03-18): `smsInbox(mobile)`, `newestMessageId(request, address)` and `readNextOtp(request, address, baselineId)` from `e2e/support/otp.ts`.
 - **Produces:**
   - `SipSetupScreen({schemeId})` (SIP-01) at `/invest/[schemeId]/sip`, where `schemeId` is the scheme uuid from the catalogue wire (`SchemeDetailSchema.id`, RV-03-8). Entry points (assembly decision D4): FUND-01's "Start SIP" (F19, shown when the scheme takes monthly SIPs) and, optionally, PORT-02's "Start SIP" (F14) push `/invest/${id}/sip`; SIPM-01's empty state sends the investor to Explore, where FUND-01 offers "Start SIP". F12 adds no entry button itself. Monthly only (H-15); day chips are `quote.availableDays` (the scheme's `sip_dates` ∩ 1–28) with **none preselected**; amount checked with `amountSchema` against the quote's min, max and multiple; duration "Until I cancel" (null) or 1..360; the expected first instalment from a dated quote, re-quoted whenever the day changes; Continue saves a `SipDraft` and pushes `/invest/{schemeId}/sip/review`. An unknown or malformed id comes back from `quoteSip` as `NOT_FOUND` or `VALIDATION_FAILED` and shows the error banner.
-  - `SipReviewScreen({schemeId})` (SIP-03): re-quotes the draft, shows fund, amount, day, first instalment, duration and rail, plus DSC-06/DSC-03/DSC-01 lines; "Confirm & get OTP" calls `plans.createSip` with one `Idempotency-Key` per intent (reused only after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS`; any other 4xx is a final refusal, and the next tap mints a new key, because D1 keeps a 4xx key IN_PROGRESS for 24 hours), shows the **mandate reuse message** (`newMandate=false`) or the new-mandate message, **re-shows the first-instalment date when registration moved it**, then opens `ConsentOtpSheet`. On approval: new mandate → `/portfolio/sips/mandates/{mandateId}`, reused → `/portfolio/sips/{planId}`.
+  - `SipReviewScreen({schemeId})` (SIP-03): re-quotes the draft, shows fund, amount, day, first instalment, duration and rail, plus DSC-06/DSC-03/DSC-01 lines; "Confirm & get OTP" calls `plans.createSip` with one `Idempotency-Key` per intent (reused only after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS`; any other 4xx is a final refusal that ends the intent, and the next tap mints a new key; D1 releases the key of any refusal, Plan 02 RV-02-37), shows the **mandate reuse message** (`newMandate=false`) or the new-mandate message, **re-shows the first-instalment date when registration moved it**, then opens `ConsentOtpSheet`. On approval: new mandate → `/portfolio/sips/mandates/{mandateId}`, reused → `/portfolio/sips/{planId}`.
   - `MandateScreen({mandateId, pollMs?})` (SIP-02/MND-03): polls `mandates.get` every 3 s for up to 10 minutes (stops on a terminal status), refetches on `AppState` `active`, "Open UPI app" opens `upiUri` with `Linking.openURL`, "Send a new request" calls `mandates.authorize` [K] (same key rule as SIP-03); APPROVED → "View my SIPs"; REJECTED/CANCELLED/EXPIRED/CONSENT_EXPIRED say "Nothing was debited".
   - `SipListScreen()` (SIPM-01): header "Active SIPs: {n} · Monthly total ₹{sum}" over ACTIVE plans only (the F10 `sipCounts.active`/`monthlyAmount` bucket), rows → `/portfolio/sips/{id}`, empty state "Start a SIP" → `/explore` (then FUND-01's "Start SIP").
   - `SipDetailScreen({planId})` (SIPM-02, read-only): status, amount, day, first instalment (labelled "expected" until FP confirms it), next instalment, duration, failure banners, "Approve the mandate" while `MANDATE_SETUP`, "See instalments in Orders" → `/portfolio/orders`. F28 adds Cancel.
@@ -26456,7 +26401,7 @@ describe('SipReviewScreen (SIP-03)', () => {
   });
 
   it('shows the copy of a final refusal; the next tap is a new intent with a new key', async () => {
-    // D1 keeps a 4xx key IN_PROGRESS for 24 h: reusing it would only answer IDEMPOTENCY_IN_PROGRESS.
+    // A refusal ends the intent (D1 releases its key): the next tap mints a new key.
     server.use(
       http.post(`${TEST_API}/plans/sips/quote`, () => quoteReply()),
       http.post(`${TEST_API}/plans/sips`, ({ request }) => {
@@ -27230,10 +27175,9 @@ export function newMandateMessage(): string {
 }
 
 /**
- * A final answer from the API. D1's requireIdempotency releases a key on a 5xx but keeps a 4xx key
- * IN_PROGRESS for 24 hours, so sending it again would only return IDEMPOTENCY_IN_PROGRESS: the next tap
- * is a new intent with a new key. A network error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps the key,
- * because the first request may still land.
+ * A final answer from the API. A 4xx ends the intent: D1's requireIdempotency releases the key
+ * of any refusal (Plan 02 RV-02-37), so the next tap is a new intent with a new key. A network
+ * error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps the key, because the first request may still land.
  */
 function isFinalRefusal(error: { status: number; code: string }): boolean {
   return error.status >= 400 && error.status < 500 && error.code !== 'IDEMPOTENCY_IN_PROGRESS';
@@ -27421,8 +27365,8 @@ const TERMINAL = new Set(['APPROVED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'CONSE
 const FAILED = new Set(['REJECTED', 'CANCELLED', 'EXPIRED', 'CONSENT_EXPIRED']);
 
 /**
- * A final answer from the API (for example MANDATE_STATE_INVALID once the mandate has moved on). D1
- * keeps a 4xx key IN_PROGRESS for 24 hours, so the next tap is a new intent with a new key; a network
+ * A final answer from the API (for example MANDATE_STATE_INVALID once the mandate has moved on). A
+ * 4xx ends the intent (D1 releases its key), so the next tap is a new intent with a new key; a network
  * error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps it (the same rule as SipReviewScreen).
  */
 function isFinalRefusal(error: { status: number; code: string }): boolean {
@@ -28193,7 +28137,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands before c
   - **Checked only by reading:** the screens and their tests (unchanged from the reviewed draft apart from comments), the mandate route's `usePreventScreenCapture('mandate')` (the C14 pattern of `login.tsx`), the `_layout.tsx` registration (F16's pattern; the `…/sip/index` name form was checked against the installed expo-router 57.0.23 `build/useScreens.js`), and the backend edits.
 
 - **Assembly round 2 (2026-10-01): what changed and what ran.**
-  - **FR-17, idempotency keys.** `SipReviewScreen` and `MandateScreen` keep a key only after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS`; any other 4xx clears it, because D1 keeps a 4xx key IN_PROGRESS for 24 hours. This is the `isFinalRefusal` rule F28's `CancelSipSheet` already used; F28 runs after F12, so F12 carries its own copy. The old "keeps the same idempotency key on retry" test asserted a reuse after a 403 that the real API would answer with `IDEMPOTENCY_IN_PROGRESS`. It is now two tests, a network-error reuse and a new key after the 403, and `MandateScreen` gains one test covering both branches.
+  - **FR-17, idempotency keys.** `SipReviewScreen` and `MandateScreen` keep a key only after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS`; any other 4xx clears it, because a refusal ends the intent (D1 releases its key, Plan 02 RV-02-37). This is the `isFinalRefusal` rule F28's `CancelSipSheet` already used; F28 runs after F12, so F12 carries its own copy. The old "keeps the same idempotency key on retry" test asserted a reuse after a 403 that the real API would answer with `IDEMPOTENCY_IN_PROGRESS`. It is now two tests, a network-error reuse and a new key after the 403, and `MandateScreen` gains one test covering both branches.
   - **FR-6, stale `dist`.** Steps 3, 4 and 5 run `pnpm exec turbo run build --filter=@sanchay/api^...` before the API checks and `openapi`, and `pnpm exec turbo run build --filter=@sanchay/features^...` before the features, web and mobile checks. The two builds are the first lines of Step 4 and of Step 5, as in F7 (in Step 5 before the biome line: biome only reformats, and the builds re-run with the rest of Step 4 if lefthook re-stages). F13 does the same.
   - **Ran** in a scratch worktree at `main` (`pnpm install --frozen-lockfile --offline`). Stand-ins: E4's `consents.ts`, E12's `ListRow`/`Sheet` and E13's consent sheet, facade and `ApiContext` (verbatim from Plan 03), plus contract modules with F2/F3/F10/F12's plans and mandates and E20/F5/F16's orders. The task's `sipCopy.ts`, `useSipDraft.ts`, `SipReviewScreen` and `MandateScreen` code and tests were extracted from this file, so the text is what ran.
     - Both build lines ran in PowerShell 5.1 and Git Bash: `api^...` built money, validation, domain and contract; `features^...` also built api-client and tokens.
@@ -32223,7 +32167,7 @@ git commit -m "feat(portfolio): allocation bar chart above the allocation list (
   - **One route, draft in memory.** RED-01, RED-02 and CNF-02 are steps of `RedeemScreen` under `/redeem/[folioId]/[isin]`; the amount never enters a URL (E23's draft rule) and a reload restarts at RED-01 with a fresh quote. The mobile route is one file, matching F18.
   - **RED-01.** No mode is preselected ("Choose how much to redeem."). AMOUNT shows "Available now: up to ₹{maxAmount}", the buffer note ("The maximum keeps a {buffer}% margin for NAV changes until your NAV date, {exitNavDate}…") and the field error "You can redeem up to ₹{max} now."; Continue stays disabled until the amount is above zero and within `maxAmount`. `maxAmount: null` (NAV not OK) shows the `NAV_UNAVAILABLE` copy and no field. ALL shows F5's decision: FULL "All {units} available units will be redeemed.", AMOUNT_WITH_RESIDUAL the design §F.6 residual note, REFUSED the catalogue copy for its code with Continue disabled. Info blocks: availability with approximate value (units × NAV, rounded down), ELSS lock (DSC-10), units in a withdrawal in progress, the provider-short note, NAV, expected NAV date, payout bank (masked, read-only), cut-off (DSC-06, 12-hour).
   - **REFRESHING** (R-09): the quote is polled every 3 s while F5 answers REFRESHING (F5 enqueues `folio.sync {folioId}` with a singleton key on each call); after 40 polls it stops and offers "Try again" (a query reset).
-  - **RED-02.** Fund, mode, amount (or units and approximate value), NAV date, payout bank, then DSC-09, DSC-20 and "Once sent to the registrar this can't be cancelled.". "Confirm & get OTP" calls `orders.createRedemption` with one Idempotency-Key per intent: a retry after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS` replays the same draft, and any other 4xx (for example `ORDERS_DISABLED`) is a final refusal, so the next tap mints a new key (D1 keeps a 4xx key IN_PROGRESS for 24 hours; F28's rule). A refusal that means the quote moved (`FOLIO_RECONCILIATION_REQUIRED`, `REDEMPTION_CONFLICT_PENDING`, `INSUFFICIENT_REDEEMABLE`, `NAV_UNAVAILABLE`) shows its copy and offers only "Back", which re-quotes.
+  - **RED-02.** Fund, mode, amount (or units and approximate value), NAV date, payout bank, then DSC-09, DSC-20 and "Once sent to the registrar this can't be cancelled.". "Confirm & get OTP" calls `orders.createRedemption` with one Idempotency-Key per intent: a retry after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS` replays the same draft, and any other 4xx (for example `ORDERS_DISABLED`) is a final refusal, so the next tap mints a new key (a refusal ends the intent and D1 releases its key, Plan 02 RV-02-37; F28's rule). A refusal that means the quote moved (`FOLIO_RECONCILIATION_REQUIRED`, `REDEMPTION_CONFLICT_PENDING`, `INSUFFICIENT_REDEEMABLE`, `NAV_UNAVAILABLE`) shows its copy and offers only "Back", which re-quotes.
   - **CNF-01** is E13's sheet for the returned challenge; the server decides the factors (F5: SMS + EMAIL). Closing it cancels the draft with `orders.cancel` (F5 releases the reservation there) and returns to RED-01; otherwise the units stay reserved until the challenge lapses.
   - **CNF-02 and payout** (D-MONEY-053): `orders.get` is polled every 3 s until a terminal state (at most 60 polls). Copy per state: UNDER_REVIEW "With the fund house for review" (GAP-01), PROCESSING "Withdrawal placed", SETTLED with EXPECTED "{units} units redeemed for ₹{amount}. Expected in your bank by {date}.", DELAYED the investor rights (due date, 15% a year, SEBI SCORES), CREDITED only as the server reports it, REJECTED/FAILED/EXPIRED/CONSENT_EXPIRED/CANCELLED "did not go through … your units are available again" with the catalogue reason when there is one.
   - **Redeem remaining** (D-MONEY-051): after an ALL that was sent as an amount settles (`mode = 'ALL'`, `amount` set), CNF-02 offers "Redeem remaining", which re-quotes and reopens RED-01 with All selected; F5's quote then decides what is left.
@@ -32850,7 +32794,7 @@ describe('RedeemReviewScreen (RED-02 + CNF-01)', () => {
   });
 
   it('shows the copy of a final refusal; the next tap is a new intent with a new key', async () => {
-    // D1 keeps a 4xx key IN_PROGRESS for 24 h: reusing it would only answer IDEMPOTENCY_IN_PROGRESS.
+    // A refusal ends the intent (D1 releases its key): the next tap mints a new key.
     const keys = draftAfter(() => errorReply('ORDERS_DISABLED', 403));
     const user = userEvent.setup();
     renderWithProviders(
@@ -33531,10 +33475,10 @@ interface Created {
 }
 
 /**
- * A final answer from the API. D1's requireIdempotency releases a key on a 5xx but keeps a 4xx key
- * IN_PROGRESS for 24 hours, so sending it again would only return IDEMPOTENCY_IN_PROGRESS: the next tap
- * is a new intent with a new key. A network error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps the key,
- * because the first request may still land (F28's rule, as in F12's SipReviewScreen).
+ * A final answer from the API. A 4xx ends the intent: D1's requireIdempotency releases the key
+ * of any refusal (Plan 02 RV-02-37), so the next tap is a new intent with a new key. A network
+ * error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps the key, because the first request may still land
+ * (F28's rule, as in F12's SipReviewScreen).
  */
 function isFinalRefusal(error: { status: number; code: string }): boolean {
   return error.status >= 400 && error.status < 500 && error.code !== 'IDEMPOTENCY_IN_PROGRESS';
@@ -34638,7 +34582,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 **Errata and notes found while writing F16–F17 (not fixed here):**
 - **E4 vs E13 consent API drift.** E4's `consents.getChallenge` returns `{challengeId, status, requiredFactors, expiresAt}` and `sendOtp` returns `{ok: true}`; E13's `ConsentApi`/`useConsentChallenge` expect `{id, …, destinationsMasked}` and `{resendAfterSeconds}`, and E4's `approve` is [K] but E13's adapter sends no Idempotency-Key. Nothing in Plan 03 builds the `consents` adapter that E13's `ConsentOtpSheet` reads from `useApi()` (E13's file list does not touch `ApiContext.tsx`; E23 says "appended here if not already present"). F16 only needs the sheet's props and labels; whoever executes E13/E23 must write the adapter (map `challengeId`→`id`, default the resend timer, send the key on approve).
 - **E23's `MoneyText amount=`** does not match E12's `MoneyText({value: Money | null})`. E12 never adds `@sanchay/money` to `packages/features/package.json`, which F16 now does (only if still absent).
-- **Plan 01 `AppShell` hydration mismatch (web, desktop width).** `navLayoutFor(useWindowDimensions().width)` is 0 on the server and the real width in the browser, so the sidebar layout differs between the server HTML and the first client render; Next's dev overlay reports it on `/explore` and `/redeem/…`. Not caused by F16; the fix belongs to C9 (render the layout after mount, or decide it with CSS).
+- **Plan 01 `AppShell` hydration mismatch (web, desktop width).** `navLayoutFor(useWindowDimensions().width)` is 0 on the server and the real width in the browser, so the sidebar layout differs between the server HTML and the first client render; Next's dev overlay reports it on `/explore` and `/redeem/…`. Not caused by F16; fixed by Plan 02 D0 (RV-02-66): `AppShell` reads the width through `useSyncExternalStore` with a server snapshot of 0.
 - **`next dev` writes `apps/web/AGENTS.md` and `apps/web/CLAUDE.md`** (Next 16.3 `agentRules`). They are untracked noise in every executor's tree; `agentRules: false` in `next.config.ts` or a `.gitignore` line would stop it (shared files, so the owner decides).
 - **F18** lists the redeem route as `redeem/[folioId]/[isin].tsx`, which F16 uses; F18's suggested key `'redeem-review'` differs from F16's `'redeem'`, which F18's check accepts.
 - **Android, after CNF-02 (open, found at assembly 2026-10-01).** The redeem route is a root-stack screen, so `nav.push('/portfolio')` ("Go to portfolio") and `nav.push('/portfolio/orders/{id}')` ("View order") reach Expo Router as a PUSH on the root stack, where the current and target states diverge (`getNavigateAction`). That pushes a second `(tabs)` entry above the redeem screen, and Back then returns to CNF-02. Plan 01's `NavAdapter` has only `push`, `replace` and `back`; a `dismissTo`-style method in C9/C13's adapter would fix it. Web is unaffected. Check it on the device build (F25).
@@ -35674,14 +35618,14 @@ Every path is a file this task creates or edits; the quotes keep `(…)` and `[�
   - `ops-catalogue-seed.ts`: `CuratedListInvalidError`, `seedCatalogue(db, dataDir, options = {pilotList: false})`, `runCatalogueSeed(db, clock, dataDir, options) → report`. `pnpm ops:catalogue:seed` prints the gate report and exits 1 on an invalid list. `pilotList` is on for `SANCHAY_APP_ENV` staging and prod, and on any machine with `pnpm ops:catalogue:seed --pilot-list`.
   - `catalogue.fp.sync` is scheduled daily at 07:30 IST (after D9's 07:00 NAV sync) and ends with `applyPublishGate`.
   - `CatalogueStatus`, `CatalogueStatusProps`, `CATALOGUE_COPY` (`packages/features/src/explore/CatalogueStatus.tsx`).
-  - FUND-01's two calls to action, as links (role `link`): "Invest" → `/invest/${scheme.id}/lumpsum` (always, as RV-03-8 has it) and "Start SIP" → `/invest/${scheme.id}/sip` (only when `scheme.thresholds` is not null; otherwise the line "SIP not available for this fund").
+  - FUND-01's two calls to action, as links (role `link`): "Invest" → `/invest/${scheme.id}/lumpsum` (always, as RV-03-8 has it) and "Start SIP" → `/invest/${scheme.id}/sip` (only when `scheme.sipAllowed`, RV-04-F19-1; otherwise the line "SIP not available for this fund").
 - **Rules pinned here** (spec §1.4 publish-gate row: "seed and FP sync re-evaluate"; G-B10; stores.md D7):
   - **Only the gate publishes.** A curated scheme that passes R1-R7 is PUBLISHED. One that fails stays DRAFT if it was never live, and becomes SUSPENDED if it was (its fund page then 404s, holdings are untouched). FP's `purchase_allowed=false` still suspends at once in the sync.
   - **Dropping an ISIN from the curated list** sets `curated=false`; a live one is SUSPENDED. Nothing is deleted (orders and folios may reference it).
   - **The list is validated before any write.** Every error is reported with its file and line; nothing is written when one exists. On staging and prod, and locally with `--pilot-list`, the list must be the v1 size (40-60), use no `INF000P` placeholder ISIN, and have a fact row for every ISIN.
   - **CSV dialect** stays D8's (comma separated, no quoting). A comma inside a value is an error; business writes `;` instead (for example in exit-load text).
   - **Screens:** loading and empty states are polite status regions, errors are alerts; a fund that is not published shows "not available" with a way back, never a retry; percentages are unsigned (`12.34%`, TER `1.55%`); SID/KIM rows open the document; Explore pages through the whole curated list ("Show more funds").
-  - **FUND-01 actions (BRIEF D4, journeys §4.6).** Both go by the scheme uuid, never the slug: SIP-01 and INV-01 take `schemeId`. "Invest" is always shown. "Start SIP" needs the thresholds' monthly SIP row: on the wire, `thresholds.sipMin`/`sipMax`/`sipMultiple`, which exist exactly when `thresholds` is not null. Without it the CTA is hidden and the reason "SIP not available for this fund" is shown. Both are links, never buttons: E24's smoke clicks `getByRole('link', { name: 'Invest' })` and its Maestro flow taps `'Invest'`, so the visible label is exactly "Invest".
+  - **FUND-01 actions (BRIEF D4, journeys §4.6).** Both go by the scheme uuid, never the slug: SIP-01 and INV-01 take `schemeId`. "Invest" is always shown. "Start SIP" needs `scheme.sipAllowed` (RV-04-F19-1): Plan 02 D10 sets it only when FP's `sip_allowed` is true and FP lists a monthly SIP row with days in 1..28, and leaves the SIP limits null without that row (RV-02-55), so it holds exactly when F2's `sipSchemeOf` (and so F10's quote) can accept a published scheme. A non-null `thresholds` says nothing about SIP. Without it the CTA is hidden and the reason "SIP not available for this fund" is shown. Both are links, never buttons: E24's smoke clicks `getByRole('link', { name: 'Invest' })` and its Maestro flow taps `'Invest'`, so the visible label is exactly "Invest".
 - **Deviations from the outline:**
   1. The outline's test `no PUBLISHED scheme fails R1–R7` needed more than a report: D10's sync published every `purchase_allowed` scheme and nothing applied E15's gate (see review notes). F19 adds `applyPublishGate` and makes it the only publisher.
   2. `catalogue.fp.sync` had no schedule anywhere in Plans 02/03, so fund flags and the NAV leg of R7 were never re-evaluated. F19 adds one cron.
@@ -36203,16 +36147,19 @@ becomes
     expect(nav.push).toHaveBeenLastCalledWith(`/invest/${SCHEME_ID}/sip`);
   });
 
-  it('keeps Invest but offers no Start SIP when the scheme has no thresholds (D4)', async () => {
+  it('keeps Invest but offers no Start SIP when FP lists no monthly SIP row (D4, RV-04-F19-1)', async () => {
+    // Lumpsum limits but no SIP: thresholds is not null, so only sipAllowed can hide Start SIP.
+    const lumpsumOnly = { purchaseMin: '500.00', purchaseMax: null, purchaseMultiple: '1.00', sipMin: null, sipMax: null, sipMultiple: null };
     server.use(
       http.get(`${TEST_API}/catalogue/schemes/parag-parikh-flexi-cap`, () =>
-        HttpResponse.json(schemeDetail({ id: SCHEME_ID, thresholds: null })),
+        HttpResponse.json(schemeDetail({ id: SCHEME_ID, sipAllowed: false, thresholds: lumpsumOnly })),
       ),
     );
     renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
     expect(await screen.findByRole('link', { name: 'Invest' })).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Start SIP' })).toBeNull();
     expect(screen.getByText('SIP not available for this fund')).toBeTruthy();
+    expect(screen.getByLabelText('Minimum lumpsum: ₹500.00')).toBeTruthy();
   });
 ```
 
@@ -36228,7 +36175,14 @@ becomes
     const setSpy = vi.fn().mockReturnThis();
     const db = { query: { schemes: { findMany: vi.fn().mockResolvedValue([{ id: 's1', isin: 'INF000P01011', curated: true }]) } }, update: vi.fn().mockReturnThis(), set: setSpy, where: vi.fn().mockResolvedValue(undefined), insert: vi.fn().mockReturnThis(), values: vi.fn().mockResolvedValue(undefined) };
     const fpRead = {
-      fundScheme: vi.fn().mockResolvedValue({ purchase_allowed: true, redemption_allowed: true, sip_allowed: true, lock_in: false, lock_in_period: null }),
+      // Multi-line, as in D10's cases: biome 2.5.14 needs two --write passes to settle the one-line form (RV-04-F19-2).
+      fundScheme: vi.fn().mockResolvedValue({
+        purchase_allowed: true,
+        redemption_allowed: true,
+        sip_allowed: true,
+        lock_in: false,
+        lock_in_period: null,
+      }),
       schemePlans: vi.fn().mockResolvedValue({ items: [], raw: {} }),
     };
     await runCatalogueFpSync(db as never, fpRead as never);
@@ -37088,19 +37042,20 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
       <AppText variant="title">{scheme.name}</AppText>
       <AppText tone="muted">{`${scheme.amcName} · ${scheme.categoryName}`}</AppText>
 
-      {/* BRIEF D4: both go by the scheme uuid. Start SIP needs the thresholds' monthly SIP row (sipMin,
-          sipMax, sipMultiple); without it the CTA is hidden with the reason (journeys §4.6). */}
+      {/* BRIEF D4: both go by the scheme uuid. Start SIP needs `sipAllowed`, Plan 02 D10's fail-closed flag
+          (FP's sip_allowed and its monthly SIP row, RV-04-F19-1); without it the CTA is hidden with the
+          reason (journeys §4.6). */}
       <View style={styles.actions} testID="fund-actions">
         <FundAction label="Invest" href={`/invest/${scheme.id}/lumpsum`} primary />
-        {t === null ? null : (
+        {scheme.sipAllowed ? (
           <FundAction label="Start SIP" href={`/invest/${scheme.id}/sip`} primary={false} />
-        )}
+        ) : null}
       </View>
-      {t === null ? (
+      {scheme.sipAllowed ? null : (
         <AppText variant="caption" tone="muted">
           SIP not available for this fund
         </AppText>
-      ) : null}
+      )}
 
       <Card>
         <AppText variant="heading">Returns (annualised)</AppText>
@@ -37116,7 +37071,10 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
       <Card>
         <AppText variant="heading">Minimums</AppText>
         <ListRow label="Minimum lumpsum" value={t ? formatInr(Money.parse(t.purchaseMin)) : DASH} />
-        <ListRow label="Minimum SIP" value={t ? formatInr(Money.parse(t.sipMin)) : DASH} />
+        <ListRow
+          label="Minimum SIP"
+          value={scheme.sipAllowed && t?.sipMin ? formatInr(Money.parse(t.sipMin)) : DASH}
+        />
         <ListRow label="Exit load" value={scheme.exitLoadText ?? DASH} />
         <ListRow
           label="Lock-in"
@@ -37253,7 +37211,7 @@ pnpm --filter=@sanchay/mobile typecheck
 pnpm --filter=@sanchay/web typecheck
 ```
 Expected:
-- `curated-csv.test.ts` 5/5, `publish-gate.apply.test.ts` 10/10, D10's `fp-sync.job.test.ts` 4/4 (its "purchase_allowed=false suspends" case still passes), E15's `publish-gate.test.ts` unchanged.
+- `curated-csv.test.ts` 5/5, `publish-gate.apply.test.ts` 10/10, D10's `fp-sync.job.test.ts` 6/6 (D10's five cases, two of them from RV-02-55, and this one; its "purchase_allowed=false suspends" case still passes), E15's `publish-gate.test.ts` unchanged.
 - `catalogue-publish-gate.int.test.ts` 7/7; D10's `catalogue-router`, E14's `catalogue-get-scheme`, E15's `fund-facts-provider` and D8's `catalogue-schema` stay green (they seed their own PUBLISHED rows directly and do not run the gate).
 - Features, `test explore`: 5 files, 25 tests: `Disclosures.test.tsx` 4 (one case fixed), `CatalogueStatus.test.tsx` 4, `ExploreScreen.test.tsx` 6 (3 + 3 new), `SearchScreen.test.tsx` 4 (2 + 2 new), `FundScreen.test.tsx` 7 (3 with the fixed first case + 2 + the 2 D4 cases), plus any case RV-03-8 added. Mobile: F18's `secureRoutes.test.ts` still passes (no catalogue route is listed, none is a test file).
 - Then `pnpm ops:catalogue:seed` against the local database prints the report, and `pnpm ops:catalogue:seed --pilot-list` applies the v1 checks (Step 3a).
@@ -37303,7 +37261,7 @@ If Step 3a replaced the CSVs in this session, add `data/curated-schemes.csv data
 - E17: the test helpers `categories()`, `schemes()`, `schemeDetail()` and `server` in its three test files; `Disclosures`, `ReturnCaveat`, `RiskometerBadge`. E17's `RiskometerBadge` renders "Riskometer: {label}" and "Benchmark: {label}"; its `FundScreen.test.tsx` imports only `screen` from Testing Library.
 - RV-03-8 (BRIEF D4): `SchemeDetail.id` is the scheme uuid, and E17's Fund page has an "Invest" action to `/invest/${scheme.id}/lumpsum`, which this replacement keeps as a link. An RV-03-8 test that queries it as a button changes to `getByRole('link', { name: 'Invest' })` (Step 1).
 - E23 and F12: `/invest/[schemeId]/lumpsum` (INV-01) and `/invest/[schemeId]/sip` (SIP-01) on web and mobile take the scheme uuid.
-- D10: `toThresholds` builds the wire's SIP fields from FP's monthly SIP row and falls back to the lumpsum row when FP sends none. The wire cannot tell those apart, so "Start SIP" depends on `thresholds` being present, and SIP-01's quote (F10) refuses a scheme without SIP (`SCHEME_NOT_ORDERABLE`).
+- D10 (RV-02-55): `toThresholds` fills the SIP limits only from FP's monthly SIP row and leaves them null without it, `toSipDates` stores that row's days in 1..28, and `schemes.sip_allowed` is FP's `sip_allowed` with both present. E14 serves the flag as `SchemeDetail.sipAllowed` (RV-03-22), which "Start SIP" reads, so FUND-01 never offers a SIP that F10's quote refuses with `SCHEME_NOT_ORDERABLE`.
 - F4: `istIsoDate(at: Date): IsoDate` and `calendarDaysBetween(from: IsoDate, to: IsoDate): number` exported from `@sanchay/domain`.
 - Plan 01: `bootTestApp().clock` is a `FakeClock` at Mon 2026-10-12 10:00 IST. `parseEnv` runs `assertBootInvariants`, which refuses `SANCHAY_APP_ENV=staging` with local values; hence `--pilot-list`.
 
@@ -39515,7 +39473,7 @@ Findings from running the real web e2e suite (13 tests, Postgres and Mailpit in 
 - Under `pnpm e2e:web`, turbo prefixes every line with `@sanchay/web:e2e:web: ` and the GitHub reporter interleaves progress dots, so a "line starts with" filter silently scans nothing. The scanner keys on the `[WebServer] ` marker anywhere in the line and scans only the text after it. With a marker, zero matched lines is exit 2, never a pass.
 - The scan targets server logs only. Playwright reports and Maestro output echo the fixture values the tests typed, which would be false positives.
 - Real pino lines carry UUID request ids. A 12-hex UUID segment can be all digits, so every rule is bounded against word characters and `-` (the unit tests pin this).
-- `DrizzleQueryError` messages include the bound parameters (`params: LOGIN,<bytes>,LOCKED,…`), and the `err` serializer logs `err.message` verbatim. A plaintext PII value bound to a failing query would reach the logs past key-based redaction. Today's bound values are blind indexes and ciphertext. The scan catches a regression in e2e; the serializer fix is an F26 item (see the errata list).
+- `DrizzleQueryError` messages include the bound parameters (`params: LOGIN,<bytes>,LOCKED,…`), and the `err` serializer logs `err.message` verbatim. A plaintext PII value bound to a failing query would reach the logs past key-based redaction. Today's bound values are blind indexes and ciphertext. The scan catches a regression in e2e; the serializer fix is Plan 02 D0 (RV-02-66), which also covers the `msg` pino copies from a message-less error.
 
 **Files:**
 - **Create:** `scripts/scan-pii-logs.ts`, `scripts/scan-pii-logs.test.ts`, `infra/test/g-e3-prod.test.ts`, `docs/security/g-e3-checklist.md`.
@@ -45367,7 +45325,7 @@ git commit -m "docs(probes): invitee dry run and kill-switch drill results (F27)
 **Interfaces:**
 - **Prerequisites:** F2 (plans, mandates, the SIP chain), F3 (`rail` on `SipService.createSip`; if T6 removed F3, drop the two `rail: 'UPI_AUTOPAY'` lines in the integration test), F4 (its `instalments-sync.job.ts`), F7 (its `fp.reconcile.nonfinal` re-enqueues `plans.sip.advance` for every RECONCILING plan; F28's `sip-advance.job.ts` fragment routes a RECONCILING cancel from there to `plans.cancel.submit`), F9 (`bola-coverage.int.test.ts`), F12 (`SipDetailScreen.tsx`, `SipDetailScreen.test.tsx`, `plans-wire.test.ts`). BRIEF D2 runs F28 after F13 and before F14. Plan 03 E3/E4 with the decided consent fix RV-03-1 (`approve` echoes the stored snapshot's `destinationsMasked` and `fields`; `ConsentEngine.markUnused`; `useConsumed` refuses CONSUMED_UNUSED; the sweep spares a record whose `first_attempt_at` is set) and the BRIEF D9 errata: RV-03-2 (the destination resolver decrypts, so the consent OTPs reach `t.sms`/`t.email`), RV-03-4 (`expectNoPmWritesBeforeConsumed` on the app clock), RV-03-9 (the `consents` facade E13's `ConsentOtpSheet` reads from `useApi()`, fed by E4's wire shapes). Plan 03 E11, E13, E20; Plan 02 D1–D6, D8.
 - **Consumes (Plan 01):** `AppError`, `PLAN_NOT_MODIFIABLE`, `NOT_FOUND`, `CONSENT_DESTINATION_UNAVAILABLE`, the idempotency codes (`ERROR_CATALOGUE`, `errors.ts`); `AuditService.record` (`null` = own autocommit write), `AUDIT_DATA_ALLOWLIST` keys `challengeId` and `reason` (`audit.service.ts`); `auditEvents` (`platform.schema.ts`); `CLOCK`, `Clock`, `MINUTE`, `DAY` (`clock.ts`); `DB`, `DbHandle`, `DbExecutor` (`db/client.ts`); `pgConstraintOf` (`pg-errors.ts`); `requireAuth`, `requireIdempotency`, `IdempotencyService`, `SanchayClsStore`; `SMS_TEMPLATE_IDS.CONSENT` and `consentSmsText` (`integrations/sms/templates.ts`, through E4); `webHeaders` (`test/int/http.ts`); `messageForError` (`@sanchay/app-core`), `toApiError`, `newIdempotencyKey` (`@sanchay/api-client`; `client.x.y(input, {context: {idempotencyKey}})` sets the `idempotency-key` header), `formatInr`, `Money` (`@sanchay/money`, a features dependency since F12), `AppText`, `Banner` (`tone: 'error' | 'info'`), `Button`, `Card` (`@sanchay/ui`), `useApi`, `renderWithProviders`, `TEST_API` (`packages/features`).
-- **Consumes (Plan 02):** `canTransition`, `PLAN_TRANSITIONS`, `PlanStatus`, `ChallengeStatus` (D5, `@sanchay/domain`); `Jobs.enqueue`, `@JobHandler`, `Job`, `JobName`, `JOB_NAMES`, `registerSchedules` (D2); D1's `requireIdempotency` semantics (a 5xx releases the key; a 4xx leaves it IN_PROGRESS for 24 h); `ReconBreaks.open` (D1, static, F4's `ON CONFLICT` fix), `reconBreaks` (D1 `kernel.schema.ts`); `FP_OPERATIONS`, `FpTransport.call`, `FpTransact`, `FpRead.purchasePlan(id)`, `FpRejectedError` (`httpStatus`, `providerCode`), `FpAmbiguousError`, `ConsumedConsent` (D3); `FakeFp` `calls`, `script` (`'timeout'`, `'5xx'`, `{status, body}`; the operation is applied first and the script replaces the reply), `state.purchasePlans`, `fpError`, `planPayload` (D4, F2); `Notify.enqueue`, `NOTIFICATION_TEMPLATE_KEYS`, `CATEGORY_BY_TEMPLATE`, `renderNotification`, `notifications` (D6); `schemes` (`isin`, `name`) (D8).
+- **Consumes (Plan 02):** `canTransition`, `PLAN_TRANSITIONS`, `PlanStatus`, `ChallengeStatus` (D5, `@sanchay/domain`); `Jobs.enqueue`, `@JobHandler`, `Job`, `JobName`, `JOB_NAMES`, `registerSchedules` (D2); D1's `requireIdempotency` semantics (any refusal or failure, 4xx or 5xx, releases the key, and only a returned result is replayed; Plan 02 RV-02-37); `ReconBreaks.open` (D1, static, F4's `ON CONFLICT` fix), `reconBreaks` (D1 `kernel.schema.ts`); `FP_OPERATIONS`, `FpTransport.call`, `FpTransact`, `FpRead.purchasePlan(id)`, `FpRejectedError` (`httpStatus`, `providerCode`), `FpAmbiguousError`, `ConsumedConsent` (D3); `FakeFp` `calls`, `script` (`'timeout'`, `'5xx'`, `{status, body}`; the operation is applied first and the script replaces the reply), `state.purchasePlans`, `fpError`, `planPayload` (D4, F2); `Notify.enqueue`, `NOTIFICATION_TEMPLATE_KEYS`, `CATEGORY_BY_TEMPLATE`, `renderNotification`, `notifications` (D6); `schemes` (`isin`, `name`) (D8).
 - **Consumes (Plan 03):** `ConsentEngine.create/sendOtp/approve/cancel/useConsumed/markUnused`, `CONSENT_SUBJECT_JOBS`, `ConsentApprovedJobData`; approve's enqueue `{singletonKey: challengeId}` and its lock order (the challenge `FOR UPDATE`, then the snapshot builder's plan `FOR UPDATE`) (E4 + RV-03-1); `SNAPSHOT_BUILDERS`, `SnapshotBuilder`, `consentChallenges` (`status`, `expiresAt`, `consumedAt`), `legalDocuments` (E3); `SNAPSHOT_VERSION`, `ConsentSnapshotV2` (E3, `@sanchay/domain`); `expectNoPmWritesBeforeConsumed`, `expectBola` (E4); `jobOf` (E1); `orders` (E20; `order_events` rows come only through F2's `movePlan`); `ConsentOtpSheet({challengeId, onApproved, onClose})` with the labels "SMS code" and "Email code" (E13 + RV-03-9).
 - **Consumes (Plan 04):** `plans`, `mandates`, `PLAN_AUDIT_ACTIONS`, `movePlan`, `toFpPlanView`, `SipService.createSip`, `SipAdvanceJob`, `SipSubmitJob`, `MandatesSubmitJob`, `MandatesPollJob`, `InstalmentsSyncJob`, `PlansRouter`, `PlansModule`, `plansContract`, `PlanSchema`, FakeFp `advanceMandate`/`advancePlan`/`addInstalment`, `seedSipInvestor`, `seedSipScheme`, `setSipEnabled` (F2); `rail` (F3); `PurchaseSettlement` in `instalments-sync.job.ts` (F4, untouched here); the `plans.sip.advance` backstop in `fp.reconcile.nonfinal` (F7); the classification test in `bola-coverage.int.test.ts` (F9); `SipDetailScreen` (its `plan` query, data `p`, `p.schemeName`, `plan.refetch`), `PlanSchema.schemeName`, `plans-wire.test.ts` (F12).
 - **Produces:**
@@ -45405,7 +45363,7 @@ git commit -m "docs(probes): invitee dry run and kill-switch drill results (F27)
   5. **Reconcile.** The outline's "LOOKUP-ADOPT by re-fetching the plan" is done by `plans.cancel.submit` itself. F2's `plans.sip.advance` adopts only a RECONCILING plan with no FP id, so F28 adds a branch there that routes F7's backstop to this job.
   6. **Extra state handling** the outline does not list, because without it a plan can stay CANCEL_PENDING forever: three D5 edges back to ACTIVE, the lazy reclaim in `requestCancel`, and `plans.cancel.sweep`.
   7. **Sandbox smoke.** `--chain=sip` gets no cancel step. F2 did not wire a SIP chain into D4's `tools/fp-probes` smoke, so there is nothing to extend. Sandbox run 1 (P-09 row 9) already cancelled a plan with `invest_later`; running this task's code against the FP sandbox stays an open item before GO-2 (R-06).
-  8. **Idempotency key in the sheet.** One key per intent, as F12 and F16 do, with one refinement: D1's `requireIdempotency` releases a key on a 5xx but leaves it IN_PROGRESS for 24 hours on a 4xx, so `CancelSipSheet` reuses its key after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS` (the first request may still land), and mints a new one after any other 4xx (a definitive refusal). Reusing it after such a 4xx would answer `IDEMPOTENCY_IN_PROGRESS` for 24 hours instead of the real reason.
+  8. **Idempotency key in the sheet.** One key per intent, as F12 and F16 do: `CancelSipSheet` reuses its key after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS` (the first request may still land), and mints a new one after any other 4xx (a definitive refusal ends the intent; D1's `requireIdempotency` releases the key of any refusal, Plan 02 RV-02-37).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -47372,8 +47330,8 @@ export interface CancelSipSheetProps {
 }
 
 /**
- * A final answer from the API. D1 keeps the key of a 4xx IN_PROGRESS for 24 hours, so sending it again
- * would only return IDEMPOTENCY_IN_PROGRESS: the next tap is a new intent with a new key.
+ * A final answer from the API. A 4xx ends the intent (D1 releases its key), so the next tap is a new
+ * intent with a new key.
  */
 function isFinalRefusal(error: { status: number; code: string }): boolean {
   return error.status >= 400 && error.status < 500 && error.code !== 'IDEMPOTENCY_IN_PROGRESS';

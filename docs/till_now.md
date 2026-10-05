@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-01 (evening). Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only. Today's session is §8._
+_Last updated: 2026-10-05. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only. The latest session is §9._
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -196,7 +196,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | Plan 04 is assembled (§8). Next: settle the owner decisions in Plan 04's header; work the Plan 02 list in `docs/delivery/plan-errata-backlog.md`; then start **Sprint 2** (Plan 02) on Mon 10-12 on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude + Owner |
+| 1 | Plan 04 is assembled (§8), and the Plan 02 backlog list was worked on 10-05 (§9). Next: the owner rulings listed in §9 and Plan 04's header; then start **Sprint 2** (Plan 02, Task D0 first) on Mon 10-12 on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude + Owner |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
 | 4 | ~~Create the GitHub repo~~ **Done:** `Platizio/Sanchay`. Push local `main` when ready: it contains PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1) (F4) plus the merge, so the PR then shows as merged. | Owner |
@@ -382,3 +382,37 @@ Observed only, not changed:
   - Settle the owner decisions in Plan 04's header (G-E4 smoke, EUIN, T3, AWS/MSG91, SNS SMS, stuck breaks, desktop MND-03, OIDC repo casing, sandbox runs before GO-2).
   - Send Cybrilla the probe questions.
   - Push `docs/plan-04-f5` and open its PR once PR #3 merges (it is stacked on it).
+
+---
+
+## 9. Session 2026-10-05: Plan 02 backlog worked, Task D0, P-07 addendum
+
+- **P-07 addendum** (`docs/probes/P-07-allotted-units.md`): the three ONDC purchases paid through the simulator all **failed at 23:00 IST on 10-01** with `fp_payment_url_unused`. A simulated payment does not count as using the payment URL. P-09's mandate-funded first SIP instalment is still `submitted`. P-07 stays PENDING; the next attempt must pay through the payment URL itself.
+- **Plan 02 backlog worked:**
+  - Five parallel agents checked every open item against the code and the libraries, prototyping on PostgreSQL 18 in scratch; nothing in the repo was edited by them. Their 181 patch edits applied cleanly.
+  - Plan 02 errata RV-02-37 to RV-02-65, with consumer follow-ons RV-03-20 to RV-03-23 and RV-04-F1-1, F2-4, F7-1, F12-1, F19-1 and F19-2. The main fixes:
+    - D1: idempotency releases the key of every refusal and replays only a returned result.
+    - D2: the drizzle-kit schema glob (a blocker), readiness and the injected clock; pg-boss needs no CREATE grant (verified as a `sanchay_app` member).
+    - D3, D4 and D9: biome-clean guards. D5's `gen:states` runs. D6's tests type-check.
+    - D9: NAV age in IST calendar days. D10: `sipAllowed` and `sip_dates` (D-MONEY-026).
+    - E25: `data/` in the image, the migrate step and the rollout check, document-bucket versioning and the apex 301.
+- **Task D0 (RV-02-66)**, new, runs first in Sprint 2. It fixes three Plan 01 defects on `main`, each reproduced and fixed test-first in a scratch worktree (api unit 133/133, api integration 130/130, features 23/23, `pnpm lint` clean):
+  - EF8-5: another investor could lock an email OTP.
+  - Bound query parameters in logs.
+  - AppShell hydration mismatch.
+- **RV-02-67 and RV-02-68:** D1's `ReconBreaks.open` and D6's `Notify.enqueue` use `ON CONFLICT DO NOTHING`. A caught `23505` inside a caller's transaction made its COMMIT a silent ROLLBACK. Verified on PostgreSQL 18 (the old class fails with "current transaction is aborted"). F4 no longer edits `runtime-config.ts` (RV-04-F4-3).
+- **Backlog** (`docs/delivery/plan-errata-backlog.md`): 39 items ticked with their RV id or reason. Open items: Plan 01 1 (the deployed curated-list run, tracked under Plan 04), Plan 02 4, Plan 03 59, Plan 04 79.
+- **Owner rulings needed before Sprint 2:**
+  1. pg-boss queue policies. `singletonKey` does not dedupe on the default `standard` policy, which Plans 03 and 04 rely on, and a policy cannot change after `createQueue`.
+  2. RV-02-64: keep one log group and the per-image ECR names, or follow spec §2.4.
+  3. PB-41's delegated `dev.sanchay.in` zone versus E25's lookup (ADR-0014).
+  4. Whether deployed NAV history needs `ops:nav-backfill`.
+- **Pre-pilot gap found:** no task loads the curated list (G-B10) on a deployed stack. The Plan 04 backlog item gives the fix (F7's one form running `dist/cli/ops-catalogue-seed.js --pilot-list`).
+- **Environment:**
+  - The main checkout's `node_modules/serialize-error` was a stub an agent left on 10-01 (`0.0.0-f1stub`). It was restored to the lockfile's 2.1.0.
+  - Docker Desktop was started for the integration tests.
+- **Next:**
+  - The owner rulings above and in Plan 04's header.
+  - Push `docs/plan-04-f5` and open its PR once PR #3 merges (stacked on it).
+  - The Fri 10-09 velocity checkpoint.
+  - Sprint 2 from Mon 10-12, Task D0 first.

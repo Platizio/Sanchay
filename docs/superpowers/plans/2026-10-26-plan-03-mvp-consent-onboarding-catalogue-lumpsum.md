@@ -167,6 +167,10 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-17 (2026-10-01): INV-02 approves the purchase in CNF-01; INV-01 loads its facts; web pages use client wrappers (E23, E24).** Continue went from `createPurchase` straight to `/confirm/{challengeId}`, so nothing approved the PURCHASE challenge; it also dropped the `orderId` CNF-02 reads and sent no `Idempotency-Key`. INV-02 now opens `ConsentOtpSheet` and only `onApproved` goes to `/confirm/{challengeId}?orderId={orderId}`; the key follows F28's rule. INV-01's web page called an undefined `fetchSchemeThresholds` and the mobile route hardcoded the limits; INV-01 takes FUND-01's cached `catalogue.getScheme` detail by uuid (`useSchemeFacts`, no new procedure) and validates with `amountSchema` instead of `Number()`. E23's and E24's web pages imported `@sanchay/features` into server components, which `next build` refuses, so they render client wrappers from `apps/web/src/client/routes.tsx`. `SuitabilityWarning` is an inline `Card` (it rendered E12's `Sheet` without its required props). Checked: `features` 33/33 tests and typecheck, `web` typecheck (`next typegen`, the pages and `e2e/**`).
 - **RV-03-18 (2026-10-01): the lumpsum smoke is gated and follows the real flow (E24).** It ran in CI's e2e job unconditionally, never signed in, clicked a fund name no seed has, read Mailpit's newest message unfiltered and filled only the SMS code. It is skipped unless `SANCHAY_E2E_LUMPSUM_MOBILE` and `SANCHAY_E2E_LUMPSUM_SCHEME_SLUG` are set; it signs in, opens `/funds/<slug>`, clicks "Invest", reads each CNF-01 code with `readNextOtp`, clicks `{ name: 'Confirm', exact: true }` and waits until the worker has taken the order past CONSENT_PENDING (no quick-settlement assumption, BRIEF D7). `smsInbox`, `newestMessageId` and `readNextOtp` move into E24 from Plan 04's F12, which runs later and must consume them instead of appending them. Checked: `web` typecheck and `playwright test --list` (1 test); the smoke itself was not run.
 - **RV-03-19 (2026-10-01): command lines in the tasks this round edits (E1, E2, E4, E12, E13, E20, E22, E23, E24).** Chained scripts (`pnpm --filter=X test typecheck` runs `vitest run "typecheck"` and exits 1; reproduced) are one script per line. Test filters drop the literal `--` (BRIEF D8). Steps that change `packages/contract` or `packages/domain` start with `pnpm exec turbo run build --filter=@sanchay/api^...` (or `--filter=@sanchay/features^...` for the screens), because those packages export only `dist`. The OpenAPI check after a regeneration is the B10 drift test (`pnpm --filter=@sanchay/api test openapi`): a bare `git diff --exit-code apps/api/openapi.json` fails on a real, unstaged regeneration. E22 regenerates `openapi.json` for `quotePurchase`. `(app)` and `(tabs)` paths are quoted, not backslash-escaped, so they work in PowerShell 5.1.
+- **RV-03-20 (2026-10-05): E23's key comment follows D1 (Plan 02 RV-02-37; minor).** `LumpsumReviewScreen`'s `isFinalRefusal` comment said D1 keeps a 4xx key `IN_PROGRESS` for 24 hours; D1 now releases the key of any refusal. The rule stays (a new key after a final 4xx, one key per intent, as in E24's `OrderDetailScreen` and F28), so only the comment changes.
+- **RV-03-21 (2026-10-05): E1's glob note follows Plan 02 D2's config (D2 review 2026-10-05; minor).** E1's first deviation said `drizzle.config.ts` only globs `./src/modules/*/*.schema.ts`; Plan 02 RV-02-41 adds `./src/modules/*/*/*.schema.ts` and `./src/integrations/*/*.schema.ts`. The note now says so. Its conclusion stands: `integrations/fp/webhooks/inbound-webhook.schema.ts` is two levels under `src/integrations`, and D2's `drizzle-config.test.ts` reports such a file (checked).
+- **RV-03-22 (2026-10-05): the catalogue wire tells SIP apart from lumpsum (E14, E17, E23; follows RV-02-55; major).** Plan 02 D10 now leaves the SIP limits null without FP's monthly SIP row and stores a fail-closed `sip_allowed`, so E14's `SchemeThresholdsWireSchema` makes `sipMin`/`sipMultiple` nullable and `SchemeDetailSchema` gains `sipAllowed: z.boolean()`, which FUND-01's "Start SIP" reads (Plan 04 F19). E14's int test asserts `sipAllowed` and adds a lumpsum-only case. E17's "Minimum SIP" row shows a dash unless `sipAllowed`, and E17's and E23's scheme fixtures gain `sipAllowed: true` (E23's is typed `SchemeDetailView` and fails with TS2741 without it). Verified in the scratch build: E14's two cases pass on PostgreSQL 18.2, and a type probe compiles the new E17/F19 expressions while the old `Money.parse(t.sipMin)` no longer compiles.
+- **RV-03-23 (2026-10-05): E14's appended router case uses D10's real helpers (follows RV-02-56; blocker).** E14 appends a `sort=name` case to D10's `catalogue-router.int.test.ts` that called `insertInvestor`, `signIn` and `httpGet`, and the last two never existed. It now reads with D10's file-level `get` and `cookies` (Plan 01's `signInWeb`), and the file passes 5/5 on PostgreSQL 18.2.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -218,7 +222,7 @@ Later errata (found while writing Plan 04; already applied below):
   - Valid, signature-checked events → `INSERT … ON CONFLICT (provider, event_id) DO NOTHING` + `Jobs.enqueue(tx, 'fp.event.process', {eventRowId}, {singletonKey: eventRowId})` in the same transaction → `200 {received: true}`.
   - Invalid-signature events → `401 AUTH_REQUIRED`, with only metadata stored (`payload_enc` left `null`; a synthetic `event_id`/`event_type` so the append still succeeds without trusting the unverified body).
 - **Deviations from outline (found by reading Plan-01 ground truth):**
-  1. `apps/api/drizzle.config.ts` only globs `./src/modules/*/*.schema.ts`. `apps/api/src/integrations/fp/webhooks/inbound-webhook.schema.ts` (as literally named in the outline) would never be picked up by `db:generate`. The Drizzle table is moved one level up to `apps/api/src/modules/fp-webhooks/inbound-webhook.schema.ts`; everything else (controller, job, handlers) stays under `integrations/fp/webhooks/` per the outline and imports the table from there.
+  1. `apps/api/drizzle.config.ts` globs `*.schema.ts` one level under `src/modules` and `src/integrations` and two levels under `src/modules` (Plan 02 D2, RV-02-41; RV-03-21). `apps/api/src/integrations/fp/webhooks/inbound-webhook.schema.ts` (as literally named in the outline) sits two levels under `src/integrations`, so it would never be picked up by `db:generate`, and D2's `drizzle-config.test.ts` would fail on it. The Drizzle table is moved one level up to `apps/api/src/modules/fp-webhooks/inbound-webhook.schema.ts`; everything else (controller, job, handlers) stays under `integrations/fp/webhooks/` per the outline and imports the table from there.
   2. `bootstrap.ts` creates the Nest app with `{bodyParser: false}`, but that flag only disables *Nest's own* body-parser registration — Fastify's built-in default `application/json` content-type parser (which always parses into an object) is still active, which is why `MeRouter` etc. already receive parsed JSON with no parser code anywhere in the repo. To get the *raw* bytes for HMAC verification on exactly this one route without disturbing every other JSON route, `fp-webhook-body-parser.ts` **replaces** Fastify's default `application/json` parser (there is no per-route content-type-parser scoping available from a single top-level Nest app) with one that returns the raw `Buffer` when `request.url` starts with `/api/v1/webhooks/fp` and otherwise re-implements the default `JSON.parse` behaviour, installed from `FpWebhooksModule.onModuleInit` via `HttpAdapterHost`.
   3. The outline's own "cookie-authenticated app host → 404" test needs host classification, which only exists once E2 adds `HostGuard`/`SANCHAY_API_ORIGIN` — but E1 runs before E2. To keep E1 independently testable in order, the controller instead rejects (404) any request that carries the session cookie (`SESSION_COOKIE`, `__Host-sanchay_sid`) at all (a real FP webhook call never carries Sanchay session cookies), which gives the same practical protection without depending on E2. E2's `HostGuard` later makes this redundant-but-harmless (defense in depth); no follow-up needed.
   4. `SANCHAY_FP_WEBHOOK_SECRET`/`SANCHAY_FP_WEBHOOK_AUTH` (listed in outline §0.2 as an "R-19 addendum" env var, owner unspecified) are not added by any of Plan 02's D1–D10 tasks (checked: D3's Files list never touches `config/env.ts`). E1 is the first task that actually needs them, so E1 adds them here, together with a new boot invariant (13; 8–10 belong to D3/D7 per outline §0.2 and 11–12 to D6) and the corresponding fragment to the closed variable-list test in `env.test.ts` and to `devSecrets`.
@@ -15131,11 +15135,11 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 - Consumes (real Plan-01 test infra, verified against `apps/api/test/int/{app.ts,flows.ts,http.ts}` — **not** the speculative `signIn`/`httpGet` helper D10's own draft assumed before this code existed): `bootTestApp`, `type TestApp` (`./app.js`); `signInWeb` (`./flows.js`); `webHeaders`, `cookiesFrom` (`./http.js`).
 - Produces:
   - `packages/contract/src/catalogue.ts` (extended):
-    - `SchemeThresholdsWireSchema = z.object({ purchaseMin, purchaseMax: nullable, purchaseMultiple, sipMin, sipMax: nullable, sipMultiple })` using `moneyWireSchema`/`nullableMoneyWireSchema`.
+    - `SchemeThresholdsWireSchema = z.object({ purchaseMin, purchaseMax: nullable, purchaseMultiple, sipMin: nullable, sipMax: nullable, sipMultiple: nullable })` using `moneyWireSchema`/`nullableMoneyWireSchema`. The three SIP fields are null when FP lists no monthly SIP row (Plan 02 D10, RV-03-22).
     - `SchemeReturnsWireSchema = z.object({ asOf: z.string().nullable(), cagr1y, cagr3y, cagr5y, abs6m: all z.string().nullable() })`.
     - `CommissionLineSchema = z.object({ kind: z.enum(['EXACT','RANGE']), trailMinBps: z.number().int(), trailMaxBps: z.number().int() }).nullable()`.
     - `AmcSummarySchema = z.object({ id, name, slug })`.
-    - `SchemeDetailSchema` (id, isin, name, slug, amcId, amcName, categoryCode, categoryName, planType, option, status, curated, lockInMonths, thresholds: nullable, riskometer, riskometerAsOf, benchmarkName, benchmarkRiskometer, expenseRatioPct, exitLoadText, sidUrl, kimUrl — all nullable except the identity/status fields —, returns: `SchemeReturnsWireSchema`, commissionLine: `CommissionLineSchema`, `regularPlanNoticeKey: z.literal('REGULAR_PLAN_NOTICE')`).
+    - `SchemeDetailSchema` (id, isin, name, slug, amcId, amcName, categoryCode, categoryName, planType, option, status, curated, lockInMonths, sipAllowed (a boolean: Plan 02 D10's fail-closed SIP flag, which FUND-01's "Start SIP" reads, RV-03-22), thresholds: nullable, riskometer, riskometerAsOf, benchmarkName, benchmarkRiskometer, expenseRatioPct, exitLoadText, sidUrl, kimUrl — all nullable except the identity/status fields —, returns: `SchemeReturnsWireSchema`, commissionLine: `CommissionLineSchema`, `regularPlanNoticeKey: z.literal('REGULAR_PLAN_NOTICE')`).
     - `SchemeSummarySchema` and `SchemeDetailSchema` carry `id: z.uuid()`, the scheme uuid that `orders.*` and `plans.*` take (RV-03-8).
     - `ListSchemesInputSchema` gains `sort: z.enum(['name']).optional()` (the enum has one member today; E18 [T2], if funded, adds `'RETURN_1Y' | 'RETURN_3Y' | 'RETURN_5Y'`).
     - `catalogueContract.getScheme`: GET `/catalogue/schemes/{slug}`, `.errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'NOT_FOUND'))`, `.input(z.object({ slug: z.string() }))`, `.output(SchemeDetailSchema)`.
@@ -15250,7 +15254,7 @@ describe('catalogue.getScheme', () => {
   });
 
   it('returns null CAGR when display_eligible=false, and money fields as wire strings', async () => {
-    const { scheme } = await seedScheme('PUBLISHED');
+    const { scheme } = await seedScheme('PUBLISHED', { sipAllowed: true, sipDates: [5, 20] });
     await t.db.db.insert(fundFacts).values({
       schemeId: scheme.id,
       expenseRatioPct: '1.75',
@@ -15273,6 +15277,7 @@ describe('catalogue.getScheme', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.id).toBe(scheme.id); // RV-03-8
+    expect(body.sipAllowed).toBe(true); // RV-03-22
     expect(body.returns).toEqual({ asOf: null, cagr1y: null, cagr3y: null, cagr5y: null, abs6m: null });
     expect(body.expenseRatioPct).toBe('1.75');
     expect(typeof body.expenseRatioPct).toBe('string');
@@ -15285,6 +15290,15 @@ describe('catalogue.getScheme', () => {
       sipMultiple: '1.00',
     });
     expect(body.regularPlanNoticeKey).toBe('REGULAR_PLAN_NOTICE');
+  });
+
+  it('a scheme without a monthly SIP row has null SIP limits and sipAllowed false (RV-03-22)', async () => {
+    const lumpsumOnly = { purchaseMin: '500.00', purchaseMax: null, purchaseMultiple: '1.00', sipMin: null, sipMax: null, sipMultiple: null };
+    const { scheme } = await seedScheme('PUBLISHED', { thresholds: lumpsumOnly });
+    const investor = await signInWeb(t, '9844400309');
+    const res = await get(`/catalogue/schemes/${scheme.slug}`, investor.cookies);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ sipAllowed: false, thresholds: lumpsumOnly });
   });
 
   it('surfaces a real return set when display_eligible=true', async () => {
@@ -15390,9 +15404,8 @@ describe('catalogue.amcs', () => {
 ```typescript
   it('sorts by name ascending by default, with a stable compound cursor', async () => {
     await seedOneScheme('PUBLISHED', true); // 'Parag Parikh Flexi Cap Fund - Regular - Growth' (see the shared factory)
-    const investor = await insertInvestor(app.db.db);
-    const session = await signIn(app, investor);
-    const page1 = JSON.parse((await httpGet(app, '/api/v1/catalogue/schemes', session)).body) as {
+    // D10's file-level `get` and `cookies` (Plan 01's signInWeb); `signIn`/`httpGet` never existed (RV-03-23).
+    const page1 = JSON.parse((await get('/catalogue/schemes', cookies)).body) as {
       items: { name: string }[];
     };
     const names = page1.items.map((i) => i.name);
@@ -15462,9 +15475,10 @@ export const SchemeThresholdsWireSchema = z.object({
   purchaseMin: moneyWireSchema,
   purchaseMax: nullableMoneyWireSchema,
   purchaseMultiple: moneyWireSchema,
-  sipMin: moneyWireSchema,
+  // Null without FP's monthly SIP row (Plan 02 D10, RV-03-22), never the lumpsum limits.
+  sipMin: nullableMoneyWireSchema,
   sipMax: nullableMoneyWireSchema,
-  sipMultiple: moneyWireSchema,
+  sipMultiple: nullableMoneyWireSchema,
 });
 export type SchemeThresholdsWire = z.infer<typeof SchemeThresholdsWireSchema>;
 
@@ -15497,6 +15511,8 @@ export const SchemeDetailSchema = z.object({
   status: z.string(),
   curated: z.boolean(),
   lockInMonths: z.number().int().nullable(),
+  /** Plan 02 D10: FP allows SIP and lists a monthly SIP row with dates (fail closed). FUND-01's "Start SIP" reads it (RV-03-22). */
+  sipAllowed: z.boolean(),
   thresholds: SchemeThresholdsWireSchema.nullable(),
   riskometer: z.string().nullable(),
   riskometerAsOf: z.string().nullable(),
@@ -15658,6 +15674,7 @@ export async function getSchemeDetail(db: Database, slug: string) {
       status: schemes.status,
       curated: schemes.curated,
       lockInMonths: schemes.lockInMonths,
+      sipAllowed: schemes.sipAllowed,
       thresholds: schemes.thresholds,
     })
     .from(schemes)
@@ -15712,6 +15729,7 @@ export async function getSchemeDetail(db: Database, slug: string) {
     status: scheme.status,
     curated: scheme.curated,
     lockInMonths: scheme.lockInMonths,
+    sipAllowed: scheme.sipAllowed, // RV-03-22
     thresholds: scheme.thresholds,
     riskometer: facts?.riskometer ?? null,
     riskometerAsOf: facts?.riskometerAsOf ?? null,
@@ -17053,6 +17071,7 @@ const schemeDetail = (overrides: Record<string, unknown> = {}) => ({
   status: 'PUBLISHED',
   curated: true,
   lockInMonths: null,
+  sipAllowed: true,
   thresholds: { purchaseMin: '500.00', purchaseMax: null, purchaseMultiple: '1.00', sipMin: '500.00', sipMax: null, sipMultiple: '1.00' },
   riskometer: 'VERY_HIGH',
   riskometerAsOf: '2026-09-01',
@@ -17385,7 +17404,7 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
       <Card>
         <AppText variant="heading">Minimums</AppText>
         <ListRow label="Minimum lumpsum" value={t ? formatInr(Money.parse(t.purchaseMin)) : DASH} />
-        <ListRow label="Minimum SIP" value={t ? formatInr(Money.parse(t.sipMin)) : DASH} />
+        <ListRow label="Minimum SIP" value={scheme.sipAllowed && t?.sipMin ? formatInr(Money.parse(t.sipMin)) : DASH} />
         <ListRow label="Exit load" value={scheme.exitLoadText ?? DASH} />
         <ListRow label="Lock-in" value={scheme.lockInMonths ? `${scheme.lockInMonths} months` : 'None'} />
         <ListRow label="Total expense ratio" value={scheme.expenseRatioPct ? formatPct(scheme.expenseRatioPct) : DASH} />
@@ -21153,6 +21172,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     status: 'PUBLISHED',
     curated: true,
     lockInMonths: null,
+    sipAllowed: true,
     thresholds: {
       purchaseMin: '1000.00',
       purchaseMax: '1000000.00',
@@ -21625,8 +21645,8 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   };
 
   /**
-   * A final answer from the API (F28's rule): D1 keeps the key of a 4xx IN_PROGRESS for 24 hours, so the
-   * next tap is a new intent with a new key. A network error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps it.
+   * A final answer from the API (F28's rule): a 4xx ends the intent (D1 releases its key), so the next
+   * tap is a new intent with a new key. A network error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps it.
    */
   function isFinalRefusal(error: { status: number; code: string }): boolean {
     return error.status >= 400 && error.status < 500 && error.code !== 'IDEMPOTENCY_IN_PROGRESS';
