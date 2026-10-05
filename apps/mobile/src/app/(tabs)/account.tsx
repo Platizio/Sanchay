@@ -1,10 +1,10 @@
-import { AccountScreen } from '@sanchay/features';
+import { AccountScreenV2 } from '@sanchay/features';
 import { NativeScreen } from '../../native/NativeScreen';
 
 export default function AccountTab() {
   return (
     <NativeScreen>
-      <AccountScreen />
+      <AccountScreenV2 />
     </NativeScreen>
   );
 }

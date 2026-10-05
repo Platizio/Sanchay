@@ -1,10 +1,12 @@
 'use client';
 import {
-  AccountScreen,
+  AccountScreenV2,
   AppShell,
   ComingSoonScreen,
+  HoldingDetailScreen,
   HomeScreen,
   LoginScreen,
+  PortfolioScreen,
 } from '@sanchay/features';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -19,7 +21,15 @@ export function HomeRoute() {
 }
 
 export function AccountRoute() {
-  return <AccountScreen />;
+  return <AccountScreenV2 />;
+}
+
+export function PortfolioRoute() {
+  return <PortfolioScreen />;
+}
+
+export function HoldingDetailRoute({ folioId, isin }: { folioId: string; isin: string }) {
+  return <HoldingDetailScreen folioId={folioId} isin={isin} />;
 }
 
 export function ComingSoonRoute({ title }: { title: string }) {
