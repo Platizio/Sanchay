@@ -85,11 +85,14 @@ Found by reading Plan 03; neither has been run. F5 (or an E3/E4 amendment) must 
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
 
-- **Holdings report shape.** `toFolioHoldingsSnapshot` reads `{data: {folios: [{folio_number, schemes: [{isin, holdings: {as_on, units, redeemable_units}}]}]}}` (research fp-api §7 names the per-scheme fields, not the envelope).
-- **Folio object fields.** `email_addresses[]` and `mobile_numbers[]` are in research fp-api §7; `payout_details[].bank_account{number, ifsc, name}` is not. `toFpFolioView` is the only place that reads them.
-- **Holdings for ONDC folios.** Research fp-api §7 marks it UNCONFIRMED whether FP populates holdings for cybrillapoa/ONDC folios. If it does not, every folio syncs as FEED_UNAVAILABLE and F5 refuses ALL. That fails safe, but it is a PO-2 escalation, not a silent limit.
-- **`allotted_nav_date`** must be a plain `YYYY-MM-DD`; anything else makes the allotment INVALID (UNITS_PENDING plus a CRITICAL break).
-- **Mandate create ambiguity (F2).** A mandate stuck in RECONCILING opens a CRITICAL `MANDATE_CREATE_AMBIGUOUS` break; D3 has no FP read that lists mandates by bank account, so an operator resolves it by hand.
+Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the rest stay open.
+
+- **Holdings report shape: RESOLVED (RV-04-F4-1).** `GET /api/oms/reports/holdings` returns `{id, folios: [{folio_number, schemes: [{isin, name, type, holdings: {as_on, units, redeemable_units}, market_value, invested_value, payout, nav}]}]}`: `folios` at the **top level** (no `data` wrapper) and units as JSON **numbers** (3 dp). `toFolioHoldingsSnapshot` read `raw.data.folios`, so every folio would have synced as FEED_UNAVAILABLE. It now reads `raw.folios` (falling back to `data.folios`), and its test uses the observed shape (8/8, verified 2026-10-01).
+- **Folio object fields: PARTLY CONFIRMED.** Folio objects carry `email_addresses`, `mobile_numbers` and `payout_details` keys (plus holder, guardian and nominee fields), but v1's sandbox folios have **no registered contacts**. FP then accepts redemption consent with the account's `folio_defaults` contacts (P-09). The `payout_details[].bank_account` value shape is still unseen.
+- **Holdings for ONDC folios: CONFIRMED in the sandbox.** A cybrillapoa folio reported 399.324 units, and its holdings fell by 3.930 after a redemption. F5's quote and ALL are not blocked by a missing feed.
+- **`allotted_nav_date`** must be a plain `YYYY-MM-DD`; anything else makes the allotment INVALID (UNITS_PENDING plus a CRITICAL break). Redemptions return `redeemed_nav_date` as a plain date (`"2026-10-01"`). No sandbox purchase has settled yet (P-07 pending), so the purchase field is still unseen.
+- **Redeemed units carry 4 dp (F5).** A ₹100 ONDC redemption reported `redeemed_units: 3.9299` while the folio fell by 3.930. F5's settlement must round `redeemed_units` to 3 dp (half-up and ceiling agree on this sample) before `Ledger.applyExit`, because `fifoExit` accepts exactly 3 dp. Re-check purchases' `allotted_units` once one settles.
+- **Mandate create ambiguity (F2).** A mandate stuck in RECONCILING opens a CRITICAL `MANDATE_CREATE_AMBIGUOUS` break, resolved by an operator. D3 has no list read, but the sandbox serves `GET /api/pg/mandates?bank_account_id=<old id>&page&size` (P-09 used it), so a later task can add `FpRead.mandatesByBank` and resolve the ambiguity automatically.
 
 ---
 
@@ -3757,31 +3760,29 @@ import { Units } from '@sanchay/money';
 import { describe, expect, it } from 'vitest';
 import { compareHoldings, toFolioHoldingsSnapshot, toFpFolioView } from './fp-holdings.js';
 
+/** The shape the FP sandbox returns (probe run 2026-10-01): `folios` at the top level, units as JSON numbers. */
 const report = {
-  data: {
-    folios: [
-      {
-        folio_number: 'OTHER',
-        schemes: [
-          { isin: 'INF000000009', holdings: { units: '1.000', redeemable_units: '1.000' } },
-        ],
-      },
-      {
-        folio_number: '12345/67',
-        schemes: [
-          {
-            isin: 'INF000000001',
-            holdings: { as_on: '2026-11-02', units: '12.3456', redeemable_units: '10.0009' },
-          },
-          {
-            isin: 'INF000000002',
-            holdings: { as_on: '2026-11-02', units: '5', redeemable_units: '0' },
-          },
-          { name: 'no isin: skipped' },
-        ],
-      },
-    ],
-  },
+  id: 23,
+  folios: [
+    {
+      folio_number: 'OTHER',
+      schemes: [{ isin: 'INF000000009', holdings: { units: 1, redeemable_units: 1 } }],
+    },
+    {
+      folio_number: '12345/67',
+      schemes: [
+        {
+          isin: 'INF000000001',
+          holdings: { as_on: '2026-11-02', units: 12.3456, redeemable_units: 10.0009 },
+        },
+        {
+          isin: 'INF000000002',
+          holdings: { as_on: '2026-11-02', units: 5, redeemable_units: 0 },
+        },
+        { name: 'no isin: skipped' },
+      ],
+    },
+  ],
 };
 
 describe('toFolioHoldingsSnapshot', () => {
@@ -3794,6 +3795,10 @@ describe('toFolioHoldingsSnapshot', () => {
         { isin: 'INF000000002', units: '5.000', redeemableUnits: '0.000' },
       ],
     });
+  });
+
+  it('also reads a report wrapped in `data` (the envelope the research assumed)', () => {
+    expect(toFolioHoldingsSnapshot({ data: { folios: report.folios } }, '12345/67')?.schemes).toHaveLength(2);
   });
 
   it('is null when the report has no row for the folio', () => {
@@ -5965,7 +5970,8 @@ export function toFolioHoldingsSnapshot(
   raw: Record<string, unknown>,
   folioNumber: string,
 ): FolioHoldingsSnapshot | null {
-  const folio = list(record(raw.data)?.folios)
+  // The sandbox returns `folios` at the top level (probe 2026-10-01); `data.folios` is kept as a fallback.
+  const folio = list(raw.folios ?? record(raw.data)?.folios)
     .map(record)
     .find((f) => f !== null && text(f.folio_number) === folioNumber);
   if (folio === undefined || folio === null) return null;
@@ -6599,7 +6605,7 @@ After the `--custom` command, paste the `REVOKE` from Step 3 into the empty `003
 Expected:
 - The generated `ledger` migration creates the four tables with their checks, partial indexes and foreign keys, and adds the `folios` and `orders` columns, `folios_amc_number_uq` and the two new checks. No other table changes.
 - Domain tests: `fifo` 12/12, `elss-lock` 10/10, `business-days` 5/5 and the new `states` case pass. The rules keep the package's 95% coverage gate (they are fully covered).
-- API unit tests: `fp-holdings` 7/7 and `purchase-settlement` 3/3.
+- API unit tests: `fp-holdings` 8/8 and `purchase-settlement` 3/3.
 - Integration tests: `ledger.int.test.ts` 14/14 and `folio-sync.int.test.ts` 9/9. E21's `payments.int.test.ts` stays 9/9, now with a SETTLED order and a lot. E20's `orders.int.test.ts` and E1's `fp-webhooks` stay green. F2's `sip-mandate.int.test.ts` gains one passing instalment test; its other tests stay green.
 - `docs/specs/states.md` shows the new edge.
 
