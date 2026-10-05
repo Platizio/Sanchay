@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan one task at a time. Steps use checkbox (`- [ ]`) syntax. `AGENTS.md` is binding. Where this plan and the outline disagree, this plan wins; where this plan and the MVP spec or rulings disagree, stop and report.
 
-**Goal:** Fri 11-20 feature freeze with SIP (UPI Autopay) and its investor cancel (R-08), the FIFO ledger, dashboard and holdings, and redemption (amount and all) working in the sandbox on web and on the Play-internal Android build; GO-1 evidence for Fri 11-27 and GO-2 for SIP after its canary (R-06). The outline's §3 is the task list.
+**Goal:** Fri 11-20 feature freeze with SIP (UPI Autopay) and its investor cancel (R-08), the FIFO ledger, dashboard and holdings, and redemption (amount and all) working in the FP sandbox on web and Android against the local stack (R-31: there is no dev stack), with the Play-internal Android build talking to the paused prod stack; GO-1 evidence for Fri 11-27 and GO-2 for SIP after its canary (R-06). The outline's §3 is the task list.
 
 **Architecture:**
 - **Consent first** and **providers only from worker jobs**, as in Plan 03. Provider reads happen before a transaction opens; nothing calls FP inside one.
@@ -41,12 +41,16 @@ These are open; each blocks or changes a task. Owners and dates are in `docs/til
 1. **G-E4 sandbox smoke (GO-1).** D4's sandbox chains still have SKIPPED placeholders for onboarding, lumpsum, SIP and redemption, and no task wires them. P-07 also shows that sandbox ONDC purchases may never settle. Without a ruling, F23's G-E4 line reads "owner ruling required". Either fund the chain wiring, or rule how G-E4 is evidenced.
 2. **EUIN (P-04 FAIL).** FP fills a tenant-default EUIN on every order. Cybrilla's answer to Q12 and a compliance view on execution-only orders are needed. Tasks never send `euin`; F20/F23 record what FP returns.
 3. **T3 funding.** F15 runs only if T3 is funded; R-08 funds F28 from T3 + T5.
-4. **AWS and MSG91 accounts.** F1 (prod stack, SES, Secrets Manager, alarms) and real SMS (DLT) cannot run without them. They were due on 10-09 (PB-45, PB-30/31).
+4. **AWS and MSG91 accounts, the domain and its hosted zone.** E25 deploys the prod stack in S2 week 2 (R-31), so the prod account, the registered `sanchay.in` and its Route 53 hosted zone in that account must exist before E25 deploys (owner action). F1 (hardening, SES, alarms) and real SMS (DLT) need them too. They were due on 10-09 (PB-45, PB-30/31, PB-41).
 5. **SNS SMS alarms (F1).** The account needs to leave the SNS SMS sandbox, plus a sender ID and DLT registration for SNS, or the SMS half of the alarms will not deliver.
 6. **Stuck CRITICAL breaks (F1/F7).** `money-invariant-breach` stays in ALARM while any CRITICAL break is open, and no command resolves a non-invariant break. Decide whether to add an audited two-founder resolve command.
 7. **Desktop MND-03 (F12).** The desktop web UPI mandate screen has no QR code (no QR library in the catalog) and sends the investor to their phone. Confirm.
-8. **GitHub OIDC (F1).** Confirm the exact `owner/repo` casing for the deploy-role trust, and set a placeholder `SANCHAY_SMS_RETRIEVER_HASH` for dev until the Play signing certificate exists.
-9. **Sandbox runs before GO-2.** Run F28's cancel and a full SIP against the FP sandbox (R-06); probe run 1 only cancelled a plan with a raw call.
+8. **GitHub OIDC and the retriever hash (E25, F1).** R-31 settles the dev half: there is no GitHub environment `dev`, so the deploy role, its trust and the GitHub environment are prod's from E25's first deploy, and the role trusts `SANCHAY_GITHUB_REPOSITORY`, which `deploy.yml` passes from `github.repository` in GitHub's own casing (RV-02-33). Still the owner's: set an interim `SANCHAY_SMS_RETRIEVER_HASH` (11 characters of `[A-Za-z0-9+/]`) on the GitHub environment `prod` before E25's first deploy, because the Play App Signing certificate does not exist yet; F18's runbook section 3 replaces it. Until then Android cannot read the OTP from the SMS by itself, which before GO-1 touches only the founders' test accounts.
+9. **Sandbox runs before GO-2.** Run F28's cancel and a full SIP against the FP sandbox (R-06) from the local stack (`SANCHAY_APP_ENV=local`, `SANCHAY_PROVIDER_MODE_FP=sandbox`), because R-31 leaves no deployed sandbox stack; probe run 1 only cancelled a plan with a raw call.
+
+**Settled by the owner on 2026-10-05** (`docs/delivery/rulings.md`; RV-04-HDR-1):
+- **R-31: no AWS dev environment and no dev domain.** Development runs locally on the owner's machine (docker compose: PostgreSQL, Mailpit). E25 deploys the CDK stack as prod (`SanchayMvpStack-prod`, cluster `sanchay-prod`, service `sanchay-app`, GitHub environment `prod`) in S2 week 2, paused: it runs and answers on `www`, `app` and `api.sanchay.in`, but sign-in is invite-only (D7; prod boot invariant 10 refuses `SANCHAY_PILOT_INVITE_ONLY=false`), `orders.enabled` and `plans.sip.enabled` stay at their default `false`, and no invite is added before GO-1 except the founders' test accounts. Before GO-1 a switch goes on only for a founders' canary leg (F20) or F27's drill, with two founders, and off again straight after. There is no ALB ingress allow-list. F1 hardens this same stack in S4 instead of adding a second environment, and F22 runs its passive ZAP baseline against it before GO-1. PB-41's delegated dev zone (ADR-0014) is moot; `sanchay.in` and its hosted zone must exist in the prod account before E25 deploys (item 4).
+- **R-33: NAV history is required for the live service.** Prod gets D9's NAV history backfill before GO-1, run through F7's one deployed form (`aws ecs run-task` with a `command` override on `sanchay-prod-ops`), and the curated list (G-B10) is loaded on prod the same way with F19's seed CLI and `--pilot-list`. This closes the backlog item "Deployed run of the curated list".
 
 ## Assembly notes (cross-task facts)
 - F2 owns `packages/domain/src/rules/sip-dates.ts` (firstInstalmentDate) and `modules/plans/sip-eligibility.ts` (assertSipEligible, sipSchemeOf, SipScheme, SIP_FLOOR, UPI_AUTOPAY_LIMIT, MAX_INSTALMENTS). F10: drop sip-dates.ts from Create, keep golden JSON + quote; import from `../plans/sip-eligibility.js`; contract/router/module are `modules/plans/*` (not orders); CutoffHolidays comes from E22's cutoff.ts (no re-declare). SipScheme fields are `sipMin/sipMax/sipMultiple/sipDates` (Money).
@@ -59,21 +63,21 @@ These are open; each blocks or changes a task. Owners and dates are in `docs/til
 - Test helpers: test/int/sip-seed.ts (seedSipScheme, seedSipInvestor, setSipEnabled, SIP_DATES) (F2); test/int/ledger-seed.ts (F4).
 - F5 owns redemption: both parts, the REDEMPTION snapshot builder, `orders.redemption.*` jobs, `payout.watch`, and `RedemptionSettlement` (in `PortfolioModule`). It rounds FP's `redeemed_units` HALF_UP to 3 dp before `Ledger.applyExit` and keeps the raw figure for evidence.
 - F7 owns the ops CLI (every command, its flags and the deployed run form on F1's ops task definition), the read-only `v_*` views, and the redemption and plan backstops in `fp.reconcile.nonfinal`. F23 registers `ops:gate-go2` in F7's command list.
-- F1 owns the prod stack, the D6 database logins (`sanchay_master` for migrate only; `sanchay_app_login` and `sanchay_readonly_login`), reference-data loading at migrate time, the alarm names (`ALARM_SUFFIXES`) and the gauges (`ops.gauges.emit`).
+- F1 hardens the prod stack E25 deploys in S2 (R-31) and owns the D6 database logins (`sanchay_master` for migrate only; `sanchay_app_login` and `sanchay_readonly_login`), reference-data loading at migrate time, the alarm names (`ALARM_SUFFIXES`) and the gauges (`ops.gauges.emit`).
 - Each task's **Interfaces** section is the authority for its names; this list only records ownership.
 
 ## Global Constraints
 
 Every task's requirements include this section. It restates the Plan 02 and Plan 03 contract that Plan 04 builds on (`docs/superpowers/plans/2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md`, `docs/superpowers/plans/2026-10-26-plan-03-mvp-consent-onboarding-catalogue-lumpsum.md`); Plan 03's Global Constraints still apply in full.
 
-- **Jobs (D2):** inject `Jobs`; `jobs.enqueue(exec, name, data, opts?)`. Handlers are `@Injectable() @JobHandler('name')` classes with `handle(job: Job<'name'>)`. New names are appended to `JOB_NAMES` in `apps/api/src/modules/platform/jobs/job-registry.ts`; crons go only into `registerSchedules(boss)` in `jobs/schedules.ts` with a distinct `key`.
+- **Jobs (D2):** inject `Jobs`; `jobs.enqueue(exec, name, data, opts?)`. Handlers are `@Injectable() @JobHandler('name')` classes with `handle(job: Job<'name'>)`. New names are added to D2's `JOB_POLICIES` in `apps/api/src/modules/platform/jobs/job-registry.ts` with their R-32 policy (`stately` for sync, poll, reconcile and sweep jobs, `exclusive` for FP submits, `standard` for `notifications.send`); `jobs.enqueue` returns `Promise<string | null>`, where `null` means the policy refused a duplicate; crons go only into `registerSchedules(boss)` in `jobs/schedules.ts` with a distinct `key`.
 - **Kernel (D1):** `RuntimeConfig.get(exec, key)` and `ReconBreaks.open(exec, {kind, entityType, entityId, severity: 'WARNING' | 'CRITICAL', detail?})` are static. One open break per `(kind, entity_id)`; use distinct kinds for a WARNING and a later CRITICAL on the same entity.
 - **FP (D3/D4):** `FpRead` (worker only) has `purchase(id)`, `holdings({investmentAccountOldId, folios?, asOn?})` and `folios({mfInvestmentAccount, folioNumber?})`; a 4xx throws `FpRejectedError` (409 throws `FpAmbiguousError`), and a 5xx or a network failure throws `FpAmbiguousError`, reads included. FakeFp is reached through `bootFpTestApp()`; its API is `calls`, `script`, `advance(id, state, fields?)` and the `state.*` maps (F4 adds the allotment fields to `advance` and `state.folios`).
 - **Orders (E20/E21):** orders move only through `moveOrder(exec, order, to, trigger, values)` (it checks D5's `canTransition` and writes `order_events`). `toFpPurchaseView(raw)` is the one FP purchase parser. `FP_EVENT_HANDLERS.mf_purchase` is registered in `PaymentsModule.onModuleInit`; after F4 it delegates to `PurchaseSettlement`.
 - **Transactions:** follow Plan 03: `this.dbh.db.transaction(...)`, never around a provider call. D3's `runInTx` is not used; D2's job runner opens no CLS context for it to write to.
 - **Notifications (D6):** `Notify.enqueue(exec, templateKey, {investorId, data, dedupeKey})`; `ORDER_ALLOTTED` renders `{units, schemeName, nav, navDate}`.
 - **Calendar (E22, D8):** `expectedNavDate({cutoffClass, at, holidays})` and `CutoffHolidays` come from `@sanchay/domain`; holidays are the `market_holidays` table (every kind counts as a non-business day).
-- **Test helpers:** `bootFpTestApp()` (D4), `jobOf(name, data)` (E1), `seedInvestableInvestor(t)` (E20; `fp_mfia_old_id` is 7001 for every seeded investor) and `seedScheme(t)` (E20; a new AMC per call). Tests that drive a job call its `handle(jobOf(…))` directly and stub `Jobs.enqueue` with `vi.spyOn`.
+- **Test helpers:** `bootFpTestApp()` (D4), `jobOf(name, data)` (E1), `seedInvestableInvestor(t)` (E20; `fp_mfia_old_id` is 7001 for every seeded investor) and `seedScheme(t)` (E20; a new AMC per call). Tests that drive a job call its `handle(jobOf(…))` directly and stub `Jobs.enqueue` with `vi.spyOn`, resolving a job id (`.mockResolvedValue('job-id')`), because a stub resolving `undefined` fails typecheck (R-32).
 - **Errors under Drizzle 0.45:** a failed query throws `Failed query: …` with the node-postgres error on `.cause`. Assert a constraint with Plan 01's `pgConstraintOf(error)` (`apps/api/src/modules/platform/pg-errors.ts`), not a regex on the message.
 - **Types:** `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess` are on; no non-null assertions (`biome ci` rejects them).
 - **Shared files:** golden vectors go in `packages/test-fixtures/src/golden/` and domain tests import them by relative path (E7's pattern). `@sanchay/domain` rules are re-exported from `packages/domain/src/rules/index.ts`. Migrations follow generate-then-custom.
@@ -128,7 +132,7 @@ Observed, not changed by F4 (for the owning task's executor):
 
 ## Review notes: Plan 02/03 errata resolved for Plan 04 (2026-10-01)
 
-The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (consent approve echo, `markUnused`, the expiry sweep). Errata RV-03-1 to RV-03-19 also fix the defects Plan 04 depends on: the destination resolver decrypts, E22's adapters exist, the consent-first window uses the app clock, the catalogue exposes the scheme id, and the consent sheet and components work. Plan 02 errata RV-02-15 to RV-02-36 fix E25 (the dev stack F1 builds on), the schema registration cycle, the workspace dependencies and the pinned tests. The errata Plan 04 agents reported but did not apply are listed in `docs/delivery/plan-errata-backlog.md`; work through them before each sprint.
+The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (consent approve echo, `markUnused`, the expiry sweep). Errata RV-03-1 to RV-03-19 also fix the defects Plan 04 depends on: the destination resolver decrypts, E22's adapters exist, the consent-first window uses the app clock, the catalogue exposes the scheme id, and the consent sheet and components work. Plan 02 errata RV-02-15 to RV-02-36 fix E25 (the stack F1 builds on, prod under R-31), the schema registration cycle, the workspace dependencies and the pinned tests. The errata Plan 04 agents reported but did not apply are listed in `docs/delivery/plan-errata-backlog.md`; work through them before each sprint.
 
 ## Review notes: Plan 04 errata (assembly 2026-10-01; Plan 02 backlog review 2026-10-05)
 
@@ -145,6 +149,25 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F19-1 (2026-10-05): FUND-01's "Start SIP" reads `sipAllowed` (F19; follows RV-02-55 and RV-03-22; major).** F19 showed "Start SIP" whenever `scheme.thresholds` was not null, which holds for every scheme with a lumpsum row, so a non-SIP scheme led to SIP-01 and F10's quote refused it. The CTA and the "Minimum SIP" row now depend on `scheme.sipAllowed`, the rules and contract-assumption text say so, and the no-SIP test uses a lumpsum-only scheme with `sipAllowed: false`. D10's unit file now counts 6/6 with F19's case (verified with F19's status edit applied over the new D10 code).
 - **RV-04-F19-2 (2026-10-05): F19's appended `fp-sync.job.test.ts` case settles in one biome pass (follows RV-02-58; minor).** Its one-line `fundScheme` mock needed a second `biome check --write`, so F19's Step 5 `pnpm lint` failed (reproduced). It is now written multi-line, like D10's mocks.
 - **RV-04-F1-1 (2026-10-05): F1 follows E25's amended image, workflow and tests (2026-10-05 review, items A and C; major).** E25 now copies `data/` and runs the migrate step and the rollout check itself (Plan 02 RV-02-59, RV-02-61). F1's Dockerfile edit therefore adds only `COPY docs/legal /repo/docs/legal`, and its `deploy.yml` edit only adds `prod` and its `cdk deploy` step. Its counts follow E25's three new tests (Step 2: 21 passed, 1 failed; Step 4: 57 = 22 + 24 + 11). Verified: F1's infra fragments applied to the amended E25 matched every anchor once, `tsc` exits 0 and 57/57 pass, and F1's final workflow equals the old one apart from two comments.
+- **RV-04-F1-2 (2026-10-05): `ops.gauges.emit` is registered as stately (R-32; minor).** F1 appended a bare name to D2's `JOB_NAMES`, which is now `JOB_POLICIES`, so the entry becomes `'ops.gauges.emit': 'stately'`. The job is a keyless per-minute sweep, so a tick is never queued twice while the worker is behind.
+- **RV-04-F2-5 (2026-10-05): F2's jobs get their R-32 policies, and the `mandates.poll` ticks carry keys (major).** `mandates.submit` and `plans.sip.submit` are `exclusive`. `mandates.poll`, `plans.sip.advance` and `plans.instalments.sync` are `stately`. Both `mandates.poll` schedules fire at 07:30, and on a stately queue keyless ticks share one slot, so one of the two would be dropped every day, sometimes the APPROVED scan that catches a cancel made at the bank. Each schedule now passes its scope as `singletonKey`: on PostgreSQL 18.6 with pg-boss 12.34.0, two keyless schedules in one minute left one job and two keyed ones left both. `mandates.authorize` now keys its re-authorise with the mandate's challenge, approve's key. The old `mandate-auth:` key let the exclusive queue run it beside approve's job, and no test pinned that key.
+- **RV-04-F4-4 (2026-10-05): `folio.sync` and `orders.units.reconcile` are stately (R-32; minor).** F4 appends both to `JOB_POLICIES`. F5's refresh keys `folio.sync` by folio, so a refresh already queued absorbs the next one; the 05:00 sweep and the reconcile run keyless. The two `Jobs.enqueue` stubs resolve a job id (RV-02-69).
+- **RV-04-F5-1 (2026-10-05): F5's redemption jobs get their R-32 policies, and its enqueue wrappers typecheck (major).** `orders.redemption.submit` is `exclusive`, and `orders.redemption.advance` and `payout.watch` are `stately`. `refresh` and `requeue` returned `this.jobs.enqueue(...)` from `Promise<void>` methods, and the module passed the call as `enqueueAdvance: (…) => Promise<void>`. Both fail `typecheck` (TS2322) now that `enqueue` returns `Promise<string | null>`, so all three now await the call. Reproduced and checked with `tsc` 6.0.3 on stand-ins of the three shapes.
+- **RV-04-F7-2 (2026-10-05): `ops:sync` sends `fp.reconcile.nonfinal` without a key, and F7's jobs are stately (R-32; major).** With `singletonKey: 'ops-sync:nonfinal'`, an ops re-drive took its own slot on the stately queue, beside the keyless */5 sweep. Two sweeps adopting the same RECONCILING order would then each write its transition, because `moveOrder` does not re-check the status. Without a key it shares the schedule's slot: a sweep already queued absorbs it, the sweeps run one at a time, and its test now expects no options. `integrity.invariants` and `recon.fp.daily` are appended as `stately`, and the three `Jobs.enqueue` stubs resolve a job id.
+- **RV-04-F28-1 (2026-10-05): `plans.cancel.submit` is exclusive, so its 60 s re-read goes through `plans.sip.advance` (R-32; major).** The job re-read an ambiguous cancel by enqueuing itself under approve's key while it ran. An `exclusive` queue refuses that send (pg-boss returns null), so the re-read would have waited for F7's 5-minute backstop. `requeue` now enqueues `plans.sip.advance` (stately, keyed by the plan id, `startAfter` 60), and its F28 branch hands the plan back to this job under approve's key once this run has ended. The timeout test now expects only that hop and then follows it. `plans.cancel.submit` (`exclusive`) and `plans.cancel.sweep` (`stately`) are appended to `JOB_POLICIES`. Checked on PostgreSQL 18.6 that an exclusive job's own key is refused while it runs, and with `tsc` on a stand-in that `requeue` typechecks.
+- **RV-04-F1-3 (2026-10-05): F1 hardens the prod stack E25 deployed instead of adding prod (F1; R-31; major).** E25 now deploys `SanchayMvpStack-prod` paused in S2 with the prod config, the deploy role and `deploy.yml`, so F1 drops `stackConfigForDeploy`, `-c env`, `-c paused`, its `bin/sanchay.ts` replacement, its deploy-role rewrite, the dev alarm and every dev test, and its alarm recipients become required for every deploy. It keeps the D6 logins, the ops task definition, the gauges and the ten alarms; its rollout moves the running stack onto the D6 logins with E25's `-c noTasks=true`, and its runbooks and checklist lose their dev twins. Verified: F1's files and fragments applied by script to the reworked E25 give `tsc` 0 and 41/41 (24, 8, 9), the Step 2 shape is as written, `biome ci` is clean after one `--write`, and the compiled entry point refuses a deploy without the alarm recipients.
+- **RV-04-F1-4 (2026-10-05): R-33's deployed runs after the migrate task (F1 `db-access.md`; R-33; major).** The runbook now runs F19's `node dist/cli/ops-catalogue-seed.js --pilot-list` and then D9's `node dist/cli/ops-nav-backfill.js --from <date> --to <date>`, each as a one-off `sanchay-prod-ops` task with a command override, with the commands for both shells. Both boot as `SANCHAY_APP_ROLE=ops` on `sanchay_app_login` with DML through `sanchay_app` (the seed only inserts into the append-only `fund_facts_revisions`) and are idempotent, and the backfill reaches AMFI through the NAT (the app subnets route to the NAT gateway and the service security group allows all egress, checked in the synthesised template). Measured on 2026-10-05: AMFI's history report needs roughly 0.6 to 1 s per day of range before its first byte, so D9's 10 s header timeout limits a run to about 7 days (a June 2026 month failed all three attempts), a month peaks at 173 MB of heap, and D9's one-row inserts took 0.7 ms a row on a local PostgreSQL 18.6, so five years is about 260 runs; the D9 changes that would make it a few runs are listed for the lead in F1's open question 4.
+- **RV-04-HDR-1 (2026-10-05): owner rulings R-31 and R-33 recorded; decisions 4, 8 and 9 updated (R-31, R-33; major).** The header now lists R-31 (no AWS dev environment or dev domain; E25 deploys the paused prod stack in S2 week 2; F1 hardens it; F22 scans it; PB-41's delegated dev zone is moot) and R-33 (D9's NAV history backfill and the curated list loaded on prod before GO-1 through F7's one form) as settled. It reads R-31's "stay false" as allowing the founders' canary legs (F20, which G-E7 needs before GO-1) and F27's drill to turn a switch on with two founders and off again straight after, since only founders are invited. Decision 4 adds the registered `sanchay.in` and its hosted zone in the prod account before E25 deploys; decision 8 keeps only the interim `SANCHAY_SMS_RETRIEVER_HASH` on the GitHub environment `prod` (the deploy-role casing comes from `github.repository`, RV-02-33); decision 9 runs the SIP sandbox runs from the local stack. The Goal, the F1 ownership note and the RV-02-15..36 note no longer name a dev stack.
+- **RV-04-F7-3 (2026-10-05): `ops-cli.md` has one deployed environment (R-31; minor).** The deployed form said "for dev use `sanchay-dev`, `sanchay-dev-ops`, `SanchayMvpStack-dev` …"; prod is the only deployed environment, so that sentence is gone and the commands, already prod's, are unchanged. The "When to use which" row now says the PO's invitees come only after the GO-1 decision (R-31: no invite before GO-1 but the founders' test accounts). The `'/sanchay/dev/invites/…'` refusal case and the `'dev'` app-env cases in `ops-inputs.test.ts` stay: they pin the prefix rule and the code value, not a dev stack.
+- **RV-04-F18-1 (2026-10-05): every Play build talks to prod (R-31; major).** F18 pointed the "sandbox chains" internal build at `app.dev.sanchay.in` and set the retriever hash on GitHub environments `dev` and `prod`. With no dev stack or dev domain, the runbook has one target row (prod, reachable from E25's paused deploy), the hash goes on `prod` only and replaces the owner's interim value, the curl, adb and Maestro lines use `app.sanchay.in`, and §4's payment-return and mandate items come from the founders' canary legs (F20), as F25 already ticks them. The intent-filter host still follows `EXPO_PUBLIC_SANCHAY_APP_ORIGIN` (a local http origin gets no App Link); its test now uses the test origin `https://app.sanchay.test/`. Verified: `appConfig.test.ts` 10/10 under Vitest 5.0.1 in a scratch copy with E24's `native-intent.tsx` and Plan 01's `config.ts`, and `biome check` clean.
+- **RV-04-F19-3 (2026-10-05): the local pilot-list check no longer waits for a dev stack (R-31; minor).** Step 3a said R3/R7 failures are expected "until the dev stack has run `catalogue.fp.sync` and NAV sync"; R3 (`fpActive && purchaseAllowed`) and R7 (commission and NAV age) pass once those jobs have run against the database being checked. The deployed run on prod belongs to R-33.
+- **RV-04-F20-1 (2026-10-05): the PO's list is seeded only after the GO-1 decision (R-31; major).** F20 said F27 seeds the PO's invite list on Thu 11-26, before the GO-1 meeting; R-31 allows no invite before GO-1 except the founders' test accounts. The four sentences now say F27 checks on Thu 11-26 that orders are off and seeds the list only after the GO-1 decision; until then the invite list holds only the founders' own numbers. The canary legs and their switch pairs are unchanged.
+- **RV-04-F21-1 (2026-10-05): G-E3's checklist names prod, not a dev stack (R-31; minor).** E25's CDK assertions now run on its prod stack (no "dev" qualifier on row 10), row 12's pass criterion is "all three prod hosts scanned" (F22 fills the same cell), and the F1 fixtures note no longer cites `DEV_INPUTS`. `g-e3-prod.test.ts`'s header comment says E25's own tests assert the same items (a comment only), and the Android PII scan names the dev-client build, because the Play-internal build talks to prod and cannot run Plan 01's Mailpit sign-up flows. Row 9 still quotes E25's test title verbatim; if Plan 02 renames it under R-31, row 9 follows.
+- **RV-04-F22-1 (2026-10-05): the ZAP baseline scans the paused prod stack before GO-1 (R-31; major).** F22 scanned `www`, `app` and `api.dev.sanchay.in` and never prod; R-31 leaves no dev stack and names this scan. `DEV_TARGETS` becomes `PROD_TARGETS` (`www`, `app` and `api.sanchay.in`), the CLI takes `--env=prod`, Step 6 records the gate commit prod runs and checks both switches are off instead of deploying, and the scan stays passive (GETs only, no AJAX spider, no sign-in, no active scan). Verified in a scratch copy: `node --test scripts/zap-baseline.test.ts` 17/17, `tsc` (repo strict base, NodeNext) exits 0, `biome check` clean; the new tests fail against the old script (no `PROD_TARGETS` export).
+- **RV-04-F23-1 (2026-10-05): G-B11's GO-1 evidence is the list and the caps, not a seed (R-31; minor).** The gate pack listed a `pilot_invites` seed as G-B11 evidence, but R-31 adds no invitee before GO-1; the row now points at the PO's list kept outside the repo (seeded by F27 after the GO-1 decision) and the caps F27 D1 reads. The gate doc is a template that no test pins, so nothing else changes.
+- **RV-04-F24-2 (2026-10-05): runbooks and their lint know one stack (R-31; minor).** `KNOWN_ALARMS` drops `sanchay-dev-nav-age`, `{env}` and `<env>` now stand for prod, and any `sanchay-dev-` name is an `ALARM` problem; the README, the kill-switch and OTP runbooks and the credential-rotation sections lose their dev variants. Verified in a scratch copy: `node --test scripts/check-runbooks.test.ts` 18/18, `tsc` exits 0, `biome check` clean; the new tests fail 2/18 against the old script; and every `sanchay-<env>-` name in F1's and F24's runbook text passes the new rule.
+- **RV-04-F25-1 (2026-10-05): the G-E6 collector checks prod's app host (R-31; minor).** The "sandbox-chain build" on `app.dev.sanchay.in` is gone: the prerequisites, the review note, the `--host` error message and Step 6 name only `app.sanchay.in`, and the test fixture for a build that declares another host uses the test origin `app.sanchay.test`. Verified: `node --test scripts/android-evidence.test.ts` 13/13, `tsc` exits 0, `biome check` clean.
+- **RV-04-F27-1 (2026-10-05): the invitee dry run runs on the paused prod stack (R-31; major).** The drill used a dev stack on Wed 11-25 and seeded the PO's list on prod on Thu 11-26, before GO-1. Now the drill (D1-D7) runs on prod on Wed 11-25 with one founder-owned spare SIM (a founders' test account) and a founder's canary account for D5-D7 (the spare SIM has no KYC on prod), orders are on only for the few minutes D7 and D5 take and off again at once, Thu 11-26 checks that orders are off, and the PO's list (D8) is seeded only after the GO-1 decision. The integration test and its counts are unchanged.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -164,7 +187,19 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 
 ---
 
-### Task F1: CDK prod, D6 database logins, ops gauges and the ten alarms (Dev A, 14 h; E25 dev already ran in S2, R-05)
+### Task F1: Harden the prod stack: D6 database logins, ops task, gauges and the ten alarms (Dev A, 14 h; E25 deployed it paused in S2, R-31)
+
+> **Reworked 2026-10-05 for R-31 and R-33 (RV-04-F1-3, RV-04-F1-4).** There is no dev stack: E25
+> deploys `SanchayMvpStack-prod` paused in S2 (closed to investors until GO-1), and F1 hardens that
+> same stack in S4 instead of adding prod as a second environment. E25 now owns the prod config, the
+> hosts, the GitHub OIDC provider, the least-privilege deploy role (trusting only the GitHub `prod`
+> environment), `deploy.yml` with `prod` as its only environment and the 0-task deploy flag
+> `-c noTasks=true`. F1 therefore no longer replaces `infra/bin/sanchay.ts`, adds no `-c env`,
+> `-c paused` or `stackConfigForDeploy`, builds no dev alarm, has no dev test, and changes
+> `deploy.yml` only by passing the two alarm-recipient secrets to `cdk deploy`. Its rollout moves the
+> running stack onto the D6 logins with E25's `-c noTasks=true`, and `db-access.md` gains R-33's
+> deployed runs after the migrate task: the curated list (F19), then the NAV history (D9). The round-2
+> notes below are kept as history; where they disagree with this note, this note wins.
 
 > **Review notes (2026-10-01, assembly round 2: FR-0, FR-3, FR-5 and the ops task role; BRIEF D5, D6,
 > D8, D9).** This text replaces the round-1 F1. What changed and why:
@@ -204,45 +239,44 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 - **Create (infra):** `infra/lib/alarms.ts`, `infra/test/stack-fixtures.ts`, `infra/test/prod-stack.test.ts`, `infra/test/alarms.test.ts`
 - **Create (api):** `apps/api/src/db/db-logins.ts`, `apps/api/src/db/db-logins.test.ts`, `apps/api/test/int/db-logins.int.test.ts`, `apps/api/src/cli/reference-data.ts`, `apps/api/test/int/reference-data.int.test.ts`, `apps/api/src/modules/platform/ops-gauges.job.ts`, `apps/api/src/modules/platform/ops-gauges.job.test.ts`, `apps/api/src/config/env-roles.test.ts`, `apps/api/test/int/ops-gauges.int.test.ts`, `apps/api/test/int/otp-send-metrics.int.test.ts`
 - **Create (docs):** `docs/runbooks/credential-rotation.md`, `docs/runbooks/db-access.md`
-- **Modify (E25, key-level; fragments in Step 3):** `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts` (one expectation), `.github/workflows/deploy.yml` (the `prod` choice and the `cdk deploy` step), `apps/api/Dockerfile` (one `COPY` line; RV-04-F1-1)
-- **Replace whole (E25's dev-only entry point):** `infra/bin/sanchay.ts`
+- **Modify (E25, key-level; fragments in Step 3):** `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts` (two expectations), `.github/workflows/deploy.yml` (two `env` lines in the `cdk deploy` step), `apps/api/Dockerfile` (one `COPY` line; RV-04-F1-1). `infra/bin/sanchay.ts` stays E25's: it already builds `SanchayMvpStack-prod` (R-31).
 - **Replace whole (other owners; same behaviour, now exported and importable):** `apps/api/src/cli/migrate.ts` (Plan 01 B23, 8 lines), `apps/api/src/cli/ops-legal-seed.ts` (E3), `apps/api/src/cli/ops-ref-seed.ts` (E6 with E7's IFSC pass)
 - **Modify (other owners, key-level):** `apps/api/src/cli/ops-catalogue-seed.ts` (D8: its first four loops move into an exported function), `apps/api/src/config/env.ts` (B2: two keys and invariant 14), `apps/api/src/config/env.test.ts` (B2 pin list: two keys), `apps/api/src/modules/identity/otp.service.ts` (Plan 01 B13: two log lines), `apps/api/src/modules/platform/jobs/job-registry.ts` (D2: one name), `apps/api/src/modules/platform/jobs/schedules.ts` (D2: one schedule), `apps/api/src/modules/platform/platform.module.ts` (Plan 01: one provider), `apps/api/package.json` (two scripts), root `package.json` (two script values)
 - **Migrations:** none. The two LOGIN roles are not migration objects (their passwords come from Secrets Manager at run time), and the migrate task upserts the reference data after the migrations.
 
 **Interfaces:**
-- **Prerequisites:** E25 as amended by Plan 02 RV-02-16 to RV-02-23 and RV-02-33 (`SanchayMvpStack-dev` deployed, R-05); Plan 01 B2, B4, B6, B13, B23 (`0000_bootstrap`'s roles `sanchay_migrator`, `sanchay_app`, `sanchay_retention`, `sanchay_readonly`; `0003_grants`); Plan 02 D1, D2 (including `runMigrations`' pg-boss bootstrap and `0005_worker_heartbeats`' pgboss grants), D3, D6, D7, D8 (with RV-02-27 and RV-02-34), D9; Plan 03 E1 (with RV-03-10), E2, E3, E6, E7, E10, E20, E21. F1 needs none of F2-F4: its RECONCILING count reads the plan and mandate rows F2 will write, through `order_events` only.
+- **Prerequisites:** E25 as amended by Plan 02 RV-02-16 to RV-02-23, RV-02-33 and RV-02-70 (`SanchayMvpStack-prod` deployed paused in S2, R-05 and R-31; F1 changes that running stack); Plan 01 B2, B4, B6, B13, B23 (`0000_bootstrap`'s roles `sanchay_migrator`, `sanchay_app`, `sanchay_retention`, `sanchay_readonly`; `0003_grants`); Plan 02 D1, D2 (including `runMigrations`' pg-boss bootstrap and `0005_worker_heartbeats`' pgboss grants), D3, D6, D7, D8 (with RV-02-27 and RV-02-34), D9; Plan 03 E1 (with RV-03-10), E2, E3, E6, E7, E10, E20, E21. F1 needs none of F2-F4: its RECONCILING count reads the plan and mandate rows F2 will write, through `order_events` only.
 - **Consumes:**
-  - E25 `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack`, `SanchayMvpStackProps`, `SERVICE_NAME` (`sanchay-app`), `DB_MASTER_USER` (`sanchay_master`), `ARM64_LINUX`, `HEALTH_CHECK` (`/api/v1/health` on port `'3000'`), the constructor locals `vpc`, `apiRepo`, `webRepo`, `keyringSecret`, `msg91Secret`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `logging`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `apiTargetGroup`; the web container's `PORT`, `HOSTNAME`, `SANCHAY_WWW_ORIGIN` and `SANCHAY_APP_ORIGIN`; `minHealthyPercent: 100`; the context flag `-c firstDeploy=true`; statement `SesSendFromSanchayDomain`; construct ids `NatEip`, `Database`, `AppTaskDef`, `MigrateTaskDef`, `Service`, `GithubOidc`, `GithubDeployRole`; outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`; secrets `sanchay/{env}/{keyring,fp,fp-webhook,msg91,db-master}`.
-  - E25 `infra/lib/config.ts`: `loadStackConfig(envName, source = process.env)` (refuses a missing or malformed `SANCHAY_PLATFORM_ARN` or `SANCHAY_SMS_RETRIEVER_HASH` and a malformed `SANCHAY_GITHUB_REPOSITORY`), `assertDeployInputs(config)` (refuses a missing repository), `SanchayStackConfig` (`githubRepo: string | undefined`, `createGithubOidcProvider`, `dbInstanceSize`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `StaticConfig`, `GITHUB_REPOSITORY`, `blankToUndefined`, `DeployInputSource`, `StackConfigError`, `SanchayEnvName`; `infra/tsconfig.json` (`exactOptionalPropertyTypes: false` for infra only, RV-02-17), `infra/cdk.json`, `.gitignore`'s `cdk.out/`; `infra/test/sanchay-mvp-stack.test.ts` (22 tests); `infra/certs/rds-global-bundle.pem`; `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL` from `SANCHAY_DB_HOST/PORT/NAME/USER` and `SANCHAY_DB_PASSWORD`); `apps/api/Dockerfile`'s runtime stage (the `/repo` layout, `dist/` under `/repo/apps/api`, `data/` at `/repo/data`); `.github/workflows/deploy.yml` (QEMU, linux/arm64 builds, the web build arguments, `ENV_NAME`, the `Run the migrate task` step before `cdk deploy`, the rollout check, `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`); ADR-0014's first-deploy runbook.
+  - E25 `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack`, `SanchayMvpStackProps`, `SERVICE_NAME` (`sanchay-app`), `DB_MASTER_USER` (`sanchay_master`), `ARM64_LINUX`, `HEALTH_CHECK` (`/api/v1/health` on port `'3000'`), the constructor locals `vpc`, `apiRepo`, `webRepo`, `keyringSecret`, `msg91Secret`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `logging`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `apiTargetGroup`; the web container's `PORT`, `HOSTNAME`, `SANCHAY_WWW_ORIGIN` and `SANCHAY_APP_ORIGIN`; `minHealthyPercent: 100`; the context flag `-c noTasks=true` (the service at 0 tasks); the GitHub OIDC provider and the least-privilege deploy role that trusts only the GitHub `prod` environment (RV-02-70); statement `SesSendFromSanchayDomain`; construct ids `NatEip`, `Database`, `AppTaskDef`, `MigrateTaskDef`, `Service`, `GithubOidc`, `GithubDeployRole`; outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`; secrets `sanchay/{env}/{keyring,fp,fp-webhook,msg91,db-master}`.
+  - E25 `infra/lib/config.ts`: `loadStackConfig(envName, source = process.env)` (refuses a missing or malformed `SANCHAY_PLATFORM_ARN` or `SANCHAY_SMS_RETRIEVER_HASH` and a malformed `SANCHAY_GITHUB_REPOSITORY`), `assertDeployInputs(config)` (refuses a missing repository), `SanchayStackConfig` (`githubRepo: string | undefined`, `dbInstanceSize`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `StaticConfig`, `PROD_CONFIG`, `GITHUB_REPOSITORY`, `blankToUndefined`, `DeployInputSource`, `StackConfigError`, `SanchayEnvName` (`'prod'`, R-31); `infra/tsconfig.json` (`exactOptionalPropertyTypes: false` for infra only, RV-02-17), `infra/cdk.json`, `.gitignore`'s `cdk.out/`; `infra/test/sanchay-mvp-stack.test.ts` (24 tests; its inputs `DEPLOY_INPUTS` and `WITH_REPO`); `infra/certs/rds-global-bundle.pem`; `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL` from `SANCHAY_DB_HOST/PORT/NAME/USER` and `SANCHAY_DB_PASSWORD`); `apps/api/Dockerfile`'s runtime stage (the `/repo` layout, `dist/` under `/repo/apps/api`, `data/` at `/repo/data`); `.github/workflows/deploy.yml` (`prod` its only environment, QEMU, linux/arm64 builds, the web build arguments, `ENV_NAME`, the `Run the migrate task` step before `cdk deploy`, the rollout check, `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`); ADR-0014's first-deploy runbook.
   - `parseEnv`, `assertBootInvariants`, `EnvError`, `EnvSchema`, `SANCHAY_APP_ROLE` (B2, `apps/api/src/config/env.ts`) and its pin test (`env.test.ts`); E25's constants `role` and `sends` with role-aware invariants 1 and 7 (RV-02-20); invariant 13 with `role === 'api'` (owner: Plan 03 E1, RV-03-10); `scrub` (B4, `platform/logging.ts`); `OtpService.issue`, `OTP_POLICY.smsPerIstDay` = 2,000, the IST-day window, `otpFixture`, `CaptureSmsSender.failNext` (B13); `createDb`, `Database`, `DbExecutor`, `DbHandle`, `DB` (B6); `loadDotEnvFile` (B23); `pgErrorCodeOf` (`platform/pg-errors.ts`); `CLOCK`, `Clock`, `FakeClock`; `PlatformModule`; `newId` and `TableName` (`platform/ids.ts`); `LEGAL_DOCUMENT_KEYS`, `isOneOf` (`@sanchay/domain`); `createTestDatabase`, `TestDatabase`, `insertOtp`, `inject('pgAdminUrl')` (Plan 01 test helpers)
   - `runMigrations` (D2: bootstraps schema `pgboss` as the migrating login), `GRANT … ON SCHEMA pgboss TO sanchay_app` (D2 `0005`), `JOB_NAMES`, `JobHandler`, `Job<N>`, `registerSchedules(boss)` with keyed `boss.schedule`, `worker_heartbeats`, `PgBoss` (D2); `ReconBreaks.open`, `recon_breaks`, `RUNTIME_CONFIG_DEFAULTS['orders.enabled'] = false`, `['plans.sip.enabled'] = false` (D1)
   - `SANCHAY_PROVIDER_MODE_FP` (`sandbox` | `production`), `SANCHAY_FP_BASE_URL`, invariants 8 and 9 (D3); `SANCHAY_PROVIDER_MODE_SMS = 'msg91'`, `SANCHAY_PROVIDER_MODE_EMAIL = 'ses'`, `SANCHAY_SES_FROM`, `SANCHAY_MSG91_CREDENTIALS_JSON`, invariants 11 and 12, `SesEmailSender` (D6); `SANCHAY_PILOT_INVITE_ONLY`, invariant 10 (D7); `seedCatalogue(db, dataDir)`, `DEFAULT_DATA_DIR`, its private `readCsv` and `cell`, its first four loops (`amcs.csv`, `sebi-categories.csv`, `category-aliases.csv`, `market-holidays-2026-2027.csv`), `amcs`, `sebiCategories`, `categoryAliases`, `marketHolidays`, `scheme_navs` (`nav_date`, `quarantined`), `market_holidays` (`holiday_date`) (D8); the NAV syncs at 21:30, 23:30, 07:00 and 10:30 IST (D9)
   - `inbound_webhook_events` (`signature_valid`, `received_at`), `SANCHAY_FP_WEBHOOK_SECRET` (E1); `SANCHAY_API_ORIGIN`, `GET /api/v1/app/config` `flags` (E2); `legalDocuments`, `LEGAL_DOCUMENT_STATUSES`, `LegalDocumentStatus`, the front matter of `docs/legal/documents/*.md` (`key`, `version`, `status`, optional `effective_from`) and its upsert in `apps/api/src/cli/ops-legal-seed.ts` (E3); `refPincodes`, `data/ref-pincodes.csv` (E6) and `refIfsc`, `data/ref-ifsc.csv` (E7), both upserted by `apps/api/src/cli/ops-ref-seed.ts`; the public route `GET /api/v1/legal/documents/{key}` (`legal.getDocument`, 404 for an unpublished key) (E10); `order_events`, `SANCHAY_PLATFORM_ARN` (required, `ARN-<digits>`), the `fp.reconcile.nonfinal.miss` self-events (E20)
 - **Produces:**
-  - `SanchayMvpStack-prod` from the same class: Multi-AZ, PITR 14 days, deletion protection, `db.t4g.medium` (spec §2.4), 2 tasks of the one service **`sanchay-app`** (both envs), E25's R-11 listener rules, health checks and web container, `rds.force_ssl` + `verify-full` (R-15), ECS Exec logging (R-16).
-  - **D6 logins (both envs):** RDS master `sanchay_master` (E25; secret `sanchay/{env}/db-master`, migrate only); `sanchay_app_login` (secret `sanchay/{env}/db-app`; api, worker, ops; member of `sanchay_app` WITH INHERIT, SET); `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`; people over SSM; member of `sanchay_readonly`; `default_transaction_read_only = on`, `statement_timeout = 60s`). The two login secrets are generated JSON `{username, password}` with 40 letters and digits.
+  - No new stack and no second environment (R-31): F1 changes the `SanchayMvpStack-prod` that E25 deployed paused in S2. Its Multi-AZ, PITR 14 days, deletion protection, `db.t4g.medium`, 2 tasks of **`sanchay-app`**, R-11 listener rules, health checks and web container, `rds.force_ssl` + `verify-full` (R-15), ECS Exec logging (R-16) and least-privilege deploy role are E25's and stay as they are.
+  - **D6 logins:** RDS master `sanchay_master` (E25; secret `sanchay/{env}/db-master`, migrate only); `sanchay_app_login` (secret `sanchay/{env}/db-app`; api, worker, ops; member of `sanchay_app` WITH INHERIT, SET); `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`; people over SSM; member of `sanchay_readonly`; `default_transaction_read_only = on`, `statement_timeout = 60s`). The two login secrets are generated JSON `{username, password}` with 40 letters and digits.
   - `apps/api/src/db/db-logins.ts`: `ensureDbLogins(db, {app, readonly}) → string[]`, `DB_LOGINS`, `DbLoginPasswords`, `scramSha256Verifier(password, salt?)`, `DbLoginError`.
   - **Reference data (FR-3):** `apps/api/src/cli/reference-data.ts`: `seedReferenceData(db, dirs = REFERENCE_DATA_DIRS) → summary`, `REFERENCE_DATA_DIRS`, `ReferenceDataDirs`. Its three idempotent steps: `seedLegalDocumentFiles(db, dir = LEGAL_DOCUMENTS_DIR) → count`, `LEGAL_DOCUMENTS_DIR`, `LegalSeedError` (`ops-legal-seed.ts`; a version that is no longer DRAFT keeps its text); `seedRefTables(db, dataDir = REF_DATA_DIR) → {pincodes, ifsc}`, `REF_DATA_DIR` (`ops-ref-seed.ts`); `seedCatalogueReference(db, dataDir)` (`ops-catalogue-seed.ts`: AMCs, SEBI categories, aliases, market holidays; never schemes, fund facts or commission lines). `pnpm ops:legal:seed` and `pnpm ops:ref:seed` run the compiled modules. The api image holds `/repo/docs/legal` and `/repo/data`.
   - `apps/api/src/cli/migrate.ts`: with `SANCHAY_APP_ROLE=migrate` it also syncs the logins (both passwords set) and seeds the reference data; its log lines are `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login` and `reference data seeded: <n> legal documents, <n> pincodes, <n> IFSC codes, catalogue reference tables`. A developer's `pnpm db:migrate` (role `api`) only migrates.
   - Env (B2 schema): `SANCHAY_DB_APP_PASSWORD`, `SANCHAY_DB_READONLY_PASSWORD` (migrate container only); boot invariant **14** (outside local/test, `SANCHAY_APP_ROLE=migrate` requires both).
   - ECS: task families `sanchay-{env}-migrate` (container `migrate`, command `node dist/cli/migrate.js`, login `sanchay_master`, E25's task role) and `sanchay-{env}-ops` (container `ops`, `SANCHAY_APP_ROLE=ops`, login `sanchay_app_login`, secrets `SANCHAY_DB_PASSWORD` and `SANCHAY_KEYRING_JSON` only, default command `node dist/main.js`, task role `OpsTaskRole` whose only statement is `ReadOpsInviteParameters`: `ssm:GetParameter` on `arn:aws:ssm:<region>:<account>:parameter/sanchay/{env}/invites/*`).
-  - `infra/lib/config.ts`: `SanchayStackConfig` gains `alarmEmails`, `alarmSmsNumbers` (deploy inputs `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS`; a malformed entry is refused by `loadStackConfig`); E25's `assertDeployInputs` also refuses prod without either list (`SANCHAY_ALARM_EMAILS is required for prod`, `SANCHAY_ALARM_SMS_NUMBERS is required for prod`); new `stackConfigForDeploy({env, paused}, source)` and `DeployContext`. CDK context `-c env=dev|prod` (one stack per synth) and `-c paused=true` (service at 0 tasks; E25's `-c firstDeploy=true` does the same). Deploy inputs: `SANCHAY_GITHUB_REPOSITORY`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_SMS_RETRIEVER_HASH` (both envs), `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS` (prod).
+  - `infra/lib/config.ts`: `SanchayStackConfig` gains `alarmEmails`, `alarmSmsNumbers` (deploy inputs `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS`; a malformed entry is refused by `loadStackConfig`); E25's `assertDeployInputs` also refuses a deploy without either list (`SANCHAY_ALARM_EMAILS is required (SNS email recipients of the alarms)`, `SANCHAY_ALARM_SMS_NUMBERS is required (SNS SMS recipients of the alarms)`). No new CDK context: E25's `-c noTasks=true` (the service at 0 tasks) serves F1's rollout. Deploy inputs: E25's `SANCHAY_GITHUB_REPOSITORY`, `SANCHAY_PLATFORM_ARN` and `SANCHAY_SMS_RETRIEVER_HASH`, plus `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS`.
   - `infra/lib/sanchay-mvp-stack.ts` exports `DB_APP_LOGIN`, `DB_READONLY_LOGIN`, `migrateFamily(env)`, `opsFamily(env)` beside E25's `SERVICE_NAME` and `DB_MASTER_USER`.
   - `infra/lib/alarms.ts`: `buildOpsMetrics`, `buildNavAgeAlarm`, `buildAlarms`, `ALARM_SUFFIXES`, `alarmName(env, suffix)`, `OPS_GAUGES_MESSAGE`, `OPS_GAUGE_KEYS`, `OTP_SENT_MESSAGE`, `OTP_SEND_FAILED_MESSAGE`, `SMS_CAP_ALARM_THRESHOLD` (1,800).
-  - Alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (one email and one SMS subscription per recipient, actions on ALARM and OK); dev keeps one alarm, `sanchay-dev-nav-age`, with no action.
-  - Outputs (both envs): E25's eight plus `OpsTaskDefinitionArn`, `DbInstanceIdentifier`, `DbEndpointAddress` and `GithubDeployRoleArn` (whenever `SANCHAY_GITHUB_REPOSITORY` is set, which every real deploy requires; prod imports the account's OIDC provider); prod also `OpsAlertsTopicArn`.
+  - Alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (one email and one SMS subscription per recipient, actions on ALARM and OK).
+  - Outputs: E25's (with `GithubDeployRoleArn`, which every real deploy has) plus `OpsTaskDefinitionArn`, `DbInstanceIdentifier`, `DbEndpointAddress` and `OpsAlertsTopicArn`.
   - Job `ops.gauges.emit` (`OpsGaugesJob`, worker, every minute, schedule key `ops-gauges`), `readOpsGauges(exec, now)`, `OPS_GAUGE_KEYS`, `OPS_GAUGES_MESSAGE`, `NAV_NEVER_SYNCED` (99), types `OpsGauges`, `OpsGaugeKey`. Log lines `otp.sent` (info) and `otp.send_failed` (warn) from `OtpService.issue`.
-  - `.github/workflows/deploy.yml`: `environment` choice `[dev, prod]`; steps build and push, **run the migrate task** (both E25; with F1 the task also syncs the two logins and loads the reference data), `cdk deploy -c env=<env> SanchayMvpStack-<env>` (F1), force a new deployment of `sanchay-app` and fail unless its rollout completes (E25). GitHub environment variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image's `/site`), `SANCHAY_SMS_RETRIEVER_HASH` (dev and prod) and secrets `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS` (prod); `SANCHAY_GITHUB_REPOSITORY` is `${{ github.repository }}`.
-  - `docs/runbooks/credential-rotation.md` (seven secrets, PITR restore test, alarm drill) and `docs/runbooks/db-access.md` (the logins, the migrate run-task form, what the migrate task loads, the ops task and its role, read-only SQL over SSM, the paused bootstrap).
+  - `.github/workflows/deploy.yml` (E25's; `prod` its only environment): build and push, **run the migrate task** (with F1's image the task also syncs the two logins and loads the reference data), `cdk deploy`, force a new deployment of `sanchay-app` and fail unless its rollout completes. F1 adds only the GitHub `prod` environment secrets `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` to the `cdk deploy` step's `env`, beside E25's variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image's `/site`), `SANCHAY_SMS_RETRIEVER_HASH` and `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`.
+  - `docs/runbooks/credential-rotation.md` (seven secrets, PITR restore test, alarm drill) and `docs/runbooks/db-access.md` (the logins, the migrate run-task form, what the migrate task loads, the ops task and its role, R-33's deployed runs after the migrate task (the curated list, then the NAV history), read-only SQL over SSM, the 0-task deploy that moves the stack onto new logins).
 - **For later tasks (use exactly these):**
   - **F7:** run ops commands on `--task-definition sanchay-{env}-ops` with `"name": "ops"` in `containerOverrides` (its environment already sets `SANCHAY_APP_ROLE=ops`); network configuration `"awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}"`, or `describe-services --services sanchay-app`. The login is `sanchay_app_login`, so `opsDatabaseUrl`'s `-c role=sanchay_app` and `assertOpsPrivileges` pass (tested here). The ops task role is `OpsTaskRole`, not the service's task role: no document bucket, no SES, and `ssm:GetParameter` only on `/sanchay/{env}/invites/*`. `ops:invite --mobiles-param /sanchay/{env}/invites/<name>` reads a SecureString under the default `aws/ssm` key with `GetParameter` and `WithDecryption: true` (a customer-managed key would also need `kms:Decrypt`, which F1 does not grant). F7's EMF metrics are not needed (BRIEF D5): `criticalBreaksOpen` and `reconcilingOverSla` are F1's gauges. Its runbook links `db-access.md` for the read-only session.
-  - **F19:** `seedCatalogueReference(db, dataDir)` sits directly above `seedCatalogue`, whose first statement calls it. F19's validation block goes at the very start of `seedCatalogue`'s body, before that call, so an invalid list still writes nothing. The migrate task never loads the curated list; `DEFAULT_DATA_DIR` resolves to `/repo/data` in the api image, so `ops:catalogue:seed --pilot-list` run on the ops task reads the CSVs the deployed image carries.
-  - **F24-F27, F20, F22, F23:** the alarm names above; the ECS service is `sanchay-app` in cluster `sanchay-{env}`; `credential-rotation.md` starts `# Runbook: credential rotation`, has an `Owner:` line and ends with the "If an alarm fires mid-rotation" section (append the G-E8 sections after its last bullet); `db-access.md` keeps the section "Read-only SQL over SSM (spec §2.4)"; app log group `/sanchay/{env}/app`, stream prefix `{env}/{container}`. In infra tests use `synthTemplate(env, inputs?, {paused?})`, `PROD_INPUTS`, `DEV_INPUTS`, `containersOf`, `envOf`, `secretNamesOf`, `familyOf` from `infra/test/stack-fixtures.ts`.
-  - **F18:** `SANCHAY_SMS_RETRIEVER_HASH` reaches the `api` container only from the GitHub environment variable of the same name (dev and prod), read by `loadStackConfig` during `cdk deploy`.
+  - **F19:** `seedCatalogueReference(db, dataDir)` sits directly above `seedCatalogue`, whose first statement calls it. F19's validation block goes at the very start of `seedCatalogue`'s body, before that call, so an invalid list still writes nothing. The migrate task never loads the curated list; `DEFAULT_DATA_DIR` resolves to `/repo/data` in the api image, so `ops:catalogue:seed --pilot-list` run on the ops task reads the CSVs the deployed image carries. On prod that run is `node dist/cli/ops-catalogue-seed.js --pilot-list` on `sanchay-prod-ops`, before D9's NAV history backfill (R-33, RV-04-F1-4; `db-access.md`, "After the migrate task").
+  - **F24-F27, F20, F22, F23:** the alarm names above; the ECS service is `sanchay-app` in cluster `sanchay-{env}`; `credential-rotation.md` starts `# Runbook: credential rotation`, has an `Owner:` line and ends with the "If an alarm fires mid-rotation" section (append the G-E8 sections after its last bullet); `db-access.md` keeps the section "Read-only SQL over SSM (spec §2.4)"; app log group `/sanchay/{env}/app`, stream prefix `{env}/{container}`. In infra tests use `synthTemplate('prod', inputs?, {noTasks?})`, `PROD_INPUTS`, `containersOf`, `envOf`, `secretNamesOf`, `familyOf` from `infra/test/stack-fixtures.ts` (R-31: there is no dev stack and no `DEV_INPUTS`; `sanchay-{env}` is `sanchay-prod`).
+  - **F18:** `SANCHAY_SMS_RETRIEVER_HASH` reaches the `api` container only from the GitHub environment variable of the same name (the `prod` environment), read by `loadStackConfig` during `cdk deploy`.
 - **Deviations from the outline:**
   1. Metrics come from CloudWatch Logs metric filters on one JSON log line a minute, not EMF or `PutMetricData`: the worker needs no CloudWatch permission, and a dead worker is itself the missing-data signal.
-  2. D6's logins, the ops task definition with its own SSM-only task role and `-c paused` are not in the outline; each is needed for R-16 and for a stack to deploy from nothing. The migrate step in `deploy.yml` is E25's (spec §2.4).
+  2. D6's logins and the ops task definition with its own SSM-only task role are not in the outline; each is needed for R-16. The prod stack itself, its 0-task deploy flag (`-c noTasks=true`), its deploy role and the migrate step in `deploy.yml` are E25's (spec §2.4, R-31).
   3. Invariant 14 is new (`env.ts` is B2's file). Invariants 1 and 7 are E25's, 13 is E1's.
   4. The migrate task loads the reference data on every deploy (FR-3), and refuses to change the text of a published legal-document version. E3's and E6's seeds become exported functions, and their `pnpm` scripts run the compiled modules.
 
@@ -253,9 +287,10 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import {
+  assertDeployInputs,
   type DeployInputSource,
+  loadStackConfig,
   type SanchayEnvName,
-  stackConfigForDeploy,
 } from '../lib/config.js';
 import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
 
@@ -267,23 +302,19 @@ export const PROD_INPUTS: DeployInputSource = {
   SANCHAY_ALARM_EMAILS: 'dev-a@example.com, dev-b@example.com',
   SANCHAY_ALARM_SMS_NUMBERS: '+919800000001,+919800000002',
 };
-export const DEV_INPUTS: DeployInputSource = {
-  SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay',
-  SANCHAY_PLATFORM_ARN: 'ARN-000000',
-  SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
-};
 
-/** The template `cdk synth -c env=<envName> [-c paused=true]` produces (bin/sanchay.ts), without AWS. */
+/**
+ * The template `cdk synth [-c noTasks=true]` produces, without AWS: bin/sanchay.ts's loadStackConfig
+ * and assertDeployInputs, then E25's stack (R-31: SanchayMvpStack-prod is the only stack).
+ */
 export function synthTemplate(
   envName: SanchayEnvName,
-  inputs: DeployInputSource = envName === 'prod' ? PROD_INPUTS : DEV_INPUTS,
-  options: { paused?: boolean } = {},
+  inputs: DeployInputSource = PROD_INPUTS,
+  options: { noTasks?: boolean } = {},
 ): Template {
-  const app = new App();
-  const config = stackConfigForDeploy(
-    { env: envName, paused: options.paused === true ? 'true' : undefined },
-    inputs,
-  );
+  const config = loadStackConfig(envName, inputs);
+  assertDeployInputs(config);
+  const app = new App({ context: options.noTasks === true ? { noTasks: 'true' } : {} });
   const stack = new SanchayMvpStack(app, `SanchayMvpStack-${envName}`, {
     env: { account: '111111111111', region: 'ap-south-1' },
     config,
@@ -356,15 +387,16 @@ export function readsSecret(
 
 `infra/test/prod-stack.test.ts`:
 ```ts
-import { App } from 'aws-cdk-lib';
-import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
-import { type DeployInputSource, StackConfigError, stackConfigForDeploy } from '../lib/config.js';
-import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
+import {
+  assertDeployInputs,
+  type DeployInputSource,
+  loadStackConfig,
+  StackConfigError,
+} from '../lib/config.js';
 import {
   attachmentLogicalId,
   containersOf,
-  DEV_INPUTS,
   envOf,
   familyOf,
   PROD_INPUTS,
@@ -384,172 +416,33 @@ function refusal(fn: () => unknown): string {
   throw new Error('expected a StackConfigError');
 }
 
-/** `cdk synth -c env=prod` with PROD_INPUTS changed by `changes`. */
-const deployProd = (changes: DeployInputSource) => () =>
-  stackConfigForDeploy({ env: 'prod', paused: undefined }, { ...PROD_INPUTS, ...changes });
+/** `cdk synth` (bin/sanchay.ts: loadStackConfig, then assertDeployInputs) with PROD_INPUTS changed. */
+const deploy = (changes: DeployInputSource) => () =>
+  assertDeployInputs(loadStackConfig('prod', { ...PROD_INPUTS, ...changes }));
 
-describe('stack config (F1)', () => {
-  it("refuses a deploy without E25's two inputs, with E25's messages (loadStackConfig)", () => {
-    const message = refusal(() => stackConfigForDeploy({ env: 'prod', paused: undefined }, {}));
-    expect(message).toContain('SANCHAY_PLATFORM_ARN is required');
-    expect(message).toContain('SANCHAY_SMS_RETRIEVER_HASH is required');
-  });
-
-  it('refuses either env without the repository the deploy role trusts', () => {
-    for (const [env, inputs] of [
-      ['prod', PROD_INPUTS],
-      ['dev', DEV_INPUTS],
-    ] as const) {
-      const without = { ...inputs, SANCHAY_GITHUB_REPOSITORY: undefined };
-      expect(refusal(() => stackConfigForDeploy({ env, paused: undefined }, without))).toContain(
-        'SANCHAY_GITHUB_REPOSITORY',
-      );
-    }
-  });
-
-  it('refuses prod, not dev, without the alarm recipients', () => {
+describe('alarm recipients (F1)', () => {
+  it('refuses a deploy without the alarm recipients, naming both', () => {
     const message = refusal(
-      deployProd({ SANCHAY_ALARM_EMAILS: undefined, SANCHAY_ALARM_SMS_NUMBERS: undefined }),
+      deploy({ SANCHAY_ALARM_EMAILS: undefined, SANCHAY_ALARM_SMS_NUMBERS: undefined }),
     );
-    expect(message).toContain('SANCHAY_ALARM_EMAILS is required for prod');
-    expect(message).toContain('SANCHAY_ALARM_SMS_NUMBERS is required for prod');
-    expect(stackConfigForDeploy({ env: 'dev', paused: undefined }, DEV_INPUTS).alarmEmails).toEqual(
-      [],
-    );
+    expect(message).toContain('SANCHAY_ALARM_EMAILS is required');
+    expect(message).toContain('SANCHAY_ALARM_SMS_NUMBERS is required');
+    expect(loadStackConfig('prod', PROD_INPUTS).alarmEmails).toEqual([
+      'dev-a@example.com',
+      'dev-b@example.com',
+    ]);
   });
 
-  it('refuses a malformed ARN, retriever hash, email, phone number or repository', () => {
-    expect(refusal(deployProd({ SANCHAY_PLATFORM_ARN: '12345' }))).toContain('ARN-<digits>');
-    expect(refusal(deployProd({ SANCHAY_SMS_RETRIEVER_HASH: 'too-short' }))).toContain(
-      '11 characters',
-    );
-    expect(refusal(deployProd({ SANCHAY_ALARM_EMAILS: 'not-an-email' }))).toContain(
+  it('refuses a malformed email or phone number', () => {
+    expect(refusal(deploy({ SANCHAY_ALARM_EMAILS: 'not-an-email' }))).toContain(
       'SANCHAY_ALARM_EMAILS',
     );
-    expect(refusal(deployProd({ SANCHAY_ALARM_SMS_NUMBERS: '9800000001' }))).toContain('E.164');
-    // The repository lands in the role's trust policy: a wildcard would trust other repositories.
-    for (const repo of ['no-slash', 'example-org/*', '*/sanchay', 'example-org/sanchay:ref']) {
-      expect(refusal(deployProd({ SANCHAY_GITHUB_REPOSITORY: repo }))).toContain(
-        'SANCHAY_GITHUB_REPOSITORY',
-      );
-    }
-  });
-
-  it('reads -c env and -c paused, refusing anything else', () => {
-    expect(stackConfigForDeploy({ env: undefined, paused: undefined }, DEV_INPUTS).envName).toBe(
-      'dev',
-    );
-    expect(stackConfigForDeploy({ env: 'prod', paused: 'true' }, PROD_INPUTS).desiredCount).toBe(0);
-    expect(stackConfigForDeploy({ env: 'prod', paused: 'false' }, PROD_INPUTS).desiredCount).toBe(
-      2,
-    );
-    expect(refusal(() => stackConfigForDeploy({ env: 'staging', paused: undefined }, {}))).toMatch(
-      /-c env=staging/,
-    );
-    expect(
-      refusal(() => stackConfigForDeploy({ env: 'prod', paused: 'yes' }, PROD_INPUTS)),
-    ).toMatch(/-c paused=yes/);
-  });
-
-  it("honours E25's -c firstDeploy=true (ADR-0014) like -c paused=true", () => {
-    const stack = new SanchayMvpStack(
-      new App({ context: { firstDeploy: 'true' } }),
-      'SanchayMvpStack-prod',
-      {
-        env: { account: '111111111111', region: 'ap-south-1' },
-        config: stackConfigForDeploy({ env: 'prod', paused: undefined }, PROD_INPUTS),
-      },
-    );
-    Template.fromStack(stack).hasResourceProperties('AWS::ECS::Service', {
-      ServiceName: 'sanchay-app',
-      DesiredCount: 0,
-    });
+    expect(refusal(deploy({ SANCHAY_ALARM_SMS_NUMBERS: '9800000001' }))).toContain('E.164');
   });
 });
 
-describe('SanchayMvpStack-prod (F1)', () => {
+describe('SanchayMvpStack-prod hardened (F1)', () => {
   const t = synthTemplate('prod');
-
-  it('prod MultiAz true, BackupRetention 14, DeletionProtection, db.t4g.medium', () => {
-    t.hasResourceProperties('AWS::RDS::DBInstance', {
-      MultiAZ: true,
-      BackupRetentionPeriod: 14,
-      DeletionProtection: true,
-      StorageEncrypted: true,
-      DBInstanceClass: 'db.t4g.medium',
-    });
-  });
-
-  it('runs 2 tasks of sanchay-app, never below 100 % healthy, with the rollback circuit breaker', () => {
-    t.hasResourceProperties('AWS::ECS::Service', {
-      ServiceName: 'sanchay-app',
-      DesiredCount: 2,
-      DeploymentConfiguration: Match.objectLike({
-        MinimumHealthyPercent: 100,
-        DeploymentCircuitBreaker: { Enable: true, Rollback: true },
-      }),
-    });
-  });
-
-  it('a paused (bootstrap) deploy keeps the service at 0 tasks', () => {
-    synthTemplate('prod', PROD_INPUTS, { paused: true }).hasResourceProperties(
-      'AWS::ECS::Service',
-      { ServiceName: 'sanchay-app', DesiredCount: 0 },
-    );
-  });
-
-  it('keeps the E25 guarantees on the prod hosts (R-11, R-12, R-15, R-16)', () => {
-    t.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
-      Protocol: 'HTTPS',
-      SslPolicy: 'ELBSecurityPolicy-TLS13-1-2-2021-06',
-    });
-    t.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
-      Conditions: Match.arrayWith([
-        Match.objectLike({
-          Field: 'host-header',
-          HostHeaderConfig: { Values: ['app.sanchay.in'] },
-        }),
-        Match.objectLike({ Field: 'path-pattern', PathPatternConfig: { Values: ['/api/v1/*'] } }),
-      ]),
-    });
-    t.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
-      Conditions: [
-        Match.objectLike({
-          Field: 'host-header',
-          HostHeaderConfig: { Values: ['api.sanchay.in'] },
-        }),
-      ],
-    });
-    // E25 (RV-02-21): both target groups probe the api container's /api/v1/health on port 3000.
-    const groups = Object.values(t.findResources('AWS::ElasticLoadBalancingV2::TargetGroup'));
-    expect(
-      groups
-        .map((g) => [g.Properties.Port, g.Properties.HealthCheckPath, g.Properties.HealthCheckPort])
-        .sort(),
-    ).toEqual([
-      [3000, '/api/v1/health', '3000'],
-      [3001, '/api/v1/health', '3000'],
-    ]);
-    t.hasResourceProperties('AWS::RDS::DBParameterGroup', {
-      Parameters: Match.objectLike({ 'rds.force_ssl': '1' }),
-    });
-    t.hasResourceProperties('AWS::ECS::Cluster', {
-      ClusterName: 'sanchay-prod',
-      Configuration: { ExecuteCommandConfiguration: Match.objectLike({ Logging: 'OVERRIDE' }) },
-    });
-  });
-
-  it('the web container listens on 3001 and knows the prod www and app hosts (proxy.ts, H-1)', () => {
-    expect(envOf(containersOf(t).get('web'))).toMatchObject({
-      SANCHAY_APP_ENV: 'prod',
-      PORT: '3001',
-      HOSTNAME: '0.0.0.0',
-      SANCHAY_WWW_ORIGIN: 'https://www.sanchay.in',
-      SANCHAY_APP_ORIGIN: 'https://app.sanchay.in',
-      SANCHAY_API_ORIGIN: 'https://api.sanchay.in',
-    });
-    expect(secretNamesOf(containersOf(t).get('web'))).toEqual([]);
-  });
 
   it('outputs what the runbooks and deploy.yml read', () => {
     t.hasOutput('NatEipAddress', { Value: { Ref: 'NatEip' } });
@@ -567,13 +460,7 @@ describe('SanchayMvpStack-prod (F1)', () => {
     }
   });
 
-  it('D6: the RDS master is sanchay_master; the two LOGIN roles get generated letters-and-digits secrets', () => {
-    t.hasResourceProperties('AWS::SecretsManager::Secret', {
-      Name: 'sanchay/prod/db-master',
-      GenerateSecretString: Match.objectLike({
-        SecretStringTemplate: JSON.stringify({ username: 'sanchay_master' }),
-      }),
-    });
+  it('D6: the two LOGIN roles get generated letters-and-digits secrets', () => {
     for (const [name, username] of [
       ['sanchay/prod/db-app', 'sanchay_app_login'],
       ['sanchay/prod/db-readonly', 'sanchay_readonly_login'],
@@ -611,56 +498,21 @@ describe('SanchayMvpStack-prod (F1)', () => {
     expect(holders).toEqual(['migrate']);
   });
 
-  it('gives each container what the boot guard needs in prod, and no FP secret outside worker (R-19)', () => {
-    const containers = containersOf(t);
-    const [api, worker, migrate, ops] = ['api', 'worker', 'migrate', 'ops'].map((n) =>
-      containers.get(n),
-    );
-    for (const c of [api, worker, migrate, ops]) {
-      expect(envOf(c)).toMatchObject({
-        SANCHAY_APP_ENV: 'prod',
-        SANCHAY_APP_ORIGIN: 'https://app.sanchay.in',
-        SANCHAY_API_ORIGIN: 'https://api.sanchay.in',
-        SANCHAY_CLIENT_IP_SOURCE: 'alb',
-        SANCHAY_KEY_SERVICE: 'secrets',
-        SANCHAY_PROVIDER_MODE_FP: 'production',
-        SANCHAY_PILOT_INVITE_ONLY: 'true',
-        SANCHAY_PLATFORM_ARN: 'ARN-000000',
-        SANCHAY_DB_NAME: 'sanchay',
-      });
-    }
-    for (const c of [api, worker]) {
-      expect(envOf(c)).toMatchObject({
-        SANCHAY_PROVIDER_MODE_SMS: 'msg91',
-        SANCHAY_PROVIDER_MODE_EMAIL: 'ses',
-        SANCHAY_SES_FROM: 'noreply@sanchay.in',
-      });
-    }
-    for (const c of [migrate, ops]) {
-      expect(envOf(c).SANCHAY_PROVIDER_MODE_SMS).toBeUndefined();
-    }
-    expect(envOf(api).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
-    expect(envOf(worker).SANCHAY_FP_BASE_URL).toBe('https://api.fintechprimitives.com');
-    expect(envOf(api).SANCHAY_FP_BASE_URL).toBeUndefined();
-    expect(envOf(ops).SANCHAY_APP_ROLE).toBe('ops');
-    expect(secretNamesOf(api)).toEqual([
-      'SANCHAY_DB_PASSWORD',
-      'SANCHAY_FP_WEBHOOK_SECRET',
-      'SANCHAY_KEYRING_JSON',
-      'SANCHAY_MSG91_CREDENTIALS_JSON',
-    ]);
-    expect(secretNamesOf(worker)).toEqual([
-      'SANCHAY_DB_PASSWORD',
-      'SANCHAY_FP_CREDENTIALS_JSON',
-      'SANCHAY_KEYRING_JSON',
-      'SANCHAY_MSG91_CREDENTIALS_JSON',
-    ]);
-    expect(secretNamesOf(migrate)).toEqual([
-      'SANCHAY_DB_APP_PASSWORD',
-      'SANCHAY_DB_PASSWORD',
-      'SANCHAY_DB_READONLY_PASSWORD',
-      'SANCHAY_KEYRING_JSON',
-    ]);
+  it('the ops container boots as role ops with the D6 login and the keyring only (R-19)', () => {
+    const ops = containersOf(t).get('ops');
+    expect(envOf(ops)).toMatchObject({
+      SANCHAY_APP_ENV: 'prod',
+      SANCHAY_APP_ROLE: 'ops',
+      SANCHAY_APP_ORIGIN: 'https://app.sanchay.in',
+      SANCHAY_API_ORIGIN: 'https://api.sanchay.in',
+      SANCHAY_CLIENT_IP_SOURCE: 'alb',
+      SANCHAY_KEY_SERVICE: 'secrets',
+      SANCHAY_PROVIDER_MODE_FP: 'production',
+      SANCHAY_PILOT_INVITE_ONLY: 'true',
+      SANCHAY_PLATFORM_ARN: 'ARN-000000',
+      SANCHAY_DB_NAME: 'sanchay',
+    });
+    expect(envOf(ops).SANCHAY_PROVIDER_MODE_SMS).toBeUndefined();
     expect(secretNamesOf(ops)).toEqual(['SANCHAY_DB_PASSWORD', 'SANCHAY_KEYRING_JSON']);
   });
 
@@ -688,117 +540,6 @@ describe('SanchayMvpStack-prod (F1)', () => {
         Resource: 'arn:aws:ssm:ap-south-1:111111111111:parameter/sanchay/prod/invites/*',
       },
     ]);
-  });
-
-  it('carries no orders.enabled / plans.sip.enabled override: both stay at the D1 default false (R-06)', () => {
-    for (const c of containersOf(t).values()) {
-      const keys = Object.keys(envOf(c)).join(' ');
-      expect(keys).not.toMatch(/ORDERS|SIP/);
-    }
-  });
-
-  it('lets the service tasks send SES email only from SANCHAY_SES_FROM (E25)', () => {
-    t.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Sid: 'SesSendFromSanchayDomain',
-            Action: ['ses:SendEmail', 'ses:SendRawEmail'],
-            Condition: { StringEquals: { 'ses:FromAddress': 'noreply@sanchay.in' } },
-          }),
-        ]),
-      },
-    });
-  });
-
-  it('prod deploy role trusts only the GitHub prod environment, exactly, and is not an administrator', () => {
-    t.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'sanchay-prod-github-deploy',
-      AssumeRolePolicyDocument: {
-        Statement: [
-          Match.objectLike({
-            Condition: {
-              StringEquals: {
-                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-                'token.actions.githubusercontent.com:sub':
-                  'repo:example-org/sanchay:environment:prod',
-              },
-            },
-          }),
-        ],
-      },
-    });
-    expect(JSON.stringify(t.toJSON())).not.toContain('AdministratorAccess');
-    t.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 0);
-  });
-
-  it('prod deploy role can do exactly what deploy.yml does, migrate run included', () => {
-    const statements = Object.values(t.findResources('AWS::IAM::Policy'))
-      .filter((p) => JSON.stringify(p.Properties.Roles).includes('GithubDeployRole'))
-      .flatMap((p) => p.Properties.PolicyDocument.Statement as Array<Record<string, unknown>>);
-    const sids = statements.map((s) => s.Sid).filter((s) => s !== undefined);
-    expect(sids).toEqual(
-      expect.arrayContaining([
-        'AssumeCdkBootstrapRoles',
-        'EcrLogin',
-        'ReadStackOutputs',
-        'WaitForMigrateTask',
-        'ForceNewDeployment',
-      ]),
-    );
-    const runTask = statements.find((s) => s.Action === 'ecs:RunTask');
-    expect(JSON.stringify(runTask?.Resource)).toContain('MigrateTaskDef');
-    expect(statements.some((s) => s.Action === 'iam:PassRole')).toBe(true);
-  });
-});
-
-describe('SanchayMvpStack-dev regression (E25 unaffected by F1, except the D6 logins)', () => {
-  const t = synthTemplate('dev');
-
-  it('stays single-AZ, 1-day retention, no deletion protection, db.t4g.micro, 1 task', () => {
-    t.hasResourceProperties('AWS::RDS::DBInstance', {
-      MultiAZ: false,
-      BackupRetentionPeriod: 1,
-      DeletionProtection: false,
-      DBInstanceClass: 'db.t4g.micro',
-    });
-    t.hasResourceProperties('AWS::ECS::Service', { ServiceName: 'sanchay-app', DesiredCount: 1 });
-  });
-
-  it('keeps one alarm (NAV age), no SNS topic, and the E25 admin deploy role on any ref', () => {
-    t.resourceCountIs('AWS::CloudWatch::Alarm', 1);
-    t.resourceCountIs('AWS::SNS::Topic', 0);
-    expect(JSON.stringify(t.toJSON())).toContain('AdministratorAccess');
-    t.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 1);
-    t.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'sanchay-dev-github-deploy',
-      AssumeRolePolicyDocument: {
-        Statement: [
-          Match.objectLike({
-            Condition: {
-              StringEquals: { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' },
-              StringLike: {
-                'token.actions.githubusercontent.com:sub': 'repo:example-org/sanchay:*',
-              },
-            },
-          }),
-        ],
-      },
-    });
-  });
-
-  it('uses the FP sandbox, never production (boot invariant 9), and the dev D6 logins', () => {
-    const containers = containersOf(t);
-    expect(envOf(containers.get('worker'))).toMatchObject({
-      SANCHAY_PROVIDER_MODE_FP: 'sandbox',
-      SANCHAY_FP_BASE_URL: 'https://s.finprim.com',
-      SANCHAY_DB_USER: 'sanchay_app_login',
-    });
-    expect(envOf(containers.get('migrate')).SANCHAY_DB_USER).toBe('sanchay_master');
-    expect(familyOf(t, 'ops')).toBe('sanchay-dev-ops');
-    secretLogicalId(t, 'sanchay/dev/db-master');
-    secretLogicalId(t, 'sanchay/dev/db-app');
-    secretLogicalId(t, 'sanchay/dev/db-readonly');
   });
 });
 ```
@@ -828,32 +569,30 @@ describe('ops metrics (F1)', () => {
     ]);
   });
 
-  for (const envName of ['dev', 'prod'] as const) {
-    it(`${envName}: one metric filter per gauge plus the two OTP counters, in namespace Sanchay/${envName}`, () => {
-      const t = synthTemplate(envName);
-      t.resourceCountIs('AWS::Logs::MetricFilter', OPS_GAUGE_KEYS.length + 2);
-      for (const key of OPS_GAUGE_KEYS) {
-        t.hasResourceProperties('AWS::Logs::MetricFilter', {
-          FilterPattern: '{ $.msg = "ops.gauges" }',
-          MetricTransformations: [
-            Match.objectLike({
-              MetricNamespace: `Sanchay/${envName}`,
-              MetricName: key,
-              MetricValue: `$.gauges.${key}`,
-            }),
-          ],
-        });
-      }
-      for (const message of [OTP_SENT_MESSAGE, OTP_SEND_FAILED_MESSAGE]) {
-        t.hasResourceProperties('AWS::Logs::MetricFilter', {
-          FilterPattern: `{ $.msg = "${message}" }`,
-          MetricTransformations: [
-            Match.objectLike({ MetricName: message, MetricValue: '1', DefaultValue: 0 }),
-          ],
-        });
-      }
-    });
-  }
+  it('one metric filter per gauge plus the two OTP counters, in namespace Sanchay/prod', () => {
+    const t = synthTemplate('prod');
+    t.resourceCountIs('AWS::Logs::MetricFilter', OPS_GAUGE_KEYS.length + 2);
+    for (const key of OPS_GAUGE_KEYS) {
+      t.hasResourceProperties('AWS::Logs::MetricFilter', {
+        FilterPattern: '{ $.msg = "ops.gauges" }',
+        MetricTransformations: [
+          Match.objectLike({
+            MetricNamespace: 'Sanchay/prod',
+            MetricName: key,
+            MetricValue: `$.gauges.${key}`,
+          }),
+        ],
+      });
+    }
+    for (const message of [OTP_SENT_MESSAGE, OTP_SEND_FAILED_MESSAGE]) {
+      t.hasResourceProperties('AWS::Logs::MetricFilter', {
+        FilterPattern: `{ $.msg = "${message}" }`,
+        MetricTransformations: [
+          Match.objectLike({ MetricName: message, MetricValue: '1', DefaultValue: 0 }),
+        ],
+      });
+    }
+  });
 });
 
 describe('prod alarms (F1)', () => {
@@ -962,20 +701,9 @@ describe('prod alarms (F1)', () => {
     });
   });
 });
-
-describe('dev alarms (E25 unaffected)', () => {
-  it('builds no SNS topic and only the NAV-age alarm, with no actions', () => {
-    const t = synthTemplate('dev');
-    t.resourceCountIs('AWS::SNS::Topic', 0);
-    t.resourceCountIs('AWS::CloudWatch::Alarm', 1);
-    const [alarm] = Object.values(t.findResources('AWS::CloudWatch::Alarm'));
-    expect(alarm?.Properties.AlarmName).toBe('sanchay-dev-nav-age');
-    expect(alarm?.Properties.AlarmActions).toBeUndefined();
-  });
-});
 ```
 
-`infra/test/sanchay-mvp-stack.test.ts` (E25's file, key-level): in the test `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, the migrate expectation `expect(secretNamesOf(migrate)).toEqual(['SANCHAY_DB_PASSWORD', 'SANCHAY_KEYRING_JSON']);` becomes (D6: the migrate task carries both login passwords):
+`infra/test/sanchay-mvp-stack.test.ts` (E25's file, key-level; two expectations): in the test `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, the migrate expectation `expect(secretNamesOf(migrate)).toEqual(['SANCHAY_DB_PASSWORD', 'SANCHAY_KEYRING_JSON']);` becomes (D6: the migrate task carries both login passwords):
 ```ts
     expect(secretNamesOf(migrate)).toEqual([
       'SANCHAY_DB_APP_PASSWORD',
@@ -983,6 +711,15 @@ describe('dev alarms (E25 unaffected)', () => {
       'SANCHAY_DB_READONLY_PASSWORD',
       'SANCHAY_KEYRING_JSON',
     ]);
+```
+and in `reads SANCHAY_GITHUB_REPOSITORY, refuses a malformed one, and a real deploy needs it`, its last line `expect(() => assertDeployInputs(loadStackConfig('prod', WITH_REPO))).not.toThrow();` becomes (a real deploy also needs the alarm recipients, 3.1):
+```ts
+    const withAlarms = {
+      ...WITH_REPO,
+      SANCHAY_ALARM_EMAILS: 'dev-a@example.com',
+      SANCHAY_ALARM_SMS_NUMBERS: '+919800000001',
+    };
+    expect(() => assertDeployInputs(loadStackConfig('prod', withAlarms))).not.toThrow();
 ```
 
 `apps/api/src/db/db-logins.test.ts`:
@@ -1896,7 +1633,7 @@ pnpm --filter=@sanchay/api test ops-gauges db-logins env
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics db-logins reference-data
 ```
 Expected:
-- infra: `prod-stack.test.ts` and `alarms.test.ts` fail to load (`stack-fixtures.ts` imports `stackConfigForDeploy`, and `../lib/alarms.js` does not exist yet); E25's `sanchay-mvp-stack.test.ts` 21 passed, 1 failed (the migrate task's secrets).
+- infra: `alarms.test.ts` fails to load (`../lib/alarms.js` does not exist yet); `prod-stack.test.ts` 8 failed (no alarm-recipient check, D6 login secrets, ops task definition, task families or F1 outputs yet); E25's `sanchay-mvp-stack.test.ts` 23 passed, 1 failed (the migrate task's secrets).
 - api unit: `db-logins.test.ts` and `ops-gauges.job.test.ts` cannot load their modules; `env-roles.test.ts` 2 failed, 6 passed (the migrate boot reads `SANCHAY_DB_APP_PASSWORD`, and invariant 14); `env.test.ts` 1 failed (the pin list names the two new keys).
 - api int: `db-logins.int.test.ts`, `ops-gauges.int.test.ts` and `reference-data.int.test.ts` cannot load their modules (`db-logins.js`, `ops-gauges.job.js`, `reference-data.js` and E3's file has no `LegalSeedError`); `otp-send-metrics.int.test.ts` 2 failed, 1 passed (no `otp.sent` / `otp.send_failed` line yet; the cooldown case passes).
 
@@ -1929,8 +1666,8 @@ function listOf(raw: string | undefined): string[] {
 ```
 In `loadStackConfig`, directly before its refusal (`if (problems.length > 0 || platformArn === undefined …`):
 ```ts
-  // F1: the prod alarm recipients. Optional here (dev has no SNS topic, and E25's tests synthesise
-  // without them); assertDeployInputs requires them for prod. A malformed entry is always refused.
+  // F1: the alarm recipients. Optional here (E25's tests synthesise without them); assertDeployInputs
+  // requires them for a real synth or deploy. A malformed entry is always refused.
   const alarmEmails = listOf(source.SANCHAY_ALARM_EMAILS);
   const alarmSmsNumbers = listOf(source.SANCHAY_ALARM_SMS_NUMBERS);
   if (alarmEmails.some((email) => !EMAIL.test(email))) {
@@ -1942,46 +1679,13 @@ In `loadStackConfig`, directly before its refusal (`if (problems.length > 0 || p
 ```
 and the object it returns gains `alarmEmails, alarmSmsNumbers`. In E25's `assertDeployInputs`, directly before its refusal (`if (problems.length > 0) {`):
 ```ts
-  // F1: a prod deploy also needs its alarm recipients; dev builds no SNS topic.
-  if (config.envName === 'prod' && config.alarmEmails.length === 0) {
-    problems.push('SANCHAY_ALARM_EMAILS is required for prod');
+  // F1: a real deploy also needs the alarm recipients (the SNS topic's subscribers).
+  if (config.alarmEmails.length === 0) {
+    problems.push('SANCHAY_ALARM_EMAILS is required (SNS email recipients of the alarms)');
   }
-  if (config.envName === 'prod' && config.alarmSmsNumbers.length === 0) {
-    problems.push('SANCHAY_ALARM_SMS_NUMBERS is required for prod');
+  if (config.alarmSmsNumbers.length === 0) {
+    problems.push('SANCHAY_ALARM_SMS_NUMBERS is required (SNS SMS recipients of the alarms)');
   }
-```
-Append at the end of the file:
-```ts
-/** F1: the CDK context bin/sanchay.ts reads: `-c env=dev|prod`, and `-c paused=true` (bootstrap only). */
-export interface DeployContext {
-  env: unknown;
-  paused: unknown;
-}
-
-const isTrue = (flag: unknown): boolean => flag === true || flag === 'true';
-
-/**
- * F1: the one config `cdk synth|deploy` uses: loadStackConfig, then assertDeployInputs. `-c env`
- * picks one stack per synth (default dev; a dev deploy never needs prod's inputs). `-c paused=true`
- * deploys the service at 0 tasks (db-access runbook, "Bootstrap a stack"); E25's
- * `-c firstDeploy=true` (ADR-0014), which the stack reads itself, does the same.
- */
-export function stackConfigForDeploy(
-  context: DeployContext,
-  source: DeployInputSource = process.env,
-): SanchayStackConfig {
-  const envName = context.env ?? 'dev';
-  if (envName !== 'dev' && envName !== 'prod') {
-    throw new StackConfigError(`unknown -c env=${String(envName)}; expected dev or prod`);
-  }
-  const paused = context.paused ?? 'false';
-  if (!isTrue(paused) && paused !== false && paused !== 'false') {
-    throw new StackConfigError(`unknown -c paused=${String(paused)}; expected true or false`);
-  }
-  const config = loadStackConfig(envName, source);
-  assertDeployInputs(config);
-  return isTrue(paused) ? { ...config, desiredCount: 0 } : config;
-}
 ```
 
 **3.2 `infra/lib/alarms.ts` (new):**
@@ -2021,8 +1725,8 @@ export const OTP_SEND_FAILED_MESSAGE = 'otp.send_failed';
 export const SMS_CAP_ALARM_THRESHOLD = 1_800;
 
 /**
- * F1 owns these names (spec §2.4, G-E5). Every alarm is `sanchay-{env}-<suffix>`; runbooks and the alarm
- * drill use exactly these. Prod builds all ten; dev builds only `nav-age`, with no action.
+ * F1 owns these names (spec §2.4, G-E5). Every alarm is `sanchay-{env}-<suffix>` (R-31: prod is the only
+ * stack, so `sanchay-prod-<suffix>`); runbooks and the alarm drill use exactly these.
  */
 export const ALARM_SUFFIXES = [
   'alb-5xx',
@@ -2055,9 +1759,8 @@ export interface OpsMetricsProps {
 }
 
 /**
- * F1: CloudWatch Logs metric filters on the app log group (E25 `/sanchay/{env}/app`). Built in every
- * env so dev data exists for the NAV-age alarm; the SNS-routed alarm set is prod only.
- * Namespace per env (`Sanchay/dev`, `Sanchay/prod`): both stacks may share one AWS account.
+ * F1: CloudWatch Logs metric filters on the app log group (E25 `/sanchay/{env}/app`), in namespace
+ * `Sanchay/{env}` (`Sanchay/prod`).
  */
 export function buildOpsMetrics(scope: Construct, props: OpsMetricsProps): OpsMetrics {
   const namespace = `Sanchay/${props.envName}`;
@@ -2092,8 +1795,8 @@ export function buildOpsMetrics(scope: Construct, props: OpsMetricsProps): OpsMe
 }
 
 /**
- * R-12: NAV missing for a business day after 11:00 IST. Built in both envs (E25's construct id
- * `NavAgeAlarm`); prod wires it to the topic with the other nine.
+ * R-12: NAV missing for a business day after 11:00 IST (construct id `NavAgeAlarm`); buildAlarms
+ * wires it to the topic with the other nine.
  */
 export function buildNavAgeAlarm(
   scope: Construct,
@@ -2399,108 +2102,20 @@ After the `migrate` container, before `// --- Service, ALB, listener rules (R-11
 ```
 E25's three-line comment that starts `// R-12's NAV-age alarm is not built here` becomes:
 ```ts
-    // --- Alarms (F1): NAV age in both envs (R-12); prod adds nine on one SNS topic (G-E5) -----
+    // --- Alarms (F1): NAV age (R-12) and nine more on one SNS topic (G-E5) -----------------
     const navAgeAlarm = buildNavAgeAlarm(this, envName, opsMetrics);
-    if (envName === 'prod') {
-      const { topic } = buildAlarms(this, {
-        envName,
-        alarmEmails: config.alarmEmails,
-        alarmSmsNumbers: config.alarmSmsNumbers,
-        metrics: opsMetrics,
-        alb,
-        apiTargetGroup,
-        navAgeAlarm,
-      });
-      new CfnOutput(this, 'OpsAlertsTopicArn', { value: topic.topicArn });
-    }
+    const { topic } = buildAlarms(this, {
+      envName,
+      alarmEmails: config.alarmEmails,
+      alarmSmsNumbers: config.alarmSmsNumbers,
+      metrics: opsMetrics,
+      alb,
+      apiTargetGroup,
+      navAgeAlarm,
+    });
+    new CfnOutput(this, 'OpsAlertsTopicArn', { value: topic.topicArn });
 ```
-E25's whole `// --- GitHub OIDC deploy role` section (up to `// --- Outputs`) becomes:
-```ts
-    // --- GitHub OIDC deploy role -----------------------------------------------------------
-    // F1: built when the deploy input SANCHAY_GITHUB_REPOSITORY is set (E25: assertDeployInputs
-    // requires it for every real deploy; loadStackConfig refuses anything but <owner>/<repo>). The
-    // OIDC provider is one per account: the dev stack creates it, the prod stack imports it.
-    const githubRepo: string | undefined = config.githubRepo;
-    if (githubRepo !== undefined) {
-      const githubOidcProviderArn = config.createGithubOidcProvider
-        ? new iam.OpenIdConnectProvider(this, 'GithubOidc', {
-            url: 'https://token.actions.githubusercontent.com',
-            clientIds: ['sts.amazonaws.com'],
-          }).openIdConnectProviderArn
-        : `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`;
-      const audience = { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' };
-      const deployRole = new iam.Role(this, 'GithubDeployRole', {
-        roleName: `sanchay-${envName}-github-deploy`,
-        assumedBy: new iam.WebIdentityPrincipal(
-          githubOidcProviderArn,
-          envName === 'prod'
-            ? {
-                // Prod: only jobs of the GitHub `prod` environment (with reviewers), exactly.
-                StringEquals: {
-                  ...audience,
-                  'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:environment:prod`,
-                },
-              }
-            : {
-                StringEquals: audience,
-                StringLike: { 'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:*` },
-              },
-        ),
-        description: 'Assumed by .github/workflows/deploy.yml via OIDC (no long-lived AWS keys).',
-      });
-      if (envName === 'prod') {
-        // F1: least privilege, exactly what deploy.yml does. CloudFormation work goes through the
-        // CDK bootstrap roles.
-        deployRole.addToPolicy(
-          new iam.PolicyStatement({
-            sid: 'AssumeCdkBootstrapRoles',
-            actions: ['sts:AssumeRole'],
-            resources: [
-              `arn:aws:iam::${this.account}:role/cdk-hnb659fds-*-${this.account}-${this.region}`,
-            ],
-          }),
-        );
-        deployRole.addToPolicy(
-          new iam.PolicyStatement({
-            sid: 'EcrLogin',
-            actions: ['ecr:GetAuthorizationToken'],
-            resources: ['*'],
-          }),
-        );
-        apiRepo.grantPullPush(deployRole);
-        webRepo.grantPullPush(deployRole);
-        deployRole.addToPolicy(
-          new iam.PolicyStatement({
-            sid: 'ReadStackOutputs',
-            actions: ['cloudformation:DescribeStacks'],
-            resources: [this.stackId],
-          }),
-        );
-        // deploy.yml runs the migrate task before every rollout (spec §2.4), then reads its exit code.
-        migrateTaskDef.grantRun(deployRole);
-        deployRole.addToPolicy(
-          new iam.PolicyStatement({
-            sid: 'WaitForMigrateTask',
-            actions: ['ecs:DescribeTasks'],
-            resources: [`arn:aws:ecs:${this.region}:${this.account}:task/${cluster.clusterName}/*`],
-          }),
-        );
-        deployRole.addToPolicy(
-          new iam.PolicyStatement({
-            sid: 'ForceNewDeployment',
-            actions: ['ecs:UpdateService', 'ecs:DescribeServices'],
-            resources: [service.serviceArn],
-          }),
-        );
-      } else {
-        // Dev sandbox only (E25).
-        deployRole.addManagedPolicy(
-          iam.ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'),
-        );
-      }
-      new CfnOutput(this, 'GithubDeployRoleArn', { value: deployRole.roleArn });
-    }
-```
+E25's `// --- GitHub OIDC deploy role` section stays as it is: the deploy role, its trust (jobs of the GitHub `prod` environment only) and its least-privilege statements, `migrateTaskDef.grantRun` included, are E25's (Plan 02 RV-02-70).
 After E25's last output (`ServiceSecurityGroupId`):
 ```ts
     // F1: the ops run-task (F7), the read-only session and the PITR test (runbooks/db-access.md).
@@ -2509,47 +2124,11 @@ After E25's last output (`ServiceSecurityGroupId`):
     new CfnOutput(this, 'DbEndpointAddress', { value: dbInstance.instanceEndpoint.hostname });
 ```
 
-**3.4 `infra/bin/sanchay.ts` (replace the whole file; E25's version builds only the dev stack):**
-```ts
-import { App } from 'aws-cdk-lib';
-import { stackConfigForDeploy } from '../lib/config.js';
-import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
+**3.4 `infra/bin/sanchay.ts`: no change.** E25's entry point already builds `SanchayMvpStack-prod` (R-31) from `loadStackConfig('prod')` and calls `assertDeployInputs`, which now also requires the alarm recipients (3.1); the stack reads E25's `-c noTasks=true` itself.
 
-const app = new App();
-// F1: one stack per synth (`-c env=dev|prod`, default dev); `-c paused=true` for a bootstrap only
-// (docs/runbooks/db-access.md). Reads the deploy inputs from this process's environment:
-// SANCHAY_GITHUB_REPOSITORY, SANCHAY_PLATFORM_ARN and SANCHAY_SMS_RETRIEVER_HASH, and in prod also
-// SANCHAY_ALARM_EMAILS and SANCHAY_ALARM_SMS_NUMBERS.
-const config = stackConfigForDeploy({
-  env: app.node.tryGetContext('env'),
-  paused: app.node.tryGetContext('paused'),
-});
-
-new SanchayMvpStack(app, `SanchayMvpStack-${config.envName}`, {
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    // Spec §2.4: ap-south-1 only. The cdk CLI overwrites CDK_DEFAULT_REGION with the caller's AWS
-    // default region (us-east-1 when none is configured), so the region is pinned, not read.
-    region: 'ap-south-1',
-  },
-  config,
-});
-```
-
-**3.5 `.github/workflows/deploy.yml` (E25's file, key-level).** E25's QEMU step, its `linux/arm64` builds with the web image's `/site` arguments, its OIDC step, its `ENV_NAME` and its 60-minute timeout stay as they are, and so do its `Run the migrate task` step between the image push and `cdk deploy` (spec §2.4; with F1's image the task also syncs the two DB logins and loads the reference data, D6 and FR-3) and its last step, which fails unless the forced deployment's `rolloutState` is `COMPLETED` (Plan 02 RV-02-61; RV-04-F1-1).
-
-`options: [dev]` becomes `options: [dev, prod]`. E25's `cdk deploy` step becomes:
+**3.5 `.github/workflows/deploy.yml` (E25's file, key-level).** Everything stays E25's: `prod` as its only environment, the QEMU step, the `linux/arm64` builds with the web image's `/site` arguments, the OIDC step, `ENV_NAME`, the 60-minute timeout, the `Run the migrate task` step between the image push and `cdk deploy` (spec §2.4; with F1's image the task also syncs the two DB logins and loads the reference data, D6 and FR-3) and the last step, which fails unless the forced deployment's `rolloutState` is `COMPLETED` (Plan 02 RV-02-61; RV-04-F1-1). In E25's `cdk deploy` step, directly after `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}` in its `env`, add (a deploy without them is refused, 3.1):
 ```yaml
-      - name: cdk deploy
-        run: pnpm --filter=@sanchay/infra exec cdk deploy -c "env=$ENV_NAME" "SanchayMvpStack-$ENV_NAME" --require-approval never
-        env:
-          CDK_DEFAULT_ACCOUNT: ${{ vars.SANCHAY_AWS_ACCOUNT_ID }}
-          CDK_DEFAULT_REGION: ap-south-1
-          # Deploy inputs: infra/lib/config.ts refuses to synthesise without them (F1: stackConfigForDeploy).
-          SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}
-          SANCHAY_PLATFORM_ARN: ${{ vars.SANCHAY_PLATFORM_ARN }}
-          SANCHAY_SMS_RETRIEVER_HASH: ${{ vars.SANCHAY_SMS_RETRIEVER_HASH }}
-          # Prod only (GitHub `prod` environment secrets); empty in dev, where no SNS topic exists.
+          # F1: the alarm recipients (GitHub `prod` environment secrets); assertDeployInputs needs both.
           SANCHAY_ALARM_EMAILS: ${{ secrets.SANCHAY_ALARM_EMAILS }}
           SANCHAY_ALARM_SMS_NUMBERS: ${{ secrets.SANCHAY_ALARM_SMS_NUMBERS }}
 ```
@@ -3161,7 +2740,7 @@ export class OpsGaugesJob {
 ```
 
 **3.12 Registration (D2 and Plan 01 files, key-level).**
-- `apps/api/src/modules/platform/jobs/job-registry.ts` (D2): append `'ops.gauges.emit',` as the last `JOB_NAMES` entry.
+- `apps/api/src/modules/platform/jobs/job-registry.ts` (D2): append `'ops.gauges.emit': 'stately', // every minute, keyless: a late tick is never queued twice (F1)` as the last `JOB_POLICIES` entry (R-32, RV-04-F1-2).
 - `apps/api/src/modules/platform/jobs/schedules.ts` (D2), inside `registerSchedules`:
 ```ts
   await boss.schedule('ops.gauges.emit', '* * * * *', {}, { tz, key: 'ops-gauges' });
@@ -3185,7 +2764,7 @@ Refusals that never reach the provider (cooldown, quotas, the daily cap) log nei
 # Runbook: credential rotation
 
 Owner: Dev A. Covers the seven `sanchay/{env}/*` secrets, the PITR restore test (G-E5) and the alarm drill
-(G-E5, Wed 11-18). The examples use prod; dev is the same with `dev` in every name. Every command is one
+(G-E5, Wed 11-18). Prod is the only AWS environment (R-31). Every command is one
 line and runs unchanged in PowerShell 5.1 and Git Bash with your AWS profile for the account selected.
 Replace each `<...>` by hand. Never put a secret value on a command line: write it to a JSON file outside
 the repo with an editor (UTF-8; PowerShell 5.1's `>` writes UTF-16, which `file://` cannot read), use
@@ -3385,9 +2964,9 @@ aws cloudwatch set-alarm-state --alarm-name sanchay-prod-job-queue-age --state-v
 # Runbook: database access and one-off tasks
 
 Owner: Dev A. How the deployed containers and people reach PostgreSQL (D6, R-16, spec §2.4), how to run
-the one-off migrate task, what reference data it loads, and how a stack is bootstrapped. The examples use
-prod; dev is the same with
-`dev` in every name. Every command is one line and runs unchanged in PowerShell 5.1 and Git Bash with
+the one-off migrate task, what reference data it loads, what runs after it before GO-1 (R-33), and how
+the stack moves onto new logins. Prod is the only AWS environment (R-31). Every command is one line and
+runs unchanged in PowerShell 5.1 and Git Bash with
 your AWS profile for the account selected, unless a line says otherwise. Replace each `<...>` by hand.
 
 ## The logins
@@ -3402,8 +2981,9 @@ The migrate task creates the two LOGIN roles and sets their passwords from the t
 (`apps/api/src/db/db-logins.ts`); it refuses a login that has gained any other role or a DDL attribute.
 Ops commands pin the session role with `-c role=sanchay_app` (F7). Nobody logs in as `sanchay_master` by
 hand. A CDK change that replaces `DbAppSecret` (for example a new `generateSecretString`) creates a new
-password: deploy that change paused, run the migrate task, then deploy again without `paused`, or the new
-tasks cannot log in. A password rotation is in [credential rotation](credential-rotation.md).
+password: deploy that change with `-c noTasks=true` ("Move the stack onto new logins", below), run the
+migrate task, then deploy again without it, or the new tasks cannot
+log in. A password rotation is in [credential rotation](credential-rotation.md).
 
 ## Read the stack outputs
 
@@ -3444,9 +3024,10 @@ and `/repo/data`, apps/api/Dockerfile), so a deploy re-seeds whatever the commit
 - E6/E7's `ref_pincodes` and `ref_ifsc` (`data/ref-pincodes.csv`, `data/ref-ifsc.csv`).
 - D8's catalogue reference tables: `amcs`, `sebi_categories`, `category_aliases` and `market_holidays`.
 
-It never loads the curated scheme list, its fund facts or its commission lines (F19's ops command
-`ops:catalogue:seed --pilot-list`, with the G-B10 checks), NAVs (the worker's NAV syncs, D9) or invites
-(F7's `ops:invite`). Check that a template a consent needs is published (E10's public route; `404` while
+It never loads the curated scheme list, its fund facts or its commission lines (F19's seed CLI with
+`--pilot-list`, with the G-B10 checks), NAVs (the worker's NAV syncs, D9), the NAV history (D9's
+backfill) or invites (F7's `ops:invite`); the curated list and the NAV history run on prod after it
+(R-33, below). Check that a template a consent needs is published (E10's public route; `404` while
 its version is DRAFT; same line in both shells):
 
 ```
@@ -3463,6 +3044,74 @@ secret, the same network configuration as the migrate task. Its task role (`OpsT
 bucket or SES access; it may only `ssm:GetParameter` under `/sanchay/prod/invites/`, the SecureString
 parameters (default `aws/ssm` key) that F7's `ops:invite --mobiles-param` reads mobile numbers from. The
 exact `aws ecs run-task --overrides` form is F7's (`docs/runbooks/ops-cli.md`).
+
+## After the migrate task: the curated list, then the NAV history (R-33)
+
+Before GO-1 prod also needs the curated list (G-B10) and the NAV history (FUND-01's 1-, 3- and 5-year
+returns, which E16 computes from `nav_history`). The migrate task loads neither. Both run once, in this
+order, as one-off tasks of `sanchay-prod-ops` ("Ops commands" above): `SANCHAY_APP_ROLE=ops`, login
+`sanchay_app_login` (DML through `sanchay_app`, which is all they need; the seed only inserts into the
+append-only `fund_facts_revisions`), the app subnets and the service security group, whose route to the
+NAT gateway reaches AMFI. Each run overrides only the container's `command`, in `ops-overrides.json`
+written outside the repo in an editor and saved as UTF-8 (PowerShell 5.1's `>` writes UTF-16, which
+`file://` cannot read).
+
+1. **The curated list** (F19's seed CLI; F19 must be deployed). `ops-overrides.json`:
+
+   ```json
+   {"containerOverrides": [{"name": "ops", "command": ["node", "dist/cli/ops-catalogue-seed.js", "--pilot-list"]}]}
+   ```
+
+   It reads the CSVs the deployed image carries (`/repo/data`) and checks them first (40-60 ISINs, no
+   placeholder ISIN, a fact row for every ISIN; on prod the G-B10 checks apply with or without the
+   flag), writing nothing if any check fails; then it upserts the list, its facts and commission lines
+   and runs the publish gate. Pass = exit code `0` and a log whose first line is
+   `Publish gate <date>: n/N curated schemes PUBLISHED`. Exit `1` lists each problem with its file and
+   line: fix the CSVs in the repo, deploy, and run it again. A scheme that still needs FP's flags or a
+   fresh NAV stays DRAFT until the next `catalogue.fp.sync` (07:30 IST, F19) re-runs the gate. A re-run
+   is safe: every write is an upsert, and a fact revision is added only for a changed row.
+
+2. **The NAV history** (D9's backfill), one window per run. `ops-overrides.json`:
+
+   ```json
+   {"containerOverrides": [{"name": "ops", "command": ["node", "dist/cli/ops-nav-backfill.js", "--from", "<yyyy-mm-dd>", "--to", "<yyyy-mm-dd>"]}]}
+   ```
+
+   Dates are ISO (AMFI's history report accepts them, and D9 also uses `--to` as the parser's upper
+   date bound). Pass = exit code `0` and `nav history backfill: <n> row(s) written`, where `<n>` counts
+   the rows AMFI returned for every scheme, not the rows inserted: every insert is
+   `ON CONFLICT DO NOTHING`, so a window can be run again, or overlap another, without writing a row
+   twice, and a failed run is simply repeated.
+   - **Window: at most 7 days with D9 as written.** Its AMFI client stops waiting for the first byte
+     after 10 s (`amfi-client.ts`), and on 2026-10-05 the history report took roughly 0.6 to 1 s per
+     day of range before its first byte (1 day 1.3 s, 7 days 4.0 s, 14 days 9.6 s, a month 31 s,
+     three months 66 s); a June 2026 month failed all three attempts with `UND_ERR_HEADERS_TIMEOUT`.
+     Never use more than one calendar month, even with a longer timeout: a month (about 25 MB and
+     250,000 rows) peaked at 173 MB of heap and 363 MB resident through the fetch, the parse and the
+     inserts, and the ops task has 1 GiB.
+   - **Depth and order:** the latest year first (FUND-01 shows a scheme's returns only once a 1-year
+     return exists, E16's `displayEligible`), then back to a week more than five years before GO-1
+     (the 3- and 5-year rows): about 260 weekly runs and 12 million rows.
+   - **Time:** D9 inserts one row per statement, which took 0.7 ms a row against a local PostgreSQL
+     18.6 (a month, 253,150 rows: 178 s; its re-run, which inserted nothing, 74 s); against Multi-AZ
+     RDS every statement is also a network round trip, and every run is a task start. Expect a day or
+     more of runs: start at least a week before GO-1 and run one window at a time (AMFI is a public
+     site).
+   - The returns appear after the next successful NAV sync (21:30, 23:30, 07:00 or 10:30 IST): D9's
+     sync enqueues E16's `catalogue.returns.compute`, which reads `nav_history`.
+
+Each run (the same lines in PowerShell 5.1 and Git Bash; the first prints the task ARN):
+
+```
+aws ecs run-task --cluster sanchay-prod --launch-type FARGATE --task-definition sanchay-prod-ops --network-configuration "awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}" --overrides file://ops-overrides.json --query "tasks[0].taskArn" --output text
+aws ecs wait tasks-stopped --cluster sanchay-prod --tasks <task arn>
+aws ecs describe-tasks --cluster sanchay-prod --tasks <task arn> --query "tasks[0].containers[0].exitCode" --output text
+```
+
+Read the result line from the log stream `prod/ops/<task-id>` (the task id is the last part of the ARN):
+
+- PowerShell: `aws logs get-log-events --log-group-name /sanchay/prod/app --log-stream-name prod/ops/<task-id> --query "events[].message" --output text`
+- Git Bash: `MSYS_NO_PATHCONV=1 aws logs get-log-events --log-group-name /sanchay/prod/app --log-stream-name prod/ops/<task-id> --query "events[].message" --output text`
 
 ## Read-only SQL over SSM (spec §2.4)
 
@@ -3493,43 +3142,36 @@ psql "host=localhost port=15432 dbname=sanchay user=sanchay_readonly_login sslmo
 Only F7's `app.v_*` views are readable, and the role has no write grant. Sessions also start read-only
 and a statement stops after 60 s (role defaults that protect prod from a mistyped or runaway query).
 
-## Bootstrap a stack (paused deploy)
+## Move the stack onto new logins (0-task deploy)
 
-Use this for the first deploy of a stack and for the deploy that moves an existing stack onto the D6
-logins. `-c paused=true` creates everything with the service at 0 tasks, so no api or worker task starts
-before the images exist and the migrate task has created the logins (E25's `-c firstDeploy=true`, in
-ADR-0014, does the same). Run it from a developer machine with the deploy inputs set; the AWS profile must
-be for the stack's account. The GitHub environment needs the variables `SANCHAY_AWS_ACCOUNT_ID`,
-`SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image prerenders `/site` with both ARN
-values) and `SANCHAY_SMS_RETRIEVER_HASH`, and in prod the secrets `SANCHAY_ALARM_EMAILS` and
-`SANCHAY_ALARM_SMS_NUMBERS`.
+Use this for F1's rollout onto the D6 logins and for a CDK change that replaces `DbAppSecret`. A deploy
+with E25's `-c noTasks=true` changes everything with the service at 0 tasks, so no api or worker task
+starts before the migrate task has created the logins or set the new password. It is not R-31's pause:
+paused prod runs its tasks and keeps investors out with D7's invite gate and RuntimeConfig. The first
+deploy of the stack is ADR-0014's (E25). Run it from a developer machine with the five deploy inputs and
+the AWS profile for the prod account; `<owner>/<repo>` is the repository exactly as its GitHub page
+shows it (IAM compares case).
 
 PowerShell:
 
 ```
-$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<arn>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>'; $env:SANCHAY_ALARM_EMAILS='<email-a>,<email-b>'; $env:SANCHAY_ALARM_SMS_NUMBERS='<e164-a>,<e164-b>'; pnpm --filter=@sanchay/infra exec cdk deploy -c env=prod -c paused=true SanchayMvpStack-prod
+$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<arn>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>'; $env:SANCHAY_ALARM_EMAILS='<email-a>,<email-b>'; $env:SANCHAY_ALARM_SMS_NUMBERS='<e164-a>,<e164-b>'; pnpm --filter=@sanchay/infra exec cdk deploy -c noTasks=true SanchayMvpStack-prod
 ```
 
 Git Bash:
 
 ```
-SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<arn>' SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>' SANCHAY_ALARM_EMAILS='<email-a>,<email-b>' SANCHAY_ALARM_SMS_NUMBERS='<e164-a>,<e164-b>' pnpm --filter=@sanchay/infra exec cdk deploy -c env=prod -c paused=true SanchayMvpStack-prod
+SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<arn>' SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>' SANCHAY_ALARM_EMAILS='<email-a>,<email-b>' SANCHAY_ALARM_SMS_NUMBERS='<e164-a>,<e164-b>' pnpm --filter=@sanchay/infra exec cdk deploy -c noTasks=true SanchayMvpStack-prod
 ```
 
-`<owner>/<repo>` is the repository exactly as its GitHub page shows it (IAM compares case). Dev needs only
-the first three inputs (`-c env=dev ... SanchayMvpStack-dev`). Then:
-
-1. First deploy of a stack only: populate `keyring`, `fp`, `fp-webhook` and `msg91`
-   ([credential rotation](credential-rotation.md), provider steps 1-3), and copy the `GithubDeployRoleArn`
-   output into the GitHub environment variable `SANCHAY_DEPLOY_ROLE_ARN`.
-2. Dispatch `deploy.yml` for the environment. In order it pushes the images, runs the migrate task (which
-   creates the schema on a new database, the two logins and the reference data), deploys without `paused`
-   (the service starts its tasks, logging in as `sanchay_app_login`) and waits for the rollout. A red
-   migrate step stops it before anything starts; read the task's log (above).
+Then dispatch `deploy.yml` for `prod`; a founder approves it. In order it pushes the images, runs the
+migrate task (the two logins and the reference data), deploys without `-c noTasks=true` (the service
+starts its tasks, logging in as `sanchay_app_login`) and waits for the rollout. A red migrate step stops
+it before anything starts; read the task's log (above).
 
 Without `deploy.yml`, do the same by hand: push `<ApiRepoUri>:latest` and `<WebRepoUri>:latest` with the
 `deploy.yml` build step's commands, run the migrate task, run the `cdk deploy` line again without
-`-c paused=true`, then `aws ecs wait services-stable --cluster sanchay-prod --services sanchay-app`.
+`-c noTasks=true`, then `aws ecs wait services-stable --cluster sanchay-prod --services sanchay-app`.
 ````
 
 - [ ] **Step 4: Run tests to confirm they pass**
@@ -3544,46 +3186,36 @@ pnpm --filter=@sanchay/api test ops-gauges db-logins env
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics otp-issue db-logins reference-data
 ```
 Expected:
-- infra typecheck exits 0; infra test: 57 passed (E25's 22, `prod-stack.test.ts` 24, `alarms.test.ts` 11).
+- infra typecheck exits 0; infra test: 41 passed (E25's 24, `prod-stack.test.ts` 8, `alarms.test.ts` 9).
 - api typecheck exits 0; unit: `ops-gauges.job.test.ts` 3, `db-logins.test.ts` 4, `env-roles.test.ts` 8; `env.test.ts` (B2, D3, D6, D7, E1, E2, E20 and E25 cases plus the pin) and `dotenv.test.ts` green.
 - api int: `ops-gauges.int.test.ts` 8, `otp-send-metrics.int.test.ts` 3, `otp-issue.int.test.ts` 14 (unchanged), `db-logins.int.test.ts` 8, `reference-data.int.test.ts` 6.
 
 Synth gate check (no AWS needed: the config is refused before any lookup; same line in both shells):
 ```
-pnpm --filter=@sanchay/infra exec cdk synth -c env=prod
+pnpm --filter=@sanchay/infra exec cdk synth
 ```
-Expected: `StackConfigError: Stack config prod refused:` naming `SANCHAY_PLATFORM_ARN is required` and `SANCHAY_SMS_RETRIEVER_HASH is required` (E25's messages). With those two set, prod is refused for `SANCHAY_GITHUB_REPOSITORY`, `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS`, and dev for the repository only (`prod-stack.test.ts` pins both).
+Expected: `StackConfigError: Stack config prod refused:` naming `SANCHAY_PLATFORM_ARN is required` and `SANCHAY_SMS_RETRIEVER_HASH is required` (E25's messages). With those two set, it is refused for `SANCHAY_GITHUB_REPOSITORY` (E25), `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` (F1; `prod-stack.test.ts` pins the alarm part).
 
-**`SANCHAY_SMS_RETRIEVER_HASH`.** The `api` container gets it only from the GitHub environment variable of the same name (`dev` and `prod` environments), which `deploy.yml` passes to `cdk deploy` and `loadStackConfig` reads. Its value is the line `SANCHAY_SMS_RETRIEVER_HASH (in.sanchay.app): <hash>` that `node scripts/android-cert-info.ts <deployment_cert.der>` prints for the Play App Signing certificate (F18, `docs/runbooks/android-release.md` §3). Until that certificate exists, use the hash of the certificate that signs the builds being tested: any 11 characters from `[A-Za-z0-9+/]` boot the api, and Android auto-read simply does not match a wrong one (OTPs are then typed).
+**`SANCHAY_SMS_RETRIEVER_HASH`.** The `api` container gets it only from the GitHub environment variable of the same name (the `prod` environment), which `deploy.yml` passes to `cdk deploy` and `loadStackConfig` reads. Its value is the line `SANCHAY_SMS_RETRIEVER_HASH (in.sanchay.app): <hash>` that `node scripts/android-cert-info.ts <deployment_cert.der>` prints for the Play App Signing certificate (F18, `docs/runbooks/android-release.md` §3). Until that certificate exists, use the hash of the certificate that signs the builds being tested: any 11 characters from `[A-Za-z0-9+/]` boot the api, and Android auto-read simply does not match a wrong one (OTPs are then typed).
 
-**Roll F1 out to dev (once; manual, owner-authorised).** Dispatching `deploy.yml` before step 2 is harmless: its migrate step runs E25's migrate task definition, which carries no login passwords, so boot invariant 14 stops it and nothing changes.
-1. Check the dev master user (same line in both shells). E25 (RV-02-19) creates it as `sanchay_master`, so F1 keeps the dev database:
-```
-aws rds describe-db-instances --query "DBInstances[].[DBInstanceIdentifier,MasterUsername]" --output table
-```
-   If it shows `sanchay_app` (a stack deployed from E25's text before RV-02-19), step 2 replaces the database, because CloudFormation cannot rename a master user. Snapshot it first: `aws rds create-db-snapshot --db-instance-identifier <dev instance id> --db-snapshot-identifier sanchay-dev-before-f1`.
-2. Paused deploy from a developer machine with the dev profile (the service drops to 0 tasks until step 3):
-   - PowerShell: `$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<arn>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>'; pnpm --filter=@sanchay/infra exec cdk deploy -c env=dev -c paused=true SanchayMvpStack-dev`
-   - Git Bash: `SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<arn>' SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>' pnpm --filter=@sanchay/infra exec cdk deploy -c env=dev -c paused=true SanchayMvpStack-dev`
-3. Dispatch `deploy.yml` for `dev` (same line in both shells): `gh workflow run deploy.yml --ref <branch with F1> -f environment=dev`. It pushes the images, runs the migrate task (the two logins and the reference data), deploys without `paused` and waits for the rollout. The migrate log shows `reference data seeded: …` (`docs/runbooks/db-access.md`, "Run the migrate task").
-4. If step 1 found `sanchay_app`, the rest of the dev data is gone: add the testers again with F7's `ops:invite` (its SSM form), load the curated list with F19's ops command once F19 is in, and let the worker's next NAV syncs (D9) refill `scheme_navs`.
-5. `curl.exe -s -i https://api.dev.sanchay.in/api/v1/health` starts with a `200` status line, and the `Sanchay/dev` metric `workerHeartbeatAgeSeconds` has datapoints (prod step 7's command with `Sanchay/dev`).
-
-**Prod go-live checklist (manual, owner-authorised, before Wed 11-18; not part of `pnpm test`).**
-1. GitHub: create the environment `prod` with both founders as required reviewers; set its variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL`, `SANCHAY_SMS_RETRIEVER_HASH` (the Play App Signing hash, after G-B9) and its secrets `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS`.
-2. Paused first deploy from a developer machine with the prod profile (this stack creates the prod deploy role), with the five inputs (`<owner>/<repo>` exactly as the repository page shows it; IAM compares case):
-   - PowerShell: `$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<arn>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>'; $env:SANCHAY_ALARM_EMAILS='<email-a>,<email-b>'; $env:SANCHAY_ALARM_SMS_NUMBERS='<e164-a>,<e164-b>'; pnpm --filter=@sanchay/infra exec cdk deploy -c env=prod -c paused=true SanchayMvpStack-prod`
-   - Git Bash: `SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<arn>' SANCHAY_SMS_RETRIEVER_HASH='<retriever-hash>' SANCHAY_ALARM_EMAILS='<email-a>,<email-b>' SANCHAY_ALARM_SMS_NUMBERS='<e164-a>,<e164-b>' pnpm --filter=@sanchay/infra exec cdk deploy -c env=prod -c paused=true SanchayMvpStack-prod`
-3. Copy the `GithubDeployRoleArn` output into the `prod` environment variable `SANCHAY_DEPLOY_ROLE_ARN`. Populate `sanchay/prod/{keyring,fp,fp-webhook,msg91}` (credential-rotation runbook, provider steps 1-3; `db-master`, `db-app` and `db-readonly` are generated). Register `NatEipAddress` with Cybrilla (G-B7). Both developers confirm their SNS email subscription; verify both numbers in the SNS SMS sandbox.
-4. Dispatch `deploy.yml` for `prod`, then a founder approves the environment: `gh workflow run deploy.yml --ref main -f environment=prod`. It pushes the images, runs the migrate task (schema, logins, reference data), deploys without `paused` (2 tasks) and waits for the rollout.
-5. `curl.exe -s -i https://app.sanchay.in/api/v1/health` starts with a `200` status line; `curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config` shows `"ordersEnabled":false` and `"sipEnabled":false` (R-06: nothing has written `app_config`; GO-1 and GO-2 flip them with F7's ops CLIs, never in CDK).
-6. Once G-C1's docs commit (`status: PUBLISHED`) has been deployed, `curl.exe -s -i -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/legal/documents/TPL_PURCHASE` starts with a `200` status line (`404` while the version is DRAFT). Then load the curated list with F19's `ops:catalogue:seed --pilot-list`, in F7's deployed form.
-7. Within two minutes the worker's gauges arrive and the heartbeat alarm is OK:
+**Roll F1 out onto the running prod stack (once; manual, owner-authorised).** E25 deployed `SanchayMvpStack-prod` in S2 and it runs, closed to investors (R-31); F1 moves it onto the D6 logins in place. Dispatching `deploy.yml` with F1's code before step 2 is harmless: its migrate step runs E25's migrate task definition, which carries no login passwords, so boot invariant 14 stops it before `cdk deploy`, and the running tasks keep their images.
+1. On the GitHub `prod` environment, add the secrets `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` (both founders); `deploy.yml` passes them, and a deploy without them is refused.
+2. The 0-task deploy from a developer machine with the prod profile and the five inputs (`docs/runbooks/db-access.md`, "Move the stack onto new logins", both shells). The service drops to 0 tasks until step 3 finishes, a few minutes in which `www`, `app` and `api.sanchay.in` answer 503 (prod is closed to investors, R-31), and `sanchay-prod-worker-heartbeat-stale` pages (missing gauges count as breaching) until step 3's worker emits them.
+3. Dispatch `deploy.yml` for `prod` at the ref that carries F1, then a founder approves the environment (same line in both shells): `gh workflow run deploy.yml --ref <ref with F1> -f environment=prod`. It pushes the images, runs the migrate task (the two logins and the reference data), deploys without `-c noTasks=true` (2 tasks, logging in as `sanchay_app_login`) and waits for the rollout. The migrate log shows `db logins synced: …` and `reference data seeded: …` (`docs/runbooks/db-access.md`, "Run the migrate task").
+4. Both founders confirm their SNS email subscription; verify both numbers in the SNS SMS sandbox (owner decision 5).
+5. `curl.exe -s -i https://api.sanchay.in/api/v1/health` starts with a `200` status line, and within two minutes the worker's gauges arrive and the heartbeat alarm is OK:
 ```
 aws cloudwatch get-metric-statistics --namespace Sanchay/prod --metric-name workerHeartbeatAgeSeconds --start-time <10 min ago, ISO 8601> --end-time <now, ISO 8601> --period 60 --statistics Maximum
 aws cloudwatch describe-alarms --alarm-names sanchay-prod-worker-heartbeat-stale --query "MetricAlarms[0].StateValue" --output text
 ```
-8. Run the PITR restore test and the alarm drill (credential-rotation runbook); record both in the G-E5 evidence.
+
+**Prod go-live checklist (manual, owner-authorised, before Wed 11-18; not part of `pnpm test`).** E25 created the stack, the GitHub `prod` environment with both founders as required reviewers, its variables and the deploy role, and registered `NatEipAddress` with Cybrilla (ADR-0014); F1 adds the rest.
+1. Cybrilla's production credentials replace E25's placeholder in `sanchay/prod/fp` when they arrive (R-21: by Mon 11-16; credential-rotation runbook, provider steps 1-6), and the `prod` environment variable `SANCHAY_SMS_RETRIEVER_HASH` becomes the Play App Signing hash after G-B9 (the api container gets it at the next deploy).
+2. Roll F1 out (above).
+3. `curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config` shows `"ordersEnabled":false` and `"sipEnabled":false` (R-06, R-31: nothing has written `app_config`; GO-1 and GO-2 flip them with F7's ops CLIs, never in CDK). Before GO-1 only the founders' test accounts are invited (F7's `ops:invite`, SSM form).
+4. Once G-C1's docs commit (`status: PUBLISHED`) has been deployed, `curl.exe -s -i -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/legal/documents/TPL_PURCHASE` starts with a `200` status line (`404` while the version is DRAFT).
+5. R-33, once F19 is deployed and before GO-1 (Fri 11-27): load the curated list, then the NAV history (`docs/runbooks/db-access.md`, "After the migrate task: the curated list, then the NAV history"). The backfill is many runs; start it at least a week before GO-1.
+6. Run the PITR restore test and the alarm drill (credential-rotation runbook); record both in the G-E5 evidence.
 
 - [ ] **Step 5: Commit**
 
@@ -3596,8 +3228,8 @@ pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test ops-gauges db-logins env
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics otp-issue db-logins reference-data
 pnpm lint
-git add infra/lib/config.ts infra/lib/alarms.ts infra/lib/sanchay-mvp-stack.ts infra/bin/sanchay.ts infra/test/stack-fixtures.ts infra/test/prod-stack.test.ts infra/test/alarms.test.ts infra/test/sanchay-mvp-stack.test.ts .github/workflows/deploy.yml apps/api/Dockerfile apps/api/src/db/db-logins.ts apps/api/src/db/db-logins.test.ts apps/api/src/cli/migrate.ts apps/api/src/cli/reference-data.ts apps/api/src/cli/ops-legal-seed.ts apps/api/src/cli/ops-ref-seed.ts apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/config/env-roles.test.ts apps/api/src/modules/platform/ops-gauges.job.ts apps/api/src/modules/platform/ops-gauges.job.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/identity/otp.service.ts apps/api/test/int/db-logins.int.test.ts apps/api/test/int/reference-data.int.test.ts apps/api/test/int/ops-gauges.int.test.ts apps/api/test/int/otp-send-metrics.int.test.ts apps/api/package.json package.json docs/runbooks/credential-rotation.md docs/runbooks/db-access.md
-git commit -m "feat(infra): prod stack, D6 database logins, deploy-time reference data, ops gauges and the 10-alarm SNS topic (F1)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add infra/lib/config.ts infra/lib/alarms.ts infra/lib/sanchay-mvp-stack.ts infra/test/stack-fixtures.ts infra/test/prod-stack.test.ts infra/test/alarms.test.ts infra/test/sanchay-mvp-stack.test.ts .github/workflows/deploy.yml apps/api/Dockerfile apps/api/src/db/db-logins.ts apps/api/src/db/db-logins.test.ts apps/api/src/cli/migrate.ts apps/api/src/cli/reference-data.ts apps/api/src/cli/ops-legal-seed.ts apps/api/src/cli/ops-ref-seed.ts apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/config/env-roles.test.ts apps/api/src/modules/platform/ops-gauges.job.ts apps/api/src/modules/platform/ops-gauges.job.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/identity/otp.service.ts apps/api/test/int/db-logins.int.test.ts apps/api/test/int/reference-data.int.test.ts apps/api/test/int/ops-gauges.int.test.ts apps/api/test/int/otp-send-metrics.int.test.ts apps/api/package.json package.json docs/runbooks/credential-rotation.md docs/runbooks/db-access.md
+git commit -m "feat(infra): harden the prod stack: D6 database logins, deploy-time reference data, ops task, gauges and the 10-alarm SNS topic (F1)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fake recipients in `stack-fixtures.ts` are `example.com` addresses and reserved-looking test numbers, and the test-only master password matches the existing `sanchay_(local|test)_only` allowlist; if gitleaks still flags a line, add a narrow regex for that exact value to `.gitleaks.toml` in this commit.
 
@@ -3608,13 +3240,14 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fak
 - **Ran (the compiled migrate CLI end to end).** `nest build`, then `node dist/cli/migrate.js` against PostgreSQL 18.6 with `SANCHAY_APP_ROLE=migrate` and both passwords: `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login`, `reference data seeded: 30 legal documents, 8 pincodes, 5 IFSC codes, catalogue reference tables` (8 AMCs, 40 categories, 18 aliases, 22 holidays, 0 schemes). A second run printed the same; role `api` only migrated; `sanchay_app_login` logged in; a changed text for a PUBLISHED version exited 1 with `LegalSeedError`. `dist/cli` resolves `docs/legal` and `data` from the repo root, which is `/repo` in the image. Both seed CLIs run their main block when started directly and nothing when imported. E3's and E6's `--experimental-strip-types` scripts fail with `ERR_MODULE_NOT_FOUND` (reproduced).
 - **Ran in round 1, unchanged since:** `db-logins.int.test.ts` 8/8 (pg-boss 12.34.0 from its tarball, D2's pgboss bootstrap and `0005` grants emulated); `db-logins.test.ts` 4/4 with the RFC 7677 known answer; `otp-send-metrics.int.test.ts` 2 failed then 3/3; the gauge query on every scenario of `ops-gauges.int.test.ts`, including a blocked pg-boss job.
 - **Re-checked 2026-10-05 (RV-04-F1-1), after Plan 02 RV-02-59, RV-02-61, RV-02-62 and RV-02-63 amended E25:** F1's infra fragments applied to the amended E25 matched every anchor once; `tsc` exits 0 and the infra suite passes 57/57 (E25's 22, 24, 11); the Step 2 shape gives E25's file 21 passed, 1 failed; and the workflow F1 now produces is identical to the one before apart from two comments (js-yaml parse, `bash -n` on every `run:` block).
+- **Re-checked 2026-10-05 for R-31 and R-33 (RV-04-F1-3, RV-04-F1-4):** F1's Step 1 files and Step 3 fragments were applied by script to E25 as extracted from the reworked Plan 02 (every anchor matched once). `tsc` exits 0, the infra suite passes 41/41 (E25's 24, 8, 9), and `biome ci` is clean after one `biome check --write` (it only rewraps `StaticConfig`'s `Omit`). With F1's tests on E25's code alone (Step 2), `alarms.test.ts` fails to load, `prod-stack.test.ts` fails 8 of 8 and E25's file passes 23 of 24. The compiled `bin/sanchay.ts`, run the way the CDK CLI runs it, refuses a synth without the ARN and the hash, then without the repository and the two alarm lists, and with all five inputs synthesises 10 alarms, 1 topic and 2 tasks (0 with `-c noTasks=true`) and a deploy role that trusts exactly `repo:<owner>/<repo>:environment:prod`. In the synthesised template the app subnets route `0.0.0.0/0` to the NAT gateway and the service security group allows all egress, so an ops task reaches AMFI. R-33's runs were checked against the plans (D9's `ops-nav-backfill.ts`; F19's entry point under `import.meta.main`, which Node 24.21.0 sets only for the file it starts; F7's `ops` role; `0003_grants`' default privileges; D8's one append-only catalogue table) and against AMFI and a local PostgreSQL 18.6 (the numbers are in `db-access.md`). Not run: any AWS deploy, the ops task itself, or the api code inside a container.
 - **Not run:** the api image build with the `COPY docs/legal` line (the Plans 02-03 code it compiles is not in the repo; the paths were checked by URL resolution and by the compiled run); `cdk synth` through the real CLI (aws-cdk 2.1143.0 is not in the scratch package); `ops-gauges.int.test.ts` and `ops-gauges.job.ts` inside a booted D2 worker; `deploy.yml` on GitHub; any AWS deploy, SNS delivery or SSM session.
 
 **Open questions.**
 1. **Owner (with F7's open question 2):** `money-invariant-breach` stays in ALARM while any CRITICAL break is open, so a break nobody can resolve (no CLI resolves non-invariant breaks) masks the next one. An `ops:resolve-break` with two founders would close this.
 2. **Owner:** SNS SMS to Indian numbers needs the account out of the SNS SMS sandbox (or both numbers verified in it) and a sender ID with DLT registration for SNS; without them the SMS half of the alarms does not arrive (G-E5 drill, step 5).
-3. **Assembler:** until F1 is deployed, no deployed database gets its reference data: E25's migrate task only migrates. Any dev demo before F1 that needs published legal documents or catalogue data (Plan 03's 11-06 lumpsum demo) must run locally or seed dev by hand.
-4. **Assembler:** D9's `ops:nav-backfill` and E15's `ops:facts:import` are still local-only scripts with no deployed run form; the deployed databases get NAV history only from the scheduled syncs.
+3. **Assembler:** until F1 is deployed, prod gets no reference data: E25's migrate task only migrates. Every demo before F1 that needs published legal documents or catalogue data (Plan 03's 11-06 lumpsum demo) runs locally (R-31: there is no dev stack to seed).
+4. **Lead (R-33, Plan 02 D9):** D9's backfill now has a deployed run form (`db-access.md`, "After the migrate task"), but as written five years of history take about 260 weekly runs: its AMFI client gives up after 10 s while AMFI's history report needs roughly 0.6 to 1 s per day of range before its first byte, and it inserts one row per statement (on a local PostgreSQL 18.6, 1,000-row inserts loaded a 277,439-row month in 16 s; D9's loop took 178 s for a 253,150-row one). Nothing appends the daily NAV to `nav_history` either (`nav.sync.daily` writes `scheme_navs` only), so after the backfill E16's returns are computed against a frozen last history date. Proposed for D9: a history timeout of a few minutes, month-sized chunks inside one run, multi-row inserts that report the rows actually inserted, and a `nav_history` insert in the daily sync. E15's `ops:facts:import` is still local-only.
 
 ---
 
@@ -3671,7 +3304,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fak
     - `plans.sip.submit` (`{challengeId, subjectIds}`)
     - `plans.sip.advance` (`{planId, challengeId}`)
     - `plans.instalments.sync` (`{}`)
-  - Schedules: `mandates.poll` PENDING at `*/10`, APPROVED at `30 7 * * *`; `plans.instalments.sync` at `30 8` and `30 20`.
+  - Schedules: `mandates.poll` PENDING at `*/10`, APPROVED at `30 7 * * *`; `plans.instalments.sync` at `30 8` and `30 20`. Both `mandates.poll` schedules fire at 07:30 and the queue is `stately`, so each tick carries its scope as `singletonKey`; keyless, one of the two would be dropped (R-32, RV-04-F2-5).
 - **One challenge per SIP; the saga window comes from the subject type** (E4 `needsNewMandateWindow`):
   - **New mandate:** subject type `MANDATE_REGISTRATION` (subjects: the plan and the mandate; template `TPL_MANDATE_REGISTRATION`; 7-day saga).
   - **Reused mandate:** subject type `SIP_REGISTRATION` (subject: the plan; template `TPL_SIP_REGISTRATION`; 60-minute saga).
@@ -3902,6 +3535,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id'; // Jobs.enqueue resolves a job id, or null when the queue's policy refused the send (R-32)
   });
   await setSipEnabled(t, true);
 });
@@ -4759,11 +4393,14 @@ export class MandatesService {
   async authorize(investorId: string, mandateId: string): Promise<{ ok: true }> {
     const row = await this.get(investorId, mandateId);
     if (row.status !== 'AUTH_PENDING' || row.consentChallengeId === null) throw new AppError('MANDATE_STATE_INVALID');
+    // Keyed like approve's job, by the mandate's challenge: mandates.submit is exclusive (R-32, RV-04-F2-5), so a
+    // re-authorise is refused (null) while that challenge's job is queued, retrying or running, and the job in
+    // flight mints the intent.
     await this.jobs.enqueue(
       this.dbh.db,
       'mandates.submit',
       { challengeId: row.consentChallengeId, subjectIds: [row.id], reauthorise: true },
-      { singletonKey: `mandate-auth:${row.id}` },
+      { singletonKey: row.consentChallengeId },
     );
     return { ok: true };
   }
@@ -5895,11 +5532,19 @@ export class PlansModule {
 ```
 
 Key-level edits:
-- `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'mandates.submit'`, `'mandates.poll'`, `'plans.sip.submit'`, `'plans.sip.advance'`, `'plans.instalments.sync'` to `JOB_NAMES`.
+- `apps/api/src/modules/platform/jobs/job-registry.ts`: append to `JOB_POLICIES` (R-32, RV-04-F2-5):
+```ts
+  'mandates.submit': 'exclusive', // key: the mandate's challenge id (approve, re-authorise); creates and authorises the mandate (F2)
+  'mandates.poll': 'stately', // keyed by scope (PENDING, APPROVED): its two schedules both fire at 07:30 (F2)
+  'plans.sip.submit': 'exclusive', // key: the challenge id (approve) or the plan id (mandates.poll), never both; POSTs the plan (F2)
+  'plans.sip.advance': 'stately', // key: the plan id; polls FP and re-enqueues itself (F2, F7, F28)
+  'plans.instalments.sync': 'stately', // twice a day, keyless (F2)
+```
 - `apps/api/src/modules/platform/jobs/schedules.ts` (inside `registerSchedules`):
 ```ts
-  await boss.schedule('mandates.poll', '*/10 * * * *', { scope: 'PENDING' }, { tz, key: 'mandates-poll-pending' });
-  await boss.schedule('mandates.poll', '30 7 * * *', { scope: 'APPROVED' }, { tz, key: 'mandates-poll-approved' });
+  // Both fire at 07:30 on a stately queue (R-32): keyless ticks share one slot, so each is keyed by its scope.
+  await boss.schedule('mandates.poll', '*/10 * * * *', { scope: 'PENDING' }, { tz, key: 'mandates-poll-pending', singletonKey: 'PENDING' });
+  await boss.schedule('mandates.poll', '30 7 * * *', { scope: 'APPROVED' }, { tz, key: 'mandates-poll-approved', singletonKey: 'APPROVED' });
   await boss.schedule('plans.instalments.sync', '30 8 * * *', {}, { tz, key: 'plans-instalments-morning' });
   await boss.schedule('plans.instalments.sync', '30 20 * * *', {}, { tz, key: 'plans-instalments-evening' });
 ```
@@ -6054,6 +5699,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
   await setSipEnabled(t, true);
 });
@@ -6352,7 +5998,7 @@ git commit -m "feat(api): eNACH mandate rail and limit ladder (F3, T6)" -m "Co-A
 - **Modify (api):** `apps/api/src/modules/portfolio/folios.schema.ts` (E20; the spec §2.3 columns), `apps/api/src/modules/orders/orders.schema.ts` (E20; `stamp_duty`, `units_source`, `units_pending_since`), `apps/api/src/modules/payments/fp-events.ts` (E21; the `mf_purchase` handler delegates to `PurchaseSettlement`), `apps/api/src/modules/payments/payments.module.ts` (E21; import `PortfolioModule`, register the new handler), `apps/api/test/int/payments.int.test.ts` (E21; its `mf_purchase` test now expects SETTLED and a lot)
 - **Modify (F2):** `apps/api/src/modules/plans/instalments-sync.job.ts` (instalments move past PROCESSING only through `PurchaseSettlement`), `apps/api/src/modules/plans/plans.module.ts` (import `PortfolioModule`), `apps/api/test/int/sip-mandate.int.test.ts` (one new instalment test)
 - **Modify (FakeFp, D4):** `apps/api/src/integrations/fp/fake/fake-fp.state.ts`, `apps/api/src/integrations/fp/fake/fake-fp.ts`
-- **Modify (kernel):** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'folio.sync'`, `'orders.units.reconcile'`), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/modules/platform/ids.ts` (append four table names), `apps/api/src/app.module.ts` (`PortfolioModule.forRoot(env)`)
+- **Modify (kernel):** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'folio.sync': 'stately'`, `'orders.units.reconcile': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/modules/platform/ids.ts` (append four table names), `apps/api/src/app.module.ts` (`PortfolioModule.forRoot(env)`)
 - **Modify (module identity, RV-04-F4-2):** `apps/api/src/bootstrap.ts` (Plan 01; export `NEST_APP_OPTIONS` and use it in `createApp`), `apps/api/test/int/app.ts` (Plan 01; `bootTestApp` passes it), `apps/api/src/modules/platform/jobs/worker.main.ts` (D2; `runWorker` passes it)
 
 **Interfaces:**
@@ -7189,7 +6835,7 @@ const ALLOTMENT = {
 
 beforeAll(async () => {
   t = await bootFpTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined); // nothing races the pg-boss worker
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id'); // nothing races the pg-boss worker
   investor = await seedInvestableInvestor(t);
   flexi = await seedScheme(t);
   elss = await seedElssScheme(t);
@@ -7598,7 +7244,7 @@ const ALLOTMENT = {
 
 beforeAll(async () => {
   t = await bootFpTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   investor = await seedInvestableInvestor(t);
   scheme = await seedScheme(t);
 });
@@ -9513,7 +9159,11 @@ function holdingsFolioPayload(f: StoredFolio, asOn: string): Record<string, unkn
 ```
 
 Key-level edits:
-- `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'folio.sync'`, `'orders.units.reconcile'` to `JOB_NAMES`.
+- `apps/api/src/modules/platform/jobs/job-registry.ts`: append to `JOB_POLICIES` (R-32, RV-04-F4-4):
+```ts
+  'folio.sync': 'stately', // key: the folio id (F5's refresh); the 05:00 sweep of every folio is keyless (F4)
+  'orders.units.reconcile': 'stately', // every 2 hours, keyless (F4)
+```
 - `apps/api/src/modules/platform/jobs/schedules.ts` (inside `registerSchedules`):
   ```ts
   await boss.schedule('folio.sync', '0 5 * * *', {}, { tz, key: 'folio-sync' });
@@ -11025,7 +10675,7 @@ Continues "Task F5 … PART 1 OF 2 (domain rules)" above: it builds on part 1's 
 - **Modify (F4):** `apps/api/src/modules/portfolio/units-reconcile.job.ts` (sweeps redemptions too), `apps/api/src/modules/portfolio/portfolio.module.ts` (`RedemptionSettlement`)
 - **Modify (D3):** `apps/api/src/integrations/fp/fp-transact.ts` (`createRedemption`/`updateRedemption` bodies)
 - **Modify (D4):** `apps/api/src/integrations/fp/fake/fake-fp.state.ts`, `apps/api/src/integrations/fp/fake/fake-fp.ts` (redemption routes, `advanceRedemption`; the routes use F2's `fpError` helper)
-- **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (three names), `apps/api/src/modules/platform/jobs/schedules.ts` (`payout.watch`)
+- **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (three `JOB_POLICIES` entries, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (`payout.watch`)
 - **Not modified:** `ERROR_CATALOGUE` and `messageForError` (every code F5 throws is Plan 01's or E20's), `ids.ts` (F4 added `redemption_reservations`), `ConsentEngine` (the decided Plan 03 E3/E4 fix supplies what F5 consumes; see Prerequisites).
 
 **Interfaces (part 2):**
@@ -11523,6 +11173,7 @@ beforeAll(async () => {
   t.clock.set(NOW);
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data, opts) => {
     enqueued.push({ name, data, opts });
+    return 'job-id';
   });
   await t.db.db.delete(marketHolidays);
   await setOrdersEnabled(true);
@@ -13328,8 +12979,9 @@ export class RedemptionService {
     });
   }
 
-  private refresh(exec: DbExecutor, folioId: string): Promise<void> {
-    return this.jobs.enqueue(exec, 'folio.sync', { folioId }, { singletonKey: folioId });
+  private async refresh(exec: DbExecutor, folioId: string): Promise<void> {
+    // Stately (R-32, RV-04-F5-1): a refresh already queued for this folio absorbs this one (enqueue returns null).
+    await this.jobs.enqueue(exec, 'folio.sync', { folioId }, { singletonKey: folioId });
   }
 
   /**
@@ -13812,8 +13464,8 @@ export class RedemptionAdvanceJob {
     }
   }
 
-  private requeue(orderId: string, challengeId: string): Promise<void> {
-    return this.jobs.enqueue(
+  private async requeue(orderId: string, challengeId: string): Promise<void> {
+    await this.jobs.enqueue(
       this.dbh.db,
       'orders.redemption.advance',
       { orderId, challengeId },
@@ -14226,14 +13878,14 @@ SNAPSHOT_BUILDERS.REDEMPTION = redemptionSnapshotBuilder;
   onModuleInit(): void {
     registerFpEventHandler(
       'mf_redemption',
-      mfRedemptionEventHandler(this.redemptions, (orderId, challengeId) =>
-        this.jobs.enqueue(
+      mfRedemptionEventHandler(this.redemptions, async (orderId, challengeId) => {
+        await this.jobs.enqueue(
           this.dbh.db,
           'orders.redemption.advance',
           { orderId, challengeId },
           { singletonKey: orderId },
-        ),
-      ),
+        );
+      }),
     );
   }
 ```
@@ -14460,7 +14112,12 @@ function redemptionPayload(r: StoredRedemption): Record<string, unknown> {
 A scripted `timeout` on `redemption.create` still stores the object (D4's `handle` routes first), so F7's LOOKUP-ADOPT can find it.
 
 Key-level edits:
-- `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'orders.redemption.submit'`, `'orders.redemption.advance'`, `'payout.watch'` to `JOB_NAMES`.
+- `apps/api/src/modules/platform/jobs/job-registry.ts`: append to `JOB_POLICIES` (R-32, RV-04-F5-1):
+```ts
+  'orders.redemption.submit': 'exclusive', // key: the challenge id (approve, F7's backstop); POSTs the redemption (F5)
+  'orders.redemption.advance': 'stately', // key: the order id; polls FP and re-enqueues itself (F5, F7)
+  'payout.watch': 'stately', // daily, keyless (F5)
+```
 - `apps/api/src/modules/platform/jobs/schedules.ts` (inside `registerSchedules`):
   ```ts
   await boss.schedule('payout.watch', '0 10 * * *', {}, { tz, key: 'payout-watch' });
@@ -15802,7 +15459,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
 - **Create (docs):** `docs/runbooks/ops-cli.md`
 - **Create (migrations):** `0032_ops_refund_ref` (generated: two `payment_attempts` columns and one check) and `0033_ops_views` (custom: six views and their `sanchay_readonly` grant)
 - **Modify (Plan 01):** `apps/api/src/config/env.ts` (`SANCHAY_APP_ROLE` gains `ops`), `apps/api/src/config/env.test.ts` (one case), `apps/api/src/main.ts` (the `ops` branch), `apps/api/src/modules/platform/audit.service.ts` (`AUDIT_DATA_ALLOWLIST` gains `approver2`, `refundRef`, `payoutRef`; Plan 01's `audit.int.test.ts` needs no edit, because Plan 02 D7, the first task that appends, relaxed its pins to `expect.arrayContaining`, FR-10), `apps/api/package.json` and root `package.json` (six `ops:*` scripts added; D7's `ops:invite` and D9's `ops:nav-release` repointed at the runner)
-- **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'integrity.invariants'`, `'recon.fp.daily'`), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/app.module.ts` (`ReconModule.forRoot(env)`)
+- **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'integrity.invariants': 'stately'`, `'recon.fp.daily': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/app.module.ts` (`ReconModule.forRoot(env)`)
 - **Modify (D4, as F2/F4/F5 left it):** `apps/api/src/integrations/fp/fake/fake-fp.ts` (`purchase.list` filters on `mf_investment_account`, as FP does)
 - **Modify (E20, as F5 left it):** `apps/api/src/modules/orders/reconcile-nonfinal.job.ts` (`fp.reconcile.nonfinal` gains the redemption saga backstop, LOOKUP-ADOPT for redemptions, and the plan and mandate branches)
 - **Modify (F5):** `apps/api/test/int/redemption.int.test.ts` (one test: a RECONCILING redemption is now adopted back into review instead of being left alone)
@@ -16713,7 +16370,7 @@ const ALLOTMENT = {
 
 beforeAll(async () => {
   t = await bootFpTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined); // nothing races the pg-boss worker
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id'); // nothing races the pg-boss worker
   investor = await seedInvestableInvestor(t);
   other = await seedInvestableInvestor(t);
 });
@@ -16993,6 +16650,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data, opts) => {
     enqueued.push({ name, data, opts });
+    return 'job-id';
   });
   investor = await seedInvestableInvestor(t);
   scheme = await seedScheme(t);
@@ -17521,6 +17179,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data, opts) => {
     enqueued.push({ name, data, opts });
+    return 'job-id';
   });
   // What runOpsCli hands a command, from this app (the FakeClock, the spied Jobs); only the role differs.
   ctx = opsContextOf(t.app);
@@ -17598,9 +17257,8 @@ describe('ops:sync (spec §4.6: read and re-fetch only)', () => {
       .set({ status: 'RECONCILING', fpOrderId: null })
       .where(eq(orders.id, seeded.orderId));
     await opsSync(ctx, ['--order', seeded.orderId, '--by', 'ops.anita']);
-    expect(enqueued).toEqual([
-      { name: 'fp.reconcile.nonfinal', data: {}, opts: { singletonKey: 'ops-sync:nonfinal' } },
-    ]);
+    // Keyless, like its */5 schedule (R-32): the stately queue runs one sweep at a time.
+    expect(enqueued).toEqual([{ name: 'fp.reconcile.nonfinal', data: {}, opts: undefined }]);
     expect(await statusOf(seeded.orderId)).toBe('RECONCILING');
   });
 
@@ -18712,12 +18370,9 @@ export const opsSync: OpsCommand = async (ctx, argv) => {
 
   if (order.status === 'RECONCILING') {
     await ctx.db.transaction(async (tx) => {
-      await ctx.jobs.enqueue(
-        tx,
-        'fp.reconcile.nonfinal',
-        {},
-        { singletonKey: 'ops-sync:nonfinal' },
-      );
+      // Keyless, like the */5 schedule: the queue is stately, so a sweep already queued absorbs this one
+      // (enqueue returns null) and two sweeps never run side by side (R-32, RV-04-F7-2).
+      await ctx.jobs.enqueue(tx, 'fp.reconcile.nonfinal', {});
       await ctx.audit.record(tx, {
         action: OPS_AUDIT_ACTIONS.OPS_SYNC_REQUESTED,
         actorType: 'ADMIN',
@@ -20684,7 +20339,11 @@ export class ReconcileNonfinalJob {
 ```
 
 Key-level edits:
-- `apps/api/src/modules/platform/jobs/job-registry.ts` (D2): append `'integrity.invariants'`, `'recon.fp.daily'` to `JOB_NAMES`.
+- `apps/api/src/modules/platform/jobs/job-registry.ts` (D2): append to `JOB_POLICIES` (R-32, RV-04-F7-2):
+```ts
+  'integrity.invariants': 'stately', // hourly, keyless (F7)
+  'recon.fp.daily': 'stately', // daily, keyless (F7)
+```
 - `apps/api/src/modules/platform/jobs/schedules.ts` (D2; inside `registerSchedules`):
   ```ts
   await boss.schedule('integrity.invariants', '5 * * * *', {}, { tz, key: 'integrity-invariants' });
@@ -20774,7 +20433,7 @@ The `actor_id` is `--by`, or `--approver1` for a two-founder command.
 | Investor or AMC confirms a redemption payout reached the bank (FP has no `bank_credit_reference`) | `ops:payout-ref` with two founders; `payout.watch` credits it on its next run. |
 | A quarantined NAV, after checking the AMFI file | `ops:nav-release` with two founders. |
 | GO-2 decided, or SIPs must pause | `ops:sip-switch --on` (two founders) or `ops:sip-switch --off` (one operator). |
-| Pilot invitees from the PO's list (G-B11), or the founders' own numbers before the canary | "Inviting pilot investors" below: put the list in an SSM SecureString, run `ops:invite --mobiles-param /sanchay/{env}/invites/<name> --by <handle> --note <list name>`, then delete the parameter. |
+| Pilot invitees from the PO's list (G-B11; only after the GO-1 decision, R-31), or the founders' own numbers before the canary | "Inviting pilot investors" below: put the list in an SSM SecureString, run `ops:invite --mobiles-param /sanchay/{env}/invites/<name> --by <handle> --note <list name>`, then delete the parameter. |
 
 ## Running a command locally
 
@@ -20816,9 +20475,8 @@ FP-webhook or MSG91 secret. Its task role may read only the SSM parameters under
 `/sanchay/{env}/invites/`.
 
 Never run an ops command on the migrate task definition `sanchay-{env}-migrate`, because it logs in as the
-RDS master `sanchay_master`. Other runbooks copy this form and change only the `command` array. The
-commands below are for prod; for dev use `sanchay-dev`, `sanchay-dev-ops`, `SanchayMvpStack-dev`,
-`/sanchay/dev/app` and the stream prefix `dev`.
+RDS master `sanchay_master`. Other runbooks copy this form and change only the `command` array. Prod is
+the only deployed environment (R-31; RV-04-F7-3), so the commands below name it.
 
 1. Read the stack outputs once (`AppSubnetIds`, `ServiceSecurityGroupId`; `OpsTaskDefinitionArn` names the
    ops task definition's current revision, which is what `--task-definition sanchay-prod-ops` runs):
@@ -22062,7 +21720,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 - **Prerequisites:** runs after F10 and F11 (D2 order: … F5, F7, F10, F11, F8, F9 …). The classification case names `plans.quoteSip` (F10) and the four `portfolio.*` procedures (F11), and the sweep calls `expectBola(t, 'portfolio.holding', …)` (E4's `routeOf` throws for a key missing from the contract) and the `/api/v1/portfolio/*` routes, so in numeric order (F9 before F10 and F11) Step 4 could not pass. Also: F8 (`listRoutes`); every task that creates an I/IP/IX procedure up to F11: E4 (consents), E6/E7/E10/E14 (the public-data path procedures below), E8/E9 (session-scoped `expectBola` registrations), E20 (orders), E21 (payments), E22 (`orders.quotePurchase`), F2/F3 (plans, mandates), F5 (redemption), F10 (`plans.quoteSip`), F11 (portfolio); F4's RV-04-F4-2 (D1: `NEST_APP_OPTIONS` in `bootTestApp`, without which no test app boots). Nothing here uses F6 (skipped, D2). F28 (`plans.cancel`) runs after F9 and registers itself with a key-level edit to this task's meta-test (D2; see "Rule for later tasks"); F9 does not pre-register it.
 - **Consumes (F8):** `listRoutes`, `type AppRoute`, `type HttpMethod` (`test/int/security/routes.ts`).
 - **Consumes (Plan 01):** `contract` (`@sanchay/contract`); `bootTestApp`, `type TestApp` (B18); `webHeaders` (`test/int/http.ts`, E2's version); `isContractProcedure`, `fallbackContractConfig` (`@orpc/contract`); `toNestPattern` (`@orpc/nest`, the function `@Implement` itself uses to register a contract path).
-- **Consumes (Plan 02, as written):** `bootFpTestApp`, `type FpTestApp` (D4); `appConfig` (D1, `kernel.schema.ts`); `Jobs` (D2, `Jobs.enqueue(...): Promise<void>`).
+- **Consumes (Plan 02, as written):** `bootFpTestApp`, `type FpTestApp` (D4); `appConfig` (D1, `kernel.schema.ts`); `Jobs` (D2, `Jobs.enqueue(...): Promise<string | null>`; the stub below resolves a job id).
 - **Consumes (Plan 03, as written):** `expectBola(app, procedureKey, foreignIdArgs)` (E4, `test/int/bola.ts`; it signs in a fresh investor with `signInWeb`, from `FLOW_IP`); `consentChallenges` (E3); `PurchaseService.createPurchase`, `orders` (with `folioId`, `type`, `status`), `seedInvestableInvestor` (E20; signs in through E11's `seedReadyInvestor`, from `FLOW_IP`); `ReadyInvestor.cookies`/`.bankId`/`.mobile`/`.investorId` (E11). Four procedures behind a session (no `@Public()`) whose path parameter is public reference data: `ref.pincode` GET `/ref/pincode/{pincode}` (E6), `ref.ifsc` GET `/ref/ifsc/{ifsc}` (E7), `legal.getDocument` GET `/legal/documents/{key}` (E10), `catalogue.getScheme` GET `/catalogue/schemes/{slug}` (E14).
 - **Consumes (Plan 04):** `SipService.createSip({…, rail})`, `seedSipInvestor`, `seedSipScheme`, `setSipEnabled` (F2, `rail` from F3); `settledPurchase`, `type Investor` (F4, `test/int/ledger-seed.ts`); the F5 procedures `orders.quoteRedemption` (POST `/orders/redemptions/quote`, `RedemptionTargetSchema = {folioId, isin}`) and `orders.createRedemption` (POST `/orders/redemptions`, `CreateRedemptionInputSchema = {folioId, isin, mode, amount?}`, ownership checked first; the sweep sends `mode: 'AMOUNT'` with an amount, as F5's own BOLA case does, so it does not depend on the ALL path); the F10 procedure `plans.quoteSip` (POST `/plans/sips/quote`, catalogue `schemeId` only); the F11 procedures `portfolio.summary`, `portfolio.holdings`, `portfolio.allocation` (GET, no input) and `portfolio.holding` (GET `/portfolio/holdings/{folioId}/{isin}`, 404 on foreign/unknown).
 - **Produces:**
@@ -22437,7 +22095,7 @@ let holding: { orderId: string; folioId: string };
 
 beforeAll(async () => {
   t = await bootFpTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   await t.db.db
     .insert(appConfig)
     .values({ key: 'orders.enabled', value: true })
@@ -23062,7 +22720,7 @@ const NOW = '2026-10-16T04:30:00.000Z';
 
 beforeAll(async () => {
   t = await bootTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   await setSipEnabled(t, true);
   // The dates below assume no market holidays unless a test inserts one.
   await t.db.db.delete(marketHolidays);
@@ -24500,7 +24158,7 @@ async function redemptionDraft(
 
 beforeAll(async () => {
   t = await bootFpTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   q = t.app.get(PortfolioQueries);
   investor = await seedInvestableInvestor(t);
   flexi = await seedScheme(t);
@@ -26792,7 +26450,7 @@ let investor: Awaited<ReturnType<typeof seedSipInvestor>>;
 
 beforeAll(async () => {
   t = await bootTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   await setSipEnabled(t, true);
   investor = await seedSipInvestor(t);
 });
@@ -34627,14 +34285,14 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
   - `docs/runbooks/android-release.md`: the S: build, signing, fingerprints, SMS hash, upload, and the G-E6 device evidence list (F25 collects it).
   - New build-time variable `SANCHAY_ANDROID_VERSION_CODE` (read by `app.config.ts` on the build host only; no runtime container).
 - **Rules pinned here** (MVP spec §1.4 G-E6, H-1, H-13; ADR-0005; stores.md §5.1 M01/M20, §5.2):
-  - **App Links.** Path prefix `/app/` with the trailing slash (so `/apple` never opens the app). The host is the origin the build talks to: the Play internal build used for the sandbox chains points at `https://app.dev.sanchay.in`, the pilot build at `https://app.sanchay.in`. Both hosts serve the same `assetlinks.json` (one web image). No App Link for `http://10.0.2.2` and friends.
+  - **App Links.** Path prefix `/app/` with the trailing slash (so `/apple` never opens the app). The host is the origin the build talks to. Prod is the only deployed stack (R-31; RV-04-F18-1), so every Play build points at `https://app.sanchay.in`, which serves `assetlinks.json` from E25's paused deploy on; a development build against the local stack gets no App Link. No App Link for `http://10.0.2.2` and friends.
   - **Returns.** Payment returns reach the app only through the verified https App Link on the **app host**. A relative or api-host Location can never open the app.
   - **FLAG_SECURE** (stores.md §5.2 "Block", D7): login and signup OTP, every onboarding step (PAN, address, FATCA, nominees, bank, CNF-01 attest), the lumpsum and SIP reviews (CNF-01), the consent status screen, the payment hand-off (TPV bank line), the mandate setup (MND-03), the SIP detail (SIPM-02 opens F28's cancel consent OTP sheet), the redemption review and the account tab (masked PAN and bank). Home, Explore, Fund, Portfolio and the SIP list stay capturable. Root-stack routes call `usePreventScreenCapture(key)`. Every screen under `(tabs)/` calls `usePreventScreenCaptureWhileFocused(key)`: that covers the tab screens and the screens pushed onto the Portfolio tab's stack (F14). A tab stays mounted after its first visit, so the plain hook would keep FLAG_SECURE on after a switch to Home. `secureRouteViolations` refuses the plain hook there.
   - **No test files under `apps/mobile/src/app`.** Expo Router turns every file there into a route.
   - **Device evidence is device-only.** The owner has no emulator yet: every `adb` and Maestro item in the runbook is marked "device-only" and is collected on a physical Android 12+ phone with the Play internal build (F25). Nothing in Steps 2 and 4 needs a device. Device-only Maestro flows live in `apps/mobile/.maestro/device/`. Maestro runs only a folder's top-level flows (Plan 01's `subflows/` relies on the same rule), so `pnpm --filter=@sanchay/mobile e2e:android` (`maestro test .maestro`) and F21's Android PII scan (`maestro test apps/mobile/.maestro`) never pick them up on a dev build.
   - **Commands work in PowerShell 5.1 and Git Bash** (AGENTS.md; checked with argv probes on 2026-10-01). Windows paths are written `C:/…`, or double-quoted when they contain backslashes. Git Bash rewrites an argument that starts with `/`: `subst S: /D` becomes `subst S: D:/`, and `adb pull /sdcard/x.png` becomes `adb pull C:/Program Files/Git/sdcard/x.png`. Such lines get a Git Bash form with `MSYS_NO_PATHCONV=1`, and an `adb shell` command is passed as one quoted argument. PowerShell 5.1's `curl` is `Invoke-WebRequest`, so the runbook uses `curl.exe`. Binary output never goes through PowerShell's `>`, which re-encodes it.
 - **Deviations from the outline:**
-  1. The intent-filter host follows `EXPO_PUBLIC_SANCHAY_APP_ORIGIN` instead of a literal `app.sanchay.in`: the internal build that runs the sandbox chains before GO-1 must verify `app.dev.sanchay.in` (E25 already serves `assetlinks.json` there).
+  1. The intent-filter host follows `EXPO_PUBLIC_SANCHAY_APP_ORIGIN` instead of a literal `app.sanchay.in`: a build verifies the host it talks to, and a development build against a local http origin declares none. R-31 leaves one deployed app host, `app.sanchay.in`, so every Play build verifies it.
   2. The App Link helpers live in `app.config.ts`. Expo evaluates that file without Metro's resolver, so `import … from './src/lib/…'` fails with `Cannot find module './src/lib/appLinks'` (checked with `expo config`).
   3. `versionCode` is added: Play rejects the second upload of a build whose `versionCode` did not increase, and C14 never set one.
   4. FLAG_SECURE is asserted by a static scan of the route files (`secureRoutes.test.ts`), not by E12's `[step].test.tsx`. That file sits inside `src/app` (so Metro would bundle Vitest as a route) and the mobile Vitest config never collected it. F18 deletes it; the scan covers the same call.
@@ -34674,9 +34332,9 @@ describe('appLinkIntentFilters (F18, ADR-0005)', () => {
     expect(appLinkHostFor('')).toBe('app.sanchay.in');
   });
 
-  it('follows the app origin the build talks to (a dev-stack build verifies app.dev.sanchay.in)', () => {
-    expect(appLinkIntentFilters('https://app.dev.sanchay.in/')[0]?.data[0].host).toBe(
-      'app.dev.sanchay.in',
+  it('follows the app origin the build talks to (here the test origin)', () => {
+    expect(appLinkIntentFilters('https://app.sanchay.test/')[0]?.data[0].host).toBe(
+      'app.sanchay.test',
     );
   });
 
@@ -34974,7 +34632,7 @@ keytool -exportcert -alias sanchay-upload -keystore C:/Users/pc/keys/sanchay-upl
 node scripts/android-cert-info.ts C:/Users/pc/Downloads/deployment_cert.der
 node scripts/android-cert-info.ts C:/Users/pc/keys/upload_cert.der
 ```
-The first `assetlinks` line is the Play App Signing fingerprint (it goes first in the file), the second the upload key's (it lets a locally signed build verify too). The first `SANCHAY_SMS_RETRIEVER_HASH` line (from the Play App Signing certificate) is the value of the GitHub environment variable `SANCHAY_SMS_RETRIEVER_HASH` on `dev` and `prod` (runbook section 3, item 4). Certificates and fingerprints are public; the keystore and its passwords never enter the repo.
+The first `assetlinks` line is the Play App Signing fingerprint (it goes first in the file), the second the upload key's (it lets a locally signed build verify too). The first `SANCHAY_SMS_RETRIEVER_HASH` line (from the Play App Signing certificate) is the value of the GitHub environment variable `SANCHAY_SMS_RETRIEVER_HASH` on `prod`, the only GitHub environment (R-31; runbook section 3, item 4). Certificates and fingerprints are public; the keystore and its passwords never enter the repo.
 
 `scripts/android-cert-info.ts`:
 ```ts
@@ -35075,7 +34733,7 @@ export interface AppLinkIntentFilter {
 
 /**
  * The host Android verifies against https://<host>/.well-known/assetlinks.json. It is the origin the app
- * talks to (EXPO_PUBLIC_SANCHAY_APP_ORIGIN), so a build pointed at the dev stack verifies app.dev.sanchay.in.
+ * talks to (EXPO_PUBLIC_SANCHAY_APP_ORIGIN); every Play build talks to prod, app.sanchay.in (R-31).
  * A local http origin has no App Link: Android verifies https only.
  */
 export function appLinkHostFor(appOrigin: string | undefined): string | null {
@@ -35352,13 +35010,13 @@ git rm "apps/mobile/src/app/onboarding/[step].test.tsx"
     timeout: 15000
 ```
 
-`apps/mobile/.maestro/device/app-link-return.yaml` (device-only). It sits in a subfolder because Maestro runs only the top-level flows of `.maestro`. That keeps it out of `e2e:android` and F21's PII scan, which run on dev builds that have no verified App Link. The host is a parameter, so the same file serves both builds:
+`apps/mobile/.maestro/device/app-link-return.yaml` (device-only). It sits in a subfolder because Maestro runs only the top-level flows of `.maestro`. That keeps it out of `e2e:android` and F21's PII scan, which run on dev builds that have no verified App Link. The host is a parameter, so the same file serves any build:
 ```yaml
 appId: in.sanchay.app
 name: A verified App Link on the app host opens the in-app payment return (F18, G-E6)
 # Device-only (docs/runbooks/android-release.md section 4): needs the Play internal build and a verified
 # App Link. Kept out of `maestro test .maestro`, which runs only the top-level flows. The host is the app
-# origin the build talks to: pass -e APP_LINK_HOST=app.dev.sanchay.in or -e APP_LINK_HOST=app.sanchay.in.
+# origin the build talks to: pass -e APP_LINK_HOST=app.sanchay.in (every Play build talks to prod).
 ---
 - launchApp
 - openLink: https://${APP_LINK_HOST}/app/r/payment?ref=maestro-app-link
@@ -35408,8 +35066,10 @@ starts with `MSYS_NO_PATHCONV=1`.
 ## 1. Choose the target
 | Build | `EXPO_PUBLIC_SANCHAY_API_BASE_URL` | `EXPO_PUBLIC_SANCHAY_APP_ORIGIN` | `EXPO_PUBLIC_SANCHAY_WWW_ORIGIN` |
 |---|---|---|---|
-| Sandbox chains (S4, before GO-1) | `https://api.dev.sanchay.in/api/v1` | `https://app.dev.sanchay.in` | `https://www.dev.sanchay.in` |
-| Pilot (after the prod stack, F1) | `https://api.sanchay.in/api/v1` | `https://app.sanchay.in` | `https://www.sanchay.in` |
+| Pilot (prod, the only deployed stack, R-31) | `https://api.sanchay.in/api/v1` | `https://app.sanchay.in` | `https://www.sanchay.in` |
+
+There is no dev stack or dev domain (R-31). Prod answers from E25's paused deploy in S2 week 2 on; before GO-1
+only the founders' invited test accounts can sign in, so every internal build is a pilot-row build.
 
 `SANCHAY_ANDROID_VERSION_CODE` is the last uploaded versionCode plus 1 (Play Console → App bundle explorer).
 `app.config.ts` refuses a production build without it.
@@ -35419,20 +35079,20 @@ starts with `MSYS_NO_PATHCONV=1`.
    backslashes in Git Bash). If it prints `Drive already SUBSTed`, the drive is mapped; continue.
 2. `cd S:/` (both shells)
 3. `pnpm install --frozen-lockfile --force`
-4. Set the session variables (dev-stack values shown; use the pilot row for the pilot build).
+4. Set the session variables (the pilot row of section 1).
    PowerShell, one per line:
    `$env:APP_VARIANT='production'`
    `$env:SANCHAY_ANDROID_VERSION_CODE='2'`
-   `$env:EXPO_PUBLIC_SANCHAY_API_BASE_URL='https://api.dev.sanchay.in/api/v1'`
-   `$env:EXPO_PUBLIC_SANCHAY_APP_ORIGIN='https://app.dev.sanchay.in'`
-   `$env:EXPO_PUBLIC_SANCHAY_WWW_ORIGIN='https://www.dev.sanchay.in'`
+   `$env:EXPO_PUBLIC_SANCHAY_API_BASE_URL='https://api.sanchay.in/api/v1'`
+   `$env:EXPO_PUBLIC_SANCHAY_APP_ORIGIN='https://app.sanchay.in'`
+   `$env:EXPO_PUBLIC_SANCHAY_WWW_ORIGIN='https://www.sanchay.in'`
    Git Bash, one per line: `export APP_VARIANT=production`, `export SANCHAY_ANDROID_VERSION_CODE=2`,
-   `export EXPO_PUBLIC_SANCHAY_API_BASE_URL=https://api.dev.sanchay.in/api/v1`,
-   `export EXPO_PUBLIC_SANCHAY_APP_ORIGIN=https://app.dev.sanchay.in`,
-   `export EXPO_PUBLIC_SANCHAY_WWW_ORIGIN=https://www.dev.sanchay.in`
+   `export EXPO_PUBLIC_SANCHAY_API_BASE_URL=https://api.sanchay.in/api/v1`,
+   `export EXPO_PUBLIC_SANCHAY_APP_ORIGIN=https://app.sanchay.in`,
+   `export EXPO_PUBLIC_SANCHAY_WWW_ORIGIN=https://www.sanchay.in`
 5. `pnpm --filter=@sanchay/mobile exec expo config --type public`
    Pass: `android.versionCode` is the number from step 4, `android.intentFilters[0]` has `autoVerify: true`,
-   host `app.dev.sanchay.in` (or `app.sanchay.in`) and `pathPrefix: "/app/"`, and there is no `scheme` key.
+   host `app.sanchay.in` and `pathPrefix: "/app/"`, and there is no `scheme` key.
 6. `pnpm --filter=@sanchay/mobile exec expo prebuild --platform android --clean`
 7. `cd S:/apps/mobile/android` (both shells)
 8. PowerShell: `.\gradlew.bat bundleRelease` · Git Bash: `./gradlew bundleRelease`
@@ -35454,23 +35114,23 @@ Run from the repo root: `cd C:/Users/pc/Desktop/sanchay` (both shells).
    certificate's line is the second:
    `keytool -exportcert -alias sanchay-upload -keystore C:/Users/pc/keys/sanchay-upload.jks -file C:/Users/pc/keys/upload_cert.der`
    `node scripts/android-cert-info.ts C:/Users/pc/keys/upload_cert.der`
-   Deploy the web image to dev and prod.
+   Deploy the web image to prod, the only stack (R-31).
 4. The `SANCHAY_SMS_RETRIEVER_HASH` line from the Play App Signing certificate (item 2) is the value of the
    GitHub environment variable `SANCHAY_SMS_RETRIEVER_HASH`. It is a variable, not a secret: the hash is public.
-   Set it on both GitHub environments, `dev` and `prod` (Settings → Environments → `dev` / `prod` →
-   Environment variables), replacing any interim value. Type it in the UI: the hash is base64 and can contain
+   Set it on the GitHub environment `prod`, the only one (R-31; Settings → Environments → `prod` →
+   Environment variables), replacing the interim value set before E25's first deploy. Type it in the UI: the hash is base64 and can contain
    `/` and `+`, which a shell argument can mangle. F1's `deploy.yml` passes it to `loadStackConfig`, which puts
    it into the api container only:
-   - `cdk deploy -c env=prod` refuses to synthesise without it.
-   - On dev the api refuses to boot without it (boot invariant 7, R-10, applies to role `api` outside local
+   - `cdk deploy` refuses to synthesise without it.
+   - The api refuses to boot without it (boot invariant 7, R-10, applies to role `api` outside local
      and test).
-   Then dispatch `deploy.yml` (Actions → deploy → Run workflow) for `dev`, and for `prod` once the prod stack
-   exists, so the api task picks up the value. Play App Signing signs every Play build, so the internal build
+   Then dispatch `deploy.yml` (Actions → deploy → Run workflow) for `prod`, so the api task picks up the
+   value. Play App Signing signs every Play build, so the internal build
    and the pilot build share the hash. A locally signed APK has a different one (enter OTPs by hand there).
 5. Check the hosted file and Google's view of it (`curl.exe` in both shells: in PowerShell 5.1 `curl` is
    `Invoke-WebRequest`):
-   `curl.exe -s -i https://app.dev.sanchay.in/.well-known/assetlinks.json`
-   `curl.exe -s "https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://app.dev.sanchay.in&relation=delegate_permission/common.handle_all_urls"`
+   `curl.exe -s -i https://app.sanchay.in/.well-known/assetlinks.json`
+   `curl.exe -s "https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://app.sanchay.in&relation=delegate_permission/common.handle_all_urls"`
    Pass: 200, `content-type: application/json`, no redirect, and the statement lists `in.sanchay.app` with both fingerprints.
 
 ## 4. G-E6 device evidence (device-only: a physical Android 12+ phone with the Play internal build)
@@ -35478,15 +35138,17 @@ The owner has no emulator yet. Every item below needs a real device with USB deb
 from the Play internal track, a signed-in session, and `adb devices` listing it. F25 records the outputs and
 screenshots. An `adb shell` command is passed as one quoted argument, so the same line works in both shells.
 1. `adb shell pm get-app-links in.sanchay.app`
-   Pass: `app.dev.sanchay.in: verified` (or `app.sanchay.in: verified` for the pilot build). If it shows
+   Pass: `app.sanchay.in: verified`. If it shows
    `1024`/`none`: `adb shell pm verify-app-links --re-verify in.sanchay.app`, wait a minute, re-run; still not
    verified means `assetlinks.json` and the signing certificate differ (section 3).
-2. `adb shell am start -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d "https://app.dev.sanchay.in/app/r/payment?ref=evidence"`
-   (pilot build: `app.sanchay.in`). Pass: Sanchay opens on "Confirming your payment (ref evidence)…" with no
+2. `adb shell am start -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d "https://app.sanchay.in/app/r/payment?ref=evidence"`.
+   Pass: Sanchay opens on "Confirming your payment (ref evidence)…" with no
    app chooser.
-3. Payment return: a sandbox lumpsum paid by UPI or netbanking returns into Sanchay. If the bank page leaves you
+3. Payment return: a lumpsum paid by UPI or netbanking on this build returns into Sanchay. The build talks to
+   prod (R-31), so before GO-1 this is a founders' canary payment (F20 leg A; F25 ticks it). If the bank page leaves you
    in the browser tab on `/r/payment`, tap "Open Sanchay" (E24's fallback); note which happened.
-4. Mandate: approve a UPI Autopay mandate (F12); switching back to Sanchay shows it APPROVED (F2 has no postback).
+4. Mandate: approve a UPI Autopay mandate (F12) on this build (before GO-2 only the canary's leg B, F20);
+   switching back to Sanchay shows it APPROVED (F2 has no postback).
 5. FLAG_SECURE. Screenshots can show real data, so keep them outside the repository, for example (both shells):
    `mkdir C:/Users/pc/sanchay-evidence` (once)
    `cd C:/Users/pc/sanchay-evidence`
@@ -35509,8 +35171,8 @@ screenshots. An `adb shell` command is passed as one quoted argument, so the sam
    `pnpm --filter=@sanchay/mobile exec maestro test .maestro/relaunch-without-screen-lock.yaml`, signs up
    through local Mailpit, so it runs only against a local dev build and API, never the Play build (F25).
 7. App Link flow, with the host of the build under test:
-   `pnpm --filter=@sanchay/mobile exec maestro test -e APP_LINK_HOST=app.dev.sanchay.in .maestro/device/app-link-return.yaml`
-   (pilot build: `-e APP_LINK_HOST=app.sanchay.in`). Pass: the flow ends green on "Confirming your payment".
+   `pnpm --filter=@sanchay/mobile exec maestro test -e APP_LINK_HOST=app.sanchay.in .maestro/device/app-link-return.yaml`.
+   Pass: the flow ends green on "Confirming your payment".
 ````
 
 - [ ] **Step 4: Run tests to confirm they pass**
@@ -35562,7 +35224,7 @@ Every path is a file this task creates or edits; the quotes keep `(…)` and `[�
 **Review notes: Plan 03 errata found while writing F18 (all fixed above):**
 - **E24 `native-intent.tsx` was never loaded.** Expo Router reads only `./+native-intent.[tj]sx` at the root of the router context (`expo-router/build/getLinkingConfig.js`), i.e. `apps/mobile/src/app/+native-intent.tsx`. E24 put it beside `src/app` and named it without the `+`, so `/app/r/payment` never reached `/r/payment`.
 - **E24/E12 tests never ran.** `apps/mobile/vitest.config.mts` collects only `src/lib/**/*.test.ts`. E12's `onboarding/[step].test.tsx` is also inside `src/app`, where Expo Router would turn it into a route and Metro would try to bundle Vitest.
-- **E21 return Location.** The APP return was the relative `/app/r/payment?ref=…`, which resolves against `api.sanchay.in` (no App Link there), and the WEB return hardcoded `https://app.sanchay.in` instead of `SANCHAY_APP_ORIGIN` (so it was wrong on the dev stack). ADR-0005 requires absolute app-host URLs. E21's test file also injected `/api/v1/pg/return/…` seven times without `host: apiHost()`: three in the return `describe`, three in `payments.poll` and one in `mf_purchase events`. E2's HostGuard answers all of them with 404, so the poll and event cases never moved the attempt to PENDING.
+- **E21 return Location.** The APP return was the relative `/app/r/payment?ref=…`, which resolves against `api.sanchay.in` (no App Link there), and the WEB return hardcoded `https://app.sanchay.in` instead of `SANCHAY_APP_ORIGIN` (so it was wrong on every other app origin, the test harness's `TEST_APP_ORIGIN` included). ADR-0005 requires absolute app-host URLs. E21's test file also injected `/api/v1/pg/return/…` seven times without `host: apiHost()`: three in the return `describe`, three in `payments.poll` and one in `mf_purchase events`. E2's HostGuard answers all of them with 404, so the poll and event cases never moved the attempt to PENDING.
 - **E24 Maestro `appId: in.sanchay.app.dev`.** C14 uses `in.sanchay.app` for every variant. E24's last step, `assertVisible: 'Confirming your payment'` with a `timeout`, never matches. Maestro matches the whole text (`Confirming your payment (ref …)…`), and Plan 01 waits with `extendedWaitUntil`. Fixed with `'Confirming your payment.*'` under `extendedWaitUntil`.
 - **E23/E24 FLAG_SECURE.** The lumpsum review (CNF-01), consent status and payment routes did not call `usePreventScreenCapture`, against G-E6 and stores.md §5.2. E12 keys `onboarding-${step}` while E13's test expected `'bank'`/`'review'` (moot once that test is deleted).
 - **E24 `expo-web-browser`.** `PayScreen` uses `WebBrowser.openAuthSessionAsync`, but E24 never installs the module (MVP spec §2 lists it). Step 3a checks and installs it.
@@ -35591,7 +35253,7 @@ Every path is a file this task creates or edits; the quotes keep `(…)` and `[�
 - F16 (resolved): `apps/mobile/src/app/redeem/[folioId]/[isin].tsx` calls `usePreventScreenCapture('redeem')`.
 - F14 (resolved): `apps/mobile/src/app/(tabs)/account.tsx` renders `AccountScreenV2`.
 - F28: SIPM-02 (`SipDetailScreen`) opens `CancelSipSheet`, which shows E13's `ConsentOtpSheet`.
-- F1 (resolved): `SANCHAY_SMS_RETRIEVER_HASH` is a GitHub environment variable (`vars`) on `dev` and `prod`. `deploy.yml` passes it into `loadStackConfig`, which sets it on the api container only. Prod synth refuses without it.
+- F1 (resolved): `SANCHAY_SMS_RETRIEVER_HASH` is a GitHub environment variable (`vars`) on `prod`, the only GitHub environment (R-31). `deploy.yml` passes it into `loadStackConfig`, which sets it on the api container only. Prod synth refuses without it.
 - E25 (resolved, FR-16): `apps/web/public/.well-known/assetlinks.json` exists as `[]` (Plan 02 RV-02-23); F18 replaces its content.
 
 ---
@@ -36212,7 +35874,7 @@ Locally `pilotList` is off. To apply the staging/prod checks to the delivered fi
 ```
 pnpm ops:catalogue:seed --pilot-list
 ```
-Do not set `SANCHAY_APP_ENV=staging` locally for this: the boot invariants refuse that env with local `.env` values (mailpit, the local keyring, `SANCHAY_CLIENT_IP_SOURCE=socket`, the dev OTP rate). Pass: exit code 0 and a report whose first line is `Publish gate <date>: n/N curated schemes PUBLISHED`. On D8's ten placeholder rows `--pilot-list` exits 1, naming each placeholder ISIN and the list size (`10 schemes; the v1 list has 40-60`); that refusal is expected until the v1 files arrive. Every DRAFT line names its failed rules; R3/R7 failures are expected until the dev stack has run `catalogue.fp.sync` and NAV sync. Business fixes data errors (the command prints file and line); never edit a business CSV to make the gate pass. If the files have not arrived, the task proceeds on D8's placeholders and this step is repeated on delivery as its own `chore(catalogue)` commit.
+Do not set `SANCHAY_APP_ENV=staging` locally for this: the boot invariants refuse that env with local `.env` values (mailpit, the local keyring, `SANCHAY_CLIENT_IP_SOURCE=socket`, the dev OTP rate). Pass: exit code 0 and a report whose first line is `Publish gate <date>: n/N curated schemes PUBLISHED`. On D8's ten placeholder rows `--pilot-list` exits 1, naming each placeholder ISIN and the list size (`10 schemes; the v1 list has 40-60`); that refusal is expected until the v1 files arrive. Every DRAFT line names its failed rules; R3/R7 failures are expected until `catalogue.fp.sync` and NAV sync have run against that database (R-31: there is no dev stack; RV-04-F19-3). Business fixes data errors (the command prints file and line); never edit a business CSV to make the gate pass. If the files have not arrived, the task proceeds on D8's placeholders and this step is repeated on delivery as its own `chore(catalogue)` commit.
 
 `apps/api/src/modules/catalogue/curated-csv.ts`:
 ```ts
@@ -37277,7 +36939,7 @@ Design decisions:
 - **"Ledger" means F4's tables.** A lumpsum's units are its `lots.units`; a redemption's are `Σ lot_consumptions.units`, which must also equal the units F5 applied (`orders.redeemed_units`, FP's figure rounded HALF_UP to 3 dp); the closing balance is `Σ lots.units_remaining` on the folio and scheme. All three are compared with the statement at 0.001 inclusive, through `@sanchay/money` `Units` (never JavaScript numbers). FP's own 4-dp figure (`orders.redeemed_units_reported`, probe P-09) is carried in the snapshot and printed in the report as evidence (BRIEF D7).
 - **EUIN (BRIEF D7).** For every leg the evidence file records the EUIN on the FP object, and for legs A and C the EUIN printed on the statement (last four characters, or null when none is shown). It also records Cybrilla's written Q12 answer (the file under `docs/probes/` and the EUIN it says FP stamps, or null). A leg fails on `EUIN_Q12_MISSING` (no written answer yet), `EUIN_NOT_AS_Q12` (FP's EUIN differs from the answer) or `STATEMENT_EUIN_DIFFERS` (the statement prints another EUIN than FP returned). A blank EUIN passes only when Q12 says FP stamps none.
 - **Signed webhooks.** GO-1 needs one signature-verified prod FP webhook. F7's `ops:sync` writes its re-fetch requests into `inbound_webhook_events` as `event_type = 'ops.sync'` rows with signature mode NONE and `signature_valid = true`, and `fp.event.process` marks them PROCESSED (F7 deviation 5). Every webhook count therefore requires provider FP, signature mode `HMAC` or `SHARED_SECRET` (E1) and `event_type <> 'ops.sync'`; otherwise one `ops:sync` would satisfy GO-1 with no signed FP webhook.
-- **Switches (BRIEF D5).** `orders.enabled` and `plans.sip.enabled` are global `app_config` flags, not per-account settings. The canary turns one on with two founders only while a leg is placed, and off again with one operator straight after (`ops:kill-switch`, `ops:sip-switch`). The invite list keeps the canary to the founders: prod is invite-only, and until F27 seeds the PO's list on Thu 11-26 it holds only the founders' mobiles.
+- **Switches (BRIEF D5).** `orders.enabled` and `plans.sip.enabled` are global `app_config` flags, not per-account settings. The canary turns one on with two founders only while a leg is placed, and off again with one operator straight after (`ops:kill-switch`, `ops:sip-switch`). The invite list keeps the canary to the founders: prod is invite-only, and until F27 seeds the PO's list after the GO-1 decision (R-31; RV-04-F20-1) it holds only the founders' mobiles.
 - **Leg (a) is two orders**, UPI and netbanking (spec G-E7 a), and each must have paid by its own rail.
 
 **Review fixes (assembly, 2026-10-01; BRIEF D5, D7, D8, D9; defects-F20F23):**
@@ -37824,7 +37486,7 @@ const opts = () => ({
 
 beforeAll(async () => {
   t = await bootFpTestApp();
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   investor = await seedInvestableInvestor(t);
 });
 afterAll(async () => {
@@ -39150,7 +38812,8 @@ this file names them only.
 
 `orders.enabled` and `plans.sip.enabled` are global `app_config` switches, not per-account ones: while one
 is on, anyone who can sign in may start an order or a SIP. Prod is invite-only, and until F27 seeds the
-PO's list (Thu 11-26) the only invites are the founders' (F20 Step 6), so the invite list is what keeps
+PO's list (after the GO-1 decision, R-31) the only invites are the founders' own numbers (F20 Step 6, F27's
+drill), so the invite list is what keeps
 the canary to the founders. Each switch is on only while a leg is placed (F20 Step 7), and the
 `OPS_KILL_SWITCH` / `OPS_SIP_SWITCH` rows in `app.v_ops_audit` are the record:
 
@@ -39254,7 +38917,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 
 **Canary runbook (evidence, not TDD): Tue 11-17 to Thu 11-26.** Prod deploys with `orders.enabled=false` and `plans.sip.enabled=false` (D1's defaults, R-06), and F27 checks on Thu 11-26 that orders are still off before GO-1.
 - **Both flags are global `app_config` switches, not per-account settings.** While one is on, every investor who can sign in may start a new order or SIP.
-- **The invite list keeps the canary to the founders.** Prod is invite-only (`SANCHAY_PILOT_INVITE_ONLY=true`, F1), and until F27 seeds the PO's list on Thu 11-26 the only invites are the founders' (Step 6 checks this).
+- **The invite list keeps the canary to the founders.** Prod is invite-only (`SANCHAY_PILOT_INVITE_ONLY=true`, F1), and until F27 seeds the PO's list after the GO-1 decision (R-31) the only invites are the founders' (Step 6 checks this).
 - **A flag is read only when a draft is created** (E20 `createPurchase`, F2 `createSip`, F5's redemption draft). So it is switched on just before a leg is placed and off again as soon as that leg's in-app flow is complete; orders and plans already placed carry on.
 - **Every switch is an F7 ops command** (`ops:kill-switch`, `ops:sip-switch`; BRIEF D5) run in F7's deployed form, so each leaves an `OPS_KILL_SWITCH` or `OPS_SIP_SWITCH` row in `app.v_ops_audit`. There is no per-account switch and no ad-hoc SQL (R-16).
 
@@ -39428,7 +39091,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 - E1: `inbound_webhook_events.status` is `PROCESSED` once `fp.event.process` has handled a signature-valid event, and `object_id` is the FP object id. A bad signature is a `signature_valid = false`, `FAILED` row in the configured mode, counted as rejected.
 - E20, F2, F5: `orders.enabled` is read only by `createPurchase` (E20) and the redemption draft (F5), and `plans.sip.enabled` only by `createSip` (F2), so switching a flag off never strands a placed leg.
 - F2: `plans.first_instalment_date` is FP's first-instalment date (R-06 "first-instalment date recorded"). `plans.fp_state` for an active plan is reported, not checked.
-- F23 reads this report's GO-1 and GO-2 lines and owns the GO-2 debit and allotment evidence. F27 seeds the PO's invite list on Thu 11-26 and checks that orders are off; the canary's switch pairs leave them off.
+- F23 reads this report's GO-1 and GO-2 lines and owns the GO-2 debit and allotment evidence. F27 checks on Thu 11-26 that orders are off, and seeds the PO's invite list only after the GO-1 decision (R-31); the canary's switch pairs leave them off.
 
 **How this task was checked while it was written (2026-10-01).** Plans 02-04 are not implemented in the repo, so the integration file and the Nest wiring could not run as written. What ran, in a worktree of `main` after `pnpm install --frozen-lockfile --offline` and a build of the workspace packages:
 - **Vitest 5.0.1:** `canary-evidence.test.ts` exactly as above, 22/22.
@@ -39459,7 +39122,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 - F8 owns OTP abuse, HostGuard and the prod-image guard.
 - F9 owns BOLA.
 - Plan 01 owns CSRF (`resolveClient`).
-- E25 owns the dev CDK assertions for TLS, RDS and `verify-full`; F1 owns the prod stack and its fixtures (`infra/test/stack-fixtures.ts`).
+- E25 owns the CDK assertions for TLS, RDS and `verify-full` on its stack, which R-31 makes prod from S2 (RV-04-F21-1); F1 hardens that stack and owns its fixtures (`infra/test/stack-fixtures.ts`).
 
 **Review fixes (assembly, 2026-10-01; defects-F20F23, BRIEF D8):**
 1. **`g-e3-prod.test.ts` could fail at import (blocker).** It built the template from `loadStackConfig('prod')` at module load. That function defaults its source to `process.env`, so the result depended on the shell. The F1 revision under review refused prod outright without the deploy inputs. F1's final text only validates formats, but a malformed variable in a developer's shell still refuses. The test now uses F1's fixtures, `synthTemplate('prod', PROD_INPUTS)` and `containersOf(template)`, which pass fixed fake inputs. Run against F1's final stack code (aws-cdk-lib 2.216.0): 4/4 pass, `tsc` exits 0, and a mutant `_SECRET` env var on the api container is caught.
@@ -39607,8 +39270,8 @@ import { describe, expect, it } from 'vitest';
 import { containersOf, PROD_INPUTS, synthTemplate } from './stack-fixtures.js';
 
 /**
- * G-E3 items the prod template itself evidences (E25 asserts the same on dev). F1's fixtures synthesise
- * `SanchayMvpStack-prod` exactly as `cdk synth -c env=prod` does, with fake deploy inputs and no AWS.
+ * G-E3 items the prod template itself evidences (E25's own tests assert the same). F1's fixtures synthesise
+ * `SanchayMvpStack-prod` exactly as `cdk synth` does, with fake deploy inputs and no AWS.
  */
 const template = synthTemplate('prod', PROD_INPUTS);
 const containers = [...containersOf(template).values()];
@@ -39881,9 +39544,9 @@ Owner: Dev A. Cross-sign: Dev B (F22, after the ZAP row). Due **Wed 11-25** (spe
 | 7 | CSRF headers | `apps/api/src/modules/platform/client.guard.ts` `resolveClient` (H-7: Origin plus `Sec-Fetch-Site: same-origin` on web mutations), `client.guard.test.ts` "resolveClient (H-7 CSRF defence, D-4, D-19)"; `__Host-` HttpOnly cookies (`cookies.test.ts`) | CI step "Test" | green | | |
 | 8 | PII log scan of e2e logs | Web: `ci.yml` `e2e-web` step "PII scan of the e2e server logs (G-E3)" (`scripts/scan-pii-logs.ts`). Android: "Android PII scan" below | the CI run on the gate commit; the Android commands below | web step green with more than 0 lines scanned; both Android scans exit 0 | | |
 | 9 | TLS-only | E25 "ALB TLS policy" and "DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image" (R-15); `g-e3-prod.test.ts` "HTTPS uses the TLS 1.3/1.2 policy and port 80 only redirects to HTTPS"; "Live prod probes" below | the infra tests, then the probes | as stated per probe | | |
-| 10 | RDS encryption + `force_ssl` | E25 "RDS StorageEncrypted and force_ssl" (dev); `g-e3-prod.test.ts` "RDS storage is encrypted and rds.force_ssl is on"; "Live prod probes" below | the infra tests, then the probes | `True` and `1` | | |
+| 10 | RDS encryption + `force_ssl` | E25 "RDS StorageEncrypted and force_ssl"; `g-e3-prod.test.ts` "RDS storage is encrypted and rds.force_ssl is on"; "Live prod probes" below | the infra tests, then the probes | `True` and `1` | | |
 | 11 | `pnpm audit --prod`: no High/Critical | `ci.yml` `verify` step "Dependency audit" (`pnpm audit --prod --audit-level=high`). Fastify is overridden to 5.12.5 (`pnpm-workspace.yaml` `overrides:` and `catalog:`, ADR-0001 row 2026-10-01) | `pnpm audit --prod --audit-level=high` then `pnpm why fastify` | audit exits 0; `pnpm why fastify` shows only 5.12.5; every `overrides:` entry has an ADR-0001 row | | |
-| 12 | One ZAP baseline on the prod-like stack | F22 ZAP report | open `docs/security/zap/<date>/summary.md` (F22 Step 6); `pnpm zap-baseline --gate=<work dir>` re-gates the saved JSON reports on the machine that ran the scan | the gate passes: no High; every Medium fixed or accepted in `docs/security/zap-acceptances.json` with an owner and an expiry no later than 2026-12-18; all three dev hosts scanned | PENDING (F22) | |
+| 12 | One ZAP baseline on the prod-like stack | F22 ZAP report | open `docs/security/zap/<date>/summary.md` (F22 Step 6); `pnpm zap-baseline --gate=<work dir>` re-gates the saved JSON reports on the machine that ran the scan | the gate passes: no High; every Medium fixed or accepted in `docs/security/zap-acceptances.json` with an owner and an expiry no later than 2026-12-18; all three prod hosts scanned | PENDING (F22) | |
 
 ## ASVS basics (OWASP ASVS 4.0.3, Level 1 chapters in scope for the MVP)
 
@@ -39923,7 +39586,7 @@ Pass criteria:
 - The SSL policy's protocols are `TLSv1.2 TLSv1.3` only.
 - The prod instance shows `StorageEncrypted` `True`, and `rds.force_ssl` is `1`.
 
-## Android PII scan (Dev B, local, with the Play-internal or dev-client build)
+## Android PII scan (Dev B, local, with the dev-client build; the Play-internal build talks to prod, R-31)
 
 Start the local API with its output in a file (terminal 1; leave it running). PowerShell 5.1 writes UTF-16 and the scanner reads it:
 ```
@@ -39998,7 +39661,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands.
   ```
 
 **Contract notes (resolved against the written tasks, 2026-10-01):**
-- F1 (`p4tasks/F1.md`): `infra/test/stack-fixtures.ts` exports `synthTemplate(envName, inputs = PROD_INPUTS | DEV_INPUTS, {paused?})`, `PROD_INPUTS` (fake deploy inputs) and `containersOf(template)` (a `Map` of `ContainerDef` by container name). The prod template therefore synthesises without AWS credentials and without deploy inputs in the shell. F1's own `prod-stack.test.ts` already pins each container's secret names; this test adds the G-E3 view (no secret-shaped plain variable anywhere; RDS, TLS and redirect).
+- F1 (`p4tasks/F1.md`): `infra/test/stack-fixtures.ts` exports `synthTemplate('prod', inputs?, {noTasks?})`, `PROD_INPUTS` (fake deploy inputs) and `containersOf(template)` (a `Map` of `ContainerDef` by container name). The prod template therefore synthesises without AWS credentials and without deploy inputs in the shell. F1's own `prod-stack.test.ts` already pins each container's secret names; this test adds the G-E3 view (no secret-shaped plain variable anywhere; RDS, TLS and redirect).
 - E25/F1: secrets reach containers only as ECS `Secrets`; `DATABASE_URL` is built in `docker-entrypoint.sh` from `SANCHAY_DB_*` and `SANCHAY_DB_PASSWORD`, not passed as plain environment. The test fails, correctly, if that changes.
 - F8: `apps/api/test/int/security/{otp-abuse,hostguard,prod-image-guard}.int.test.ts`. F9: `apps/api/test/int/security/{bola-coverage,bola-sweep}.int.test.ts` (as written in `p4tasks/F8-F9.md`).
 - F22 (`p4tasks/F22-F23.md`) fills row 12's Evidence, Status and Link cells and the "Dev B (cross-sign, F22)" sign-off row in place, and re-runs the security suites with `pnpm --filter=@sanchay/api test:int test/int/security` (no `--`, BRIEF D8).
@@ -40006,14 +39669,14 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands.
 
 ---
 
-### Task F22: ZAP baseline on the prod-like dev stack; cross-sign G-E3 (Dev B, 4 h)
+### Task F22: ZAP baseline on the paused prod stack before GO-1; cross-sign G-E3 (Dev B, 4 h)
 
-**Why:** G-E3 (spec §7) ends with "one ZAP baseline on the prod-like stack", the accepted mitigation for having no external pen test in the MVP (spec §5, P2-13). The dev AWS stack (E25, R-05) is the prod-like target; prod itself is never scanned. Dev B owns the scan and cross-signs Dev A's G-E3 checklist (F21). The scan is a **baseline** (spider plus passive rules, no attack payloads). This task builds the runner and the gate as tested code, then runs it once on the dev stack in pilot week. Do not run it ad hoc.
+**Why:** G-E3 (spec §7) ends with "one ZAP baseline on the prod-like stack", the accepted mitigation for having no external pen test in the MVP (spec §5, P2-13). R-31 leaves no dev stack, so the target is prod itself, paused before GO-1 (E25's stack as F1 hardened it): sign-in is invite-only with only the founders' test accounts invited, orders and SIPs are off, and no pilot investor's data exists yet (RV-04-F22-1). Dev B owns the scan and cross-signs Dev A's G-E3 checklist (F21). The scan is a passive **baseline** only (a spider that sends GETs, plus passive rules; no active scan, no attack payloads, no sign-in). This task builds the runner and the gate as tested code, then runs it once on the paused prod stack in pilot week, before GO-1. Do not run it ad hoc.
 
 **Review fixes (assembly, 2026-10-01; defects-F20F23, BRIEF D8):**
 1. **The cross-sign edits F21's checklist in place.** Row 12 is a 7-column row (`# | Item | Evidence | How to check | Pass criterion | Status | Link`). Step 6 fills its Evidence, Status and Link cells, and fills the "Dev B (cross-sign, F22)" row of F21's sign-off table, instead of adding a 2-column row and a free paragraph.
-2. **No `--` before arguments (BRIEF D8).** pnpm 11 forwards a literal `--`, so a test filter after it runs the whole suite. The security suites now run with `pnpm --filter=@sanchay/api test:int test/int/security`. The runner's own flags go straight after the script name (`pnpm zap-baseline --env=dev`), which works in both shells: pnpm appends them to the script's command.
-3. **F1's names.** Deploying dev now dispatches `deploy.yml` with `-f environment=dev`, F1's required input. The health check uses `curl.exe -s -i`, which runs in both shells (`-o /dev/null` does not exist in PowerShell).
+2. **No `--` before arguments (BRIEF D8).** pnpm 11 forwards a literal `--`, so a test filter after it runs the whole suite. The security suites now run with `pnpm --filter=@sanchay/api test:int test/int/security`. The runner's own flags go straight after the script name (`pnpm zap-baseline --env=prod`), which works in both shells: pnpm appends them to the script's command.
+3. **F1's names.** A prod deploy dispatches `deploy.yml` with `-f environment=prod` (R-31: the only environment); this task never deploys, it scans what prod runs. The health check uses `curl.exe -s -i`, which runs in both shells (`-o /dev/null` does not exist in PowerShell).
 4. **CI.** This task's step is now "ZAP baseline gate tests (G-E3)", and F23 adds its own step instead of editing this one, so F23 Part A no longer depends on F22.
 
 **Files:**
@@ -40023,7 +39686,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands.
 
 **Interfaces:**
 - **Prerequisites:**
-  - E25 (Plan 02) as F1 left it: `SanchayMvpStack-dev` serving `www.dev.sanchay.in`, `app.dev.sanchay.in`, `api.dev.sanchay.in` (R-11 listener rules, liveness `GET /api/v1/health`, R-12), deployed by `deploy.yml` (F1: `workflow_dispatch` input `environment`, so `gh workflow run deploy.yml --ref <ref> -f environment=dev`) from the feature-freeze commit (Fri 11-20).
+  - E25 (Plan 02) as F1 left it: `SanchayMvpStack-prod`, paused until GO-1 (R-31), serving `www.sanchay.in`, `app.sanchay.in` and `api.sanchay.in` (R-11 listener rules, liveness `GET /api/v1/health`, R-12; no ALB ingress allow-list), running the gate commit F21 records (the commit deployed to prod for the canary, by `deploy.yml` with `-f environment=prod`).
   - F21: `docs/security/g-e3-checklist.md`, whose row 12 is `| 12 | One ZAP baseline on the prod-like stack | F22 ZAP report | <how to check> | <pass criterion> | PENDING (F22) | |` and whose `## Sign-off` table has a "Dev B (cross-sign, F22)" row.
   - F8/F9: `apps/api/test/int/security/{otp-abuse,hostguard,prod-image-guard,bola-coverage,bola-sweep}.int.test.ts` (Dev B re-runs them for the cross-sign).
   - Docker on the developer machine. The image is pulled by digest (below).
@@ -40032,7 +39695,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands.
   - `apps/web/src/proxy.ts` / `apps/web/src/lib/csp.ts` (Plan 01 C11): the app host's CSP with `frame-ancestors 'none'`, used for triage (Step 6).
   - `ghcr.io/zaproxy/zaproxy:2.17.0@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef`. This is the OCI index digest of `2.17.0`, which equalled `stable` when checked with `docker buildx imagetools inspect` on 2026-10-01. Re-check it with the same command before the pilot-week run. Record any change of digest as an ADR-0001 row.
 - **Produces:**
-  - `ZAP_IMAGE`, `DEV_TARGETS` (the three dev hosts; no prod host), `reportBaseFor(url)`, and `zapDockerArgs({workDir, target, spiderMinutes}): string[]`. These are the `docker run` arguments: `-J`/`-w` reports, `-I`, `--autooff -z "-config spider.postform=false"`, so the spider sends GETs only and never POSTs a form. There is no `-j` (AJAX spider), because on `app.dev` it could click through to the OTP send route.
+  - `ZAP_IMAGE`, `PROD_TARGETS` (the three hosts of the paused prod stack, R-31), `reportBaseFor(url)`, and `zapDockerArgs({workDir, target, spiderMinutes}): string[]`. These are the `docker run` arguments: `-J`/`-w` reports, `-I`, `--autooff -z "-config spider.postform=false"`, so the spider sends GETs only and never POSTs a form. There is no `-j` (AJAX spider), because on the app host it could click through to the OTP send route, which sends a real SMS on prod.
   - `parseZapReport(json): ZapAlert[]` (ZAP traditional JSON; throws on an unknown shape or riskcode) and `sitesOf(json)`.
   - `evaluateZap({alerts, scannedSites, targets, acceptances, today}): ZapGateResult`. Gate rules:
     - Any HIGH alert blocks, even if an acceptance names it.
@@ -40040,12 +39703,12 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands.
     - LOW and INFO alerts are counted and never block.
     - A target whose origin is missing from the reports blocks with `TARGET_NOT_SCANNED`.
   - `renderSummary(...)`, `loadAcceptances(path)`.
-  - The CLI `pnpm zap-baseline --env=dev` (also `--target=<url>` repeatable, `--out=<dir>`, `--evidence=<dir>`, `--minutes=<n>`, and `--gate=<dir>`, which re-gates existing JSON reports without scanning). pnpm passes the flags after the script name straight to it. Docker is spawned directly, without a shell, so the same line works in PowerShell 5.1 and Git Bash, and the mount has no MSYS path conversion. JSON reports stay in the work dir (default `<os tmp>/sanchay-zap-<IST date>`). They are never committed: ZAP writes tab-indented JSON, which `biome ci .` would reject. The markdown reports and `summary.md` are copied to `docs/security/zap/<IST date>/`. The exit code is 1 when the gate fails.
+  - The CLI `pnpm zap-baseline --env=prod` (also `--target=<url>` repeatable, `--out=<dir>`, `--evidence=<dir>`, `--minutes=<n>`, and `--gate=<dir>`, which re-gates existing JSON reports without scanning). pnpm passes the flags after the script name straight to it. Docker is spawned directly, without a shell, so the same line works in PowerShell 5.1 and Git Bash, and the mount has no MSYS path conversion. JSON reports stay in the work dir (default `<os tmp>/sanchay-zap-<IST date>`). They are never committed: ZAP writes tab-indented JSON, which `biome ci .` would reject. The markdown reports and `summary.md` are copied to `docs/security/zap/<IST date>/`. The exit code is 1 when the gate fails.
 - **Deviation from the stale draft:** the draft kept the scan manual and unpinned (it had no registry access). Here the digest is resolved and the runner is code.
 - **Contract notes (resolved against the written tasks, 2026-10-01):**
   - F21 (`p4tasks/F20-F21.md`) writes row 12 and the sign-off table exactly as quoted under Prerequisites.
   - F8/F9 (`p4tasks/F8-F9.md`) put their suites under `apps/api/test/int/security/`.
-  - F1 (`p4tasks/F1.md`) replaces E25's `deploy.yml`; a dispatch needs `-f environment=dev|prod`.
+  - F1 (`p4tasks/F1.md`) owns the final `deploy.yml`; a prod dispatch passes `-f environment=prod`, the only environment (R-31).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -40057,9 +39720,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
-  DEV_TARGETS,
   evaluateZap,
   loadAcceptances,
+  PROD_TARGETS,
   parseZapReport,
   renderSummary,
   reportBaseFor,
@@ -40070,8 +39733,8 @@ import {
   zapDockerArgs,
 } from './zap-baseline.ts';
 
-const APP = 'https://app.dev.sanchay.in';
-const WWW = 'https://www.dev.sanchay.in';
+const APP = 'https://app.sanchay.in';
+const WWW = 'https://www.sanchay.in';
 
 /** The shape ZAP 2.17.0 writes with -J (traditional JSON), trimmed to the fields the gate reads. */
 function report(sites: Array<{ name: string; alerts: Array<[string, string, string]> }>) {
@@ -40130,7 +39793,7 @@ describe('zapDockerArgs', () => {
     assert.ok(args.includes('-I'));
     assert.deepEqual(args.slice(args.indexOf('-J'), args.indexOf('-J') + 2), [
       '-J',
-      'zap-app.dev.sanchay.in.json',
+      'zap-app.sanchay.in.json',
     ]);
   });
 
@@ -40139,15 +39802,12 @@ describe('zapDockerArgs', () => {
     assert.equal(args.includes('-j'), false);
   });
 
-  it('scans the three dev-stack hosts and never a prod host', () => {
+  it('scans the three hosts of the paused prod stack (R-31)', () => {
     assert.deepEqual(
-      DEV_TARGETS.map((t) => new URL(t).hostname),
-      ['www.dev.sanchay.in', 'app.dev.sanchay.in', 'api.dev.sanchay.in'],
+      PROD_TARGETS.map((t) => new URL(t).hostname),
+      ['www.sanchay.in', 'app.sanchay.in', 'api.sanchay.in'],
     );
-    assert.equal(
-      reportBaseFor('https://api.dev.sanchay.in/api/v1/health'),
-      'zap-api.dev.sanchay.in',
-    );
+    assert.equal(reportBaseFor('https://api.sanchay.in/api/v1/health'), 'zap-api.sanchay.in');
   });
 });
 
@@ -40210,11 +39870,11 @@ describe('evaluateZap', () => {
     const result = evaluateZap({
       alerts: [],
       scannedSites: [APP],
-      targets: [`${APP}/`, 'https://api.dev.sanchay.in/api/v1/health'],
+      targets: [`${APP}/`, 'https://api.sanchay.in/api/v1/health'],
       acceptances: [],
       today: '2026-11-24',
     });
-    assert.deepEqual(result.blocking, ['TARGET_NOT_SCANNED https://api.dev.sanchay.in']);
+    assert.deepEqual(result.blocking, ['TARGET_NOT_SCANNED https://api.sanchay.in']);
   });
 
   it('blocks a High alert even when an acceptance names it', () => {
@@ -40274,7 +39934,7 @@ describe('renderSummary', () => {
       result: gate([alert('10038', 'MEDIUM')]),
     });
     assert.match(md, /\| 0 \| 1 \| 0 \| 0 \| FAIL \|/);
-    assert.match(md, /- MEDIUM 10038 "rule 10038" on https:\/\/app\.dev\.sanchay\.in/);
+    assert.match(md, /- MEDIUM 10038 "rule 10038" on https:\/\/app\.sanchay\.in/);
   });
 });
 
@@ -40314,14 +39974,14 @@ Create `scripts/zap-baseline.ts`:
 ```ts
 /**
  * G-E3 ZAP baseline (Task F22). Runs the OWASP ZAP baseline scan (passive rules only, no attacks)
- * in Docker against each target host of the prod-like dev stack, then gates the JSON reports:
+ * in Docker against each host of the paused prod stack (R-31), then gates the JSON reports:
  * any High alert blocks; a Medium alert blocks unless docs/security/zap-acceptances.json accepts it
  * (owner, reason, unexpired); Low and Informational alerts are listed, never blocking.
  *
  * Plain Node 24 (type stripping), like scripts/check-brand.ts. Docker is spawned directly (no shell),
  * so the same command works in PowerShell 5.1 and in Git Bash (no MSYS path conversion of the mount).
  * pnpm passes the flags after the script name straight through (no `--`, BRIEF D8):
- *   pnpm zap-baseline --env=dev
+ *   pnpm zap-baseline --env=prod
  *   pnpm zap-baseline --target=http://host.docker.internal:8090/ --out=<dir> --evidence=<dir>
  *   pnpm zap-baseline --gate=<dir holding zap-*.json>
  */
@@ -40344,13 +40004,14 @@ export const ZAP_IMAGE =
   'ghcr.io/zaproxy/zaproxy:2.17.0@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef';
 
 /**
- * The prod-like dev stack (E25 hosts, R-11 listener rules). Prod itself is never scanned. No AJAX
- * spider: it clicks buttons and fills inputs, and on app.dev that could reach the OTP send route.
+ * The paused prod stack (R-31: there is no dev stack), scanned before GO-1 while sign-in is
+ * invite-only and orders are off (E25's hosts, R-11 listener rules). No AJAX spider: it clicks
+ * buttons and fills inputs, and on the app host that could reach the OTP send route.
  */
-export const DEV_TARGETS: readonly string[] = [
-  'https://www.dev.sanchay.in/',
-  'https://app.dev.sanchay.in/',
-  'https://api.dev.sanchay.in/api/v1/health',
+export const PROD_TARGETS: readonly string[] = [
+  'https://www.sanchay.in/',
+  'https://app.sanchay.in/',
+  'https://api.sanchay.in/api/v1/health',
 ];
 
 export type ZapRisk = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH';
@@ -40594,12 +40255,12 @@ function parseArgs(argv: readonly string[], today: string): CliOptions {
     .filter((a) => a.startsWith('--target='))
     .map((a) => a.slice('--target='.length));
   const env = value('env');
-  if (gate === undefined && explicit.length === 0 && env !== 'dev') {
-    throw new Error('usage: zap-baseline --env=dev | --target=<url> ... | --gate=<dir>');
+  if (gate === undefined && explicit.length === 0 && env !== 'prod') {
+    throw new Error('usage: zap-baseline --env=prod | --target=<url> ... | --gate=<dir>');
   }
   const workDir = resolve(gate ?? value('out') ?? join(tmpdir(), `sanchay-zap-${today}`));
   return {
-    targets: explicit.length > 0 ? explicit : [...DEV_TARGETS],
+    targets: explicit.length > 0 ? explicit : [...PROD_TARGETS],
     workDir,
     evidenceDir: resolve(value('evidence') ?? join('docs', 'security', 'zap', today)),
     gateOnly: gate !== undefined,
@@ -40676,14 +40337,15 @@ Create `docs/security/zap-baseline.md`:
 ````markdown
 # ZAP baseline (G-E3)
 
-Owner: Dev B. Due Wed 11-25 (G-E3). Target: the prod-like dev stack (E25), never prod.
+Owner: Dev B. Due Wed 11-25 (G-E3). Target: the paused prod stack, before GO-1 (R-31: there is no dev stack).
 
 ## What runs
 `scripts/zap-baseline.ts` runs `zap-baseline.py` from
 `ghcr.io/zaproxy/zaproxy:2.17.0@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef`
-against `https://www.dev.sanchay.in/`, `https://app.dev.sanchay.in/` and
-`https://api.dev.sanchay.in/api/v1/health`. The scan is passive: a spider that sends GETs only (`--autooff`,
-`spider.postform=false`, no AJAX spider), plus ZAP's passive rules. Nothing is attacked and no form is posted.
+against `https://www.sanchay.in/`, `https://app.sanchay.in/` and
+`https://api.sanchay.in/api/v1/health`. The scan is passive: a spider that sends GETs only (`--autooff`,
+`spider.postform=false`, no AJAX spider), plus ZAP's passive rules. Nothing is attacked, no form is posted and
+nothing signs in.
 
 ## Gate
 - Any High alert blocks G-E3 until it is fixed and re-scanned. A High alert is never accepted.
@@ -40716,7 +40378,7 @@ node --test scripts/zap-baseline.test.ts
 ```
 Expected: `ℹ tests 17`, `ℹ pass 17`, `ℹ fail 0`.
 
-Rehearse the runner end to end against any local HTTP server before you touch the dev stack. This needs Docker; the image is large on first pull. With a server on port 8090 (for example `node -e "require('node:http').createServer((q,s)=>s.end('<a href=/a>a</a>')).listen(8090)"`), run (same line in both shells; pnpm passes the flags after the script name to the script):
+Rehearse the runner end to end against any local HTTP server before you scan prod. This needs Docker; the image is large on first pull. With a server on port 8090 (for example `node -e "require('node:http').createServer((q,s)=>s.end('<a href=/a>a</a>')).listen(8090)"`), run (same line in both shells; pnpm passes the flags after the script name to the script):
 ```
 pnpm zap-baseline --target=http://host.docker.internal:8090/ --out=.zap-rehearsal --evidence=.zap-rehearsal/evidence --minutes=1
 ```
@@ -40734,31 +40396,32 @@ pnpm exec biome check --write scripts/zap-baseline.ts scripts/zap-baseline.test.
 node --test scripts/zap-baseline.test.ts
 pnpm lint
 git add scripts/zap-baseline.ts scripts/zap-baseline.test.ts docs/security/zap-baseline.md docs/security/zap-acceptances.json package.json .github/workflows/ci.yml
-git commit -m "feat(security): ZAP baseline runner and G-E3 gate on the dev stack" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(security): ZAP baseline runner and G-E3 gate for the paused prod stack" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test command.
 
-- [ ] **Step 6: Run the baseline on the dev stack, triage, cross-sign G-E3 (pilot week, Mon 11-23; re-scan by Wed 11-25)**
+- [ ] **Step 6: Run the baseline on the paused prod stack, triage, cross-sign G-E3 (pilot week, Mon 11-23; re-scan by Wed 11-25; before GO-1)**
 
-1. Deploy the freeze commit to dev and record it (F1's `deploy.yml` needs its `environment` input):
+1. Record what prod runs and check that it is still paused. Do not deploy for the scan: prod is the only stack
+   (R-31) and the canary runs on it, so scan between canary legs, never while a switch is on:
    ```
-   git rev-parse main
-   gh workflow run deploy.yml --ref main -f environment=dev
-   gh run list --workflow=deploy.yml --limit=1 --json url,headSha,conclusion
-   curl.exe -s -i https://api.dev.sanchay.in/api/v1/health
+   gh run list --workflow=deploy.yml --limit=5 --json url,headSha,conclusion,createdAt
+   curl.exe -s -i https://api.sanchay.in/api/v1/health
+   curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config
    ```
    Pass criteria:
-   - The run's `headSha` equals `git rev-parse main` and its `conclusion` is `success`.
+   - The newest run whose `conclusion` is `success` has the gate commit as its `headSha` (F21: the commit deployed to prod for the canary).
+   - The config contains `"ordersEnabled":false` and `"sipEnabled":false`.
    - The health response starts with a `200` status line. Use `curl.exe` in both shells; in PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`.
 2. Scan (about 10 minutes for three hosts):
    ```
-   pnpm zap-baseline --env=dev
+   pnpm zap-baseline --env=prod
    ```
 3. Triage every blocking line in `docs/security/zap/<date>/summary.md`:
    - **High:** fix it inside the F26 fix budget, redeploy, re-scan. A High alert is never accepted.
    - **Medium:** fix it if the fix is a header or a config line (for example a missing CSP or `X-Frame-Options` on the `www` host or on a path excluded from `apps/web/src/proxy.ts`'s matcher, such as `robots.txt`). Otherwise add one entry to `docs/security/zap-acceptances.json`:
      ```json
-     { "pluginId": "10202", "site": "https://www.dev.sanchay.in", "owner": "Dev B", "reason": "<why it is not exploitable here>", "expires": "2026-12-18" }
+     { "pluginId": "10202", "site": "https://www.sanchay.in", "owner": "Dev B", "reason": "<why it is not exploitable here>", "expires": "2026-12-18" }
      ```
      Example: 10202 (Anti-CSRF tokens) on a form-less page. CSRF is enforced by Origin + `Sec-Fetch-Site` (H-7, B18), not by tokens.
    - Re-gate without re-scanning:
@@ -40768,12 +40431,12 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test command.
 4. Pass criteria for G-E3's ZAP item:
    - The last `pnpm zap-baseline` run exits 0.
    - `summary.md` shows `| 0 | … | PASS |`.
-   - All three hosts appear in `docs/security/zap/<date>/` as `zap-www.dev.sanchay.in.md`, `zap-app.dev.sanchay.in.md` and `zap-api.dev.sanchay.in.md`.
+   - All three hosts appear in `docs/security/zap/<date>/` as `zap-www.sanchay.in.md`, `zap-app.sanchay.in.md` and `zap-api.sanchay.in.md`.
    - Every accepted Medium has an owner and an expiry no later than 2026-12-18.
 5. Fill the "Runs" row of `docs/security/zap-baseline.md` with the date, the commit from 1, the counts and the evidence folder link.
 6. Cross-sign G-E3 in F21's `docs/security/g-e3-checklist.md`. First fill row 12 in place: keep its `#`, Item, How to check and Pass criterion cells as F21 wrote them, and fill Evidence, Status and Link. The whole row then reads:
    ```markdown
-   | 12 | One ZAP baseline on the prod-like stack | [`zap-baseline.md`](zap-baseline.md) "Runs" row <date>; ZAP's per-host reports in `zap/<date>/` | open `docs/security/zap/<date>/summary.md` (F22 Step 6); `pnpm zap-baseline --gate=<work dir>` re-gates the saved JSON reports on the machine that ran the scan | the gate passes: no High; every Medium fixed or accepted in `docs/security/zap-acceptances.json` with an owner and an expiry no later than 2026-12-18; all three dev hosts scanned | PASS | [`zap/<date>/summary.md`](zap/<date>/summary.md) |
+   | 12 | One ZAP baseline on the prod-like stack | [`zap-baseline.md`](zap-baseline.md) "Runs" row <date>; ZAP's per-host reports in `zap/<date>/` | open `docs/security/zap/<date>/summary.md` (F22 Step 6); `pnpm zap-baseline --gate=<work dir>` re-gates the saved JSON reports on the machine that ran the scan | the gate passes: no High; every Medium fixed or accepted in `docs/security/zap-acceptances.json` with an owner and an expiry no later than 2026-12-18; all three prod hosts scanned | PASS | [`zap/<date>/summary.md`](zap/<date>/summary.md) |
    ```
    A FAIL instead: Status `FAIL`, and Link names the F26 item.
 
@@ -41687,7 +41350,7 @@ and, for G-E4 only, "owner ruling required" (a sandbox chain is not wired; never
 | G-B8 | ARN/EUIN configuration: the ARN on the canary statement (P-05); the EUIN FP returns, compared with Cybrilla's written Q12 answer and never asserted blank (P-04 FAIL, BRIEF D7) | PO + Dev A | Thu 11-26 | [`P-04`](P-04-euin-blank.md), [`P-05`](P-05-arn-visible.md), the Q12 answer in `docs/probes/`, and the EUIN table and G-B8 boxes of [`canary-2026-11.md`](canary-2026-11.md) | |
 | G-B9 | Play Console, internal track, Play App Signing | PO | 10-30 / 11-06 | console | |
 | G-B10 | Curated list and fund-facts CSV | PO | 11-06 / 11-20 | CSVs in the repo | |
-| G-B11 | Invite list, pilot terms addendum, pilot caps | PO | Fri 11-20 | `pilot_invites` seed, `app_config` | |
+| G-B11 | Invite list, pilot terms addendum, pilot caps | PO | Fri 11-20 | the PO's list, kept outside the repo (F27 seeds it only after the GO-1 decision, R-31; RV-04-F23-1); `app_config` caps (F27 D1) | |
 | G-B12 | Support/grievance mailboxes, on-call rota, CERT-In contact | PO | Mon 11-23 | published page, rota | |
 | G-C1 | Counsel approval of the legal texts and templates | PO | Fri 11-13 | signed PDF + sha256 in `legal_documents` | |
 | G-C2 | Risk questionnaire v1.0.0 sign-off | PO | Fri 10-30 | sign-off | |
@@ -42313,7 +41976,7 @@ gh run list --workflow=deploy.yml --limit=5 --json url,headSha,conclusion,create
 
 **Interfaces:**
 - **Prerequisites (BRIEF D2 order: F24 runs after F23 and every task before it; F6 and F17 are skipped):**
-  - F1: `docs/runbooks/credential-rotation.md` (first line `# Runbook: credential rotation`, an `Owner:` line, last section "If an alarm fires mid-rotation", last line `  after step 5, the two sides hold different secrets. Roll back and call Cybrilla.`) and `docs/runbooks/db-access.md` (section "Read-only SQL over SSM (spec §2.4)"). The ten prod alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (notifications on ALARM and OK); dev has one alarm, `sanchay-dev-nav-age`, with no action. Cluster `sanchay-{env}`, the one service `sanchay-app` (containers web, api, worker), stack `SanchayMvpStack-{env}` with outputs `OpsTaskDefinitionArn`, `AppSubnetIds`, `ServiceSecurityGroupId`. Log group `/sanchay/{env}/app`, stream prefix `{env}/{container}/<task id>`. Metric namespace `Sanchay/{env}`, OTP counters `otp.sent` and `otp.send_failed`, gauge `smsSentToday`. Secrets `sanchay/{env}/{keyring, fp, fp-webhook, msg91, db-app, db-readonly, db-master}`; read-only login `sanchay_readonly_login`.
+  - F1: `docs/runbooks/credential-rotation.md` (first line `# Runbook: credential rotation`, an `Owner:` line, last section "If an alarm fires mid-rotation", last line `  after step 5, the two sides hold different secrets. Roll back and call Cybrilla.`) and `docs/runbooks/db-access.md` (section "Read-only SQL over SSM (spec §2.4)"). The ten prod alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (notifications on ALARM and OK); prod is the only stack (R-31; RV-04-F24-2), so there is no other alarm. Cluster `sanchay-{env}`, the one service `sanchay-app` (containers web, api, worker), stack `SanchayMvpStack-{env}` with outputs `OpsTaskDefinitionArn`, `AppSubnetIds`, `ServiceSecurityGroupId`. Log group `/sanchay/{env}/app`, stream prefix `{env}/{container}/<task id>`. Metric namespace `Sanchay/{env}`, OTP counters `otp.sent` and `otp.send_failed`, gauge `smsSentToday`. Secrets `sanchay/{env}/{keyring, fp, fp-webhook, msg91, db-app, db-readonly, db-master}`; read-only login `sanchay_readonly_login`.
   - F7: the ops commands and their exact flags (below), the deployed run form and `docs/runbooks/ops-cli.md` (section "Running a command in a deployed environment (the one form)"), the six read-only views, `integrity.invariants` (hourly at :05 IST) and its `INVARIANT_*` kinds, `recon.fp.daily` (02:00 IST), the redemption backstop and LOOKUP-ADOPT in `fp.reconcile.nonfinal`.
   - F2, F4, F5, F28: the jobs and break kinds the runbooks name. S1: the stub `docs/runbooks/otp-send-failure.md` (commit b90b137).
   - The lint itself needs nothing but Node 24.
@@ -42327,14 +41990,14 @@ gh run list --workflow=deploy.yml --limit=5 --json url,headSha,conclusion,create
   - E21 `payment_attempts.refund_status` (`IN_PROGRESS`, D-MONEY-040's `REFUND_PENDING`); E20 `ORDERS_DISABLED` 403 and its copy "New investments are paused right now. Please try again later."; E2 `GET /api/v1/app/config` (`flags.ordersEnabled`, `flags.sipEnabled`, `limits.perOrderMax`, `limits.perInvestorPerDayMax`), answered on the app host to `x-sanchay-client: web` (F8's HostGuard refuses the web client on the api host); D3 `FpAmbiguousError`/`FpRejectedError`; Plan 01 B13 `SMS_UNAVAILABLE` 503, the 5 s send timeout (D-17) and the 2,000-SMS-per-IST-day cap; D6's four DLT template keys `LOGIN`, `CONSENT`, `CONSENT_UNITS`, `ATTEST` in `SANCHAY_MSG91_CREDENTIALS_JSON`; `/api/v1/health` (the ALB check, R-12) and `/api/v1/health/ready` (database, pg-boss and a worker heartbeat fresher than 2 minutes, D2); D9 `nav.sync.daily`.
   - Rulings and spec: spec §4.1, §4.6, §5, §7 G-E8; H-1, H-9, H-13, H-21; R-06, R-07, R-10, R-16, R-20; D-PLATFORM-095/096; D-MONEY-040, D-MONEY-053, D-MONEY-055, D-MONEY-071; privacy spec §5 and §6 (acknowledge ≤ 24 h, resolve ≤ 30 days).
 - **Produces:**
-  - `scripts/check-runbooks.ts` exporting `REQUIRED_RUNBOOKS` (13 `{slug, title}` in spec §7 order), `REQUIRED_SECTIONS` (`When to use`, `Detect`, `Act`, `Verify`, `Escalate`, `Evidence`), `KNOWN_ALARMS` (F1's ten prod alarms and `sanchay-dev-nav-age`), `checkRunbookText(slug, title, text): RunbookProblem[]`, `checkIndex(text, slugs)`, `checkRunbooksDir(dir): {checked, problems}`, problem codes `MISSING | TITLE | OWNER | SECTION_MISSING | SECTION_ORDER | AMPERSANDS | FILTER_FORM | ENV_TWIN | ALARM | PII | INDEX`.
+  - `scripts/check-runbooks.ts` exporting `REQUIRED_RUNBOOKS` (13 `{slug, title}` in spec §7 order), `REQUIRED_SECTIONS` (`When to use`, `Detect`, `Act`, `Verify`, `Escalate`, `Evidence`), `KNOWN_ALARMS` (F1's ten prod alarms; R-31 leaves no dev stack), `checkRunbookText(slug, title, text): RunbookProblem[]`, `checkIndex(text, slugs)`, `checkRunbooksDir(dir): {checked, problems}`, problem codes `MISSING | TITLE | OWNER | SECTION_MISSING | SECTION_ORDER | AMPERSANDS | FILTER_FORM | ENV_TWIN | ALARM | PII | INDEX`.
   - Root script `check-runbooks` and the CI step "Ops scripts and runbook lint (G-E8)", which F25 and F26 extend.
   - The 13 G-E8 runbooks (11 new; `otp-send-failure.md` and `credential-rotation.md` extended) and `docs/runbooks/README.md` (index, alarm map, CRITICAL break kinds, the shared rules, the one deployed ops form copied from F7, the evidence location `docs/probes/incidents/<yyyy-mm-dd>-<runbook>.md`).
 - **Deviation from outline:** the outline says "from sprint stubs". Two runbooks exist before F24: F1's `credential-rotation.md` and the S1 stub `docs/runbooks/otp-send-failure.md` (commit b90b137), whose status line says the pilot week (F24, G-E8) turns it into the final runbook. F24 extends both instead of replacing them: the stub keeps its name and its sections and becomes G-E8 item 2 ("SMS outage"); F1's runbook gains the six shared sections after its last line. F24 writes the other 11 in full. `docs/runbooks/provisioning-failed.md` (spec §4.5, E11) is not a G-E8 item and stays out of this task.
 - **Review fixes (assembly, 2026-10-01; BRIEF D5, D7, D8; defects-F24F27):**
   1. Every ops command uses F7's exact flags (`ops:sync … --by <handle>`; `ops:kill-switch --off --by <handle> --reason <text>`; `--on` with two different founders and a reason) and, in a deployed environment, F7's one run form; no runbook sets `SANCHAY_APP_ROLE` by hand (the runner forces it).
   2. Read-only SQL uses F7's six views only; audit checks read `app.v_ops_audit` filtered on `action` (and on the payment attempt id for a refund), never `audit_events` or `pilot_invites`.
-  3. Alarm names are F1's and exist in prod only (`sanchay-prod-*`; dev keeps `sanchay-dev-nav-age`); the service is `sanchay-app`; the credential-rotation sections follow F1's last section. The lint refuses an alarm name F1 does not create (`ALARM`).
+  3. Alarm names are F1's and exist in prod, the only stack (`sanchay-prod-*`; R-31); the service is `sanchay-app`; the credential-rotation sections follow F1's last section. The lint refuses an alarm name F1 does not create and any `sanchay-dev-` name (`ALARM`).
   4. Invariants carry F7's kinds (M1–M4 per D-MONEY-071 plus `INVARIANT_RESERVATIONS_OVER_HELD`); the kill switch pauses new redemptions too; payouts follow F5 (DELAYED after `payout_due_by`, both dates in `v_payouts_due`); a handled break that does not resolve itself leaves the open list through `ops:resolve-break`.
   5. The app config is read on the app host with the web header.
   6. The S1 stub `otp-send-failure.md` is G-E8 item 2; there is no `sms-outage.md`.
@@ -42419,7 +42082,7 @@ describe('REQUIRED_RUNBOOKS', () => {
 });
 
 describe('KNOWN_ALARMS', () => {
-  it("pins F1's ten prod alarms and the one dev alarm", () => {
+  it("pins F1's ten alarms, all in prod, the only stack (R-31)", () => {
     assert.deepEqual(KNOWN_ALARMS, [
       'sanchay-prod-alb-5xx',
       'sanchay-prod-target-unhealthy',
@@ -42431,7 +42094,6 @@ describe('KNOWN_ALARMS', () => {
       'sanchay-prod-otp-send-failure-rate',
       'sanchay-prod-sms-cap-reached',
       'sanchay-prod-nav-age',
-      'sanchay-dev-nav-age',
     ]);
   });
 });
@@ -42510,19 +42172,19 @@ describe('checkRunbookText', () => {
       ...KNOWN_ALARMS,
       'sanchay-{env}-nav-age',
       'sanchay-prod-ops',
-      'sanchay-dev-migrate',
+      'sanchay-<env>-migrate',
       'sanchay-prod-restore-test',
     ];
     const body = names.map((n) => `- \`${n}\``).join('\n');
     assert.deepEqual(codesOf('refund', 'Refund', runbook('Refund', { body })), []);
   });
 
-  it('flags an alarm F1 does not create, and a prod-only alarm written for every env', () => {
+  it('flags an alarm F1 does not create, and any sanchay-dev- name (R-31: no dev stack)', () => {
     for (const name of [
       'sanchay-prod-critical-breaks',
-      'sanchay-{env}-alb-5xx',
-      'sanchay-<env>-reconciling-sla',
-      'sanchay-dev-sms-cap-reached',
+      'sanchay-{env}-critical-breaks',
+      'sanchay-dev-nav-age',
+      'sanchay-dev-migrate',
     ]) {
       const text = runbook('Refund', { body: `Page: \`${name}\`.` });
       assert.deepEqual(codesOf('refund', 'Refund', text), ['ALARM'], name);
@@ -42656,7 +42318,7 @@ export const REQUIRED_SECTIONS: readonly string[] = [
   'Evidence',
 ];
 
-/** F1's alarms (`infra/lib/alarms.ts` `ALARM_SUFFIXES`): prod has all ten, dev only `nav-age`. */
+/** F1's alarms (`infra/lib/alarms.ts` `ALARM_SUFFIXES`), all in prod: R-31 leaves no dev stack. */
 export const KNOWN_ALARMS: readonly string[] = [
   'sanchay-prod-alb-5xx',
   'sanchay-prod-target-unhealthy',
@@ -42668,7 +42330,6 @@ export const KNOWN_ALARMS: readonly string[] = [
   'sanchay-prod-otp-send-failure-rate',
   'sanchay-prod-sms-cap-reached',
   'sanchay-prod-nav-age',
-  'sanchay-dev-nav-age',
 ];
 
 /** F1 names that share the `sanchay-<env>-` prefix but are not alarms: task families, ECR, the PITR copy. */
@@ -42684,15 +42345,15 @@ const MOBILE = /(?<![\d-])[6-9]\d{9}(?!\d)/;
 const PAN = /\b[A-Z]{5}\d{4}[A-Z]\b/;
 const PS_ENV = /\$env:([A-Z][A-Z0-9_]*)\s*=/g;
 
-/** Null when `sanchay-<env>-<suffix>` is an F1 alarm (in every env it names) or another F1 resource. */
+/**
+ * Null when `sanchay-<env>-<suffix>` is one of F1's alarms or another F1 resource. `{env}` and `<env>`
+ * stand for prod, the only stack (R-31), so a `sanchay-dev-` name is always a problem.
+ */
 function alarmProblem(env: string, suffix: string): string | null {
-  if (OTHER_ENV_NAMES.has(suffix)) return null;
-  const envs = env === 'prod' || env === 'dev' ? [env] : ['prod', 'dev'];
-  const missing = envs.filter((e) => !KNOWN_ALARMS.includes(`sanchay-${e}-${suffix}`));
-  if (missing.length === 0) return null;
-  return envs.length > 1 && missing.length < envs.length
-    ? `sanchay-${env}-${suffix}: F1 creates it in prod only; write sanchay-prod-${suffix}`
-    : `sanchay-${env}-${suffix} is not one of F1's alarms (KNOWN_ALARMS)`;
+  if (env === 'dev')
+    return `sanchay-dev-${suffix}: there is no dev stack (R-31); write sanchay-prod-${suffix}`;
+  if (OTHER_ENV_NAMES.has(suffix) || KNOWN_ALARMS.includes(`sanchay-prod-${suffix}`)) return null;
+  return `sanchay-${env}-${suffix} is not one of F1's alarms (KNOWN_ALARMS)`;
 }
 
 export function checkRunbookText(slug: string, title: string, text: string): RunbookProblem[] {
@@ -42831,7 +42492,8 @@ Create `docs/runbooks/README.md`:
 G-E8 (spec §7) requires these 13 runbooks before GO-1. `pnpm check-runbooks` (F24) fails the build when
 one is missing, lacks the shared shape (When to use, Detect, Act, Verify, Escalate, Evidence), puts `&&` or
 the space form of `--filter` in a command, gives a PowerShell `$env:` command without its Git Bash form,
-names an alarm F1 does not create, or contains a real-looking mobile number or PAN.
+names an alarm F1 does not create or a `sanchay-dev-` resource (R-31: there is no dev stack), or contains a
+real-looking mobile number or PAN.
 
 | # | Runbook | Typical trigger |
 |---|---|---|
@@ -42853,10 +42515,8 @@ Related references (not G-E8 items): [ops CLIs](ops-cli.md) (F7: every `ops:*` c
 writes and the one deployed run form), [database access](db-access.md) (F1: the logins, the migrate task and
 the read-only SQL session over SSM) and [Android release](android-release.md) (F18).
 
-The examples use prod. Dev is the same with `dev` in every name (`sanchay-dev`, `sanchay-dev-ops`,
-`SanchayMvpStack-dev`, `/sanchay/dev/app`, `/sanchay/dev/invites/`, the stream prefix `dev`,
-`app.dev.sanchay.in`, `api.dev.sanchay.in`), except that dev has one alarm only, `sanchay-dev-nav-age`, which
-notifies nobody.
+Every name below is prod's: R-31 leaves one deployed stack, `SanchayMvpStack-prod`, and no dev stack or dev
+domain.
 
 ## Alarm to runbook map
 
@@ -43498,8 +43158,8 @@ aws ecs update-service --cluster sanchay-prod --service sanchay-app --desired-co
 
 ## Evidence
 - `docs/probes/incidents/<yyyy-mm-dd>-kill-switch.md`: off and on times, the handles that ran each, the task
-  ids, the alarm or reason, the two founders' written agreement to turn back on. F27 drills this runbook on dev
-  before the invitees start.
+  ids, the alarm or reason, the two founders' written agreement to turn back on. F27 drills this runbook on the paused prod
+  stack before GO-1 (R-31).
 ````
 
 Create `docs/runbooks/cert-in-6h.md`:
@@ -43766,13 +43426,13 @@ Owner: on-call developer (Dev B primary, Dev A secondary; rota per G-B12). Gate:
 3. In "Symptoms", the line `- From F1 on, these alarms fire: …` becomes:
 
 ```
-- In prod these F1 alarms fire: `sanchay-prod-otp-send-failure-rate` (more than 5% of OTP sends failed in one 15-minute period, counted only when that period had at least 20 sends) or `sanchay-prod-sms-cap-reached` (SMS sent since 00:00 IST reach 1,800 or more, 90% of the 2,000-a-day cap, read in one 5-minute period; the cap refuses the 2,001st). Dev has no OTP alarm.
+- In prod these F1 alarms fire: `sanchay-prod-otp-send-failure-rate` (more than 5% of OTP sends failed in one 15-minute period, counted only when that period had at least 20 sends) or `sanchay-prod-sms-cap-reached` (SMS sent since 00:00 IST reach 1,800 or more, 90% of the 2,000-a-day cap, read in one 5-minute period; the cap refuses the 2,001st).
 ```
 
 4. In "Triage (in order)", step 3, the first sub-bullet (`` - `SANCHAY_PROVIDER_MODE_SMS` / `_EMAIL`. Today these are … ``) becomes (its three leading spaces kept):
 
 ```
-   - `SANCHAY_PROVIDER_MODE_SMS` / `_EMAIL` are `msg91` / `ses` on the api and worker containers in dev and prod (Plan 02 D6, E25); the production boot guard refuses `capture` and `mailpit`.
+   - `SANCHAY_PROVIDER_MODE_SMS` / `_EMAIL` are `msg91` / `ses` on the api and worker containers in prod, the only stack (Plan 02 D6, E25; R-31); the production boot guard refuses `capture` and `mailpit`.
 ```
 
 5. In "Cap reached", the line `- Email OTPs keep working during an SMS cap. …` becomes:
@@ -43898,7 +43558,7 @@ curl.exe -s -i https://api.sanchay.in/api/v1/health/ready
 ```
 
 - The alarms of step 6 of the provider section stay `OK` for 15 minutes, and nothing else is in ALARM (the
-  "Before you start" check prints an empty list again). One founder sign-in on prod (a sandbox sign-in on dev)
+  "Before you start" check prints an empty list again). One founder sign-in on prod
   succeeds, which proves the MSG91 secret.
 
 ## Escalate
@@ -43977,14 +43637,14 @@ Results:
 - **Test:** `scripts/android-evidence.test.ts` (`node --test`).
 
 **Interfaces:**
-- **Prerequisites:** F18 (the Play internal build of `in.sanchay.app`; one `autoVerify` App Link filter for `https://<host of EXPO_PUBLIC_SANCHAY_APP_ORIGIN>/app/*`, so the sandbox-chain build (S4, before GO-1) verifies `app.dev.sanchay.in` and the pilot build `app.sanchay.in`; `apps/web/public/.well-known/assetlinks.json` served on both hosts; FLAG_SECURE on every `SECURE_ROUTES` screen; `docs/runbooks/android-release.md` §4, the G-E6 device evidence list this task records), E24 (`/app/r/payment` return route, `apps/mobile/src/app/r/[kind].tsx`), F12 (the UPI Autopay mandate screen; F2 sends no mandate postback, so the mandate is evidenced as F18 deviation 6 words it: after approval, switching back to Sanchay shows the mandate APPROVED), Plan 01 C13/C14 (`usePreventScreenCapture` from `expo-screen-capture`), Plan 01 `apps/mobile/.maestro/relaunch-without-screen-lock.yaml`, H-13 app lock. G-B9 (Play console, signing key).
+- **Prerequisites:** F18 (the Play internal build of `in.sanchay.app`; one `autoVerify` App Link filter for `https://<host of EXPO_PUBLIC_SANCHAY_APP_ORIGIN>/app/*`, so the Play build verifies `app.sanchay.in`, the app host of prod, the only deployed stack (R-31; RV-04-F25-1); `apps/web/public/.well-known/assetlinks.json` served there; FLAG_SECURE on every `SECURE_ROUTES` screen; `docs/runbooks/android-release.md` §4, the G-E6 device evidence list this task records), E24 (`/app/r/payment` return route, `apps/mobile/src/app/r/[kind].tsx`), F12 (the UPI Autopay mandate screen; F2 sends no mandate postback, so the mandate is evidenced as F18 deviation 6 words it: after approval, switching back to Sanchay shows the mandate APPROVED), Plan 01 C13/C14 (`usePreventScreenCapture` from `expo-screen-capture`), Plan 01 `apps/mobile/.maestro/relaunch-without-screen-lock.yaml`, H-13 app lock. G-B9 (Play console, signing key).
 - **Consumes:** `adb` on the PATH (Android platform-tools), one device with USB debugging on and the Play internal build installed; `APP_ID` `in.sanchay.app` (`apps/mobile/app.config.ts`).
 - **Produces:**
   - `scripts/android-evidence.ts` exporting `APP_ID`, `DEFAULT_APP_LINK_HOST` (`app.sanchay.in`, the pilot build's host), `appLinkHostFor(argv, declared): {host, source}`, `parseAppLinks(output): Record<domain, state>`, `parseInstaller(output): string | null`, `parseVersion(output): {versionName, versionCode}`, `focusedWindowFlags(dumpsys): {component, flags}`, `isInside(path, root)`, `renderSection(section)`; steps `device`, `app-links [--host <host>]`, `secure --screen <name>`, `screenshot --screen <name> --dir <folder outside the repo>`; exit code 1 on a failed check.
   - Root script `evidence:android`.
   - The G-E6 evidence file for F23's gate pack.
 - **Design notes:** FLAG_SECURE is read from the focused window's own `fl=` line in `dumpsys window windows`, so another window's `SECURE` is never borrowed. The installer check (`com.android.vending`) proves the device runs the Play-distributed build, not a sideloaded one. Screenshots can show a founder's real data, so the script refuses a `--dir` inside the repository and records only the sha256. The App Links host follows the build (F18 deviation 1): `--host` names it; without it the script checks the one domain the installed build declares (from `pm get-app-links`), else `app.sanchay.in`, and the evidence line records which source chose the host.
-- **Review fixes (assembly, 2026-10-01; defects-F24F27):** the App Links host is no longer hard-coded (`--host`, defaulting to the installed build's own domain), so the sandbox-chain build's `app.dev.sanchay.in` passes; the mandate check uses F18's wording (switching back shows APPROVED), because no `/app/r/mandate` route or mandate postback exists; the FLAG_SECURE screens are F18's list.
+- **Review fixes (assembly, 2026-10-01; defects-F24F27):** the App Links host is no longer hard-coded (`--host`, defaulting to the installed build's own domain), so a build that declares another host is checked against its own; the mandate check uses F18's wording (switching back shows APPROVED), because no `/app/r/mandate` route or mandate postback exists; the FLAG_SECURE screens are F18's list.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -44019,8 +43679,8 @@ const APP_LINKS_PENDING = `  in.sanchay.app:
       app.sanchay.in: 1024
 `;
 
-/** The sandbox-chain build (S4) points at the dev stack, so it declares app.dev.sanchay.in (F18). */
-const APP_LINKS_DEV_BUILD = APP_LINKS_VERIFIED.replace('app.sanchay.in', 'app.dev.sanchay.in');
+/** A build pointed at another app origin declares that host (F18); the test origin stands in. */
+const APP_LINKS_OTHER_BUILD = APP_LINKS_VERIFIED.replace('app.sanchay.in', 'app.sanchay.test');
 
 const DUMPSYS_SECURE = `WINDOW MANAGER WINDOWS (dumpsys window windows)
   Window #4 Window{77aa11 u0 com.android.systemui/StatusBar}:
@@ -44050,7 +43710,7 @@ describe('parseAppLinks', () => {
   it('reads each domain and its verification state', () => {
     assert.deepEqual(parseAppLinks(APP_LINKS_VERIFIED), { 'app.sanchay.in': 'verified' });
     assert.deepEqual(parseAppLinks(APP_LINKS_PENDING), { 'app.sanchay.in': '1024' });
-    assert.deepEqual(parseAppLinks(APP_LINKS_DEV_BUILD), { 'app.dev.sanchay.in': 'verified' });
+    assert.deepEqual(parseAppLinks(APP_LINKS_OTHER_BUILD), { 'app.sanchay.test': 'verified' });
   });
 
   it('returns nothing when the package is unknown', () => {
@@ -44061,21 +43721,21 @@ describe('parseAppLinks', () => {
 describe('appLinkHostFor (F18: the host follows the build origin)', () => {
   it('--host wins over what the installed build declares', () => {
     assert.deepEqual(
-      appLinkHostFor(['app-links', '--host', 'app.dev.sanchay.in'], ['app.sanchay.in']),
-      { host: 'app.dev.sanchay.in', source: '--host' },
+      appLinkHostFor(['app-links', '--host', 'app.sanchay.test'], ['app.sanchay.in']),
+      { host: 'app.sanchay.test', source: '--host' },
     );
   });
 
   it("without --host, checks the installed build's one domain, else the pilot host", () => {
     assert.deepEqual(
-      appLinkHostFor(['app-links'], Object.keys(parseAppLinks(APP_LINKS_DEV_BUILD))),
-      { host: 'app.dev.sanchay.in', source: 'installed build' },
+      appLinkHostFor(['app-links'], Object.keys(parseAppLinks(APP_LINKS_OTHER_BUILD))),
+      { host: 'app.sanchay.test', source: 'installed build' },
     );
     assert.deepEqual(appLinkHostFor(['app-links'], []), {
       host: 'app.sanchay.in',
       source: 'default',
     });
-    assert.deepEqual(appLinkHostFor(['app-links'], ['app.sanchay.in', 'app.dev.sanchay.in']), {
+    assert.deepEqual(appLinkHostFor(['app-links'], ['app.sanchay.in', 'app.sanchay.test']), {
       host: 'app.sanchay.in',
       source: 'default',
     });
@@ -44191,8 +43851,8 @@ import process from 'node:process';
 
 export const APP_ID = 'in.sanchay.app';
 /**
- * The pilot build's App Links host. F18 makes the host follow EXPO_PUBLIC_SANCHAY_APP_ORIGIN, so the
- * sandbox-chain build (S4) declares and verifies app.dev.sanchay.in instead.
+ * The pilot build's App Links host. F18 makes the host follow EXPO_PUBLIC_SANCHAY_APP_ORIGIN, and every
+ * Play build talks to prod, the only stack (R-31), so this is the host the gate checks.
  */
 export const DEFAULT_APP_LINK_HOST = 'app.sanchay.in';
 const HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
@@ -44235,7 +43895,7 @@ export function appLinkHostFor(
   if (i !== -1) {
     const host = argv[i + 1]?.toLowerCase();
     if (host === undefined || !HOST.test(host))
-      throw new Error('--host needs a host name, for example app.sanchay.in or app.dev.sanchay.in');
+      throw new Error('--host needs a host name, for example app.sanchay.in');
     return { host, source: '--host' };
   }
   const [only, ...more] = declared;
@@ -44474,7 +44134,7 @@ pnpm evidence:android device
 pnpm evidence:android app-links --host app.sanchay.in
 ```
 
-Pass: `device` reports installer `com.android.vending` and the versionName/versionCode of the AAB uploaded in F18; `app-links` reports `app.sanchay.in: verified (host from --host)`. A sandbox-chain build (S4) declares `app.dev.sanchay.in` instead: check it with `pnpm evidence:android app-links --host app.dev.sanchay.in`, which is useful but is not the gate evidence. A state other than `verified` (for example `1024` or `none`) means `assetlinks.json` does not match the Play App Signing SHA-256: log an F26 defect, fix `assetlinks.json`, redeploy web, then re-verify with:
+Pass: `device` reports installer `com.android.vending` and the versionName/versionCode of the AAB uploaded in F18; `app-links` reports `app.sanchay.in: verified (host from --host)`. A state other than `verified` (for example `1024` or `none`) means `assetlinks.json` does not match the Play App Signing SHA-256: log an F26 defect, fix `assetlinks.json`, redeploy web, then re-verify with:
 
 ```
 adb shell pm verify-app-links --re-verify in.sanchay.app
@@ -45096,8 +44756,10 @@ Create `docs/probes/invitee-dry-run-2026-11.md`:
 ````markdown
 # Invitee dry run and kill-switch drill (F27)
 
-Dev stack: Wed 2026-11-25. Prod: Thu 2026-11-26, after the canary is reconciled and before the GO-1 meeting on
-Fri 11-27. Invitees start on Mon 11-30, and only after a GO-1.
+Everything runs on prod, the only deployed stack, paused until GO-1 (R-31): invite-only, orders and SIPs off,
+and no invite but the founders' test accounts. Drill (D1-D7): Wed 2026-11-25, between canary legs. Pre-GO-1
+check (D1, D2, D9): Thu 2026-11-26, after the canary is reconciled and before the GO-1 meeting on Fri 11-27.
+Invitee seed (D8, D9): only after the owner's GO-1 decision. Invitees start on Mon 11-30, and only after a GO-1.
 
 Operator: Dev B. Witness: the PO. Times in IST. This log never holds a mobile number, a name or an email: refer
 to invitees by their row number in the PO's private list, and to people by their operator handle (a
@@ -45107,8 +44769,7 @@ Every ops command below is a one-off ECS task on the ops task definition, run wi
 the [runbooks README](../runbooks/README.md#running-an-ops-command) (copied from F7's
 [ops CLIs](../runbooks/ops-cli.md)): write `ops-overrides.json` outside the repo with the `command` shown here,
 run the task, wait for it, read its exit code (0 done, 1 refused with nothing written, 2 usage) and its result
-line, then delete the file. The lines show prod; on dev use `sanchay-dev`, `sanchay-dev-ops`,
-`SanchayMvpStack-dev`, `/sanchay/dev/app`, `/sanchay/dev/invites/` and the stream prefix `dev`.
+line, then delete the file. Prod is the only deployed stack (R-31), so every line below is prod's.
 
 ## Pass criteria
 
@@ -45116,28 +44777,27 @@ line, then delete the file. The lines show prod; on dev use `sanchay-dev`, `sanc
 |---|---|---|
 | D1 | Caps | `app/config` shows `limits.perOrderMax` `100000.00` and `limits.perInvestorPerDayMax` `200000.00`, equal to G-B11 |
 | D2 | SIP flag | `flags.sipEnabled` is `false` in prod (R-06) |
-| D3 | Invite seed (dev) | the task exits 0; its result line shows the mobile only as `******` and the last 4 digits; `v_ops_audit` has one `PILOT_INVITE_ADDED` row for it, with the operator's handle; the SSM parameter and the local list file are deleted |
-| D4 | Gate (dev) | the invited spare number signs up; a never-invited number sees "Sanchay is invite-only right now. Please use the mobile number your invitation was sent to." after a correct OTP |
-| D5 | Per-order cap (dev) | a ₹1,00,000.01 purchase is refused (`AMOUNT_ABOVE_MAX`, field `PILOT_CAP`) before any FP call |
-| D6 | Kill switch off (dev) | the task exits 0; `flags.ordersEnabled` is `false`; Invest shows "New investments are paused right now. Please try again later."; `v_ops_audit` has the `OPS_KILL_SWITCH` row with the operator's handle and the reason |
-| D7 | Kill switch on (dev) | two different founders; `flags.ordersEnabled` is `true`; a ₹500 purchase reaches the consent screen; `v_ops_audit` has the row with `--approver1` as `actor_id` |
-| D8 | Invite seed (prod) | `v_pilot_invites_count` shows `LIVE` equal to the number of rows in the PO's list (G-B11); re-running the same parameter exits 1 with the masked refusal and adds no `PILOT_INVITE_ADDED` row; the SSM parameter and the local list file are deleted |
-| D9 | Prod stays off | `flags.ordersEnabled` is `false` in prod from before D8 until the owner's GO-1 decision |
+| D3 | Invite seed (one founder-owned spare SIM, a founders' test account) | the task exits 0; its result line shows the mobile only as `******` and the last 4 digits; `v_ops_audit` has one `PILOT_INVITE_ADDED` row for it, with the operator's handle; the SSM parameter and the local list file are deleted |
+| D4 | Gate | the invited spare number signs up; a founder-owned number that was never invited sees "Sanchay is invite-only right now. Please use the mobile number your invitation was sent to." after a correct OTP |
+| D5 | Per-order cap (in D7's window, on a founder's canary account: the spare SIM has no KYC on prod) | a ₹1,00,000.01 purchase is refused (`AMOUNT_ABOVE_MAX`, field `PILOT_CAP`) before any FP call |
+| D6 | Kill switch off | the task exits 0; `flags.ordersEnabled` is `false`; Invest on a founder's canary account shows "New investments are paused right now. Please try again later."; `v_ops_audit` has the `OPS_KILL_SWITCH` row with the operator's handle and the reason |
+| D7 | Kill switch on (a window of a few minutes, like a canary leg's) | two different founders; `flags.ordersEnabled` is `true`; a ₹500 purchase on a founder's canary account reaches the consent screen and is not approved; `v_ops_audit` has the row with `--approver1` as `actor_id`; one operator turns orders off again straight after D5 (reason `F27 drill done`) |
+| D8 | Invite seed (the PO's list, only after the GO-1 decision, R-31) | `v_pilot_invites_count` shows `LIVE` equal to the number of rows in the PO's list (G-B11); re-running the same parameter exits 1 with the masked refusal and adds no `PILOT_INVITE_ADDED` row; the SSM parameter and the local list file are deleted |
+| D9 | Prod stays off | `flags.ordersEnabled` is `false` in prod after the drill, before and after D8, until two founders turn it on for the pilot after the GO-1 decision |
 
 ## Commands
 
 Read the public config (D1, D2, D6, D7, D9) on the app host: F8's HostGuard refuses the web client on the api
-host. Same lines in both shells; the first is dev, the second prod:
+host. Same line in both shells:
 
 ```
-curl.exe -s -H "x-sanchay-client: web" https://app.dev.sanchay.in/api/v1/app/config
 curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config
 ```
 
 Invites (D3, D8) never put a mobile on a command line: F7's `ops:invite` reads the list from an SSM
 SecureString that only the ops task role may read (FR-20/FR-21). Write the list in an editor, outside the
 repository, as `invite-list.txt`: one 10-digit mobile per line (a `+91` prefix and spaces are dropped), no
-names, saved as UTF-8. On dev it holds the one spare SIM (D3); on prod it holds the PO's list (D8). Put it
+names, saved as UTF-8. For D3 it holds the one spare SIM; for D8, after the GO-1 decision, the PO's list. Put it
 as a SecureString (the name is `/sanchay/<env>/invites/<name>`; F7 refuses any other prefix and a parameter
 that is not a SecureString). PowerShell:
 
@@ -45151,7 +44811,8 @@ Git Bash (`MSYS_NO_PATHCONV=1` stops Git Bash rewriting the parameter name into 
 MSYS_NO_PATHCONV=1 aws ssm put-parameter --name /sanchay/prod/invites/pilot-2026-11 --type SecureString --value file://invite-list.txt
 ```
 
-On dev use `/sanchay/dev/invites/f27-drill`. The `command` arrays for `ops-overrides.json`:
+For D3 use `/sanchay/prod/invites/f27-drill` in place of `pilot-2026-11`. The `command` arrays for
+`ops-overrides.json`:
 
 - Invite every mobile in the parameter (D3, D8). All or nothing: if any listed mobile already has an invite,
   the run exits 1, names it masked and writes nothing:
@@ -45181,13 +44842,14 @@ rm invite-list.txt
   an invite) wrote nothing: correct the file, put it under a new name such as `pilot-2026-11-2`, run again and
   delete again (F7's "Inviting pilot investors").
 
-- Turn orders off (D6; in prod, before D8 if the canary left them on). One operator:
+- Turn orders off (D6, the end of the D7 window, and before D8 if anything left them on). One operator:
 
 ```
 ["node", "dist/main.js", "ops:kill-switch", "--off", "--by", "<handle>", "--reason", "F27 drill"]
 ```
 
-- Turn orders back on (D7, dev only). Two different founders:
+- Turn orders on (D7 only: prod is paused until GO-1, R-31, so this window lasts only as long as D7 and D5,
+  like a canary leg's, F20). Two different founders:
 
 ```
 ["node", "dist/main.js", "ops:kill-switch", "--on", "--approver1", "<handle>", "--approver2", "<handle>", "--reason", "F27 drill"]
@@ -45228,24 +44890,27 @@ SecureString and the local file until both are deleted.
 
 The founders' own prod accounts for the canary (F20, from Tue 11-17) need invites too: F20 Step 6 seeds them
 before the first canary leg, with the same form and the parameter `/sanchay/prod/invites/canary-founders`, and
-they show as `USED` in `v_pilot_invites_count` once the founders have signed up. They are already invited, so
-keep them out of the PO's list, or the D8 run refuses the whole list.
+they show as `USED` in `v_pilot_invites_count` once the founders have signed up. They and the D3 spare SIM are
+already invited, so keep them out of the PO's list, or the D8 run refuses the whole list.
 
 ## Results
 
 | # | Env | Time (IST) | Operator | Result | Notes |
 |---|---|---|---|---|---|
-| D1 | dev | | | | |
-| D3 | dev | | | | |
-| D4 | dev | | | | |
-| D5 | dev | | | | |
-| D6 | dev | | | | |
-| D7 | dev | | | | |
-| D1 | prod | | | | |
-| D2 | prod | | | | |
-| D9 | prod (before D8) | | | | |
-| D8 | prod | | | | |
-| D9 | prod (after D8) | | | | |
+| D1 | prod, drill Wed 11-25 | | | | |
+| D2 | prod, drill Wed 11-25 | | | | |
+| D3 | prod, drill Wed 11-25 | | | | |
+| D4 | prod, drill Wed 11-25 | | | | |
+| D6 | prod, drill Wed 11-25 | | | | |
+| D7 | prod, drill Wed 11-25 | | | | |
+| D5 | prod, drill Wed 11-25 | | | | |
+| D9 | prod, end of the drill | | | | |
+| D1 | prod, Thu 11-26 | | | | |
+| D2 | prod, Thu 11-26 | | | | |
+| D9 | prod, Thu 11-26 | | | | |
+| D9 | prod, after GO-1 (before D8) | | | | |
+| D8 | prod, after GO-1 | | | | |
+| D9 | prod, after GO-1 (after D8) | | | | |
 
 ## Sign-off
 
@@ -45279,12 +44944,15 @@ git commit -m "test(api): invitee dry run proves ops:invite end to end through t
 
 If gitleaks flags the fake `98765001xx` fixtures, add a narrow regex for exactly those two literals to `.gitleaks.toml` in this commit (never a path wildcard). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 
-- [ ] **Step 6: Run the drill (dev Wed 11-25, prod Thu 11-26)**
+- [ ] **Step 6: Run the drill on the paused prod stack (R-31: drill Wed 11-25, check Thu 11-26, D8 only after the GO-1 decision)**
 
-Follow `docs/probes/invitee-dry-run-2026-11.md` and fill its results table, in this order:
-- Dev: read the config (D1). If `flags.ordersEnabled` is `false` on dev, turn it on first with D7's command (two founders), so that D5 meets the cap, not the switch. Invite one founder-owned spare SIM through `/sanchay/dev/invites/f27-drill` and delete the parameter and the file (D3), sign up with it and try one never-invited number (D4), try ₹1,00,000.01 (D5), then turn orders off and check (D6), and back on with two founders and check (D7). The per-investor-per-day cap is not exercised with money; E20's int test covers it and D1 checks the value.
-- Prod: read the config (D1, D2). Confirm `flags.ordersEnabled` is `false` (D9, before D8); if the canary left it `true`, turn it off now with the off command (reason `canary done`) and read again, so no invitee can ever sign up while orders are on before GO-1. Put the PO's list (the list lives outside the repository; the founders' own numbers are not on it) as `/sanchay/prod/invites/pilot-2026-11` and seed it with one run (D8), confirm `LIVE` equals the list length, run the same command again and see it refused (exit 1, every mobile masked) without a second audit row, then delete the parameter and the local file, and read the config once more (D9, after D8). Prod orders are turned on only by the owner's GO-1 decision, with `ops:kill-switch --on --approver1 <handle> --approver2 <handle> --reason <text>` (two founders) per `docs/runbooks/kill-switch.md`.
-- Any FAIL becomes an F26 defect row before the GO-1 meeting.
+There is no dev stack (R-31; RV-04-F27-1), so the drill runs on prod while it is paused. The only invite it adds before GO-1 is one founder-owned spare SIM, a founders' test account, and orders are on only for the minutes D7 and D5 take. Follow `docs/probes/invitee-dry-run-2026-11.md` and fill its results table, in this order:
+- Wed 11-25, drill, between canary legs (no switch on): read the config (D1, D2). Invite one founder-owned spare SIM through `/sanchay/prod/invites/f27-drill` and delete the parameter and the file (D3), sign up with it and try one founder-owned number that was never invited (D4). Run the off command (orders are already off; the run still writes its audit row) and try ₹500 on a founder's canary account (D6). Turn orders on with two founders and start a ₹500 purchase on that account up to the consent screen without approving it (D7), try ₹1,00,000.01 (D5), then turn orders off at once (reason `F27 drill done`) and read the config (D9). The spare SIM has no KYC on prod, so D5-D7 use a founder's canary account. The per-investor-per-day cap is not exercised with money; E20's int test covers it and D1 checks the value.
+- Thu 11-26, after the canary is reconciled: read the config (D1, D2) and confirm `flags.ordersEnabled` is `false` (D9); if the canary left it `true`, turn it off now with the off command (reason `canary done`) and read again.
+- After the owner's GO-1 decision, before invitees start on Mon 11-30 (without a GO-1, D8 does not run): confirm `flags.ordersEnabled` is `false` (D9, before D8), so no invitee can ever sign up while orders are on. Put the PO's list (the list lives outside the repository; the founders' own numbers and the spare SIM are not on it) as `/sanchay/prod/invites/pilot-2026-11` and seed it with one run (D8), confirm `LIVE` equals the list length, run the same command again and see it refused (exit 1, every mobile masked) without a second audit row, then delete the parameter and the local file, and read the config once more (D9, after D8). Only then do two founders turn prod orders on for the pilot, with `ops:kill-switch --on --approver1 <handle> --approver2 <handle> --reason <text>` per `docs/runbooks/kill-switch.md`.
+- Any FAIL in the drill or the Thu 11-26 check becomes an F26 defect row before the GO-1 meeting; a D8 or D9 FAIL keeps prod orders off until it is fixed.
+
+Commit the results after the Thu 11-26 check, and again after D8:
 
 ```
 git add docs/probes/invitee-dry-run-2026-11.md
@@ -45316,7 +44984,7 @@ git commit -m "docs(probes): invitee dry run and kill-switch drill results (F27)
 - **Modify (D3):** `apps/api/src/integrations/fp/fp-operations.ts` (`purchasePlan.cancel`, class M), `apps/api/src/integrations/fp/fp-operations.test.ts` (one case), `apps/api/src/integrations/fp/fp-transact.ts` (`cancelPurchasePlan`)
 - **Modify (D4):** `apps/api/src/integrations/fp/fake/fake-fp.state.ts` (`StoredPurchasePlan.cancellationCode`), `apps/api/src/integrations/fp/fake/fake-fp.ts` (the `purchasePlan.cancel` route; `planPayload` echoes `cancellation_code` the way sandbox run 1 does)
 - **Modify (D6):** `apps/api/src/modules/notifications/notifications.schema.ts` (`SIP_CANCELLED`), `apps/api/src/modules/notifications/notify.service.ts` (its category), `apps/api/src/modules/notifications/templates.ts` (its renderer)
-- **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (two names), `apps/api/src/modules/platform/jobs/schedules.ts` (`plans.cancel.sweep`)
+- **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (two `JOB_POLICIES` entries, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (`plans.cancel.sweep`)
 - **Modify (F9, BRIEF D2):** `apps/api/test/int/security/bola-coverage.int.test.ts` (`'plans.cancel'` joins the id-taking list of the classification test; key-level)
 - **Modify (F12):** `packages/features/src/sip/SipDetailScreen.tsx` (SIPM-02's "Cancel SIP" action; key-level), `packages/features/src/sip/SipDetailScreen.test.tsx` (one import name, one case), `packages/contract/src/plans-wire.test.ts` (the `plan` fixture gains the two new `PlanSchema` fields)
 - **Regenerate:** `apps/api/openapi.json`
@@ -45333,7 +45001,7 @@ git commit -m "docs(probes): invitee dry run and kill-switch drill results (F27)
   - `SipCancelService.requestCancel(investorId, planId)`.
   - One PLAN_CANCEL challenge (`TPL_PLAN_CANCEL`, SMS + EMAIL: H-21 `EMAIL_ALWAYS`), SMS `SANCHAY_CONSENT_OTP_V1` reading "… is your OTP to cancel SIP of Rs {amount} in {schemeShort} on Sanchay …".
   - `SNAPSHOT_BUILDERS.PLAN_CANCEL = planCancelSnapshotBuilder` (plan id, amount, ISIN, scheme, instalment day, FP plan id, mandate id and rail, `mandateKept: 'true'`, cancellation code, the published `TPL_PLAN_CANCEL`); `CONSENT_SUBJECT_JOBS.PLAN_CANCEL = 'plans.cancel.submit'` (both at `plans.module.ts` load, every role).
-  - Jobs (worker only): `plans.cancel.submit` (`SipCancelSubmitData = {challengeId, subjectIds}`; `ConsentApprovedJobData` satisfies it; **every enqueue uses `singletonKey: challengeId`, approve's key**), `plans.cancel.sweep` (`{}`, `*/5`, key `plans-cancel-sweep`).
+  - Jobs (worker only): `plans.cancel.submit` (`SipCancelSubmitData = {challengeId, subjectIds}`; `ConsentApprovedJobData` satisfies it; **every enqueue uses `singletonKey: challengeId`, approve's key**; the queue is `exclusive` (R-32), so the job never enqueues itself and its 60 s re-read goes through `plans.sip.advance`), `plans.cancel.sweep` (`{}`, `*/5`, key `plans-cancel-sweep`).
   - `PLAN_CANCEL_ACTION`, `PLAN_CANCELLATION_CODE`, `CANCEL_RECONCILE_GRACE_MS`, `CANCEL_RECONCILE_POLL_SECONDS`, `CANCEL_SUBMIT_LOST_AFTER_MS`, `isDeadCancelChallenge`, `cancelSweepStep`, `CancelSweepStep`, `preCancelCheck`, `cancelReconcileStep` (`plan-cancel.ts`); `revertCancel`, `settleCancelled`, `cancelAttempted` (`plan-cancel-moves.ts`).
   - `FP_OPERATIONS['purchasePlan.cancel']` (POST `/v2/mf_purchase_plans/cancel`, class M) and `FpTransact.cancelPurchasePlan({planId, fpPlanId, cancellationCode}, consent)`; FakeFp route `purchasePlan.cancel` and `StoredPurchasePlan.cancellationCode` (the code our request sent; FP's reply does not echo it).
   - `plans` columns `cancel_challenge_id`, `cancel_requested_at`, `cancelled_by` (`PLAN_CANCELLED_BY = ['INVESTOR', 'EXTERNAL']`), `cancel_failure_code`, `cancel_reconciling_since` (app clock); checks `plans_cancelled_by_ck`, `plans_cancelled_by_status_ck`, `plans_cancel_challenge_ck`; index `plans_cancel_pending_idx`; trigger `trg_plans_cancel_guard` (function `app.trg_plan_cancel_guard()`).
@@ -45346,12 +45014,12 @@ git commit -m "docs(probes): invitee dry run and kill-switch drill results (F27)
   - `plans.cancel` in F9's classification list (BRIEF D2).
 - **The saga** (spec §4.3 CANCEL_PENDING, R-08, research fp-api §4: "Cancel: `POST /v2/mf_purchase_plans/cancel {id, cancellation_code, cancellation_reason?}`", states `created|active → cancelled`, "cancellation takes effect immediately; instalments already generated are unaffected"; sandbox run 1, P-09 row 9: `invest_later` accepted, plan `cancelled`, FP stored `cancellation_code: custom_reason`):
   1. **Request (api):** lock the plan; reclaim a dead CANCEL_PENDING; refuse anything but ACTIVE; `ConsentEngine.create` (subjects: the plan only) → move to CANCEL_PENDING → `SIP_CANCEL_REQUESTED`. No FP call.
-  2. **Approve (E4):** enqueues `plans.cancel.submit` with `singletonKey = challengeId`. Every other enqueue of the job (the sweep, F2's `plans.sip.advance` branch, the job's own re-read) uses the same key, so a job still queued for this cancel absorbs a second one.
+  2. **Approve (E4):** enqueues `plans.cancel.submit` with `singletonKey = challengeId`. Every other enqueue of the job (the sweep, and F2's `plans.sip.advance` branch, which also carries the job's own re-read) uses the same key. The queue is `exclusive` (R-32, RV-04-F28-1), so a send while a job for this cancel is queued, retrying or running is refused (null): one live cancel job at a time.
   3. **Submit (worker), inside `useConsumed`:** `GET /v2/mf_purchase_plans/{id}` first (class R).
      - FP `active`/`created`: `SIP_CANCEL_SUBMITTED` is recorded in its own autocommit write, then `POST /v2/mf_purchase_plans/cancel {id, cancellation_code: 'invest_later'}`. FP `cancelled` in the reply → CANCELLED (`fp_cancelled`, `cancelled_by = 'INVESTOR'`, `final_at`), `SIP_CANCELLED` audit and email, in one transaction. Only the reply's `state` is read: the sandbox does not keep the code we send (BRIEF D7).
      - FP already `cancelled` and no `SIP_CANCEL_SUBMITTED` for this challenge (an FP auto-cancel, for example three failed instalments) → CANCELLED with `cancelled_by = 'EXTERNAL'`, `markUnused`, email. When `SIP_CANCEL_SUBMITTED` exists, a previous run's write landed and its reply was lost → CANCELLED by INVESTOR, no `markUnused`.
      - FP `completed`/`failed`/other → ACTIVE (`cancel_not_applicable`), `markUnused`, WARNING `PLAN_CANCEL_NOT_APPLICABLE`.
-  4. **Failures:** `CONSENT_EXPIRED` before anything was sent → ACTIVE (`cancel_consent_lapsed`, failure code `CONSENT_EXPIRED`) and `markUnused`. A failed pre-check read is re-thrown, and pg-boss retries inside the saga window. A 4xx on the cancel → **FP is read again first**: FP also refuses a plan that is already cancelled (a second delivery of the job, or FP itself, got there after our live read), so `cancelled` → CANCELLED by INVESTOR; anything else → ACTIVE (`fp_cancel_rejected`, failure code = FP's code), WARNING `PLAN_CANCEL_REJECTED` (ops follow up on SEBI's two-working-day cancel), consent stays CONSUMED. A failed re-read is re-thrown (pg-boss retries). Ambiguous (timeout, 5xx, 409, a reply without `cancelled`) → RECONCILING (`ambiguous`) with `cancel_reconciling_since = clock.now()`, and a re-read in 60 s.
+  4. **Failures:** `CONSENT_EXPIRED` before anything was sent → ACTIVE (`cancel_consent_lapsed`, failure code `CONSENT_EXPIRED`) and `markUnused`. A failed pre-check read is re-thrown, and pg-boss retries inside the saga window. A 4xx on the cancel → **FP is read again first**: FP also refuses a plan that is already cancelled (a second delivery of the job, or FP itself, got there after our live read), so `cancelled` → CANCELLED by INVESTOR; anything else → ACTIVE (`fp_cancel_rejected`, failure code = FP's code), WARNING `PLAN_CANCEL_REJECTED` (ops follow up on SEBI's two-working-day cancel), consent stays CONSUMED. A failed re-read is re-thrown (pg-boss retries). Ambiguous (timeout, 5xx, 409, a reply without `cancelled`) → RECONCILING (`ambiguous`) with `cancel_reconciling_since = clock.now()`, and a re-read in 60 s. The job cannot enqueue its own key while it runs (exclusive), so it enqueues `plans.sip.advance` (stately, key = the plan id, `startAfter` 60), whose F28 branch enqueues this job again after this run has ended.
   5. **Re-read (LOOKUP-ADOPT, no consent needed):** FP `cancelled` → CANCELLED by INVESTOR (`lookup_adopt_mapped`). Still `active` 10 minutes after `cancel_reconciling_since` → ACTIVE (`lookup_adopt_mapped`, failure code `FP_PLAN_STILL_ACTIVE`), WARNING `PLAN_CANCEL_NOT_APPLIED`. Any other state → CRITICAL `PLAN_CANCEL_UNRESOLVED`, left RECONCILING for ops. F7's 5-minute backstop reaches this through `plans.sip.advance`. The grace is measured on the app clock on both sides; `order_events.occurred_at` is the database's `now()` and is not used.
   6. **Sweep (`*/5`):** for each CANCEL_PENDING plan it locks the plan, then reads the challenge `FOR UPDATE SKIP LOCKED` (approve locks the challenge first and the plan second, so waiting here could deadlock; a challenge approve holds is live and is seen again next run). A dead challenge (EXPIRED, CANCELLED, SUPERSEDED, CONSUMED_UNUSED, or PENDING past `expires_at`) → ACTIVE (`cancel_consent_lapsed`, failure code `CONSENT_NOT_GIVEN`). A CONSUMED challenge approved at least 5 minutes ago (`consumed_at`) → `plans.cancel.submit` re-enqueued with `singletonKey = challengeId`, so a lost job cannot strand the plan; earlier, approve's own job may still be running and is left alone. The sweep's cadence puts the re-enqueue 5 to 10 minutes after approve, inside `execute_before` (approve + 10 minutes) for a saga that never started.
   - The mandate is never touched (R-08). Instalments FP raised before the cancel keep syncing (F2's sync now also reads CANCEL_PENDING, cancel-RECONCILING and plans CANCELLED in the last 7 days) and settle through F4's `PurchaseSettlement`.
@@ -45582,6 +45250,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data, opts) => {
     enqueued.push({ name, data, opts });
+    return 'job-id';
   });
   await setSipEnabled(t, true);
 });
@@ -45595,7 +45264,7 @@ beforeEach(() => {
 type SipInvestor = Awaited<ReturnType<typeof seedSipInvestor>>;
 
 const lastJob = (name: JobName) => [...enqueued].reverse().find((j) => j.name === name);
-/** Every plans.cancel.submit enqueue for one cancel (approve's, the sweep's, the backstop's, the re-read's). */
+/** Every plans.cancel.submit enqueue for one cancel (approve's, the sweep's, and plans.sip.advance's for the backstop and the re-read). */
 const cancelJobsFor = (challengeId: string) =>
   enqueued.filter(
     (j) =>
@@ -45847,15 +45516,24 @@ describe('plans.cancel.submit', () => {
   it('timeout -> RECONCILING (stamped with the app clock) -> re-fetch shows cancelled -> CANCELLED', async () => {
     const c = await approvedCancel();
     t.fakeFp.script('purchasePlan.cancel', 'timeout');
+    enqueued.length = 0;
     await cancelSubmit(c.jobData);
     expect(await planOf(c.planId)).toMatchObject({
       status: 'RECONCILING',
       cancelReconcilingSince: t.clock.now(),
     });
+    // R-32: plans.cancel.submit is exclusive, so the re-read comes back through plans.sip.advance (stately).
+    expect(enqueued.map((j) => j.name)).toEqual(['plans.sip.advance']);
+    expect(lastJob('plans.sip.advance')).toMatchObject({
+      data: { planId: c.planId, challengeId: c.registrationChallengeId },
+      opts: { startAfter: 60, singletonKey: c.planId },
+    });
+    enqueued.length = 0;
+    await sipAdvance(c.planId, c.registrationChallengeId); // that job, 60 s later: it routes the cancel here
     const requeued = lastJob('plans.cancel.submit');
     expect(requeued).toMatchObject({
       data: { challengeId: c.challengeId, subjectIds: [c.planId] },
-      opts: { startAfter: 60, singletonKey: c.challengeId },
+      opts: { singletonKey: c.challengeId },
     });
 
     const cancels = cancelCalls();
@@ -46816,7 +46494,7 @@ import { PLAN_AUDIT_ACTIONS, plans } from './plans.schema.js';
 
 /**
  * `ConsentApprovedJobData` from approve (CONSENT_SUBJECT_JOBS.PLAN_CANCEL), or the same two keys from
- * plans.cancel.sweep, F2's plans.sip.advance (F7's backstop) and this job's own re-read.
+ * plans.cancel.sweep and F2's plans.sip.advance (F7's backstop, and this job's own re-read: see `requeue`).
  */
 export interface SipCancelSubmitData {
   challengeId: string;
@@ -46956,7 +46634,7 @@ export class SipCancelSubmitJob {
         if (attempted) {
           // An earlier run sent the write and crashed before recording the outcome: settle it by reading FP.
           await movePlan(tx, current, 'RECONCILING', 'ambiguous', { cancelReconcilingSince: now });
-          await this.requeue(tx, planId, challengeId);
+          await this.requeue(tx, current, challengeId);
           return;
         }
         await revertCancel(tx, this.audit, {
@@ -47046,7 +46724,7 @@ export class SipCancelSubmitJob {
           });
           return;
         case 'WAIT':
-          await this.requeue(tx, current.id, challengeId);
+          await this.requeue(tx, current, challengeId);
           return;
         case 'UNRESOLVED':
           await ReconBreaks.open(tx, {
@@ -47081,17 +46759,22 @@ export class SipCancelSubmitJob {
       const current = await this.lockPlan(tx, planId);
       if (current?.status !== 'CANCEL_PENDING') return;
       await movePlan(tx, current, 'RECONCILING', 'ambiguous', { cancelReconcilingSince: now });
-      await this.requeue(tx, planId, challengeId);
+      await this.requeue(tx, current, challengeId);
     });
   }
 
-  /** approve's singleton key (the challenge id), so this never runs beside a live job for the same cancel. */
-  private async requeue(exec: DbExecutor, planId: string, challengeId: string): Promise<void> {
+  /**
+   * The re-read, CANCEL_RECONCILE_POLL_SECONDS from now. This queue is exclusive (R-32, RV-04-F28-1), so a run
+   * cannot enqueue its own key (the send is refused while it runs): the hop goes through F2's plans.sip.advance
+   * (stately, key = the plan id), whose F28 branch enqueues this job under approve's key once this run has
+   * ended. Its own consent is the plan's registration challenge; the branch reads the cancel challenge itself.
+   */
+  private async requeue(exec: DbExecutor, plan: PlanRow, challengeId: string): Promise<void> {
     await this.jobs.enqueue(
       exec,
-      'plans.cancel.submit',
-      { challengeId, subjectIds: [planId] },
-      { startAfter: CANCEL_RECONCILE_POLL_SECONDS, singletonKey: challengeId },
+      'plans.sip.advance',
+      { planId: plan.id, challengeId: plan.consentChallengeId ?? challengeId },
+      { startAfter: CANCEL_RECONCILE_POLL_SECONDS, singletonKey: plan.id },
     );
   }
 
@@ -47197,8 +46880,9 @@ export class SipCancelSweepJob {
 ```ts
     if (plan.status === 'RECONCILING' && plan.cancelChallengeId !== null) {
       // F28: an ambiguous investor cancel (only CANCEL_PENDING reaches RECONCILING with an FP plan id).
-      // plans.cancel.submit re-reads FP; F7's backstop re-enqueues this job for every RECONCILING plan.
-      // approve's singleton key (the cancel challenge id) keeps it to one live cancel job.
+      // plans.cancel.submit re-reads FP; F7's backstop re-enqueues this job for every RECONCILING plan, and the
+      // cancel job's own 60 s re-read comes through here too (an exclusive job cannot enqueue itself, R-32).
+      // approve's key (the cancel challenge id) on the exclusive queue keeps it to one live cancel job.
       await this.jobs.enqueue(
         db,
         'plans.cancel.submit',
@@ -47302,7 +46986,11 @@ pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api openapi
 ```
 
-`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'plans.cancel.submit'` and `'plans.cancel.sweep'` to `JOB_NAMES`.
+`apps/api/src/modules/platform/jobs/job-registry.ts`: append to `JOB_POLICIES` (R-32, RV-04-F28-1):
+```ts
+  'plans.cancel.submit': 'exclusive', // key: the cancel challenge id; the FP cancel; its re-read goes through plans.sip.advance (F28)
+  'plans.cancel.sweep': 'stately', // every 5 minutes, keyless (F28)
+```
 
 `apps/api/src/modules/platform/jobs/schedules.ts` (inside `registerSchedules`):
 ```ts

@@ -21,7 +21,7 @@ Every task's requirements include this section. It is the Plan 02 contract **as 
 
 - **Jobs (D2).**
   - `Jobs` is `@Injectable()` and global: `jobs.enqueue(exec, name, data, opts?)`, where `opts` is `{singletonKey?, startAfter?: Date | number (seconds), retryLimit?}`. It uses pg-boss's `send(…, {db})`, so the job commits with `exec`'s transaction.
-  - `JobName` values are dotted string literals appended to `JOB_NAMES` in `apps/api/src/modules/platform/jobs/job-registry.ts` by the task that introduces them.
+  - `JobName` values are dotted string literals added to D2's `JOB_POLICIES` in `apps/api/src/modules/platform/jobs/job-registry.ts` as `'name': 'policy', // reason` by the task that introduces them (R-32: `stately` for sync, poll, reconcile and sweep jobs, `exclusive` for FP submits, `standard` for `notifications.send`). `jobs.enqueue` returns `Promise<string | null>`; `null` means the queue's policy refused a duplicate, which is not an error.
   - Handlers are classes decorated `@Injectable() @JobHandler('name')` with `handle(job: Job<'name'>)`, reading `job.data`.
   - Crons go only into `registerSchedules(boss)` in `jobs/schedules.ts` as `await boss.schedule(name, cron, data, { tz: 'Asia/Kolkata', key })`, with a distinct `key` per schedule.
   - `identity.cleanup`, `nav.sync.daily` (D9) and the tasks below are the only schedules.
@@ -45,7 +45,7 @@ Every task's requirements include this section. It is the Plan 02 contract **as 
   - `seedReadyInvestor(app, opts?)` and `seedRiskProfile` (E11, `test/int/onboarding-seed.ts`).
   - `seedScheme(app)` and `seedInvestableInvestor(app)` (E20, `test/int/orders-seed.ts`).
   - Plan 01's `signInWeb(app, mobile)` (`test/int/flows.ts`) and `webHeaders`/`cookiesFrom` (`test/int/http.ts`).
-  - Tests that drive a job call its `handle(jobOf(…))` directly and spy on the injected `Jobs` (`vi.spyOn(app.app.get(Jobs), 'enqueue')`) so nothing races the pg-boss worker.
+  - Tests that drive a job call its `handle(jobOf(…))` directly and spy on the injected `Jobs` (`vi.spyOn(app.app.get(Jobs), 'enqueue')`) so nothing races the pg-boss worker. The spy resolves a job id (for example `.mockResolvedValue('job-id')`): `enqueue` returns `Promise<string | null>`, and a spy resolving `undefined` fails typecheck (R-32).
   - BOLA tests apply only to id-addressed procedures; session-scoped ones assert isolation instead.
 - **Types:** the base tsconfig sets `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. Never pass an explicit `undefined` to an optional property; index lookups need `?? fallback`. `AadRef.rowId` is branded: use `asRowId(table, id)`.
 - **Shared files:**
@@ -76,7 +76,7 @@ Every task's requirements include this section. It is the Plan 02 contract **as 
 | 16 | E22 quote, cut-off | Dev B | E20, E9 |
 | 17 | E23, E24 order and payment screens | Dev B | E13, E17, E20–E22 |
 
-E18 [T2] and E19 [T4] are not committed (they fund the protected dev stack, R-05); they are built only as extensions if f₂ allows. The overflow order into S4 is the outline's §2.
+E18 [T2] and E19 [T4] are not committed (they fund E25's protected S2 stack, R-05, which R-31 makes the paused prod stack; RV-03-25); they are built only as extensions if f₂ allows. The overflow order into S4 is the outline's §2.
 
 ## Migration numbers
 
@@ -157,7 +157,7 @@ Later errata (found while writing Plan 04; already applied below):
   - E12: `AmountInput` destructures `[whole = '', fraction]` (TS2322 under noUncheckedIndexedAccess), and `packages/ui` depends on `@sanchay/money` for `MoneyText`. The AmountInput test drives a controlled value (it expected '12.34' from an input pinned to ''), and the Checkbox test reads `textContent`.
   - E17, the first `packages/features` importer of `@sanchay/money`, adds the dependency.
   - E23 and E24 use E12's props: `AmountInput onChangeValue`, `MoneyText value={Money | null}`, and a string `ListRow value`. E24's smoke and Maestro flows tap "Confirm" (E13's label) and no longer tap "Send code", since the sheet sends on open.
-- **RV-03-10 (2026-10-01): boot invariant 13 binds the api role (E1).** R-19 gives `SANCHAY_FP_WEBHOOK_SECRET` to the api container alone, and only the api serves HTTP, but invariant 13 refused every role outside local/test, so the dev worker and migrate containers stopped booting from E1 on. The condition is now `!localOrTest && role === 'api' && env.SANCHAY_FP_WEBHOOK_SECRET === undefined`, reusing the `role` constant that Plan 02 E25 adds to `assertBootInvariants` (RV-02-20), as invariant 7 does. A new `env.test.ts` case boots worker and migrate without the secret and still refuses the api. Checked against Plan 01's `env.ts` with E25's constants and a reduced D3 FP-mode invariant: 18/18, and the new case fails against the role-free condition.
+- **RV-03-10 (2026-10-01): boot invariant 13 binds the api role (E1).** R-19 gives `SANCHAY_FP_WEBHOOK_SECRET` to the api container alone, and only the api serves HTTP, but invariant 13 refused every role outside local/test, so the deployed worker and migrate containers (E25's stack, prod under R-31) stopped booting from E1 on. The condition is now `!localOrTest && role === 'api' && env.SANCHAY_FP_WEBHOOK_SECRET === undefined`, reusing the `role` constant that Plan 02 E25 adds to `assertBootInvariants` (RV-02-20), as invariant 7 does. A new `env.test.ts` case boots worker and migrate without the secret and still refuses the api. Checked against Plan 01's `env.ts` with E25's constants and a reduced D3 FP-mode invariant: 18/18, and the new case fails against the role-free condition.
 - **RV-03-11 (2026-10-01): E2 no longer edits `auth.test.ts` (E2).** Plan 02 D10 adds the first new contract key (`catalogue`), so it now relaxes Plan 01's `packages/contract/src/auth.test.ts` itself, with the fragment E2 carried under RV-03-5 (RV-02-30): the top-level and `me` key checks become `expect.arrayContaining`. E2's fragment is now a note; `auth.test.ts` leaves its Files, Biome and `git add` lists, and Step 4 still runs the contract suite with `meta` added.
 - **RV-03-12 (2026-10-01): `ConsentEngine.cancel` cannot overwrite a consumed challenge (E4).** `cancel` read the challenge without a lock and then updated it with no status guard, so a cancel racing `approve` could turn CONSUMED into CANCELLED after approve committed; the queued subject job then failed in `useConsumed` on every retry, and for plans F2's and F28's guards refused the write. `cancel` is one `UPDATE … WHERE id = ? AND status = 'PENDING' RETURNING investor_id`. Zero rows re-reads the status: absent is NOT_FOUND, an ended challenge (CANCELLED, EXPIRED, SUPERSEDED) is left as it is, anything else is CONSENT_ALREADY_USED. Four new cases, one holding approve's row lock open. Checked on PostgreSQL 18 (Testcontainers) with the exact query: the old body overwrote CONSUMED in the race, the new one answers CONSENT_ALREADY_USED and leaves CONSUMED, stable over four runs.
 - **RV-03-13 (2026-10-01): no jest-dom; `@sanchay/validation` in `packages/features` (E12, E13, E23).** The IdentityScreen, PersonalDetailsScreen, AddressScreen, FatcaScreen, LegalPendingBanner and LumpsumReviewScreen tests used `toBeDisabled`, `toBeEnabled` and `toHaveValue`. `@testing-library/jest-dom` is neither installed nor in the `catalog:` (which nobody edits), and react-native-web renders Plan 01's `Button` as a `div` with `role="button"` and `aria-disabled`, so `toBeDisabled` would fail even with it. The tests read `aria-disabled` and `HTMLInputElement.value`, as Plan 01's tests do. E12's screens are the first `features` importers of `@sanchay/validation`, which `packages/features` did not depend on; E12 adds it (one lockfile importer line). E12's Step 2 and Step 4 placeholder lines (`X=v cmd`, `SANCHAY_PLACEHOLDER=1`) and the unknown Playwright project `chromium` are replaced.
@@ -171,6 +171,8 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-21 (2026-10-05): E1's glob note follows Plan 02 D2's config (D2 review 2026-10-05; minor).** E1's first deviation said `drizzle.config.ts` only globs `./src/modules/*/*.schema.ts`; Plan 02 RV-02-41 adds `./src/modules/*/*/*.schema.ts` and `./src/integrations/*/*.schema.ts`. The note now says so. Its conclusion stands: `integrations/fp/webhooks/inbound-webhook.schema.ts` is two levels under `src/integrations`, and D2's `drizzle-config.test.ts` reports such a file (checked).
 - **RV-03-22 (2026-10-05): the catalogue wire tells SIP apart from lumpsum (E14, E17, E23; follows RV-02-55; major).** Plan 02 D10 now leaves the SIP limits null without FP's monthly SIP row and stores a fail-closed `sip_allowed`, so E14's `SchemeThresholdsWireSchema` makes `sipMin`/`sipMultiple` nullable and `SchemeDetailSchema` gains `sipAllowed: z.boolean()`, which FUND-01's "Start SIP" reads (Plan 04 F19). E14's int test asserts `sipAllowed` and adds a lumpsum-only case. E17's "Minimum SIP" row shows a dash unless `sipAllowed`, and E17's and E23's scheme fixtures gain `sipAllowed: true` (E23's is typed `SchemeDetailView` and fails with TS2741 without it). Verified in the scratch build: E14's two cases pass on PostgreSQL 18.2, and a type probe compiles the new E17/F19 expressions while the old `Money.parse(t.sipMin)` no longer compiles.
 - **RV-03-23 (2026-10-05): E14's appended router case uses D10's real helpers (follows RV-02-56; blocker).** E14 appends a `sort=name` case to D10's `catalogue-router.int.test.ts` that called `insertInvestor`, `signIn` and `httpGet`, and the last two never existed. It now reads with D10's file-level `get` and `cookies` (Plan 01's `signInWeb`), and the file passes 5/5 on PostgreSQL 18.2.
+- **RV-03-24 (2026-10-05): Plan 03's jobs register their pg-boss policy (R-32; major).** Every name Plan 03 appends now goes into D2's `JOB_POLICIES`. `onboarding.provision` and `orders.purchase.submit` are `exclusive`. `onboarding.preverify`, `onboarding.bank.verify`, `orders.purchase.advance`, `fp.reconcile.nonfinal` and `payments.poll` are `stately`. The two pre-verification jobs are `stately` although each creates one FP object: they poll by enqueuing their own key while they run, which `exclusive` refuses, and the create runs once because its id is stored before the first poll. E21 notes that a return or webhook nudge is refused while a delayed poll is queued; that poll then applies the result. The `Jobs.enqueue` spies in E4, E6, E7, E11, E20 and E21 now resolve a job id, because `enqueue` returns `Promise<string | null>` (RV-02-69) and a spy resolving `undefined` fails `typecheck` (checked with the repo's TypeScript 6.0.3 against Vitest 5.0.1's typings).
+- **RV-03-25 (2026-10-05): no dev stack in Plan 03's text (R-31; minor).** The execution-order note said E18 and E19 fund "the protected dev stack", and RV-03-10 and E1's review fix 7 spoke of "the dev worker and migrate containers". R-31 removes the AWS dev environment: E25's protected S2 stack is the paused prod stack, so the note and both sentences now name it and the deployed containers. Wording only: `devSecrets` and the `'dev'` app-env test cases stay, because `SANCHAY_APP_ENV` keeps `dev` as a code value (Plan 01 `env.ts`). Checked by a full-text scan of Plan 03 for dev hosts, dev stacks and dev deploys.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -228,7 +230,7 @@ Later errata (found while writing Plan 04; already applied below):
   4. `SANCHAY_FP_WEBHOOK_SECRET`/`SANCHAY_FP_WEBHOOK_AUTH` (listed in outline §0.2 as an "R-19 addendum" env var, owner unspecified) are not added by any of Plan 02's D1–D10 tasks (checked: D3's Files list never touches `config/env.ts`). E1 is the first task that actually needs them, so E1 adds them here, together with a new boot invariant (13; 8–10 belong to D3/D7 per outline §0.2 and 11–12 to D6) and the corresponding fragment to the closed variable-list test in `env.test.ts` and to `devSecrets`.
   5. Plan 02 as built: `Jobs` is injected; `ReconBreaks` and `RuntimeConfig` are static (`ReconBreaks.open(exec, …)`), so they are called, not injected.
   6. Review fix: the provider re-fetch never runs inside a DB transaction (outline §0.1, "providers only from worker jobs" plus the `ProviderCallInTransactionError` guard), so the job does not lock the row across the handler. pg-boss's `singletonKey` (the row id) keeps one active job per event, and handlers are idempotent.
-  7. Review fix (RV-03-10): invariant 13 binds the api role only. R-19 gives `SANCHAY_FP_WEBHOOK_SECRET` to the api container alone, and only the api serves HTTP (the worker is an application context, migrate a one-off task), so as written the dev worker and migrate containers stopped booting from this task on. The condition reuses E25's `role` constant (Plan 02 RV-02-20), the way invariant 7 does, and a new case boots worker and migrate without the secret.
+  7. Review fix (RV-03-10): invariant 13 binds the api role only. R-19 gives `SANCHAY_FP_WEBHOOK_SECRET` to the api container alone, and only the api serves HTTP (the worker is an application context, migrate a one-off task), so as written the deployed worker and migrate containers (E25's stack, prod under R-31) stopped booting from this task on. The condition reuses E25's `role` constant (Plan 02 RV-02-20), the way invariant 7 does, and a new case boots worker and migrate without the secret.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3346,6 +3348,7 @@ beforeAll(async () => {
   engine = ta.app.get(ConsentEngine);
   vi.spyOn(ta.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id'; // Jobs.enqueue resolves a job id, or null when the queue's policy refused the send (R-32)
   });
 });
 
@@ -4947,8 +4950,8 @@ Expected: every test in `consent-engine.int.test.ts` (including the four RV-03-1
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm exec biome check --write apps/api/src/modules/legal-consent apps/api/test/int/consent-engine.int.test.ts apps/api/test/int/consent-guard-trigger.int.test.ts apps/api/test/int/consent-first.ts apps/api/test/int/bola.ts apps/api/src/modules/platform/audit.service.ts packages/contract/src/consents.ts packages/contract/src/index.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int consent-engine consent-guard-trigger legal-consent
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
@@ -5884,7 +5887,7 @@ git commit -m "feat(onboarding): add onboarding.get, deriveOnboardingStage and m
 
 **Files:**
 - **Create:** `apps/api/src/integrations/fp/pre-verification.ts`, `apps/api/src/integrations/fp/pre-verification.test.ts`, `apps/api/src/modules/onboarding/identity.service.ts`, `apps/api/src/modules/onboarding/preverify.job.ts`, `apps/api/src/modules/onboarding/profile.service.ts`, `apps/api/src/modules/onboarding/ref.schema.ts`, `apps/api/src/modules/onboarding/ref.router.ts`, `data/ref-pincodes.csv`, `apps/api/src/cli/ops-ref-seed.ts`, `apps/api/test/int/onboarding-identity.int.test.ts`.
-- **Modify:** `packages/contract/src/onboarding.ts` (append `submitIdentity`/`putProfile`), `packages/contract/src/ref.ts` (new file, exported from `index.ts`; see note below — the outline's `ref.pincode`/`ref.ifsc` share one contract namespace `ref`), `packages/contract/src/index.ts` (`refContract` import/export, add `ref: refContract`), `apps/api/src/modules/onboarding/onboarding.router.ts` (append the two handlers), `apps/api/src/modules/onboarding/onboarding.module.ts` (becomes `OnboardingModule.forRoot(env)`: imports `LegalConsentModule`, registers `IdentityService`, `ProfileService`, `RefRouter`, and `PreverifyJob` in the worker role only), `apps/api/src/app.module.ts` (`OnboardingModule` → `OnboardingModule.forRoot(env)`), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.preverify'` to `JOB_NAMES`), `apps/api/src/modules/platform/ids.ts` (append `'ref_pincodes'`), root `package.json` (script `ops:ref:seed`).
+- **Modify:** `packages/contract/src/onboarding.ts` (append `submitIdentity`/`putProfile`), `packages/contract/src/ref.ts` (new file, exported from `index.ts`; see note below — the outline's `ref.pincode`/`ref.ifsc` share one contract namespace `ref`), `packages/contract/src/index.ts` (`refContract` import/export, add `ref: refContract`), `apps/api/src/modules/onboarding/onboarding.router.ts` (append the two handlers), `apps/api/src/modules/onboarding/onboarding.module.ts` (becomes `OnboardingModule.forRoot(env)`: imports `LegalConsentModule`, registers `IdentityService`, `ProfileService`, `RefRouter`, and `PreverifyJob` in the worker role only), `apps/api/src/app.module.ts` (`OnboardingModule` → `OnboardingModule.forRoot(env)`), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.preverify': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/ids.ts` (append `'ref_pincodes'`), root `package.json` (script `ops:ref:seed`).
 
 **Interfaces:**
 - Prerequisites: **E3** (`LegalDocs.recordAcceptance` for the KYC_CONSENT checkbox — no OTP, per §0.4 item 4), **E5** (`onboardingApplications`, `investorProfiles`, `kycChecks`, `deriveOnboardingStage`, `onboarding.router.ts`/`onboarding.module.ts`, `StageResultSchema`).
@@ -5979,6 +5982,7 @@ beforeAll(async () => {
   job = t.app.get(PreverifyJob);
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data, opts) => {
     enqueued.push({ name, data, opts });
+    return 'job-id';
   });
 });
 beforeEach(() => {
@@ -6830,7 +6834,7 @@ export class OnboardingModule {
 
 `apps/api/src/app.module.ts`: replace `OnboardingModule` in `imports` with `OnboardingModule.forRoot(env)`.
 
-`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.preverify'` to `JOB_NAMES`.
+`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.preverify': 'stately', // key: the kyc_checks id; creates the FP pre-verification once, then re-enqueues itself to poll (E6)` to `JOB_POLICIES`. Stately, not exclusive: the create runs once (its id is stored before the first poll), and `exclusive` would refuse the job's send of its own key while it runs (R-32, RV-03-24).
 
 Modify `apps/api/src/modules/platform/ids.ts` — add `'ref_pincodes'` to the `TableName` union.
 
@@ -6863,7 +6867,7 @@ git commit -m "feat(onboarding): identity/KRA pre-verification, putProfile and r
 
 **Files:**
 - **Create:** `packages/domain/src/rules/name-match.ts`, `packages/domain/test/name-match.test.ts`, `packages/test-fixtures/src/golden/name-match.json`, `apps/api/src/modules/onboarding/bank.schema.ts`, `apps/api/src/modules/onboarding/bank.service.ts`, `apps/api/src/modules/onboarding/bank-verify.job.ts`, `data/ref-ifsc.csv`, `apps/api/test/int/onboarding-bank.int.test.ts`.
-- **Modify:** `packages/domain/tsconfig.json` (add `"resolveJsonModule": true` to `compilerOptions`, if not already present, so `import … with { type: 'json' }` from `packages/test-fixtures/src/golden` typechecks), `packages/domain/src/rules/index.ts` (append `export * from './name-match.js';`), `packages/domain/src/investor.ts` (append `BANK_ACCOUNT_STATUSES`), `packages/contract/src/onboarding.ts` (this task adds nothing here — see Deviation), `packages/contract/src/ref.ts` (append `refContract.ifsc`), `apps/api/src/modules/onboarding/ref.schema.ts` (append `refIfsc`), `apps/api/src/modules/onboarding/ref.router.ts` (append the `ifsc` handler), `apps/api/src/modules/onboarding/onboarding.module.ts` (register `BankService`; `BankVerifyJob` in the worker-only list), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.bank.verify'` to `JOB_NAMES`), `apps/api/src/cli/ops-ref-seed.ts` (also seed `ref-ifsc.csv`), `apps/api/src/modules/platform/ids.ts` (append `'bank_accounts' | 'ref_ifsc'`).
+- **Modify:** `packages/domain/tsconfig.json` (add `"resolveJsonModule": true` to `compilerOptions`, if not already present, so `import … with { type: 'json' }` from `packages/test-fixtures/src/golden` typechecks), `packages/domain/src/rules/index.ts` (append `export * from './name-match.js';`), `packages/domain/src/investor.ts` (append `BANK_ACCOUNT_STATUSES`), `packages/contract/src/onboarding.ts` (this task adds nothing here — see Deviation), `packages/contract/src/ref.ts` (append `refContract.ifsc`), `apps/api/src/modules/onboarding/ref.schema.ts` (append `refIfsc`), `apps/api/src/modules/onboarding/ref.router.ts` (append the `ifsc` handler), `apps/api/src/modules/onboarding/onboarding.module.ts` (register `BankService`; `BankVerifyJob` in the worker-only list), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.bank.verify': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/cli/ops-ref-seed.ts` (also seed `ref-ifsc.csv`), `apps/api/src/modules/platform/ids.ts` (append `'bank_accounts' | 'ref_ifsc'`).
 
 **Interfaces:**
 - Prerequisites: **E5** (`onboardingApplications`, `deriveOnboardingStage`, `StageResultSchema`, `onboarding.router.ts`/`onboarding.module.ts`), **E6** (`parsePreVerification`, the `OnboardingModule.forRoot(env)` worker-only list, and the same D3 `FpKyc` pre-verification, now with a bank account; `investorProfiles.nameAsPerPan`; `profileStatus` must be `DONE` before a bank account can be added; `refPincodes`/`ref.schema.ts`/`ref.router.ts` to extend).
@@ -6970,7 +6974,7 @@ let job: BankVerifyJob;
 beforeAll(async () => {
   t = await bootFpTestApp();
   job = t.app.get(BankVerifyJob);
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
 });
 
 /** A completed bank pre-verification, as FP returns it (research fp-api §5.1). */
@@ -7687,7 +7691,7 @@ Modify `apps/api/src/modules/onboarding/onboarding.router.ts` — add two handle
 
 Modify `apps/api/src/modules/onboarding/onboarding.module.ts` — add `BankService` to `providers`, and `BankVerifyJob` to the worker-only list: `const workerOnly = env.SANCHAY_APP_ROLE === 'worker' ? [PreverifyJob, BankVerifyJob] : [];`.
 
-Modify `apps/api/src/modules/platform/jobs/job-registry.ts` — append `'onboarding.bank.verify'` to `JOB_NAMES`.
+Modify `apps/api/src/modules/platform/jobs/job-registry.ts` — append `'onboarding.bank.verify': 'stately', // key: the kyc_checks id; creates the bank pre-verification once, then re-enqueues itself to poll (E7)` to `JOB_POLICIES` (stately for E6's reason, R-32, RV-03-24).
 
 Modify `apps/api/src/modules/platform/ids.ts` — add `'bank_accounts'` and `'ref_ifsc'` to `TableName`.
 
@@ -9945,7 +9949,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/src/integrations/fp/fp-operations.ts` (D3; append seven class-R list operations)
   - `apps/api/src/integrations/fp/fp-provision.ts` (D3; replace the stub bodies, add the lookups)
   - `apps/api/src/integrations/fp/fake/fake-fp.state.ts` and `apps/api/src/integrations/fp/fake/fake-fp.ts` (D4; model the provisioning resources)
-  - `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.provision'` to `JOB_NAMES`)
+  - `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.provision': 'exclusive'` to `JOB_POLICIES`, R-32)
   - `packages/contract/src/onboarding.ts` (append `attest`)
   - `apps/api/src/modules/onboarding/onboarding.router.ts` (append the `attest` handler)
   - `apps/api/src/modules/onboarding/onboarding.module.ts` (register `AttestService`; `ProvisionJob` in the worker-only list; import `IdentityModule`; register the attest snapshot builder and subject job)
@@ -10345,6 +10349,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
 });
 afterAll(async () => {
@@ -11508,7 +11513,7 @@ CONSENT_SUBJECT_JOBS.ONBOARDING_ATTEST = 'onboarding.provision';
     // providers: [...existing, AttestService, ...workerOnly]
 ```
 
-`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.provision'` to `JOB_NAMES`.
+`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)` to `JOB_POLICIES` (R-32, RV-03-24).
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
@@ -17746,7 +17751,7 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
 - **Create (migrations):** `orders_folios` (generated) and `orders_guard` (custom: attaches E4's `trg_consent_guard`, revokes UPDATE/DELETE on `order_events`)
 - **Modify:** `apps/api/src/integrations/fp/fp-transact.ts` (D3; real bodies for `createPurchase`/`updatePurchase`), `apps/api/src/integrations/fp/fp-read.ts` (D3; `purchases` gains `sourceRefId`), `apps/api/src/integrations/fp/fake/fake-fp.ts` (D4; `purchasePayload` also returns `consent: p.consent`, as FP's GET does)
 - **Create:** `apps/api/src/modules/orders/order-transitions.ts`, `apps/api/src/modules/orders/order-transitions.test.ts` (RV-03-16: `isCancellable`, `orderNextStep`)
-- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'orders.purchase.submit'`, `'orders.purchase.advance'`, `'fp.reconcile.nonfinal'`), `apps/api/src/modules/platform/jobs/schedules.ts` (`fp.reconcile.nonfinal` every 5 minutes)
+- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'orders.purchase.submit': 'exclusive'`, `'orders.purchase.advance': 'stately'`, `'fp.reconcile.nonfinal': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (`fp.reconcile.nonfinal` every 5 minutes)
 - **Modify:** `apps/api/src/modules/platform/ids.ts` (append `'orders' | 'order_events' | 'folios'`)
 - **Modify:** `apps/api/src/config/env.ts`, `apps/api/src/config/env.test.ts` (`base` and the closed-list pin), `apps/api/test/int/env.ts`, `apps/api/.env.example` (`SANCHAY_PLATFORM_ARN`)
 - **Modify (RV-03-15):** `apps/api/src/integrations/integrations.module.test.ts` (its `base`) and `apps/api/src/modules/platform/crypto.test.ts` (its `localRaw`): Plan 01 tests that build their own env gain `SANCHAY_PLATFORM_ARN`
@@ -17971,6 +17976,7 @@ beforeAll(async () => {
   await setOrdersEnabled(true);
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
 });
 afterAll(async () => {
@@ -19066,7 +19072,12 @@ export class OrdersModule {
 ```
 
 Key-level edits:
-- `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'orders.purchase.submit'`, `'orders.purchase.advance'`, `'fp.reconcile.nonfinal'`.
+- `apps/api/src/modules/platform/jobs/job-registry.ts`: append to `JOB_POLICIES` (R-32, RV-03-24):
+```ts
+  'orders.purchase.submit': 'exclusive', // key: the challenge id (approve); POSTs the purchase (E20)
+  'orders.purchase.advance': 'stately', // key: the order id; polls FP and re-enqueues itself (E20)
+  'fp.reconcile.nonfinal': 'stately', // every 5 minutes, keyless: one sweep queued and one running (E20, F7)
+```
 - `apps/api/src/modules/platform/jobs/schedules.ts` (inside `registerSchedules`): `await boss.schedule('fp.reconcile.nonfinal', '*/5 * * * *', {}, { tz, key: 'fp-reconcile-nonfinal' });`
 - `apps/api/src/modules/platform/ids.ts`: append `'orders' | 'order_events' | 'folios'`.
 - `apps/api/src/config/env.ts`: `SANCHAY_PLATFORM_ARN: z.string().regex(/^ARN-\d+$/)` (required); `apps/api/test/int/env.ts` and `env.test.ts`'s `base`: `SANCHAY_PLATFORM_ARN: 'ARN-000000'`; `env.test.ts`'s closed-list pin: `'SANCHAY_PLATFORM_ARN'` in sorted position, right after `'SANCHAY_PILOT_INVITE_ONLY'` (D7; RV-03-15); `.env.example`: `SANCHAY_PLATFORM_ARN=ARN-000000`.
@@ -19204,7 +19215,7 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
 - **Create (migration, generated):** `payment_attempts`
 - **Modify:** `apps/api/src/integrations/fp/fp-transact.ts` (D3; real `createPayment` body), `apps/api/src/integrations/fp/fake/fake-fp.ts` (D4; `payment.get`)
 - **Modify:** `apps/api/src/modules/orders/purchase-advance.job.ts` (E20; `checkout` creates the payment and PATCHes `confirmed`), `apps/api/src/modules/orders/orders.module.ts` (import `PaymentsModule`)
-- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'payments.poll'`), `apps/api/src/modules/platform/ids.ts` (append `'payment_attempts'`), `apps/api/src/modules/platform/audit.service.ts` (append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED`)
+- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'payments.poll': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/ids.ts` (append `'payment_attempts'`), `apps/api/src/modules/platform/audit.service.ts` (append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED`)
 - **Modify:** `packages/contract/src/index.ts` (`payments` key), `apps/api/openapi.json`, `apps/api/src/app.module.ts` (`PaymentsModule.forRoot(env)`), `apps/api/test/int/infra-routes.ts` + `infra-routes.int.test.ts` (drop the `pg/return` stand-in; the real route replaces it)
 
 **Interfaces:**
@@ -19215,7 +19226,7 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
   - `PaymentsService.createAttempt(consent, order) → {attemptId, returnRef}` (inside `useConsumed` only), `resolveReturn(ref) → redirect path`, `get(investorId, attemptId)`.
   - `PurchaseAdvanceJob.checkout` (E20's extension point): PATCH consent → `createAttempt` → PATCH `state: 'confirmed'` → returns `true` (order → `AWAITING_PAYMENT`).
   - Raw route `GET|POST /api/v1/pg/return/{ref}` (`@InfraRoute('API_HOST')`): single-use, 30-minute ref (hash stored, never the ref); marks the attempt `PENDING`, the order `PAYMENT_PENDING`, enqueues `payments.poll`, and returns 303 to `/app/r/payment?ref=<attemptId>` (APP) or `https://app.sanchay.in/r/payment?ref=<attemptId>` (WEB). The postback body is never read (research fp-api §4.1: never trust a postback).
-  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, 2 m, 5 m, 15 m while pending.
+  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, 2 m, 5 m, 15 m while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends, at most 15 minutes later.
   - FP event handlers `payment` and `mf_purchase` registered in E1's `FP_EVENT_HANDLERS` at `payments.module.ts` load (they re-fetch and apply the same transitions; idempotent).
   - `payments.get` GET `/payments/{attemptId}`.
   - Emails via `Notify.enqueue`: `ORDER_PLACED` when an attempt succeeds, `ORDER_FAILED` on FP `failed`, `REFUND_IN_PROGRESS` when a payment fails after success (late auth reversal).
@@ -19258,6 +19269,7 @@ beforeAll(async () => {
     .onConflictDoUpdate({ target: appConfig.key, set: { value: true } });
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
 });
 afterAll(async () => {
@@ -19912,7 +19924,7 @@ export class PaymentsModule implements OnModuleInit {
 ```
 (Add `@Inject(PaymentsService) private readonly payments: PaymentsService` to the constructor; `orders.module.ts` imports `PaymentsModule.forRoot(env)`.)
 
-Key-level edits: `job-registry.ts` append `'payments.poll'`; `ids.ts` append `'payment_attempts'`; `audit.service.ts` append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED` to `AUDIT_ACTIONS`; `packages/contract/src/index.ts` add `payments: paymentsContract`; `app.module.ts` add `PaymentsModule.forRoot(env)`; `test/int/infra-routes.ts` removes its `pg/return` stand-in handlers and `infra-routes.int.test.ts` drops those rows (the real controller replaces them).
+Key-level edits: `job-registry.ts` append `'payments.poll': 'stately', // key: the payment attempt id; polls FP and re-enqueues itself (E21)` to `JOB_POLICIES` (R-32); `ids.ts` append `'payment_attempts'`; `audit.service.ts` append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED` to `AUDIT_ACTIONS`; `packages/contract/src/index.ts` add `payments: paymentsContract`; `app.module.ts` add `PaymentsModule.forRoot(env)`; `test/int/infra-routes.ts` removes its `pg/return` stand-in handlers and `infra-routes.int.test.ts` drops those rows (the real controller replaces them).
 
 - [ ] **Step 4: Run tests to confirm they pass**
 

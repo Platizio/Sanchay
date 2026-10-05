@@ -1,12 +1,12 @@
-# Plan 02 (Sprint 2): platform kernel, FP gateway, FakeFp, catalogue data, dev AWS
+# Plan 02 (Sprint 2): platform kernel, FP gateway, FakeFp, catalogue data, the paused prod AWS stack
 
 > **For agentic workers:** execute one task at a time, exactly as written, test first (Files → Interfaces → Step 1 failing test → Step 2 see it fail → Step 3 minimal implementation → Step 4 see it pass → Step 5 commit). `AGENTS.md` is binding. Where this plan and the outline disagree, this plan wins; where this plan and the MVP spec or rulings disagree, stop and report.
 
-**Goal.** By Fri 10-23 the money kernel runs under Testcontainers and the dev AWS stack is up with the catalogue data on it: idempotency, the pg-boss worker role, FpGateway (lossless-json, `provider_calls`), a stateful FakeFp plus the sandbox smoke harness, domain state machines, MSG91/SES adapters and `Notify`, the pilot invite gate, and the catalogue schema, seeds, AMFI NAV sync and FP scheme sync.
+**Goal.** By Fri 10-23 the money kernel runs under Testcontainers and on the local docker compose stack: idempotency, the pg-boss worker role, FpGateway (lossless-json, `provider_calls`), a stateful FakeFp plus the sandbox smoke harness, domain state machines, MSG91/SES adapters and `Notify`, the pilot invite gate, and the catalogue schema, seeds, AMFI NAV sync and FP scheme sync. R-31: there is no AWS dev environment and no dev domain, so development runs locally, and in S2 week 2 E25 deploys `SanchayMvpStack-prod` paused: it runs and answers on `www`, `app` and `api.sanchay.in`, but no investor can transact before GO-1 (invite-only sign-in, D7 and boot invariant 10; `orders.enabled` and `plans.sip.enabled` stay at their D1 default, false; no invite before GO-1 except the founders' test accounts). R-31 amends R-24's "catalogue data is live on dev AWS": the 10-23 catalogue data lives on the paused prod stack. What reaches it by then is D9's NAV data (the worker runs the NAV syncs from E25's first deploy); the catalogue reference tables arrive with Plan 04 F1's migrate task, and F19's curated list and D9's NAV history backfill run on prod before GO-1 through F1's ops task (R-33; F1's `docs/runbooks/db-access.md`; RV-02-71).
 
-**Sources.** Outline: `docs/superpowers/plans/2026-09-28-plans-02-04-outlines.md` §0 and §1 (conventions, env additions, capacity, rulings). Names: `docs/interface/plan-01-interface-sheet.md`. Rulings: `docs/delivery/rulings.md` (R-01…R-30).
+**Sources.** Outline: `docs/superpowers/plans/2026-09-28-plans-02-04-outlines.md` §0 and §1 (conventions, env additions, capacity, rulings). Names: `docs/interface/plan-01-interface-sheet.md`. Rulings: `docs/delivery/rulings.md` (R-01…R-34).
 
-**Branch.** `feat/plan-02-mvp-kernel` from `main` (`225d60a` or later). Nothing is pushed until the owner asks. Update the branch line in `AGENTS.md` when the branch is created.
+**Branch.** `feat/plan-02-mvp-kernel` from `main` (`225d60a` or later). Nothing is pushed until the owner asks. Update the branch line in `AGENTS.md` when the branch is created. E25 deploys the prod stack from this branch by hand (ADR-0014's first deploy, steps 1-6). GitHub runs a `workflow_dispatch` workflow only when its file is on the default branch, so E25's step 7 and every later `deploy.yml` run wait until the owner has merged `deploy.yml` to `main` (RV-02-71).
 
 ## Execution order
 
@@ -22,7 +22,7 @@
 | 7 | D8 catalogue schema and seeds | Dev B | Plan 01 |
 | 8 | D9 AMFI NAV sync | Dev B | D1, D2, D8 |
 | 9 | D10 FP scheme sync, catalogue procedures | Dev B | D3, D8, D9 |
-| 10 | E25 CDK `SanchayMvpStack-dev` (protected, S2 week 2, R-05) | Dev A | D2, D3, D6, D7 |
+| 10 | E25 CDK `SanchayMvpStack-prod`, deployed paused (protected, S2 week 2, R-05, R-31) | Dev A | D2, D3, D6, D7 |
 | 11 | D4 FakeFp and smoke harness (starts S3 week 1, outline §0.3) | Dev A | D3 |
 
 The task sections below appear in chunk order (D0, D1–D4, D5–D7, D8–D10, E25); run them in the order above.
@@ -127,9 +127,12 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-66: Task D0 fixes three Plan 01 defects from the errata backlog (2026-10-05; major).** EF8-5: `ContactEmailService.verify` let another investor's wrong codes bump, and at the fifth lock, a `VERIFY_EMAIL` challenge, because `OtpService.verify` commits its attempt bump before the in-transaction owner check (reproduced on `main`: investor B's fifth wrong code answered `OTP_LOCKED`). B4: the `err` serializer, and the `msg` pino copies from a message-less error, logged a `DrizzleQueryError`'s bound parameters (reproduced: a mobile number in `msg`, `err.message`, `err.stack` and `err.params`). C9: at desktop width `AppShell` rendered the sidebar on the client's first render while the server rendered the bottom nav, so React reported "Hydration failed" (reproduced under jsdom by rendering at width 0 and hydrating at 1280). D0 refuses a foreign challenge before `OtpService.verify`, redacts bound parameters in the serializer and in a `logMethod` hook, and reads the width through `useSyncExternalStore` with a server snapshot of 0. Each test failed on `main` and passes with its fix (scratch worktree of `main`: api unit 133/133, api integration 130/130, features 23/23, typechecks and `pnpm lint` clean). D1's `me-email.int.test.ts` counts include D0's case.
 - **RV-02-67: D1 `ReconBreaks.open` never aborts its caller's transaction (2026-10-05 backlog review, the D1 agent's finding G; major).** It caught `23505` from `recon_breaks_open_uq`, but a failed INSERT aborts the whole PostgreSQL transaction and the caller's COMMIT then silently becomes a ROLLBACK, so the first repeat of a break inside a transaction (D9's NAV sync, Plan 03's handlers, Plan 04's daily folio checks) would discard that transaction's writes without an error. Plan 04 F4 carried the fix (`ON CONFLICT … DO NOTHING` on the index predicate) for S4; D1 now has it from the start, with F4's in-transaction case added to `idempotency.int.test.ts` (12 cases), and F4 no longer edits `runtime-config.ts` (Plan 04 RV-04-F4-3). `runtime-config.ts` no longer imports `pg-errors`. Verified on PostgreSQL 18 in a scratch worktree of `main` plus D0: the new case fails on the old class ("current transaction is aborted") and passes on the new one.
 - **RV-02-68: D6 `Notify.enqueue` uses `ON CONFLICT DO NOTHING` (2026-10-05 backlog review; major).** It caught `23505` from `notifications_dedupe_uq` the same way, and its callers enqueue inside their own transactions with per-entity keys (Plan 03 `order-placed:` and `refund:`, Plan 04 `order-allotted:`, `sip-active:`, `redemption-processed:` and others), so a duplicate from a retried job or a racing worker would have rolled the caller's writes back silently. It now inserts with `.onConflictDoNothing({ target: notifications.dedupeKey }).returning({ id })` and enqueues `notifications.send` only when a row was inserted; the unit mocks follow the new chain, and `notify.service.ts` no longer imports `pg-errors`. The drizzle-orm 0.45.3 chain was checked on PostgreSQL 18: the duplicate returns no row and the transaction commits its other writes.
+- **RV-02-69: every pg-boss queue gets an explicit policy (R-32, owner ruling 2026-10-05; major).** D2 left every queue on pg-boss's default `standard` policy, under which the `singletonKey`s that Plans 03 and 04 send per aggregate neither dedupe nor serialise. `JOB_NAMES` becomes `JOB_POLICIES`, a registry that gives each job its policy with a reason: `stately` for per-aggregate sync, poll, reconcile and sweep jobs, `exclusive` for jobs that submit to FP, and `standard` for `notifications.send`. D2's table "Queue policies (R-32)" lists all 31 jobs in Plans 02–04, which closes the verify-list item on `singletonKey`. `JobsService` creates each queue with its policy and refuses to start when a stored policy differs, because pg-boss never changes one in place. `Jobs.enqueue` returns the job id, or null for a send the policy refuses, and D9's `NavSyncDeps` and every `Jobs.enqueue` stub in Plans 03 and 04 follow, because a stub that resolves `undefined` fails `typecheck`. Checked on PostgreSQL 18.6 with pg-boss 12.34.0: a refused send returned null with and without the `db` option and the caller's transaction committed; `createQueue` kept a stored policy and `updateQueue` refused `policy`; and a login without CREATE on `pgboss` created both kinds of queue. D2 built from this plan text on Plan 01's `apps/api` passes `typecheck`, `biome ci` after one `--write`, 4/4 unit cases, 12/12 integration cases and both full suites; the five new integration cases fail against the old `JobsService`.
+- **RV-02-70: E25 deploys `SanchayMvpStack-prod`, paused, instead of a dev stack (R-31, owner ruling 2026-10-05; major).** There is no AWS dev environment or dev domain, so E25 builds the one prod stack in S2 week 2: `PROD_CONFIG` only (`DEV_CONFIG`, `envSubdomain` and `createGithubOidcProvider` are gone), `www`, `app` and `api.sanchay.in` with the apex 301 on `sanchay.in` in the `sanchay.in` zone, the account's GitHub OIDC provider and the least-privilege deploy role that F1 used to add, now trusting exactly `repo:<owner>/<repo>:environment:prod`, `deploy.yml` with `prod` as its only environment, and ADR-0014's first deploy and the post-deploy checklist for prod. Paused means closed to investors (invite-only sign-in, `orders.enabled` and `plans.sip.enabled` left false, no ingress allow-list), not stopped, so the 0-task flag `-c firstDeploy=true` becomes `-c noTasks=true`, which F1 reuses. Verified with aws-cdk-lib 2.216.0: `tsc` clean, the 24 infra tests pass and `biome ci` is clean; eight single mutations (a wildcard trust, `AdministratorAccess`, no `grantRun`, a closed listener, an orders flag, an ignored `noTasks`, no apex record, the api host sent to web) each fail exactly the test meant for them; and the compiled entry point refuses a synth without its inputs and otherwise synthesises 2 tasks (0 with `-c noTasks=true`).
+- **RV-02-71: the plan header follows R-31 and R-33 (owner rulings 2026-10-05; minor).** The title, the goal and E25's execution-order row describe the paused prod stack. R-31 moves R-24's 10-23 catalogue data from dev AWS to the paused prod stack, so the goal says what reaches prod and when: D9's NAV data from E25's first deploy (its worker runs the NAV syncs), the reference tables with F1, and the curated list and the NAV history backfill before GO-1 through F1's ops task (R-33). The branch line records that GitHub runs a `workflow_dispatch` workflow only when its file is on the default branch (GitHub's documentation, checked 2026-10-05), so `deploy.yml` runs wait for the owner's merge to `main`.
 
 **Verify at execution time (not changed here):**
-- D2 creates every queue with pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises: two `send`s with the same key both create a job, and one `fetch` activates both (checked against pg-boss 12.34.0). The other policies differ: `singleton` and `key_strict_fifo` activate one job per key at a time, and `stately`, `short` and `exclusive` drop a second send while the first is queued, keyless sends included. Target design T5, Plan 03 (E1, E4, E6, E7, E20, E21) and Plan 04 (F2, F5, F7, F28) rely on `singletonKey` = aggregate id to keep one job per aggregate, and D2's case `singletonKey serialises jobs for the same aggregate` only checks that the second enqueue does not throw. Owner decision before D2 first runs against a shared database: a policy per job name, passed to `createQueue`, and a case that pins it. It cannot be changed in place later: `createQueue` on an existing queue keeps the old policy (`ON CONFLICT DO NOTHING`), and `updateQueue` refuses `policy`.
+- **Resolved (R-32, RV-02-69): queue policies.** D2 no longer leaves every queue on pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises. `JOB_POLICIES` gives each job its policy: `stately` for per-aggregate sync, poll, reconcile and sweep jobs, `exclusive` for jobs that submit to FP, and `standard` for `notifications.send` only. `JobsService` creates each queue with that policy, and `Jobs.enqueue` returns null for a send the policy refuses. `jobs.int.test.ts` pins the stored policies and both refusals on PostgreSQL. A policy cannot change in place (`createQueue` on an existing queue keeps the old one, and `updateQueue` refuses `policy`), so `JobsService` refuses to start when a stored policy differs from the registry. D2's table "Queue policies (R-32)" lists every job in Plans 02–04.
 - `Money.toWire()` must format whole rupees as `'500.00'` (D10's new test assumes it).
 
 ---
@@ -1281,12 +1284,12 @@ git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBr
 - Prerequisites: **D1** (this task's custom migration grants `sanchay_app` on schema `pgboss`, which must run after `0003_grants.sql` exists as the pattern to extend; it does not touch D1's tables).
 - Consumes: `AppConfig`, `CLOCK`/`Clock`/`FakeClock`, `DB`/`DbHandle`/`Database`, `PlatformModule`, `AppError`, `createDb`, `MIGRATIONS_FOLDER`/`runMigrations` (`db/migrate.ts`), `bootTestApp`, `createTestDatabase`, `TestDatabase`.
 - Produces:
-  - `JOB_NAMES` (`job-registry.ts`): `'identity.cleanup' | 'nav.sync.daily' | 'catalogue.returns.compute' | 'catalogue.fp.sync' | 'sms.dlr.sync' | 'notifications.send' | 'consent.expiry.sweep' | 'drafts.abandon' | 'fp.event.process'`. **Deviation from outline:** the outline calls `JOB_NAMES` "a closed union of every MVP job in spec §1" and defers verification to D3's expansion; this task's Files list gives it no mandate to re-derive that full inventory from the spec, so `JOB_NAMES` here is the jobs Plan 02 itself needs (`identity.cleanup`, registered by this task) plus one forward-declared name per job the outline names for a later Plan-02/03 task (D6 `sms.dlr.sync`/`notifications.send`, D9 `nav.sync.daily`, D10 `catalogue.fp.sync`/`catalogue.returns.compute`, E1 `fp.event.process`, E4 `consent.expiry.sweep`/`drafts.abandon`). `JOB_NAMES` is append-only (same convention as `ERROR_CATALOGUE`): each later task that adds a job appends its literal to the union in the same PR that registers its handler.
+  - `JOB_POLICIES` (`job-registry.ts`, R-32): the job registry. It maps every job name to its pg-boss queue policy, with a one-line reason per entry: `'identity.cleanup' | 'nav.sync.daily' | 'catalogue.returns.compute' | 'catalogue.fp.sync' | 'sms.dlr.sync' | 'notifications.send' | 'consent.expiry.sweep' | 'drafts.abandon' | 'fp.event.process'`, all `stately` except `notifications.send` (`standard`). `JobName` is `keyof typeof JOB_POLICIES`, `JOB_NAMES` lists the names (`Object.keys`), and `queuePolicyDrift(stored)` names the registry queues that `PgBoss.getQueues` returns missing or with another policy. **Deviation from outline:** the outline calls `JOB_NAMES` "a closed union of every MVP job in spec §1" and defers verification to D3's expansion; this task's Files list gives it no mandate to re-derive that full inventory from the spec, so `JOB_NAMES` here is the jobs Plan 02 itself needs (`identity.cleanup`, registered by this task) plus one forward-declared name per job the outline names for a later Plan-02/03 task (D6 `sms.dlr.sync`/`notifications.send`, D9 `nav.sync.daily`, D10 `catalogue.fp.sync`/`catalogue.returns.compute`, E1 `fp.event.process`, E4 `consent.expiry.sweep`/`drafts.abandon`). `JOB_POLICIES` is append-only (same convention as `ERROR_CATALOGUE`): each later task that adds a job appends `'name': 'policy', // reason` to it in the same PR that registers its handler, and no entry is ever removed, renamed or given another policy (see "Queue policies (R-32)" below).
   - `@JobHandler(name: JobName)` (class decorator, `job-registry.ts`): marks a provider's `handle(job)` method as the pg-boss worker for `name`, found via Nest's `DiscoveryService`.
-  - `Jobs` (`jobs.service.ts`, `@Injectable()`, provided and exported by the global `JobsModule`): `enqueue(exec: DbExecutor, name: JobName, data: unknown, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?}): Promise<void>`. It sends through its own application's `JobsService` (injected, never module-level state, RV-02-45) with pg-boss's `send(name, data, {db})` BYODB adapter on the caller's executor, so the job commits or rolls back with the caller's transaction (`startAfter` as a number is seconds, per pg-boss). Consumers inject it (`@Inject(Jobs) private readonly jobs: Jobs`) and unit tests stub it with `{ enqueue: vi.fn() }`.
-  - `registerSchedules(boss: PgBoss): Promise<void>` (`schedules.ts`): the one schedule extension point, awaited by `JobsService` after the workers are registered. It starts empty; later tasks add keyed `await boss.schedule(name, cron, data, {tz: 'Asia/Kolkata', key})` calls to its body (pg-boss needs a distinct `key` for several schedules on one queue). `JobsService.onModuleInit` also calls `boss.createQueue(name)` for every `JOB_NAMES` entry (pg-boss 10+ requires a queue before `send`/`work`), and `Jobs.enqueue` goes through `boss.send(..., {db})` (pg-boss's BYODB adapter) so the job commits with the caller's transaction; it never writes `pgboss.job` directly.
+  - `Jobs` (`jobs.service.ts`, `@Injectable()`, provided and exported by the global `JobsModule`): `enqueue(exec: DbExecutor, name: JobName, data: unknown, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?}): Promise<string | null>`. It returns the pg-boss job id, or null when the queue's policy refused the send (R-32): a job with the same `singletonKey` is already queued (`stately`) or queued, retrying or running (`exclusive`). A refusal is not an error, and the caller's transaction stays usable. It sends through its own application's `JobsService` (injected, never module-level state, RV-02-45) with pg-boss's `send(name, data, {db})` BYODB adapter on the caller's executor, so the job commits or rolls back with the caller's transaction (`startAfter` as a number is seconds, per pg-boss). Consumers inject it (`@Inject(Jobs) private readonly jobs: Jobs`). Unit tests stub it with `{ enqueue: vi.fn() }`, and a `vi.spyOn(…, 'enqueue')` stub resolves a job id (`mockResolvedValue('job-id')`, or `return 'job-id'` from `mockImplementation`), because a stub that resolves `undefined` no longer typechecks.
+  - `registerSchedules(boss: PgBoss): Promise<void>` (`schedules.ts`): the one schedule extension point, awaited by `JobsService` after the workers are registered. It starts empty; later tasks add keyed `await boss.schedule(name, cron, data, {tz: 'Asia/Kolkata', key})` calls to its body (pg-boss needs a distinct `key` for several schedules on one queue). `JobsService.onModuleInit` also calls `boss.createQueue(name, {policy: JOB_POLICIES[name]})` for every `JOB_NAMES` entry (pg-boss 10+ requires a queue before `send`/`work`). It then reads the queues back (`boss.getQueues`) and throws, after stopping pg-boss, when `queuePolicyDrift` names one: pg-boss would otherwise keep running a queue under a policy it was created with earlier. `Jobs.enqueue` goes through `boss.send(..., {db})` (pg-boss's BYODB adapter) so the job commits with the caller's transaction; it never writes `pgboss.job` directly.
   - `JobsService` (`jobs.service.ts`, `@Injectable`, provided by the new `JobsModule`, `@Global()`, imported once from `AppModule.forRoot`): owns its application's `PgBoss` instance (a second Nest application in the same process, such as `runWorker`'s in the tests, owns another). `onModuleInit()` starts pg-boss (`migrate: false` — see the migration note below) in **every** role so `Jobs.enqueue` is callable from `api` request handlers; it registers `.work()` handlers and starts the heartbeat loop **only** when `env.SANCHAY_APP_ROLE === 'worker'`. `onApplicationShutdown()` stops the heartbeat and calls `boss.stop({graceful: true, timeout: 10_000})`.
-  - pg-boss as the D6 app login (RV-02-43): under D6 (Plan 04 F1) api, worker and ops log in as `sanchay_app_login`, a `sanchay_app` member without CREATE on schema `pgboss`. Everything `JobsService` and `Jobs` run is DML on the tables `0005` grants: `start` with `migrate: false` installs nothing (it checks the schema version), `createQueue(name)` is an idempotent `INSERT … ON CONFLICT DO NOTHING` into `pgboss.queue`, and `send`, `work`, `schedule` and maintenance write rows. Never pass `partition: true` to `createQueue` (a table per queue) or `persistQueueStats` to `PgBoss` (daily `queue_stats` partitions): both are DDL, fail with 42501 for that login, and go unnoticed in the tests, which run as a superuser.
+  - pg-boss as the D6 app login (RV-02-43): under D6 (Plan 04 F1) api, worker and ops log in as `sanchay_app_login`, a `sanchay_app` member without CREATE on schema `pgboss`. Everything `JobsService` and `Jobs` run is DML on the tables `0005` grants: `start` with `migrate: false` installs nothing (it checks the schema version), `createQueue(name, {policy})` is an idempotent `INSERT … ON CONFLICT DO NOTHING` into `pgboss.queue` (the policies' unique indexes come with pg-boss's schema), `getQueues` is a `SELECT`, and `send`, `work`, `schedule` and maintenance write rows. Never pass `partition: true` to `createQueue` (a table per queue) or `persistQueueStats` to `PgBoss` (daily `queue_stats` partitions): both are DDL, fail with 42501 for that login, and go unnoticed in the tests, which run as a superuser.
   - `runWorker(env: Env): Promise<INestApplicationContext>` (`worker.main.ts`): `NestFactory.createApplicationContext(AppModule.forRoot(env), {bufferLogs: true})` — no Fastify adapter, so nothing ever binds a port; wires `SIGTERM` to drain.
   - `startHeartbeat(dbh: DbHandle, clock: Clock, taskId: string): {stop(): void}` (`heartbeat.ts`): upserts `worker_heartbeats (task_id, last_beat_at)` every 30 s.
   - Table `worker_heartbeats (task_id text PRIMARY KEY, last_beat_at timestamptz NOT NULL)`.
@@ -1294,6 +1297,49 @@ git commit -m "feat(api): idempotency-key interceptor, RuntimeConfig and ReconBr
   - `identity.module.ts` gains an inline `IdentityCleanupJob` provider (same inline-provider style `identity.module.ts` already uses for `OtpBookkeepingDbLifecycle`), `@JobHandler('identity.cleanup')`: hourly, deletes `otp_codes` rows older than 24 h **only** for `purpose IN ('LOGIN', 'VERIFY_EMAIL')` (R-13; every other purpose, including `CONSENT`, is untouched by this task since no `CONSENT` rows exist before Plan 03's E3/E4), and deletes `auth_sessions` rows whose `absolute_expires_at` is more than 7 days in the past.
   - `main.ts`: `SANCHAY_APP_ROLE === 'worker'` now calls `runWorker(env)` instead of printing "not available yet" and exiting 1.
   - `db/migrate.ts`'s `runMigrations` bootstraps pg-boss's own schema **before** the Drizzle migrations run, so `0005_worker_heartbeats.sql`'s `GRANT`s on `pgboss.*` succeed against tables that already exist (see Step 3).
+
+**Queue policies (R-32).** pg-boss 12.34.0 enforces a queue's policy with partial unique indexes on `pgboss.job`. A send that one of them refuses is an `INSERT … ON CONFLICT DO NOTHING` that returns no row, so `send` returns null, with or without the `db` option, and the caller's transaction is not aborted. `fetch` treats the same conflict as an empty fetch. All of this was checked on PostgreSQL 18.6 (RV-02-69).
+- `stately` (per-aggregate sync, poll, reconcile and sweep jobs): at most one queued and one running job per `singletonKey`, the aggregate id (index `(name, state, key)` over created, retry and active). Keyless sends, schedule ticks included, share one slot. So a job may re-enqueue itself while it runs, and a second send while one is queued is refused.
+- `exclusive` (jobs that submit to FP): at most one job per `singletonKey` across created, retry and active. A duplicate submit is refused while one is queued, retrying or running, and so is a job's send of its own key while it runs: an exclusive job never re-enqueues itself.
+- `standard`: no limit. Only `notifications.send` uses it; the `notifications` row is its dedupe (RV-02-68).
+- What later tasks must know:
+  - A schedule tick is a keyless send. On a stately queue a tick is dropped while the previous one is still queued, and two schedules on one queue that can fire in the same minute need distinct `singletonKey`s in their options, or one tick is dropped (F2's `mandates.poll`).
+  - A nudge (a webhook or a browser return) for an aggregate whose delayed poll is already queued is refused. That poll applies the change when its delay ends.
+  - A queued job whose key is running waits for it, and while it is the oldest ready job in its queue pg-boss may fetch nothing else from that queue, so handlers stay short.
+
+| Job | Task | Policy | `singletonKey` | Why |
+|---|---|---|---|---|
+| `identity.cleanup` | D2 | stately | none (hourly) | sweep |
+| `nav.sync.daily` | D9 | stately | none (four ticks a day at different times) | sync sweep of the AMFI feed |
+| `catalogue.returns.compute` | D9 sends, E16 handles | stately | none | one queued run covers every NAV sync before it |
+| `catalogue.fp.sync` | D10, F19 schedule | stately | none (daily) | sync sweep |
+| `sms.dlr.sync` | D6 (no handler yet) | stately | the message row id, once it has a handler | per-message sync |
+| `notifications.send` | D6 | standard | none | the `notifications` row is the dedupe (RV-02-68) |
+| `consent.expiry.sweep` | E4 | stately | none (every 5 minutes) | sweep |
+| `drafts.abandon` | E4 | stately | none (hourly) | sweep |
+| `fp.event.process` | E1, F7 `ops:sync` | stately | the `inbound_webhook_events` id | per-event sync; re-enqueues itself to retry |
+| `onboarding.preverify` | E6 | stately | the `kyc_checks` id | poll: creates the pre-verification once (class K, its id stored), then re-enqueues itself |
+| `onboarding.bank.verify` | E7 | stately | the `kyc_checks` id | the same, for the bank account |
+| `onboarding.provision` | E11 | exclusive | the ATTEST challenge id | FP provisioning writes |
+| `orders.purchase.submit` | E20 | exclusive | the challenge id | FP submit |
+| `orders.purchase.advance` | E20 | stately | the order id | poll; re-enqueues itself |
+| `fp.reconcile.nonfinal` | E20, F7 | stately | none (every 5 minutes; F7's `ops:sync` sends keyless too) | backstop sweep, one run at a time |
+| `payments.poll` | E21 | stately | the payment attempt id | poll; re-enqueues itself |
+| `ops.gauges.emit` | F1 | stately | none (every minute) | sweep |
+| `mandates.submit` | F2 | exclusive | the mandate's challenge id (approve and re-authorise) | FP submit |
+| `mandates.poll` | F2 | stately | the scope, `PENDING` or `APPROVED` (schedule options) | sweep per scope; both schedules fire at 07:30 |
+| `plans.sip.submit` | F2 | exclusive | the challenge id (approve) or the plan id (`mandates.poll`), never both for one plan | FP submit |
+| `plans.sip.advance` | F2, F7, F28 | stately | the plan id | poll; re-enqueues itself |
+| `plans.instalments.sync` | F2 | stately | none (twice a day) | sync sweep |
+| `folio.sync` | F4, F5 | stately | the folio id (F5), none for the 05:00 sweep | sync |
+| `orders.units.reconcile` | F4 | stately | none (every 2 hours) | reconcile sweep |
+| `orders.redemption.submit` | F5, F7 | exclusive | the challenge id | FP submit |
+| `orders.redemption.advance` | F5, F7 | stately | the order id | poll; re-enqueues itself |
+| `payout.watch` | F5 | stately | none (daily) | sweep |
+| `integrity.invariants` | F7 | stately | none (hourly) | sweep |
+| `recon.fp.daily` | F7 | stately | none (daily) | reconcile sweep |
+| `plans.cancel.submit` | F28 | exclusive | the cancel challenge id | FP submit; its 60 s re-read goes through `plans.sip.advance` |
+| `plans.cancel.sweep` | F28 | stately | none (every 5 minutes) | sweep |
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1307,20 +1353,45 @@ Expected: `pnpm-workspace.yaml`'s `catalog:` map gains `'pg-boss': 12.34.0` (add
 ```ts
 import { SetMetadata } from '@nestjs/common';
 
-export const JOB_NAMES = [
-  'identity.cleanup',
-  'nav.sync.daily',
-  'catalogue.returns.compute',
-  'catalogue.fp.sync',
-  'sms.dlr.sync',
-  'notifications.send',
-  'consent.expiry.sweep',
-  'drafts.abandon',
-  'fp.event.process',
-] as const;
+/** The pg-boss queue policies Sanchay uses (R-32). */
+export type JobPolicy = 'standard' | 'stately' | 'exclusive';
 
-/** Append-only, mirroring @sanchay/contract's ERROR_CATALOGUE convention: never remove or rename an entry. */
-export type JobName = (typeof JOB_NAMES)[number];
+/**
+ * Every job and its pg-boss queue policy (R-32). Append-only, mirroring @sanchay/contract's ERROR_CATALOGUE:
+ * never remove, rename or re-policy an entry. pg-boss cannot change a queue's policy after `createQueue` (a
+ * second `createQueue` keeps the stored row and `updateQueue` refuses `policy`), so JobsService refuses to
+ * start when a stored policy differs from this map.
+ * - stately: per-aggregate sync, poll, reconcile and sweep jobs. At most one queued and one running job per
+ *   singletonKey (the aggregate id); keyless sends, schedule ticks included, share one slot.
+ * - exclusive: jobs that submit to FP. At most one job per singletonKey in created, retry or active.
+ * - standard: no limit; notifications.send only (the notifications row is the dedupe, RV-02-68).
+ * A send that the policy refuses is not an error: `Jobs.enqueue` returns null.
+ */
+export const JOB_POLICIES = {
+  'identity.cleanup': 'stately', // hourly sweep, keyless (D2)
+  'nav.sync.daily': 'stately', // four AMFI syncs a day at different times, keyless (D9)
+  'catalogue.returns.compute': 'stately', // keyless after each NAV sync; a queued run covers later syncs (D9, E16)
+  'catalogue.fp.sync': 'stately', // daily FP scheme sync, keyless (D10, F19)
+  'sms.dlr.sync': 'stately', // DLR sync; no handler yet, key it by the message's row id when it gets one
+  'notifications.send': 'standard', // one job per notifications row (D6)
+  'consent.expiry.sweep': 'stately', // every 5 minutes, keyless (E4)
+  'drafts.abandon': 'stately', // hourly, keyless (E4)
+  'fp.event.process': 'stately', // key: the inbound_webhook_events id; re-enqueues itself to retry (E1)
+} as const satisfies Record<string, JobPolicy>;
+
+/** Append-only (see JOB_POLICIES). */
+export type JobName = keyof typeof JOB_POLICIES;
+
+/** Every job name, in registry order. */
+export const JOB_NAMES = Object.keys(JOB_POLICIES) as JobName[];
+
+/** The registry entries whose queue is missing or stored with another policy (`stored` is `PgBoss.getQueues`). */
+export function queuePolicyDrift(stored: readonly { name: string; policy?: string }[]): string[] {
+  const byName = new Map(stored.map((q) => [q.name, q.policy]));
+  return JOB_NAMES.filter((name) => byName.get(name) !== JOB_POLICIES[name]).map(
+    (name) => `${name}: stored ${byName.get(name) ?? 'none'}, JOB_POLICIES ${JOB_POLICIES[name]}`,
+  );
+}
 
 export interface Job<N extends JobName = JobName> {
   id: string;
@@ -1389,6 +1460,7 @@ import { AppConfig } from '../../../config/app-config.js';
 import { parseEnv } from '../../../config/env.js';
 import { DB } from '../../../db/client.js';
 import { CLOCK, FakeClock } from '../clock.js';
+import { JOB_NAMES, JOB_POLICIES, queuePolicyDrift } from './job-registry.js';
 import { JobsModule } from './jobs.module.js';
 import { JobsService } from './jobs.service.js';
 
@@ -1418,6 +1490,28 @@ describe('JobsModule wiring (unit; no live pg-boss connection needed to assert t
   });
 });
 
+describe('JOB_POLICIES (R-32)', () => {
+  it('gives notifications.send the standard policy and every other job stately or exclusive', () => {
+    expect(JOB_NAMES).toEqual(Object.keys(JOB_POLICIES));
+    for (const name of JOB_NAMES) {
+      const allowed = name === 'notifications.send' ? ['standard'] : ['stately', 'exclusive'];
+      expect(allowed, name).toContain(JOB_POLICIES[name]);
+    }
+  });
+
+  it('queuePolicyDrift names a queue that is missing or stored with another policy', () => {
+    const stored = JOB_NAMES.map((name) => ({ name, policy: JOB_POLICIES[name] as string }));
+    expect(queuePolicyDrift(stored)).toEqual([]);
+    const drifted = stored
+      .filter((q) => q.name !== 'identity.cleanup')
+      .map((q) => (q.name === 'drafts.abandon' ? { ...q, policy: 'standard' } : q));
+    expect(queuePolicyDrift(drifted)).toEqual([
+      'identity.cleanup: stored none, JOB_POLICIES stately',
+      'drafts.abandon: stored standard, JOB_POLICIES stately',
+    ]);
+  });
+});
+
 void Test;
 void AppConfig;
 void DB;
@@ -1429,11 +1523,13 @@ void apiEnv;
 
 `apps/api/test/int/jobs.int.test.ts`
 ```ts
+import { DiscoveryService, Reflector } from '@nestjs/core';
 import { and, eq, gt } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { JOB_NAMES } from '../../src/modules/platform/jobs/job-registry.js';
+import { AppConfig } from '../../src/config/app-config.js';
+import { JOB_POLICIES, type JobName } from '../../src/modules/platform/jobs/job-registry.js';
 import { workerHeartbeats } from '../../src/modules/platform/jobs/jobs.schema.js';
-import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
+import { Jobs, JobsService } from '../../src/modules/platform/jobs/jobs.service.js';
 import { HOUR } from '../../src/modules/platform/clock.js';
 import { bootTestApp, type TestApp } from './app.js';
 
@@ -1452,6 +1548,12 @@ async function eventually(check: () => Promise<boolean>): Promise<void> {
     if (Date.now() > deadline) throw new Error('the worker did not finish within 10 s');
     await new Promise((r) => setTimeout(r, 100));
   }
+}
+
+/** A queue no worker serves, so the test decides when its job runs (pg-boss `fetch` makes it active). */
+async function unservedQueue(name: string, policy: 'stately' | 'exclusive'): Promise<JobName> {
+  await t.app.get(JobsService).started().createQueue(name, { policy });
+  return name as JobName;
 }
 
 describe('Jobs.enqueue', () => {
@@ -1480,15 +1582,43 @@ describe('Jobs.enqueue', () => {
     });
   });
 
-  it('singletonKey serialises jobs for the same aggregate', async () => {
+  it('stately refuses a second send with the same singletonKey while the first is queued: null, and the caller transaction goes on (R-32)', async () => {
+    const jobs = t.app.get(Jobs);
+    const first = await jobs.enqueue(t.db.db, 'identity.cleanup', {}, { singletonKey: 'agg-1', startAfter: 3600 });
+    expect(first).toEqual(expect.any(String));
+    expect(await jobs.enqueue(t.db.db, 'identity.cleanup', {}, { singletonKey: 'agg-1' })).toBeNull();
     await t.db.db.transaction(async (tx) => {
-      await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' });
+      expect(await jobs.enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' })).toBeNull();
+      await tx.insert(workerHeartbeats).values({ taskId: 'after-refusal', lastBeatAt: t.clock.now() });
     });
-    await expect(
-      t.db.db.transaction(async (tx) => {
-        await t.app.get(Jobs).enqueue(tx, 'identity.cleanup', {}, { singletonKey: 'agg-1' });
-      }),
-    ).resolves.not.toThrow(); // pg-boss drops the duplicate (send returns null) instead of throwing
+    expect(await t.db.db.select().from(workerHeartbeats).where(eq(workerHeartbeats.taskId, 'after-refusal'))).toHaveLength(1);
+    const rows = await t.db.pool.query<{ id: string }>(
+      `SELECT id FROM pgboss.job WHERE name = 'identity.cleanup' AND singleton_key = 'agg-1'`,
+    );
+    expect(rows.rows.map((r) => r.id)).toEqual([first]);
+  });
+
+  it('stately lets one job wait behind a running one with the same singletonKey and refuses a third (R-32)', async () => {
+    const name = await unservedQueue('test.stately', 'stately');
+    const jobs = t.app.get(Jobs);
+    const running = await jobs.enqueue(t.db.db, name, {}, { singletonKey: 'agg-2' });
+    const [active] = await t.app.get(JobsService).started().fetch(name);
+    expect(active?.id).toBe(running);
+    expect(await jobs.enqueue(t.db.db, name, {}, { singletonKey: 'agg-2' })).toEqual(expect.any(String));
+    expect(await jobs.enqueue(t.db.db, name, {}, { singletonKey: 'agg-2' })).toBeNull();
+  });
+
+  it('exclusive refuses a send with the same singletonKey while the first is running, also inside a transaction (R-32)', async () => {
+    const name = await unservedQueue('test.exclusive', 'exclusive');
+    const jobs = t.app.get(Jobs);
+    const running = await jobs.enqueue(t.db.db, name, {}, { singletonKey: 'challenge-1' });
+    const [active] = await t.app.get(JobsService).started().fetch(name);
+    expect(active?.id).toBe(running);
+    expect(await jobs.enqueue(t.db.db, name, {}, { singletonKey: 'challenge-1' })).toBeNull();
+    await t.db.db.transaction(async (tx) => {
+      expect(await jobs.enqueue(tx, name, {}, { singletonKey: 'challenge-1' })).toBeNull();
+    });
+    expect(await jobs.enqueue(t.db.db, name, {}, { singletonKey: 'challenge-2' })).toEqual(expect.any(String));
   });
 });
 
@@ -1529,13 +1659,24 @@ describe('worker heartbeat', () => {
   });
 });
 
-describe('pg-boss queues (D6: the app login has no CREATE on schema pgboss)', () => {
-  it('creates every JOB_NAMES queue without a partition table, which would be DDL', async () => {
-    const { rows } = await t.db.pool.query<{ name: string; partition: boolean }>(
-      'SELECT name, partition FROM pgboss.queue',
+describe('pg-boss queues (R-32 policies; D6: the app login has no CREATE on schema pgboss)', () => {
+  it('creates every queue with its JOB_POLICIES policy and without a partition table, which would be DDL', async () => {
+    const { rows } = await t.db.pool.query<{ name: string; policy: string; partition: boolean }>(
+      'SELECT name, policy, partition FROM pgboss.queue',
     );
     expect(rows.filter((q) => q.partition)).toEqual([]);
-    expect(rows.map((q) => q.name)).toEqual(expect.arrayContaining([...JOB_NAMES]));
+    const stored = Object.fromEntries(rows.filter((q) => q.name in JOB_POLICIES).map((q) => [q.name, q.policy]));
+    expect(stored).toEqual(JOB_POLICIES);
+  });
+
+  it('refuses to start when a queue already holds another policy, which pg-boss would keep', async () => {
+    await t.db.pool.query(`UPDATE pgboss.queue SET policy = 'standard' WHERE name = 'drafts.abandon'`);
+    const service = new JobsService(t.app.get(AppConfig), t.db, t.clock, t.app.get(DiscoveryService), t.app.get(Reflector));
+    try {
+      await expect(service.onModuleInit()).rejects.toThrow('drafts.abandon: stored standard, JOB_POLICIES stately');
+    } finally {
+      await t.db.pool.query(`UPDATE pgboss.queue SET policy = 'stately' WHERE name = 'drafts.abandon'`);
+    }
   });
 });
 
@@ -1629,7 +1770,7 @@ pnpm --filter=@sanchay/api test:int
 Expected:
 - `typecheck` FAILS: `jobs.module.ts`, `jobs.service.ts`, `worker.main.ts` and `schedules.ts` do not exist yet (Step 1 wrote `job-registry.ts`, `heartbeat.ts` and `jobs.schema.ts`), so `jobs.module.test.ts` and `jobs.int.test.ts` fail to resolve their imports.
 - `test` FAILS: `jobs.module.test.ts` cannot load `jobs.module.js`, and `drizzle-config.test.ts` reports `src/modules/platform/jobs/jobs.schema.ts` (backslashes on Windows) as a schema file the `schema` glob misses.
-- `test:int` FAILS the same way, and both readiness cases in `health.int.test.ts` fail (no `app.worker_heartbeats` table yet, and Plan 01's router checks only the database); `migrations.int.test.ts` still passes with 8 tests (D1's count).
+- `test:int` FAILS the same way (`jobs.int.test.ts`, its five R-32 cases included, cannot load `jobs.service.js`), and both readiness cases in `health.int.test.ts` fail (no `app.worker_heartbeats` table yet, and Plan 01's router checks only the database); `migrations.int.test.ts` still passes with 8 tests (D1's count).
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -1643,7 +1784,15 @@ import { AppConfig } from '../../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../../db/client.js';
 import { CLOCK, type Clock } from '../clock.js';
 import { startHeartbeat, type Heartbeat } from './heartbeat.js';
-import { JOB_HANDLER, JOB_NAMES, type Job, type JobHandler, type JobName } from './job-registry.js';
+import {
+  JOB_HANDLER,
+  JOB_NAMES,
+  JOB_POLICIES,
+  type Job,
+  type JobHandler,
+  type JobName,
+  queuePolicyDrift,
+} from './job-registry.js';
 import { registerSchedules } from './schedules.js';
 
 export interface JobsEnqueueOptions {
@@ -1693,7 +1842,14 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
       migrate: false, // db/migrate.ts bootstraps pg-boss's own schema; the api/worker roles never migrate it.
     });
     await this.boss.start();
-    for (const name of JOB_NAMES) await this.boss.createQueue(name); // no options: an idempotent INSERT into pgboss.queue
+    // R-32: each queue gets its JOB_POLICIES policy (still an idempotent INSERT into pgboss.queue, no DDL).
+    // createQueue never changes an existing queue and updateQueue refuses `policy`, so a drift stops the boot.
+    for (const name of JOB_NAMES) await this.boss.createQueue(name, { policy: JOB_POLICIES[name] });
+    const drift = queuePolicyDrift(await this.boss.getQueues(JOB_NAMES));
+    if (drift.length > 0) {
+      await this.boss.stop({ graceful: false });
+      throw new Error(`pg-boss queue policies differ from JOB_POLICIES (R-32): ${drift.join('; ')}`);
+    }
     this.ready = this.boss;
     if (this.config.env.SANCHAY_APP_ROLE !== 'worker') return;
     for (const wrapper of this.discovery.getProviders()) {
@@ -1721,13 +1877,18 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
 export class Jobs {
   constructor(@Inject(JobsService) private readonly service: JobsService) {}
 
+  /**
+   * Sends inside `exec`'s transaction (BYODB). Returns the job id, or null when the queue's policy refused the
+   * send (R-32): a job with the same singletonKey is already queued (stately) or queued, retrying or running
+   * (exclusive). A refusal is not an error, and the caller's transaction stays usable.
+   */
   async enqueue<N extends JobName>(
     exec: DbExecutor,
     name: N,
     data: unknown,
     opts: JobsEnqueueOptions = {},
-  ): Promise<void> {
-    await this.service.started().send(name, (data ?? {}) as object, {
+  ): Promise<string | null> {
+    return this.service.started().send(name, (data ?? {}) as object, {
       db: drizzleAdapter(exec),
       retryLimit: opts.retryLimit ?? 3,
       ...(opts.singletonKey === undefined ? {} : { singletonKey: opts.singletonKey }),
@@ -1761,7 +1922,12 @@ import type { PgBoss } from 'pg-boss';
  * (`boss.schedule('nav.sync.daily', '30 21,23 * * *', {}, {tz: 'Asia/Kolkata'})` and three more
  * crons for the other sync times). Each later task appends its own `boss.schedule(...)` call here.
  */
-/** The single schedule extension point. Later tasks append keyed calls; pg-boss needs a distinct `key` per schedule on one queue. */
+/**
+ * The single schedule extension point. Later tasks append keyed calls; pg-boss needs a distinct `key` per
+ * schedule on one queue. A tick is a keyless send (R-32): on a stately queue it is dropped while the previous
+ * tick is still queued, and two schedules on one queue that can fire in the same minute each need their own
+ * `singletonKey` in the options, or one of the two ticks is dropped (F2's `mandates.poll`).
+ */
 export async function registerSchedules(boss: PgBoss): Promise<void> {
   const tz = 'Asia/Kolkata';
   await boss.schedule('identity.cleanup', '0 * * * *', {}, { tz, key: 'identity-cleanup' });
@@ -2064,8 +2230,8 @@ pnpm --filter=@sanchay/api db:check
 ```
 Expected:
 - `typecheck`: exits 0.
-- `test`: `jobs.module.test.ts` — 2 passed; `drizzle-config.test.ts` — 1 passed.
-- `test:int`: `jobs.int.test.ts` — 9 passed; `health.int.test.ts` — 8 passed (was 7); `migrations.int.test.ts` — 9 passed (was 8 after D1); every other `test/int/*.int.test.ts` file still passes (worker-role heartbeat and job processing only start when `SANCHAY_APP_ROLE=worker`, which `bootTestApp()`'s default `testEnv` does not set; the one api-role change, `/health/ready` needing a fresh heartbeat, is covered by `health.int.test.ts`).
+- `test`: `jobs.module.test.ts` — 4 passed; `drizzle-config.test.ts` — 1 passed.
+- `test:int`: `jobs.int.test.ts` — 12 passed (the five R-32 cases fail against a `JobsService` that creates its queues without a policy); `health.int.test.ts` — 8 passed (was 7); `migrations.int.test.ts` — 9 passed (was 8 after D1); every other `test/int/*.int.test.ts` file still passes (worker-role heartbeat and job processing only start when `SANCHAY_APP_ROLE=worker`, which `bootTestApp()`'s default `testEnv` does not set; the one api-role change, `/health/ready` needing a fresh heartbeat, is covered by `health.int.test.ts`).
 - `db:check`: `db:check OK: schema and migrations are in sync`.
 
 - [ ] **Step 5: Commit**
@@ -2076,7 +2242,7 @@ pnpm --filter=@sanchay/api test
 pnpm --filter=@sanchay/api test:int
 pnpm lint
 git add apps/api pnpm-workspace.yaml pnpm-lock.yaml docs/adr/0001-versions.md
-git commit -m "feat(api): pg-boss JobsModule, worker role, heartbeats, readiness checks, identity.cleanup" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(api): pg-boss JobsModule with queue policies (R-32), worker role, heartbeats, readiness checks, identity.cleanup" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -9265,8 +9431,8 @@ Expected: `db:generate` writes a new `drizzle/0009_catalogue.sql` + snapshot (ap
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm exec biome check --write apps/api/src/modules/catalogue apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/db/schema.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/catalogue-schema.int.test.ts packages/domain/src/catalogue.ts data apps/api/package.json package.json apps/api/drizzle
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int catalogue-schema
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
@@ -10057,7 +10223,7 @@ export interface NavSyncDeps {
       input: { kind: string; entityType: string; entityId: string; severity: 'WARNING' | 'CRITICAL'; detail?: Record<string, unknown> },
     ): Promise<void>;
   };
-  jobs: { enqueue(tx: unknown, name: string, data: unknown): Promise<void> };
+  jobs: { enqueue(tx: unknown, name: string, data: unknown): Promise<string | null> };
   clock: Clock;
   kind: 'DAILY_2130' | 'DAILY_2330' | 'DAILY_0700' | 'DAILY_1030';
 }
@@ -10937,8 +11103,8 @@ Expected: the build refreshes `packages/contract/dist` before anything in `apps/
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm exec biome check --write packages/contract/src/catalogue.ts packages/contract/src/index.ts packages/contract/src/auth.test.ts apps/api/src/modules/catalogue apps/api/src/app.module.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/contract test
 pnpm --filter=@sanchay/api test fp-sync.job
 pnpm --filter=@sanchay/api test:int catalogue-router
@@ -10952,11 +11118,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
 ---
 
-### Task E25: CDK `SanchayMvpStack-dev` (Dev A, 12 h). **Protected; runs in S2 week 2 (R-05)**, not in the overflow ranking.
+### Task E25: CDK `SanchayMvpStack-prod`, deployed paused (Dev A, 12 h). **Protected; runs in S2 week 2 (R-05, R-31)**, not in the overflow ranking.
 
-**Why S2 (unchanged from the outline):** FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06 demo all need a public dev host. Funded by taking E18 [T2] and E19 [T4] out of the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1. **Fallback:** a fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the local API, recorded in ADR-0014 and registered with Cybrilla by 10-23.
+**Why S2 (R-31 replaces the outline's dev stack):** there is no AWS dev environment and no dev domain; development runs locally (docker compose: PostgreSQL, Mailpit). E25 deploys the one stack, `SanchayMvpStack-prod` (cluster `sanchay-prod`, service `sanchay-app`, GitHub environment `prod`), in S2 week 2 and leaves it **paused**: it runs and answers on `www`, `app` and `api.sanchay.in`, so the production hosts, the NAT EIP that Cybrilla allowlists, the webhook and payment-return URLs and the deploy pipeline exist about five weeks before GO-1, but no investor can transact before GO-1. Sign-in is invite-only (D7; prod boot invariant 10 refuses `SANCHAY_PILOT_INVITE_ONLY=false`), RuntimeConfig's `orders.enabled` and `plans.sip.enabled` stay at their D1 default (false), and no invite is added before GO-1 except the founders' test accounts (F7's `ops:invite` on F1's ops task, S4). There is no ALB ingress allow-list. Plan 04 F1 hardens this same stack in S4 (D6 logins, ops task definition, alarms) instead of adding a second environment, and F22 runs its passive ZAP baseline against it before GO-1. Owner action before the first deploy: `sanchay.in` is registered (R-22) and its public hosted zone exists in the prod account. The delegated dev zone question (PB-41, ADR-0014) is moot. Funded as R-05 funded the dev stack: E18 [T2] and E19 [T4] leave the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1.
 
 > **Amended 2026-10-01 (RV-02-16 to RV-02-23).** The earlier text could not install, compile, synthesise, boot or deploy. This version was checked with a real `pnpm install` under the workspace's supply-chain policies, `tsc`, the CDK assertion tests, `cdk synth` from PowerShell 5.1 and Git Bash, each container's synthesised environment run through the boot guard, an arm64 api image that migrated a Postgres 18.6 database and answered `/api/v1/health` with 200, and an arm64 web image that served `/site` on the www host and `assetlinks.json` on the app host. What changed and why is in the errata at the top of this plan. RV-02-32 and RV-02-33 (also 2026-10-01) made the post-deploy checks run in both shells and moved the repository the deploy role trusts to the deploy input `SANCHAY_GITHUB_REPOSITORY`. The 2026-10-05 errata (RV-02-59, RV-02-60, RV-02-61, RV-02-62, RV-02-63, RV-02-64, RV-02-65) copy `data/` into the api image and keep JSON import attributes in its build (Plan 03 E9 reads its questionnaire when its module loads), make the master-user test able to fail, run the migrate task before `cdk deploy` and fail the run on a rolled-back deployment, name and version the document bucket as spec §2.4 does, answer the apex with a 301 to www, record the two remaining spec §2.4 deviations, and make Step 5 re-run all five Step 4 commands.
+
+> **Reworked 2026-10-05 for R-31 (RV-02-70).** E25 deploys `SanchayMvpStack-prod` instead of a dev stack. The dev-only config is gone (`DEV_CONFIG`, `envSubdomain`, `createGithubOidcProvider`); the hosts are `www`, `app` and `api.sanchay.in`, with the apex 301 (RV-02-63) on `sanchay.in`; the stack creates the account's GitHub OIDC provider and a least-privilege deploy role that trusts only jobs of the GitHub `prod` environment (moved here from Plan 04 F1); `deploy.yml` has `prod` as its only environment; ADR-0014's first deploy and the post-deploy checklist target prod. R-31's "paused" means closed to investors, not stopped, so the 0-task context flag `-c firstDeploy=true` becomes `-c noTasks=true`, which F1 also uses for its rollout. The infra test file has 24 tests.
 
 **Files:**
 - Create: `infra/package.json`, `infra/tsconfig.json`, `infra/cdk.json`, `infra/vitest.config.ts`, `infra/bin/sanchay.ts`, `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts`
@@ -10975,27 +11143,27 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   - `.github/workflows/ci.yml`: its three already-resolved action pins (`actions/checkout@3d3c42e5...`, `pnpm/action-setup@ea17c68d...`, `actions/setup-node@82076278...`).
   - `docs/adr/README.md` ADR-0014 row (`Planned`, "Minimal AWS topology: single ECS service, ALB only") and `docs/adr/0001-versions.md` (append-only, A1 rule).
 - **Produces (spec §2.4):**
-  - `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack` (a `cdk.Stack`), `SanchayMvpStackProps` (`{config}` plus `StackProps`), `SERVICE_NAME = 'sanchay-app'`, `DB_MASTER_USER = 'sanchay_master'`. Constructor locals F1 edits: `vpc`, `natEip`, `documentsBucket`, `apiRepo`, `webRepo`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `taskDef`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `httpsListener`, `apiTargetGroup`, `webTargetGroup`. Construct ids `NatEip`, `Database`, `Service`, `GithubOidc`, `GithubDeployRole`. Outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`, and `GithubDeployRoleArn` when the stack creates the OIDC provider and the deploy input `SANCHAY_GITHUB_REPOSITORY` is set (RV-02-33).
-  - `infra/lib/config.ts`: `loadStackConfig(envName: SanchayEnvName, source: DeployInputSource = process.env): SanchayStackConfig`, `SanchayEnvName`, `SanchayStackConfig` (E25's original keys, with `githubRepo: string | undefined` read from the deploy input `SANCHAY_GITHUB_REPOSITORY` (RV-02-33), plus `dbInstanceSize: 'MICRO' | 'MEDIUM'`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `DeployInputSource`, `StackConfigError`, `assertDeployInputs(config)`. Every env refuses to synthesise without the deploy inputs `SANCHAY_PLATFORM_ARN` (`ARN-<digits>`) and `SANCHAY_SMS_RETRIEVER_HASH` (11 characters of `[A-Za-z0-9+/]`) and refuses a `SANCHAY_GITHUB_REPOSITORY` that is not `<owner>/<repo>`; `assertDeployInputs` refuses a missing one (a real synth or deploy, never the tests).
-  - `infra/bin/sanchay.ts`: `SanchayMvpStack-dev`, region pinned to `ap-south-1`; it calls `assertDeployInputs(config)` before building the stack (RV-02-33).
-  - CDK context flag `-c firstDeploy=true`: the service is created with 0 tasks (ADR-0014 "First deploy").
-  - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`.
-  - Listener rules (R-11): host `api.dev.sanchay.in` (any path) → api target group (3000); host `app.dev.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.dev.sanchay.in` and the rest of `app.dev.sanchay.in`) → web target group (3001); host `dev.sanchay.in` (the apex) → 301 to `https://www.dev.sanchay.in`, path and query kept (rule `ApexToWww`; spec §2.4 and H-1, RV-02-63). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
+  - `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack` (a `cdk.Stack`), `SanchayMvpStackProps` (`{config}` plus `StackProps`), `SERVICE_NAME = 'sanchay-app'`, `DB_MASTER_USER = 'sanchay_master'`. Constructor locals F1 edits: `vpc`, `natEip`, `documentsBucket`, `apiRepo`, `webRepo`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `taskDef`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `httpsListener`, `apiTargetGroup`, `webTargetGroup`. Construct ids `NatEip`, `Database`, `Service`, `GithubOidc`, `GithubDeployRole`. Outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`, and `GithubDeployRoleArn` when the deploy input `SANCHAY_GITHUB_REPOSITORY` is set (RV-02-33).
+  - `infra/lib/config.ts`: `loadStackConfig(envName: SanchayEnvName, source: DeployInputSource = process.env): SanchayStackConfig`, `SanchayEnvName` (`'prod'` only: R-31), `SanchayStackConfig` (`envName`, `rootDomain`, `multiAz`, `deletionProtection`, `backupRetentionDays`, `desiredCount`, `githubRepo: string | undefined` read from the deploy input `SANCHAY_GITHUB_REPOSITORY` (RV-02-33), `dbInstanceSize: 'MICRO' | 'MEDIUM'`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `DeployInputSource`, `StackConfigError`, `assertDeployInputs(config)`. One static config, `PROD_CONFIG`: Multi-AZ, 14-day backups, deletion protection, 2 tasks, `db.t4g.medium`, FP `production` at `https://api.fintechprimitives.com` (no dev config and no dev subdomain, RV-02-70). It refuses to synthesise without the deploy inputs `SANCHAY_PLATFORM_ARN` (`ARN-<digits>`) and `SANCHAY_SMS_RETRIEVER_HASH` (11 characters of `[A-Za-z0-9+/]`) and refuses a `SANCHAY_GITHUB_REPOSITORY` that is not `<owner>/<repo>`; `assertDeployInputs` refuses a missing one (a real synth or deploy, never the tests).
+  - `infra/bin/sanchay.ts`: `SanchayMvpStack-prod` (R-31: the only stack), region pinned to `ap-south-1`; it calls `assertDeployInputs(config)` before building the stack (RV-02-33).
+  - CDK context flag `-c noTasks=true`: the service is created, or kept, at 0 tasks (ADR-0014 "First deploy"; Plan 04 F1 uses it to move the running stack onto its D6 logins). It is not R-31's pause: paused prod runs its tasks and keeps investors out with D7's invite gate and RuntimeConfig.
+  - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`; no ingress allow-list (R-31): port 443 is open to the internet.
+  - Listener rules (R-11): host `api.sanchay.in` (any path) → api target group (3000); host `app.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.sanchay.in` and the rest of `app.sanchay.in`) → web target group (3001); host `sanchay.in` (the apex) → 301 to `https://www.sanchay.in`, path and query kept (rule `ApexToWww`; spec §2.4 and H-1, RV-02-63). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
   - One ECS Fargate ARM64 service, containers `web`, `api`, `worker`, plus the one-off `MigrateTaskDef` (container `migrate`, run with `aws ecs run-task`). `SANCHAY_FP_CREDENTIALS_JSON` goes only into `worker`; `SANCHAY_FP_WEBHOOK_SECRET` and `SANCHAY_SMS_RETRIEVER_HASH` only into `api`; `SANCHAY_KEYRING_JSON` into `api`, `worker` and `migrate` (the boot guard's keyring check runs in every role).
-  - RDS PostgreSQL 18.6 with `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group; `db.t4g.micro` in dev, `db.t4g.medium` from `dbInstanceSize` (spec §2.4); master login `sanchay_master`, secret `sanchay/{env}/db-master` (BRIEF D6). The migrate task logs in as the master; api and worker share that login until F1 adds `sanchay_app_login` (secret `sanchay/{env}/db-app`) and moves `appDbLogin` to it.
+  - RDS PostgreSQL 18.6 with `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group; Multi-AZ, 14-day backups (PITR), deletion protection, `db.t4g.medium` (spec §2.4); master login `sanchay_master`, secret `sanchay/{env}/db-master` (BRIEF D6). The migrate task logs in as the master; api and worker share that login until F1 adds `sanchay_app_login` (secret `sanchay/{env}/db-app`) and moves `appDbLogin` to it.
   - Task role statement `SesSendFromSanchayDomain` (`ses:SendEmail`, `ses:SendRawEmail`, condition `ses:FromAddress` = `SANCHAY_SES_FROM`).
-  - S3 document bucket `sanchay-dev-docs` (public access blocked, SSE, versioning; spec §2.4, RV-02-62), ECR repos (`sanchay-dev-api`, `sanchay-dev-web`), Secrets Manager secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`, `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`, `sanchay/dev/db-master`), CloudWatch log groups `/sanchay/dev/app` and `/sanchay/dev/ecs-exec` at 400-day retention, ECS Exec logging (R-16), Route 53 A-alias records for `www.dev`, `app.dev`, `api.dev` and the apex `dev` (RV-02-63).
-  - **Deviations from spec §2.4, recorded for an owner ruling (RV-02-64).** One log group per env, `/sanchay/{env}/app`, whose awslogs stream prefix `{env}` gives each container its own streams (`{env}/web/…`, `{env}/api/…`, `{env}/worker/…`, `{env}/migrate/…`), instead of `/sanchay/{env}/{web,api,worker}`: F1's metric filters and alarms and the F7, F20, F23, F24 and F27 runbook lines read that group by stream prefix. Two ECR repositories per env, `sanchay-{env}-api` and `sanchay-{env}-web`, instead of `sanchay/app`, because the task runs two images: `deploy.yml`, ADR-0014's first deploy and F1's prod deploy role (`grantPullPush` on both) use them. Either change touches F1 and those runbooks, so neither is made without the ruling.
-  - No CloudWatch alarm. R-12's NAV-age alarm needs a published metric, and no task before F1 publishes one; F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm with its metric source in both envs.
-  - GitHub OIDC provider and the dev deploy role (output `GithubDeployRoleArn`), which trusts only `repo:<SANCHAY_GITHUB_REPOSITORY>:*` and is built only when that deploy input is set (RV-02-33), consumed by `.github/workflows/deploy.yml`, which reads the GitHub `dev` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs the one-off migrate task and stops unless it exits 0 (spec §2.4), runs `cdk deploy`, forces a new deployment of `sanchay-app` and fails unless that deployment's rollout completes (RV-02-61).
+  - S3 document bucket `sanchay-prod-docs` (public access blocked, SSE, versioning; spec §2.4, RV-02-62), ECR repos (`sanchay-prod-api`, `sanchay-prod-web`), Secrets Manager secrets (`sanchay/prod/keyring`, `sanchay/prod/fp`, `sanchay/prod/fp-webhook`, `sanchay/prod/msg91`, `sanchay/prod/db-master`), CloudWatch log groups `/sanchay/prod/app` and `/sanchay/prod/ecs-exec` at 400-day retention, ECS Exec logging (R-16) on cluster `sanchay-prod`, and, in the `sanchay.in` hosted zone (it must exist in the prod account before the first deploy, R-31), the A-alias records `www`, `app`, `api` and the apex (RV-02-63) and the DNS validation of one ACM certificate for `*.sanchay.in` and `sanchay.in`.
+  - **Deviations from spec §2.4, recorded for an owner ruling (RV-02-64).** One log group per env, `/sanchay/{env}/app`, whose awslogs stream prefix `{env}` gives each container its own streams (`{env}/web/…`, `{env}/api/…`, `{env}/worker/…`, `{env}/migrate/…`), instead of `/sanchay/{env}/{web,api,worker}`: F1's metric filters and alarms and the F7, F20, F23, F24 and F27 runbook lines read that group by stream prefix. Two ECR repositories per env, `sanchay-{env}-api` and `sanchay-{env}-web`, instead of `sanchay/app`, because the task runs two images: `deploy.yml`, ADR-0014's first deploy and the deploy role (`grantPullPush` on both) use them. Either change touches F1 and those runbooks, so neither is made without the ruling.
+  - No CloudWatch alarm. R-12's NAV-age alarm needs a published metric, and no task before F1 publishes one; F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm with its metric source.
+  - The account's GitHub OIDC provider and the deploy role `sanchay-prod-github-deploy` (output `GithubDeployRoleArn`), built only when the deploy input `SANCHAY_GITHUB_REPOSITORY` is set (RV-02-33). It trusts exactly `repo:<SANCHAY_GITHUB_REPOSITORY>:environment:prod` (`StringEquals`: jobs of the GitHub `prod` environment, whose required reviewers are both founders) and may do only what `deploy.yml` does: assume the CDK bootstrap roles, log in to ECR and push both repositories, read the stack's outputs, run the migrate task (`ecs:RunTask` and `iam:PassRole` through `grantRun`) and read its tasks, and force a new deployment of `sanchay-app` (statements `AssumeCdkBootstrapRoles`, `EcrLogin`, `ReadStackOutputs`, `WaitForMigrateTask`, `ForceNewDeployment`; no `AdministratorAccess`; moved here from Plan 04 F1, RV-02-70). It is consumed by `.github/workflows/deploy.yml` (manual dispatch, `prod` its only environment), which reads the GitHub `prod` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs the one-off migrate task and stops unless it exits 0 (spec §2.4), runs `cdk deploy`, forces a new deployment of `sanchay-app` and fails unless that deployment's rollout completes (RV-02-61).
   - `apps/api/Dockerfile` (keeps the `/repo` layout, copies `data/` to `/repo/data`, bakes in `infra/certs/rds-global-bundle.pem`, sets `NODE_EXTRA_CA_CERTS`) and `apps/api/.swcrc` (`jsc.experimental.keepImportAttributes`): from Plan 03 E9 on, `risk-profile.service.ts` imports `data/risk-questionnaire-v1.0.0.json` `with { type: 'json' }` when its module loads, in api and worker, so the image needs `/repo/data` and the SWC output needs the attribute (RV-02-59), `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL=...?sslmode=verify-full` from the split `SANCHAY_DB_*` pieces), `apps/web/Dockerfile` (Next.js standalone, port 3001), `.dockerignore`, `apps/web/public/.well-known/assetlinks.json` (`[]` until F18 writes the App Links payload).
   - B2 `assertBootInvariants`: the constants `role` and `sends` (`role === 'api' || role === 'worker'`); invariant 1 binds api and worker, invariant 7 binds api. E1 (Plan 03) must scope invariant 13 to `role === 'api'` the same way (open item for Plan 03).
-  - `docs/adr/0014-minimal-aws-topology.md` (accepted; dev hosts, tunnel fallback, first-deploy runbook).
+  - `docs/adr/0014-minimal-aws-topology.md` (accepted; the prod hosts, R-31's paused state, the first-deploy runbook).
   - **Deviation from outline: the RDS connection string is not injected as one Secrets-Manager-composed `DATABASE_URL` value.** CDK/Secrets Manager cannot concatenate a generated-secret field with plain strings into one ECS secret at deploy time without a custom resource. Instead the containers get plain env `SANCHAY_DB_HOST`/`SANCHAY_DB_PORT`/`SANCHAY_DB_NAME`/`SANCHAY_DB_USER` plus one ECS secret `SANCHAY_DB_PASSWORD` (the login secret's `password` field), and `apps/api/docker-entrypoint.sh` composes `DATABASE_URL` with `?sslmode=verify-full` before `exec`ing the container command. `EnvSchema.DATABASE_URL` is unaffected.
   - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist until Plan 03 E3, and a `COPY` of a missing path fails the build (`"/docs/legal": not found`), so the Dockerfile omits the line and a comment names F1 (Plan 04), whose migrate task seeds it. It does copy `data/`, which D8 creates before E25 (RV-02-59).
   - **Deviation from outline: `.github/workflows/deploy.yml` authenticates to AWS by scripting the OIDC token exchange (`aws sts assume-role-with-web-identity`) and pushes to ECR with the AWS CLI and `docker build`, instead of the `aws-actions/configure-aws-credentials` / `aws-actions/amazon-ecr-login` marketplace actions.** It reuses only the three action pins `ci.yml` already carries; the arm64 emulation installer (`tonistiigi/binfmt`) is a container image pinned by digest, not an action.
-- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `the apex dev.sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log retention 400`, `S3 document bucket sanchay-dev-docs: SSE, public access blocked, versioned (spec §2.4)`, `ECS Exec logging configured`, `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service named sanchay-app; -c firstDeploy=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `RDS instance class follows config.dbInstanceSize (spec §2.4: db.t4g.medium)`, `the GitHub deploy role trusts only SANCHAY_GITHUB_REPOSITORY, and exists only with it`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
-- **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to dev: /api/v1/health 200 on app.dev and api.dev`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.dev.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; `https://dev.sanchay.in/ answers 301 to https://www.dev.sanchay.in/` (RV-02-63); an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
+- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rules: api host (any path) and app host + /api/v1/* → api target group (R-11)`, `the apex sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log retention 400`, `S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned (spec §2.4)`, `ECS Exec logging configured on cluster sanchay-prod`, `DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service sanchay-app: 2 tasks, never below 100 % healthy, rollback circuit breaker; -c noTasks=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `prod database: Multi-AZ, 14-day backups, deletion protection, db.t4g.medium (spec §2.4)`, `closed to investors until GO-1 (R-31): invite-only, no orders or SIP override, no ingress allow-list`, `the GitHub deploy role trusts only the prod environment of SANCHAY_GITHUB_REPOSITORY, is no administrator, and exists only with it`, `the deploy role can do exactly what deploy.yml does, the migrate run included`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
+- **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to prod: /api/v1/health 200 on app.sanchay.in and api.sanchay.in`; `https://www.sanchay.in/ serves the public site (200)`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; `https://sanchay.in/ answers 301 to https://www.sanchay.in/` (RV-02-63); an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
 
 ---
 
@@ -11108,6 +11276,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     SANCHAY_PLATFORM_ARN: 'ARN-000000',
     SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
   };
+  /** What a real deploy also passes: the repository the deploy role trusts (a fake owner). */
+  const WITH_REPO = { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay' };
 
   function synth(config: SanchayStackConfig, context: Record<string, string> = {}): Template {
     const app = new App({ context });
@@ -11118,8 +11288,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     return Template.fromStack(stack);
   }
 
-  function synthDevTemplate(context: Record<string, string> = {}): Template {
-    return synth(loadStackConfig('dev', DEPLOY_INPUTS), context);
+  function synthProdTemplate(context: Record<string, string> = {}): Template {
+    return synth(loadStackConfig('prod', DEPLOY_INPUTS), context);
   }
 
   interface ContainerDef {
@@ -11155,9 +11325,9 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     throw new Error('expected a StackConfigError');
   }
 
-  describe('SanchayMvpStack-dev (E25)', () => {
+  describe('SanchayMvpStack-prod (E25, R-31)', () => {
     it('FP secret only in worker container', () => {
-      const containers = containersOf(synthDevTemplate());
+      const containers = containersOf(synthProdTemplate());
       const worker = containers.get('worker');
       const api = containers.get('api');
       const web = containers.get('web');
@@ -11171,7 +11341,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     });
 
     it('RDS StorageEncrypted and force_ssl', () => {
-      const template = synthDevTemplate();
+      const template = synthProdTemplate();
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         StorageEncrypted: true,
         Engine: 'postgres',
@@ -11183,52 +11353,69 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     });
 
     it('ALB TLS policy', () => {
-      synthDevTemplate().hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+      synthProdTemplate().hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
         Protocol: 'HTTPS',
         SslPolicy: 'ELBSecurityPolicy-TLS13-1-2-2021-06',
       });
     });
 
-    it('listener rule app host + /api/v1/* → api target group', () => {
-      synthDevTemplate().hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
+    it('listener rules: api host (any path) and app host + /api/v1/* → api target group (R-11)', () => {
+      const template = synthProdTemplate();
+      const toApi = [
+        Match.objectLike({
+          Type: 'forward',
+          TargetGroupArn: { Ref: Match.stringLikeRegexp('^ApiTargetGroup') },
+        }),
+      ];
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
+        Conditions: [
+          Match.objectLike({
+            Field: 'host-header',
+            HostHeaderConfig: { Values: ['api.sanchay.in'] },
+          }),
+        ],
+        Actions: toApi,
+      });
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
         Conditions: Match.arrayWith([
           Match.objectLike({
             Field: 'host-header',
-            HostHeaderConfig: { Values: ['app.dev.sanchay.in'] },
+            HostHeaderConfig: { Values: ['app.sanchay.in'] },
           }),
           Match.objectLike({
             Field: 'path-pattern',
             PathPatternConfig: { Values: ['/api/v1/*'] },
           }),
         ]),
+        Actions: toApi,
       });
     });
 
-    it('the apex dev.sanchay.in answers 301 to www (spec §2.4, H-1)', () => {
-      const template = synthDevTemplate();
+    it('the apex sanchay.in answers 301 to www (spec §2.4, H-1)', () => {
+      const template = synthProdTemplate();
       template.hasResourceProperties('AWS::ElasticLoadBalancingV2::ListenerRule', {
         Conditions: [
           Match.objectLike({
             Field: 'host-header',
-            HostHeaderConfig: { Values: ['dev.sanchay.in'] },
+            HostHeaderConfig: { Values: ['sanchay.in'] },
           }),
         ],
         Actions: [
           Match.objectLike({
             Type: 'redirect',
-            RedirectConfig: Match.objectLike({ Host: 'www.dev.sanchay.in', StatusCode: 'HTTP_301' }),
+            RedirectConfig: Match.objectLike({ Host: 'www.sanchay.in', StatusCode: 'HTTP_301' }),
           }),
         ],
       });
       template.hasResourceProperties('AWS::Route53::RecordSet', {
-        Name: 'dev.sanchay.in.',
+        Name: 'sanchay.in.',
         Type: 'A',
       });
     });
 
     it('health check path /api/v1/health on the api port, for both target groups (R-12)', () => {
       const groups = Object.values(
-        synthDevTemplate().findResources('AWS::ElasticLoadBalancingV2::TargetGroup'),
+        synthProdTemplate().findResources('AWS::ElasticLoadBalancingV2::TargetGroup'),
       );
       expect(groups.map((g) => g.Properties.Port).sort()).toEqual([3000, 3001]);
       for (const group of groups) {
@@ -11238,7 +11425,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     });
 
     it('SG: RDS reachable only from service', () => {
-      const ingress = synthDevTemplate().findResources('AWS::EC2::SecurityGroupIngress', {
+      const ingress = synthProdTemplate().findResources('AWS::EC2::SecurityGroupIngress', {
         Properties: { FromPort: 5432, ToPort: 5432 },
       });
       const rules = Object.values(ingress);
@@ -11249,12 +11436,12 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     });
 
     it('log retention 400', () => {
-      synthDevTemplate().hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 400 });
+      synthProdTemplate().hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 400 });
     });
 
-    it('S3 document bucket sanchay-dev-docs: SSE, public access blocked, versioned (spec §2.4)', () => {
-      synthDevTemplate().hasResourceProperties('AWS::S3::Bucket', {
-        BucketName: 'sanchay-dev-docs',
+    it('S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned (spec §2.4)', () => {
+      synthProdTemplate().hasResourceProperties('AWS::S3::Bucket', {
+        BucketName: 'sanchay-prod-docs',
         BucketEncryption: {
           ServerSideEncryptionConfiguration: [
             { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
@@ -11270,15 +11457,16 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
     });
 
-    it('ECS Exec logging configured', () => {
-      synthDevTemplate().hasResourceProperties('AWS::ECS::Cluster', {
+    it('ECS Exec logging configured on cluster sanchay-prod', () => {
+      synthProdTemplate().hasResourceProperties('AWS::ECS::Cluster', {
+        ClusterName: 'sanchay-prod',
         Configuration: {
           ExecuteCommandConfiguration: Match.objectLike({ Logging: 'OVERRIDE' }),
         },
       });
     });
 
-    it('DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image', () => {
+    it('DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image', () => {
       const entrypoint = readFileSync(path.join(repoRoot, 'apps/api/docker-entrypoint.sh'), 'utf8');
       expect(entrypoint).toContain('sslmode=verify-full');
       const dockerfile = readFileSync(path.join(repoRoot, 'apps/api/Dockerfile'), 'utf8');
@@ -11296,10 +11484,10 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       expect(swcrc.jsc?.experimental?.keepImportAttributes).toBe(true);
     });
 
-    it('RDS master is sanchay_master in sanchay/dev/db-master, and migrate logs in as it (D6)', () => {
-      const template = synthDevTemplate();
+    it('RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)', () => {
+      const template = synthProdTemplate();
       template.hasResourceProperties('AWS::SecretsManager::Secret', {
-        Name: 'sanchay/dev/db-master',
+        Name: 'sanchay/prod/db-master',
         GenerateSecretString: Match.objectLike({
           SecretStringTemplate: '{"username":"sanchay_master"}',
         }),
@@ -11320,7 +11508,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     });
 
     it('api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)', () => {
-      const containers = containersOf(synthDevTemplate());
+      const containers = containersOf(synthProdTemplate());
       const api = containers.get('api');
       const worker = containers.get('worker');
       const migrate = containers.get('migrate');
@@ -11330,13 +11518,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         [migrate, 'migrate'],
       ] as const) {
         expect(envOf(container)).toMatchObject({
-          SANCHAY_APP_ENV: 'dev',
+          SANCHAY_APP_ENV: 'prod',
           SANCHAY_APP_ROLE: role,
-          SANCHAY_APP_ORIGIN: 'https://app.dev.sanchay.in',
-          SANCHAY_API_ORIGIN: 'https://api.dev.sanchay.in',
+          SANCHAY_APP_ORIGIN: 'https://app.sanchay.in',
+          SANCHAY_API_ORIGIN: 'https://api.sanchay.in',
           SANCHAY_CLIENT_IP_SOURCE: 'alb',
           SANCHAY_KEY_SERVICE: 'secrets',
-          SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+          SANCHAY_PROVIDER_MODE_FP: 'production',
           SANCHAY_PILOT_INVITE_ONLY: 'true',
           SANCHAY_PLATFORM_ARN: 'ARN-000000',
         });
@@ -11351,7 +11539,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       expect(envOf(migrate)).not.toHaveProperty('SANCHAY_PROVIDER_MODE_SMS');
       expect(envOf(api).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
       expect(envOf(worker)).not.toHaveProperty('SANCHAY_SMS_RETRIEVER_HASH');
-      expect(envOf(worker).SANCHAY_FP_BASE_URL).toBe('https://s.finprim.com');
+      expect(envOf(worker).SANCHAY_FP_BASE_URL).toBe('https://api.fintechprimitives.com');
       expect(envOf(api)).not.toHaveProperty('SANCHAY_FP_BASE_URL');
       expect(secretNamesOf(api)).toEqual([
         'SANCHAY_DB_PASSWORD',
@@ -11369,29 +11557,35 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     });
 
     it('web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)', () => {
-      const web = containersOf(synthDevTemplate()).get('web');
+      const web = containersOf(synthProdTemplate()).get('web');
       expect(envOf(web)).toMatchObject({
+        SANCHAY_APP_ENV: 'prod',
         PORT: '3001',
         HOSTNAME: '0.0.0.0',
-        SANCHAY_WWW_ORIGIN: 'https://www.dev.sanchay.in',
-        SANCHAY_APP_ORIGIN: 'https://app.dev.sanchay.in',
+        SANCHAY_WWW_ORIGIN: 'https://www.sanchay.in',
+        SANCHAY_APP_ORIGIN: 'https://app.sanchay.in',
+        SANCHAY_API_ORIGIN: 'https://api.sanchay.in',
       });
       expect(secretNamesOf(web)).toEqual([]);
     });
 
-    it('one service named sanchay-app; -c firstDeploy=true creates it with no tasks', () => {
-      synthDevTemplate().hasResourceProperties('AWS::ECS::Service', {
+    it('one service sanchay-app: 2 tasks, never below 100 % healthy, rollback circuit breaker; -c noTasks=true creates it with no tasks', () => {
+      synthProdTemplate().hasResourceProperties('AWS::ECS::Service', {
         ServiceName: 'sanchay-app',
-        DesiredCount: 1,
+        DesiredCount: 2,
+        DeploymentConfiguration: Match.objectLike({
+          MinimumHealthyPercent: 100,
+          DeploymentCircuitBreaker: { Enable: true, Rollback: true },
+        }),
       });
-      synthDevTemplate({ firstDeploy: 'true' }).hasResourceProperties('AWS::ECS::Service', {
+      synthProdTemplate({ noTasks: 'true' }).hasResourceProperties('AWS::ECS::Service', {
         ServiceName: 'sanchay-app',
         DesiredCount: 0,
       });
     });
 
     it('the tasks may send SES email only from SANCHAY_SES_FROM (D6)', () => {
-      synthDevTemplate().hasResourceProperties('AWS::IAM::Policy', {
+      synthProdTemplate().hasResourceProperties('AWS::IAM::Policy', {
         PolicyDocument: {
           Statement: Match.arrayWith([
             Match.objectLike({
@@ -11404,76 +11598,112 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
     });
 
-    it('RDS instance class follows config.dbInstanceSize (spec §2.4: db.t4g.medium)', () => {
-      synthDevTemplate().hasResourceProperties('AWS::RDS::DBInstance', {
-        DBInstanceClass: 'db.t4g.micro',
+    it('prod database: Multi-AZ, 14-day backups, deletion protection, db.t4g.medium (spec §2.4)', () => {
+      synthProdTemplate().hasResourceProperties('AWS::RDS::DBInstance', {
+        MultiAZ: true,
+        BackupRetentionPeriod: 14,
+        DeletionProtection: true,
+        DBInstanceClass: 'db.t4g.medium',
       });
-      synth({
-        ...loadStackConfig('dev', DEPLOY_INPUTS),
-        dbInstanceSize: 'MEDIUM',
-      }).hasResourceProperties('AWS::RDS::DBInstance', { DBInstanceClass: 'db.t4g.medium' });
     });
 
-    it('the GitHub deploy role trusts only SANCHAY_GITHUB_REPOSITORY, and exists only with it', () => {
-      const deployRole = { Properties: { RoleName: 'sanchay-dev-github-deploy' } };
-      expect(Object.keys(synthDevTemplate().findResources('AWS::IAM::Role', deployRole))).toEqual([]);
-      const template = synth(
-        loadStackConfig('dev', {
-          ...DEPLOY_INPUTS,
-          SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay',
-        }),
+    it('closed to investors until GO-1 (R-31): invite-only, no orders or SIP override, no ingress allow-list', () => {
+      const template = synthProdTemplate();
+      for (const c of containersOf(template).values()) {
+        const env = envOf(c);
+        // D1's RuntimeConfig defaults orders.enabled and plans.sip.enabled to false; nothing here may set them.
+        expect(Object.keys(env).join(' ')).not.toMatch(/ORDERS|SIP/);
+        if (env.SANCHAY_APP_ROLE !== undefined) expect(env.SANCHAY_PILOT_INVITE_ONLY).toBe('true');
+      }
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '0.0.0.0/0', FromPort: 443, ToPort: 443 }),
+        ]),
+      });
+    });
+
+    it('the GitHub deploy role trusts only the prod environment of SANCHAY_GITHUB_REPOSITORY, is no administrator, and exists only with it', () => {
+      const deployRole = { Properties: { RoleName: 'sanchay-prod-github-deploy' } };
+      expect(Object.keys(synthProdTemplate().findResources('AWS::IAM::Role', deployRole))).toEqual(
+        [],
       );
+      const template = synth(loadStackConfig('prod', WITH_REPO));
       template.hasResourceProperties('AWS::IAM::Role', {
-        RoleName: 'sanchay-dev-github-deploy',
-        AssumeRolePolicyDocument: Match.objectLike({
-          Statement: Match.arrayWith([
+        RoleName: 'sanchay-prod-github-deploy',
+        AssumeRolePolicyDocument: {
+          Statement: [
             Match.objectLike({
               Condition: {
-                StringEquals: { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' },
-                StringLike: {
-                  'token.actions.githubusercontent.com:sub': 'repo:example-org/sanchay:*',
+                StringEquals: {
+                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+                  'token.actions.githubusercontent.com:sub':
+                    'repo:example-org/sanchay:environment:prod',
                 },
               },
             }),
-          ]),
-        }),
+          ],
+        },
       });
+      expect(JSON.stringify(template.toJSON())).not.toContain('AdministratorAccess');
+      template.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 1);
       template.hasOutput('GithubDeployRoleArn', {});
+    });
+
+    it('the deploy role can do exactly what deploy.yml does, the migrate run included', () => {
+      const template = synth(loadStackConfig('prod', WITH_REPO));
+      const statements = Object.values(template.findResources('AWS::IAM::Policy'))
+        .filter((p) => JSON.stringify(p.Properties.Roles).includes('GithubDeployRole'))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement as Array<Record<string, unknown>>);
+      const sids = statements.map((s) => s.Sid).filter((s) => s !== undefined);
+      expect(sids).toEqual(
+        expect.arrayContaining([
+          'AssumeCdkBootstrapRoles',
+          'EcrLogin',
+          'ReadStackOutputs',
+          'WaitForMigrateTask',
+          'ForceNewDeployment',
+        ]),
+      );
+      const runTask = statements.find((s) => s.Action === 'ecs:RunTask');
+      expect(JSON.stringify(runTask?.Resource)).toContain('MigrateTaskDef');
+      expect(statements.some((s) => s.Action === 'iam:PassRole')).toBe(true);
     });
   });
 
   describe('loadStackConfig (E25)', () => {
     it('refuses to synthesise without the two deploy inputs, naming each', () => {
-      const message = refusal(() => loadStackConfig('dev', {}));
+      const message = refusal(() => loadStackConfig('prod', {}));
       expect(message).toContain('SANCHAY_PLATFORM_ARN is required');
       expect(message).toContain('SANCHAY_SMS_RETRIEVER_HASH is required');
     });
 
     it('refuses a malformed platform ARN or retriever hash', () => {
       expect(
-        refusal(() => loadStackConfig('dev', { ...DEPLOY_INPUTS, SANCHAY_PLATFORM_ARN: '12345' })),
+        refusal(() => loadStackConfig('prod', { ...DEPLOY_INPUTS, SANCHAY_PLATFORM_ARN: '12345' })),
       ).toContain('ARN-<digits>');
       expect(
         refusal(() =>
-          loadStackConfig('dev', { ...DEPLOY_INPUTS, SANCHAY_SMS_RETRIEVER_HASH: 'short' }),
+          loadStackConfig('prod', { ...DEPLOY_INPUTS, SANCHAY_SMS_RETRIEVER_HASH: 'short' }),
         ),
       ).toContain('11 characters');
     });
 
     it('reads SANCHAY_GITHUB_REPOSITORY, refuses a malformed one, and a real deploy needs it', () => {
-      expect(loadStackConfig('dev', DEPLOY_INPUTS).githubRepo).toBeUndefined();
-      const withRepo = { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay' };
-      expect(loadStackConfig('dev', withRepo).githubRepo).toBe('example-org/sanchay');
-      expect(
-        refusal(() =>
-          loadStackConfig('dev', { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: 'no-slash' }),
-        ),
-      ).toContain('<owner>/<repo>');
+      expect(loadStackConfig('prod', DEPLOY_INPUTS).githubRepo).toBeUndefined();
+      expect(loadStackConfig('prod', WITH_REPO).githubRepo).toBe('example-org/sanchay');
+      // The repository lands in the role's trust policy: a wildcard would trust other repositories.
+      for (const repo of ['no-slash', 'example-org/*', '*/sanchay', 'example-org/sanchay:ref']) {
+        expect(
+          refusal(() =>
+            loadStackConfig('prod', { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: repo }),
+          ),
+        ).toContain('<owner>/<repo>');
+      }
       // bin/sanchay.ts: a synth or deploy without the repository is refused before CloudFormation.
-      expect(refusal(() => assertDeployInputs(loadStackConfig('dev', DEPLOY_INPUTS)))).toContain(
+      expect(refusal(() => assertDeployInputs(loadStackConfig('prod', DEPLOY_INPUTS)))).toContain(
         'SANCHAY_GITHUB_REPOSITORY is required',
       );
-      expect(() => assertDeployInputs(loadStackConfig('dev', withRepo))).not.toThrow();
+      expect(() => assertDeployInputs(loadStackConfig('prod', WITH_REPO))).not.toThrow();
     });
   });
   ```
@@ -11556,7 +11786,11 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
   **3.5 `infra/lib/config.ts`:**
   ```typescript
-  export type SanchayEnvName = 'dev' | 'prod';
+  /**
+   * R-31: prod is the only AWS environment (no dev stack and no dev domain; development runs locally on
+   * docker compose). The name still prefixes every resource (`sanchay-prod-*`, `sanchay/prod/*`).
+   */
+  export type SanchayEnvName = 'prod';
 
   /**
    * Values that differ per deploy and are never committed, read from the environment of the `cdk`
@@ -11566,8 +11800,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
   export interface SanchayStackConfig {
     envName: SanchayEnvName;
-    /** Second-level label under the root domain, e.g. "dev" for app.dev.sanchay.in. Prod uses ''. */
-    envSubdomain: string;
+    /** The apex: the stack serves www, app and api under it and answers the apex with a 301 to www. */
     rootDomain: string;
     multiAz: boolean;
     deletionProtection: boolean;
@@ -11580,12 +11813,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
      * of code. Without it the stack builds no deploy role (the tests); bin/sanchay.ts requires it.
      */
     githubRepo: string | undefined;
-    /**
-     * The GitHub OIDC provider is one resource per AWS account. Only the first stack deployed
-     * into an account creates it; every later stack (prod, in F1) imports it instead.
-     */
-    createGithubOidcProvider: boolean;
-    /** Spec §2.4 sizes the RDS instance at db.t4g.medium; the dev stack stays on micro. */
+    /** Spec §2.4 sizes the RDS instance at db.t4g.medium. */
     dbInstanceSize: 'MICRO' | 'MEDIUM';
     /** D3 boot invariants 8/9: fake is refused outside local/test, production only in prod. */
     fpProviderMode: 'sandbox' | 'production';
@@ -11601,31 +11829,14 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
   type StaticConfig = Omit<SanchayStackConfig, 'githubRepo' | 'platformArn' | 'smsRetrieverHash'>;
 
-  const DEV_CONFIG: StaticConfig = {
-    envName: 'dev',
-    envSubdomain: 'dev',
-    rootDomain: 'sanchay.in',
-    multiAz: false,
-    deletionProtection: false,
-    backupRetentionDays: 1,
-    desiredCount: 1,
-    createGithubOidcProvider: true,
-    dbInstanceSize: 'MICRO',
-    fpProviderMode: 'sandbox',
-    fpBaseUrl: 'https://s.finprim.com',
-    sesFrom: 'noreply@sanchay.in',
-  };
-
-  /** F1 (Plan 04) deploys prod from these values; this task only ever instantiates 'dev'. */
+  /** R-31: E25 deploys prod from these values in S2 week 2 (closed to investors); F1 hardens it in S4. */
   const PROD_CONFIG: StaticConfig = {
     envName: 'prod',
-    envSubdomain: '',
     rootDomain: 'sanchay.in',
     multiAz: true,
     deletionProtection: true,
     backupRetentionDays: 14,
     desiredCount: 2,
-    createGithubOidcProvider: false,
     dbInstanceSize: 'MEDIUM',
     fpProviderMode: 'production',
     fpBaseUrl: 'https://api.fintechprimitives.com',
@@ -11656,7 +11867,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     envName: SanchayEnvName,
     source: DeployInputSource = process.env,
   ): SanchayStackConfig {
-    const base = envName === 'dev' ? DEV_CONFIG : PROD_CONFIG;
+    const base = PROD_CONFIG;
     const githubRepo = blankToUndefined(source.SANCHAY_GITHUB_REPOSITORY);
     const platformArn = blankToUndefined(source.SANCHAY_PLATFORM_ARN);
     const smsRetrieverHash = blankToUndefined(source.SANCHAY_SMS_RETRIEVER_HASH);
@@ -11750,10 +11961,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       super(scope, id, props);
       const { config } = props;
       const envName = config.envName;
-      const domain =
-        config.envSubdomain === ''
-          ? config.rootDomain
-          : `${config.envSubdomain}.${config.rootDomain}`;
+      // R-31: the real hosts in the sanchay.in zone; there is no dev domain.
+      const domain = config.rootDomain;
       const wwwOrigin = `https://www.${domain}`;
       const appOrigin = `https://app.${domain}`;
       const apiOrigin = `https://api.${domain}`;
@@ -11916,7 +12125,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
       // Every key parseEnv and assertBootInvariants demand of every API-image role (Plans 01-03),
       // plain values only. SANCHAY_API_ORIGIN (E2) and SANCHAY_PLATFORM_ARN (E21) are set before
-      // those tasks make them required, so the dev stack keeps booting when they land.
+      // those tasks make them required, so the stack keeps booting when they land.
       const bootEnv: Record<string, string> = {
         SANCHAY_APP_ENV: envName,
         SANCHAY_APP_ORIGIN: appOrigin,
@@ -12019,16 +12228,17 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       );
 
       // First deploy (ADR-0014): this stack creates the ECR repositories empty and the secrets with
-      // placeholder values, so `-c firstDeploy=true` creates the service with no tasks. Every later
-      // deploy runs config.desiredCount.
-      const firstDeployFlag: unknown = this.node.tryGetContext('firstDeploy');
-      const firstDeploy = firstDeployFlag === true || firstDeployFlag === 'true';
+      // placeholder values, so `-c noTasks=true` creates the service with no tasks; F1 uses the same
+      // flag to move the stack onto its D6 logins. Every other deploy runs config.desiredCount. R-31's
+      // pause (closed to investors until GO-1) is D7's invite gate and RuntimeConfig, not this flag.
+      const noTasksFlag: unknown = this.node.tryGetContext('noTasks');
+      const noTasks = noTasksFlag === true || noTasksFlag === 'true';
       const service = new ecs.FargateService(this, 'Service', {
         serviceName: SERVICE_NAME,
         cluster,
         taskDefinition: taskDef,
-        desiredCount: firstDeploy ? 0 : config.desiredCount,
-        // Start the new task before stopping the old one (1 task in dev would otherwise drop to 0).
+        desiredCount: noTasks ? 0 : config.desiredCount,
+        // Start new tasks before stopping old ones, so a rollout never drops below the running count.
         minHealthyPercent: 100,
         securityGroups: [serviceSecurityGroup],
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
@@ -12060,6 +12270,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         port: 80,
         defaultAction: elbv2.ListenerAction.redirect({ protocol: 'HTTPS', port: '443' }),
       });
+      // R-31: no ingress allow-list. Until GO-1 the boot guard's invariant 10 keeps sign-in
+      // invite-only (D7) and RuntimeConfig keeps orders.enabled and plans.sip.enabled false (D1).
       const httpsListener = alb.addListener('HttpsListener', {
         port: 443,
         certificates: [cert],
@@ -12106,8 +12318,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         ],
         action: elbv2.ListenerAction.forward([apiTargetGroup]),
       });
-      // Spec §2.4 and H-1: the apex (dev.sanchay.in; sanchay.in in prod) answers 301 to www, keeping the
-      // path and query. Port 80 sends it to HTTPS first, like every host; the certificate covers it.
+      // Spec §2.4 and H-1: the apex sanchay.in answers 301 to www.sanchay.in, keeping the path and
+      // query. Port 80 sends it to HTTPS first, like every host; the certificate covers it.
       new elbv2.ApplicationListenerRule(this, 'ApexToWww', {
         listener: httpsListener,
         priority: 5,
@@ -12115,31 +12327,29 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         action: elbv2.ListenerAction.redirect({ host: `www.${domain}`, permanent: true }),
       });
 
-      // --- Route 53 (noindex on dev hosts is applied at the app layer, not here) -----------
+      // --- Route 53: www, app, api and the apex in the sanchay.in hosted zone (R-31) ------------
       const albTarget = route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(alb));
       for (const sub of ['www', 'app', 'api']) {
         new route53.ARecord(this, `${sub.charAt(0).toUpperCase()}${sub.slice(1)}Record`, {
           zone,
-          recordName: config.envSubdomain === '' ? sub : `${sub}.${config.envSubdomain}`,
+          recordName: sub,
           target: albTarget,
         });
       }
-      // The apex itself (the zone root in prod): the ALB answers it with ApexToWww's 301.
-      new route53.ARecord(this, 'ApexRecord', {
-        zone,
-        recordName: config.envSubdomain === '' ? undefined : config.envSubdomain,
-        target: albTarget,
-      });
+      // The zone apex: the ALB answers it with ApexToWww's 301.
+      new route53.ARecord(this, 'ApexRecord', { zone, target: albTarget });
 
       // R-12's NAV-age alarm is not built here: no task before F1 publishes a NAV metric, and an alarm
       // without data is either always in ALARM or never fires. F1 (Plan 04) adds the metric source
-      // (the worker's ops.gauges.emit job and its log metric filters) and the alarm, in both envs.
+      // (the worker's ops.gauges.emit job and its log metric filters) and the alarm.
 
       // --- GitHub OIDC deploy role -----------------------------------------------------------
-      // Trusts only the repository named by the deploy input SANCHAY_GITHUB_REPOSITORY (bin/sanchay.ts
-      // refuses a deploy without it); a template synthesised without it (the tests) has no deploy role.
+      // Trusts only jobs of the GitHub `prod` environment (both founders are its required reviewers)
+      // in the repository named by the deploy input SANCHAY_GITHUB_REPOSITORY (bin/sanchay.ts refuses
+      // a deploy without it); a template synthesised without it (the tests) has no deploy role. The
+      // OIDC provider is one per account, and this is the account's only stack (R-31).
       const githubRepo = config.githubRepo;
-      if (config.createGithubOidcProvider && githubRepo !== undefined) {
+      if (githubRepo !== undefined) {
         const oidcProvider = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
           url: 'https://token.actions.githubusercontent.com',
           clientIds: ['sts.amazonaws.com'],
@@ -12147,14 +12357,55 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         const deployRole = new iam.Role(this, 'GithubDeployRole', {
           roleName: `sanchay-${envName}-github-deploy`,
           assumedBy: new iam.WebIdentityPrincipal(oidcProvider.openIdConnectProviderArn, {
-            StringEquals: { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' },
-            StringLike: { 'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:*` },
+            StringEquals: {
+              'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+              'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:environment:${envName}`,
+            },
           }),
           description: 'Assumed by .github/workflows/deploy.yml via OIDC (no long-lived AWS keys).',
         });
-        // Dev sandbox only; F1 (prod) must scope this to the exact actions the prod deploy needs.
-        deployRole.addManagedPolicy(
-          iam.ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'),
+        // Least privilege: exactly what deploy.yml does. CloudFormation work goes through the CDK
+        // bootstrap roles.
+        deployRole.addToPolicy(
+          new iam.PolicyStatement({
+            sid: 'AssumeCdkBootstrapRoles',
+            actions: ['sts:AssumeRole'],
+            resources: [
+              `arn:aws:iam::${this.account}:role/cdk-hnb659fds-*-${this.account}-${this.region}`,
+            ],
+          }),
+        );
+        deployRole.addToPolicy(
+          new iam.PolicyStatement({
+            sid: 'EcrLogin',
+            actions: ['ecr:GetAuthorizationToken'],
+            resources: ['*'],
+          }),
+        );
+        apiRepo.grantPullPush(deployRole);
+        webRepo.grantPullPush(deployRole);
+        deployRole.addToPolicy(
+          new iam.PolicyStatement({
+            sid: 'ReadStackOutputs',
+            actions: ['cloudformation:DescribeStacks'],
+            resources: [this.stackId],
+          }),
+        );
+        // deploy.yml runs the migrate task before every rollout (spec §2.4), then reads its exit code.
+        migrateTaskDef.grantRun(deployRole);
+        deployRole.addToPolicy(
+          new iam.PolicyStatement({
+            sid: 'WaitForMigrateTask',
+            actions: ['ecs:DescribeTasks'],
+            resources: [`arn:aws:ecs:${this.region}:${this.account}:task/${cluster.clusterName}/*`],
+          }),
+        );
+        deployRole.addToPolicy(
+          new iam.PolicyStatement({
+            sid: 'ForceNewDeployment',
+            actions: ['ecs:UpdateService', 'ecs:DescribeServices'],
+            resources: [service.serviceArn],
+          }),
         );
         new CfnOutput(this, 'GithubDeployRoleArn', { value: deployRole.roleArn });
       }
@@ -12162,7 +12413,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       // --- Outputs -----------------------------------------------------------------------
       new CfnOutput(this, 'NatEipAddress', {
         value: natEip.ref,
-        description: 'Register this IP with Cybrilla for sandbox allowlisting',
+        description: 'Register this IP with Cybrilla for the production IP allowlist (G-B7)',
       });
       new CfnOutput(this, 'AlbDnsName', { value: alb.loadBalancerDnsName });
       new CfnOutput(this, 'ClusterName', { value: cluster.clusterName });
@@ -12187,12 +12438,13 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
 
   const app = new App();
-  // Reads SANCHAY_PLATFORM_ARN, SANCHAY_SMS_RETRIEVER_HASH and SANCHAY_GITHUB_REPOSITORY from this
-  // process's environment; a real synth or deploy also needs the repository the deploy role trusts.
-  const config = loadStackConfig('dev');
+  // R-31: prod is the only stack. Reads SANCHAY_PLATFORM_ARN, SANCHAY_SMS_RETRIEVER_HASH and
+  // SANCHAY_GITHUB_REPOSITORY from this process's environment; a real synth or deploy also needs the
+  // repository the deploy role trusts.
+  const config = loadStackConfig('prod');
   assertDeployInputs(config);
 
-  new SanchayMvpStack(app, 'SanchayMvpStack-dev', {
+  new SanchayMvpStack(app, 'SanchayMvpStack-prod', {
     env: {
       account: process.env.CDK_DEFAULT_ACCOUNT,
       // Spec §2.4: ap-south-1 only. The cdk CLI overwrites CDK_DEFAULT_REGION with the caller's AWS
@@ -12366,9 +12618,10 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         environment:
           description: 'Target stack'
           required: true
-          default: dev
+          default: prod
           type: choice
-          options: [dev]
+          # R-31: prod is the only AWS environment (development runs locally).
+          options: [prod]
 
   concurrency:
     group: deploy-${{ inputs.environment }}
@@ -12380,6 +12633,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
     deploy:
       runs-on: ubuntu-24.04
       timeout-minutes: 60
+      # The GitHub `prod` environment: both founders are its required reviewers, and the deploy role
+      # trusts only its jobs (OIDC sub repo:<owner>/<repo>:environment:prod).
       environment: ${{ inputs.environment }}
       permissions:
         contents: read
@@ -12431,7 +12686,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
             REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
             aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
             docker build --platform linux/arm64 -f apps/api/Dockerfile -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:latest" .
-            if [ "${{ inputs.environment }}" = prod ]; then DOMAIN=sanchay.in; else DOMAIN="${{ inputs.environment }}.sanchay.in"; fi
+            DOMAIN=sanchay.in
             docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN="${{ vars.SANCHAY_PLATFORM_ARN }}" --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL="${{ vars.SANCHAY_PLATFORM_ARN_VALID_TILL }}" --build-arg SANCHAY_APP_ORIGIN="https://app.$DOMAIN" --build-arg SANCHAY_WWW_ORIGIN="https://www.$DOMAIN" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:latest" .
             docker push "$REGISTRY/sanchay-${{ inputs.environment }}-api" --all-tags
             docker push "$REGISTRY/sanchay-${{ inputs.environment }}-web" --all-tags
@@ -12469,7 +12724,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
             SANCHAY_PLATFORM_ARN: ${{ vars.SANCHAY_PLATFORM_ARN }}
             SANCHAY_SMS_RETRIEVER_HASH: ${{ vars.SANCHAY_SMS_RETRIEVER_HASH }}
             # The repository the deploy role trusts (bin/sanchay.ts refuses a deploy without it), in
-            # the exact owner/repo case that IAM's StringLike compares.
+            # the exact owner/repo case that IAM compares.
             SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}
 
         # Wait for this rollout and fail unless it completed: `services-stable` alone also succeeds once
@@ -12485,7 +12740,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
             echo "deployment $DEPLOYMENT: $STATE"
             test "$STATE" = "COMPLETED"
   ```
-  `vars.SANCHAY_DEPLOY_ROLE_ARN`, `vars.SANCHAY_AWS_ACCOUNT_ID`, `vars.SANCHAY_PLATFORM_ARN`, `vars.SANCHAY_PLATFORM_ARN_VALID_TILL` and `vars.SANCHAY_SMS_RETRIEVER_HASH` are GitHub environment variables on the `dev` environment, set once by hand (ADR-0014 "First deploy"). `SANCHAY_GITHUB_REPOSITORY` is not a variable: the workflow passes `github.repository`. Under QEMU the two image builds take several minutes each (the api image built in about 7 minutes on Docker Desktop), hence the 60-minute job timeout and the one-hour OIDC session. The migrate step reads the stack outputs `MigrateTaskDefinitionArn`, `AppSubnetIds` and `ServiceSecurityGroupId`, so it needs the stack from ADR-0014's "First deploy" step 2; it runs the migrate task definition as deployed, on the `:latest` api image just pushed, before `cdk deploy` changes anything (spec §2.4, RV-02-61). A release whose boot guard needs a key that the deployed migrate task definition lacks therefore deploys the stack first by hand, as F1's dev rollout does with `-c paused=true`.
+  `vars.SANCHAY_DEPLOY_ROLE_ARN`, `vars.SANCHAY_AWS_ACCOUNT_ID`, `vars.SANCHAY_PLATFORM_ARN`, `vars.SANCHAY_PLATFORM_ARN_VALID_TILL` and `vars.SANCHAY_SMS_RETRIEVER_HASH` are GitHub environment variables on the `prod` environment, set once by hand (ADR-0014 "First deploy"). Its protection rules list both founders as required reviewers, so every run waits for a founder's approval, and the deploy role trusts only that environment's jobs (R-31). `SANCHAY_GITHUB_REPOSITORY` is not a variable: the workflow passes `github.repository`. Under QEMU the two image builds take several minutes each (the api image built in about 7 minutes on Docker Desktop), hence the 60-minute job timeout and the one-hour OIDC session. The migrate step reads the stack outputs `MigrateTaskDefinitionArn`, `AppSubnetIds` and `ServiceSecurityGroupId`, so it needs the stack from ADR-0014's "First deploy" step 2; it runs the migrate task definition as deployed, on the `:latest` api image just pushed, before `cdk deploy` changes anything (spec §2.4, RV-02-61). A release whose boot guard needs a key that the deployed migrate task definition lacks therefore deploys the stack first by hand, as F1's rollout does with `-c noTasks=true`.
 
   **3.15 `docs/adr/0014-minimal-aws-topology.md`:**
   ```markdown
@@ -12493,104 +12748,132 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
   - Status: Accepted (Sprint 2, week of 2026-10-19)
   - Deciders: Dev A, lead
-  - Related: R-05, R-11, R-12, R-15, R-16, R-19; ADR-0001 (versions); ADR-0005 (hosts, H-1)
+  - Related: R-05, R-11, R-12, R-15, R-16, R-19, R-31; ADR-0001 (versions); ADR-0005 (hosts, H-1)
 
   ## Context
-  FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06
-  lumpsum demo all need a public dev host reachable from the internet. This has to exist before
-  E20/E21/E24's lumpsum flow and D4's sandbox smoke harness can run against anything but localhost.
+  R-31: there is no AWS dev environment and no dev domain; development runs locally (docker compose:
+  PostgreSQL, Mailpit). The one AWS stack is prod, deployed in Sprint 2 week 2 so that the production
+  hosts, the NAT EIP that Cybrilla allowlists, the webhook and payment-return URLs and the deploy
+  pipeline exist about five weeks before GO-1. It stays paused (closed to investors) until GO-1.
 
   ## Decision
-  - One VPC (2 AZs, 1 NAT with a stable EIP for Cybrilla's sandbox IP allowlist), one ALB, one ECS
-    Fargate ARM64 service, `sanchay-app`, running three containers (`web`, `api`, `worker`) from one
-    task definition — not three services — to keep the dev stack cheap and the ALB routing simple.
-  - Host-based ALB listener rules (R-11): `api.dev.sanchay.in` (any path) and
-    `app.dev.sanchay.in` + `/api/v1/*` both forward to the api target group; everything else on
-    `app.dev.sanchay.in` and all of `www.dev.sanchay.in` forwards to the web target group. The apex
-    `dev.sanchay.in` answers 301 to `www.dev.sanchay.in` (spec §2.4, H-1).
+  - One stack, `SanchayMvpStack-prod`: one VPC (2 AZs, 1 NAT with a stable EIP for Cybrilla's IP
+    allowlist), one ALB, one ECS Fargate ARM64 service, `sanchay-app` in cluster `sanchay-prod`,
+    running three containers (`web`, `api`, `worker`) from one task definition — not three services —
+    to keep the stack cheap and the ALB routing simple.
+  - Paused until GO-1 (R-31): the service runs and answers on `www`, `app` and `api.sanchay.in`, but no
+    investor can transact. Sign-in is invite-only (D7; boot invariant 10 refuses
+    `SANCHAY_PILOT_INVITE_ONLY=false` in prod), RuntimeConfig's `orders.enabled` and `plans.sip.enabled`
+    stay at their D1 default (false; nothing in the stack sets them), and no invite is added before
+    GO-1 except the founders' test accounts. There is no ALB ingress allow-list. F1 (Plan 04) hardens
+    this stack in Sprint 4 (D6 logins, ops task definition, alarms); there is no second environment.
+  - Host-based ALB listener rules (R-11): `api.sanchay.in` (any path) and `app.sanchay.in` +
+    `/api/v1/*` both forward to the api target group; everything else on `app.sanchay.in` and all of
+    `www.sanchay.in` forwards to the web target group. The apex `sanchay.in` answers 301 to
+    `www.sanchay.in` (spec §2.4, H-1). The four names are alias records in the `sanchay.in` hosted
+    zone, which also validates the one ACM certificate (`*.sanchay.in` and `sanchay.in`).
   - `/api/v1/health` is the only health-check path (liveness only, R-12). Both target groups probe it
     on the task's api port: the web container (Next.js) serves no `/api/v1/*` route in AWS, and a
     crashed web process still stops the task because every container is essential. NAV staleness is
     a CloudWatch alarm plus a per-scheme AGED grade, not a readiness probe, so a stale catalogue sync
     never takes the whole app down; the alarm and its metric source arrive with F1 (Plan 04).
-  - RDS PostgreSQL 18.6, `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS
-    service security group; the app connects with `sslmode=verify-full` against the RDS global CA
-    bundle baked into the api image (R-15). The master login is `sanchay_master` (secret
-    `sanchay/{env}/db-master`), never `sanchay_app`, the NOLOGIN role the migrations grant to. The
-    migrate task uses the master; api and worker share it until F1 adds the `sanchay_app_login`
-    LOGIN role (secret `sanchay/{env}/db-app`).
-  - FP credentials (`sanchay/{env}/fp`) go into the `worker` container only; the FP webhook secret
-    and the SMS Retriever hash into `api` only; the keyring (`sanchay/{env}/keyring`) into `api`,
+  - RDS PostgreSQL 18.6 (Multi-AZ, 14-day backups, deletion protection, `db.t4g.medium`),
+    `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group;
+    the app connects with `sslmode=verify-full` against the RDS global CA bundle baked into the api
+    image (R-15). The master login is `sanchay_master` (secret `sanchay/prod/db-master`), never
+    `sanchay_app`, the NOLOGIN role the migrations grant to. The migrate task uses the master; api and
+    worker share it until F1 adds the `sanchay_app_login` LOGIN role (secret `sanchay/prod/db-app`).
+  - FP credentials (`sanchay/prod/fp`) go into the `worker` container only; the FP webhook secret
+    and the SMS Retriever hash into `api` only; the keyring (`sanchay/prod/keyring`) into `api`,
     `worker` and the one-off `migrate` task, whose boot guard checks it too (R-19 owning containers).
   - Values that differ per deploy and that the boot guard needs (`SANCHAY_PLATFORM_ARN`,
     `SANCHAY_SMS_RETRIEVER_HASH`) are read from the deploy environment at synth; the stack refuses
     to synthesise without them.
-  - The GitHub deploy role trusts only the repository named by the deploy input
-    `SANCHAY_GITHUB_REPOSITORY` (`deploy.yml` passes `github.repository`). The owner is never written
-    into code, and `bin/sanchay.ts` refuses a synth or deploy without it.
+  - The stack creates the account's GitHub OIDC provider and a deploy role that trusts only jobs of
+    the GitHub `prod` environment (both founders are its required reviewers) in the repository named
+    by the deploy input `SANCHAY_GITHUB_REPOSITORY` (OIDC `sub` `repo:<owner>/<repo>:environment:prod`,
+    matched exactly; `deploy.yml` passes `github.repository`). The role may do only what `deploy.yml`
+    does. The owner is never written into code, and `bin/sanchay.ts` refuses a synth or deploy without
+    it.
   - ECS Exec is enabled with command logging to CloudWatch (R-16); a one-off Fargate task
     definition (not a `Service`) runs `db:migrate` with `aws ecs run-task` before each deploy:
     `deploy.yml` runs it after pushing the images and before `cdk deploy`, and a non-zero exit
     stops the deploy (spec §2.4).
   - Images are linux/arm64. `deploy.yml` builds them on x86_64 runners under QEMU (the
     `tonistiigi/binfmt` installer, pinned by digest).
-  - `.github/workflows/deploy.yml` is manual dispatch only in the MVP; it authenticates over
-    GitHub OIDC (no long-lived AWS keys) via a scripted `sts assume-role-with-web-identity` call,
-    reusing `ci.yml`'s already-pinned `actions/checkout`/`pnpm/action-setup`/`actions/setup-node`
-    SHAs rather than adding new, unresolved third-party action pins.
+  - `.github/workflows/deploy.yml` is manual dispatch only, with `prod` its only environment; it
+    authenticates over GitHub OIDC (no long-lived AWS keys) via a scripted
+    `sts assume-role-with-web-identity` call, reusing `ci.yml`'s already-pinned
+    `actions/checkout`/`pnpm/action-setup`/`actions/setup-node` SHAs rather than adding new,
+    unresolved third-party action pins.
 
-  ## Dev hosts
-  `www.dev.sanchay.in`, `app.dev.sanchay.in`, `api.dev.sanchay.in`; all `noindex` at the app layer
-  (web sends `X-Robots-Tag: noindex` when `SANCHAY_APP_ENV=dev`; wired outside this ADR's stack).
+  ## Hosts
+  `www.sanchay.in` (the public site, `/site`), `app.sanchay.in` (the web app and
+  `/.well-known/assetlinks.json`), `api.sanchay.in` (the mobile API, FP webhooks and payment returns);
+  the apex `sanchay.in` redirects to `www`. There are no dev hosts: the delegated dev zone (PB-41) is
+  moot (R-31), and local development runs on docker compose.
 
-  ## Fallback (not taken, recorded per R-05)
-  A fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the
-  local API for sandbox webhooks and payment returns, if the CDK dev stack slips past 10-23.
-
-  ## First deploy (manual, once per environment)
-  The stack creates the ECR repositories empty and the provider secrets with placeholder values,
-  so the first deploy creates the service with no tasks. One command per line; replace each `<...>`
-  by hand and keep secret files outside the repository. Run from the repo root with AWS credentials
-  for the target account.
+  ## First deploy (manual, once)
+  Owner prerequisites (R-31): the prod AWS account, with no IAM OIDC provider for
+  `token.actions.githubusercontent.com` yet (`aws iam list-open-id-connect-providers` lists none: the
+  stack creates it); `sanchay.in` registered (R-22), with its public hosted zone in that
+  account and the registrar's name servers pointing at the zone; the GitHub environment `prod`, with both
+  founders as required reviewers. The stack creates the ECR repositories
+  empty and the provider secrets with placeholder values, so the first deploy creates the service with
+  no tasks. One command per line; replace each `<...>` by hand and keep secret files outside the
+  repository. Run from the repo root with AWS credentials for the prod account.
 
   1. Once per account and region: `pnpm --filter=@sanchay/infra exec cdk bootstrap aws://<account-id>/ap-south-1`
   2. Create the stack with the service at 0 tasks. `<owner>/<repo>` is this repository exactly as
-     GitHub prints it (the `origin` remote's path), the value `deploy.yml` later passes:
-     - PowerShell: `$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<ARN-digits>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<hash>'; pnpm --filter=@sanchay/infra exec cdk deploy -c firstDeploy=true`
-     - Git Bash: `SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<ARN-digits>' SANCHAY_SMS_RETRIEVER_HASH='<hash>' pnpm --filter=@sanchay/infra exec cdk deploy -c firstDeploy=true`
-  3. Put the real values into the four provider secrets (`sanchay/dev/keyring`, `sanchay/dev/fp`,
-     `sanchay/dev/fp-webhook`, `sanchay/dev/msg91`), one command per secret:
-     `aws secretsmanager put-secret-value --secret-id sanchay/dev/keyring --secret-string file://<path-outside-the-repo>`
-  4. On the GitHub `dev` environment, set the variables `SANCHAY_DEPLOY_ROLE_ARN` (stack output
+     GitHub prints it (the `origin` remote's path), the value `deploy.yml` later passes. Until the Play
+     App Signing certificate exists (F18), the retriever hash is any 11 characters of `[A-Za-z0-9+/]`:
+     it boots the api, and Android's SMS auto-read simply does not match it.
+     - PowerShell: `$env:SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>'; $env:SANCHAY_PLATFORM_ARN='<ARN-digits>'; $env:SANCHAY_SMS_RETRIEVER_HASH='<hash>'; pnpm --filter=@sanchay/infra exec cdk deploy -c noTasks=true`
+     - Git Bash: `SANCHAY_GITHUB_REPOSITORY='<owner>/<repo>' SANCHAY_PLATFORM_ARN='<ARN-digits>' SANCHAY_SMS_RETRIEVER_HASH='<hash>' pnpm --filter=@sanchay/infra exec cdk deploy -c noTasks=true`
+  3. Put the real values into the four provider secrets (`sanchay/prod/keyring`, `sanchay/prod/fp`,
+     `sanchay/prod/fp-webhook`, `sanchay/prod/msg91`), one command per secret:
+     `aws secretsmanager put-secret-value --secret-id sanchay/prod/keyring --secret-string file://<path-outside-the-repo>`
+     Until a provider issues its production value (Cybrilla's FP credentials: R-21, by Mon 11-16),
+     store a well-formed placeholder in the shape the boot guard checks: D3's `FpCredentialsSchema` for
+     `fp` (the worker parses it at boot) and D6's `Msg91CredentialsSchema` for `msg91` (boot invariant
+     11, api and worker). The containers refuse to start on anything else, and the provider refuses
+     the placeholder until the real values replace it (F1's credential-rotation runbook).
+  4. On the GitHub `prod` environment, set the variables `SANCHAY_DEPLOY_ROLE_ARN` (stack output
      `GithubDeployRoleArn`), `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`,
      `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image prerenders `/site` with both ARN values) and
      `SANCHAY_SMS_RETRIEVER_HASH`.
   5. Build and push both images (outputs `ApiRepoUri`, `WebRepoUri`; Docker Desktop emulates arm64):
      - `aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.ap-south-1.amazonaws.com`
      - `docker build --platform linux/arm64 -f apps/api/Dockerfile -t <ApiRepoUri>:latest .`
-     - `docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN=<ARN-digits> --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL=<yyyy-mm-dd> --build-arg SANCHAY_APP_ORIGIN=https://app.dev.sanchay.in --build-arg SANCHAY_WWW_ORIGIN=https://www.dev.sanchay.in -t <WebRepoUri>:latest .`
+     - `docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN=<ARN-digits> --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL=<yyyy-mm-dd> --build-arg SANCHAY_APP_ORIGIN=https://app.sanchay.in --build-arg SANCHAY_WWW_ORIGIN=https://www.sanchay.in -t <WebRepoUri>:latest .`
      - `docker push <ApiRepoUri>:latest`
      - `docker push <WebRepoUri>:latest`
   6. Run the migrate task and check its exit code (outputs `MigrateTaskDefinitionArn`,
      `AppSubnetIds`, `ServiceSecurityGroupId`):
-     - `aws ecs run-task --cluster sanchay-dev --launch-type FARGATE --task-definition <MigrateTaskDefinitionArn> --network-configuration "awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}" --query 'tasks[0].taskArn' --output text`
-     - `aws ecs wait tasks-stopped --cluster sanchay-dev --tasks <taskArn>`
-     - `aws ecs describe-tasks --cluster sanchay-dev --tasks <taskArn> --query 'tasks[0].containers[0].exitCode'` (expect `0`)
-  7. Dispatch `deploy.yml` for `dev`: it rebuilds and pushes the images, runs the migrate task
-     again (step 6 left nothing to apply), runs `cdk deploy` without the flag (one task), forces a
-     new deployment and fails unless that rollout completes.
+     - `aws ecs run-task --cluster sanchay-prod --launch-type FARGATE --task-definition <MigrateTaskDefinitionArn> --network-configuration "awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}" --query 'tasks[0].taskArn' --output text`
+     - `aws ecs wait tasks-stopped --cluster sanchay-prod --tasks <taskArn>`
+     - `aws ecs describe-tasks --cluster sanchay-prod --tasks <taskArn> --query 'tasks[0].containers[0].exitCode'` (expect `0`)
+  7. Dispatch `deploy.yml` for `prod`, and a founder approves the `prod` environment. GitHub runs a
+     dispatched workflow only when its file is on the default branch, so this waits for `main` to
+     carry `deploy.yml`. The run rebuilds and pushes the images, runs the migrate task again (step 6
+     left nothing to apply), runs `cdk deploy` without the flag (two tasks), forces a new deployment
+     and fails unless that rollout completes.
   8. Commit `infra/cdk.context.json` (the hosted-zone and availability-zone lookups from step 2)
      after `pnpm exec biome check --write infra/cdk.context.json`.
+  9. Register the stack output `NatEipAddress` with Cybrilla (the production IP allowlist, G-B7), and
+     give Cybrilla the webhook URL `https://api.sanchay.in/api/v1/webhooks/fp`.
 
-  Every later deploy: dispatch `deploy.yml`. It runs the migrate task (step 6) itself, after pushing
-  the images and before `cdk deploy`, and stops on a non-zero exit.
+  Every later deploy: dispatch `deploy.yml`; a founder approves it. It runs the migrate task (step 6)
+  itself, after pushing the images and before `cdk deploy`, and stops on a non-zero exit.
 
   ## Consequences
-  - F1 (Plan 04) reuses `SanchayMvpStack` with prod config (Multi-AZ, PITR 14 days, deletion
-    protection, `db.t4g.medium`, 2 tasks) instead of a second, duplicated stack file.
+  - F1 (Plan 04) hardens this stack in place (D6 logins, ops task definition, gauges and alarms)
+    instead of adding a second environment or a duplicated stack file.
   - Everything in `infra/lib/sanchay-mvp-stack.ts` is covered by `infra/test/sanchay-mvp-stack.test.ts`
-    CDK assertions, so a prod-config regression (for example a dropped `StorageEncrypted`) fails
-    before any `cdk deploy`.
+    CDK assertions, so a regression (for example a dropped `StorageEncrypted`) fails before any
+    `cdk deploy`.
+  - Prod costs run from Sprint 2 (Multi-AZ RDS, the NAT gateway, the ALB, two tasks) for a stack that
+    no investor uses before GO-1.
   ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
@@ -12603,7 +12886,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/web typecheck
   ```
-  Expected: `tsc` exits 0; the 22 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
+  Expected: `tsc` exits 0; the 24 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
 
   Then the two images (Docker; not part of `pnpm test`), from the repo root:
   ```
@@ -12614,13 +12897,14 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
   **Post-deploy verification checklist** (after the ADR-0014 first deploy and a `deploy.yml` run; not part of `pnpm test`). PowerShell and Git Bash, the same lines (RV-02-32): `curl.exe` is the real curl in both shells (in PowerShell 5.1 `curl` is an alias of `Invoke-WebRequest`), and `NUL` discards the body on Windows in both:
   ```
-  curl.exe -s -o NUL -w "%{http_code}\n" https://app.dev.sanchay.in/api/v1/health
-  curl.exe -s -o NUL -w "%{http_code}\n" https://api.dev.sanchay.in/api/v1/health
-  curl.exe -s -o NUL -w "%{http_code} %{content_type}\n" https://app.dev.sanchay.in/.well-known/assetlinks.json
-  curl.exe -s -o NUL -w "%{http_code} %{redirect_url}\n" https://dev.sanchay.in/
-  aws ecs execute-command --cluster sanchay-dev --task <task-id> --container api --interactive --command "node --version"
+  curl.exe -s -o NUL -w "%{http_code}\n" https://app.sanchay.in/api/v1/health
+  curl.exe -s -o NUL -w "%{http_code}\n" https://api.sanchay.in/api/v1/health
+  curl.exe -s -o NUL -w "%{http_code}\n" https://www.sanchay.in/
+  curl.exe -s -o NUL -w "%{http_code} %{content_type}\n" https://app.sanchay.in/.well-known/assetlinks.json
+  curl.exe -s -o NUL -w "%{http_code} %{redirect_url}\n" https://sanchay.in/
+  aws ecs execute-command --cluster sanchay-prod --task <task-id> --container api --interactive --command "node --version"
   ```
-  Expected: `200` for both health checks; `200 application/json` for `assetlinks.json`; `301 https://www.dev.sanchay.in/` for the apex (RV-02-63; the same line printed that from both shells against a local stand-in); the ECS Exec session prints the Node version and the command appears in `/sanchay/dev/ecs-exec` (R-16). If the session is refused with "encryption is not set up on the selected CloudWatch log group", the exec log group needs a KMS key for `cloudWatchEncryptionEnabled: true`; record it and raise it with the lead before changing the setting. `POST https://api.dev.sanchay.in/api/v1/webhooks/fp` reachability is checked with the FP sandbox's own webhook test-send tool once Cybrilla has the URL (10-23 milestone).
+  Expected: `200` for both health checks and for the www home page (`/site`, H-1); `200 application/json` for `assetlinks.json`; `301 https://www.sanchay.in/` for the apex (RV-02-63; the same `curl.exe` line printed the 301 and its target from both shells against a local stand-in); the ECS Exec session prints the Node version and the command appears in `/sanchay/prod/ecs-exec` (R-16). If the session is refused with "encryption is not set up on the selected CloudWatch log group", the exec log group needs a KMS key for `cloudWatchEncryptionEnabled: true`; record it and raise it with the lead before changing the setting. `POST https://api.sanchay.in/api/v1/webhooks/fp` reachability is checked with FP's own webhook test-send tool once Cybrilla has the URL (ADR-0014 step 9). The pause (R-31) needs no live check: Step 1's `closed to investors` test pins `SANCHAY_PILOT_INVITE_ONLY=true` and the absence of any orders or SIP override, and no invite exists until F7's `ops:invite` adds the founders' test accounts (Plan 04).
 
 - [ ] **Step 5: Commit**
   ```
@@ -12632,6 +12916,6 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   pnpm --filter=@sanchay/web typecheck
   pnpm lint
   git add infra .dockerignore .gitignore .github/workflows/deploy.yml apps/api/Dockerfile apps/api/docker-entrypoint.sh apps/api/.swcrc apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/web/Dockerfile apps/web/next.config.ts apps/web/public/.well-known/assetlinks.json docs/adr/0001-versions.md docs/adr/0014-minimal-aws-topology.md docs/adr/README.md pnpm-workspace.yaml pnpm-lock.yaml
-  git commit -m "feat(infra): add SanchayMvpStack-dev, arm64 images and the dev deploy workflow (R-05, E25)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+  git commit -m "feat(infra): add SanchayMvpStack-prod (paused, R-31), arm64 images and the prod deploy workflow (E25)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   If lefthook re-stages files (`stage_fixed`), re-run the Step 4 `typecheck`/`test` commands before committing again.
