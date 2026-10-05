@@ -25,6 +25,14 @@ overrides:
   # @nestjs/platform-fastify@11.2.6 pins fastify 5.11.3 exactly. See ADR-0001 (2026-10-01).
   fastify: 5.12.5
 
+# Audit exceptions: exact advisories with no patched version, reached only through the mobile build
+# toolchain (never the api or web images). One ADR-0001 row each; re-check 2026-11-02 and on every
+# Expo SDK or Metro bump, and remove an entry as soon as a fixed version exists.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-86w9-cpqp-85rv # node-forge <=1.4.0 (high): expo > @expo/cli, @expo/code-signing-certificates
+    - GHSA-vfj7-8cjw-p6xm # braces <=3.0.3 (high): react-native/expo > metro > micromatch
+
 # Owner ruling R-28 (docs/delivery/rulings.md): exact `name@version` trust-policy exceptions
 # only, never a range, bare name or pattern; `trustPolicy: no-downgrade` stays on for everything
 # else. Every entry has an ADR-0001 row with the reason, dependency path and re-check date.
