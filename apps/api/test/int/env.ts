@@ -5,8 +5,12 @@ export const TEST_APP_ORIGIN = 'https://app.sanchay.test';
 
 const key = (fill: number): string => Buffer.alloc(32, fill).toString('base64');
 
-export function testEnv(databaseUrl: string, overrides: Record<string, string> = {}): Env {
-  return parseEnv({
+/** The raw variables behind testEnv, for a CLI spawned as a child process (F27). */
+export function testEnvVars(
+  databaseUrl: string,
+  overrides: Record<string, string> = {},
+): Record<string, string> {
+  return {
     SANCHAY_APP_ENV: 'test',
     DATABASE_URL: databaseUrl,
     SANCHAY_APP_ORIGIN: TEST_APP_ORIGIN,
@@ -20,7 +24,11 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
     SANCHAY_PROVIDER_MODE_EMAIL: 'capture',
     SANCHAY_LOG_LEVEL: 'silent',
     ...overrides,
-  });
+  };
+}
+
+export function testEnv(databaseUrl: string, overrides: Record<string, string> = {}): Env {
+  return parseEnv(testEnvVars(databaseUrl, overrides));
 }
 
 export function testKeyService(env: Env): KeyService {
