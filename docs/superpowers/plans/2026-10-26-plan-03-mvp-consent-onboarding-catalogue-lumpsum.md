@@ -173,6 +173,8 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-23 (2026-10-05): E14's appended router case uses D10's real helpers (follows RV-02-56; blocker).** E14 appends a `sort=name` case to D10's `catalogue-router.int.test.ts` that called `insertInvestor`, `signIn` and `httpGet`, and the last two never existed. It now reads with D10's file-level `get` and `cookies` (Plan 01's `signInWeb`), and the file passes 5/5 on PostgreSQL 18.2.
 - **RV-03-24 (2026-10-05): Plan 03's jobs register their pg-boss policy (R-32; major).** Every name Plan 03 appends now goes into D2's `JOB_POLICIES`. `onboarding.provision` and `orders.purchase.submit` are `exclusive`. `onboarding.preverify`, `onboarding.bank.verify`, `orders.purchase.advance`, `fp.reconcile.nonfinal` and `payments.poll` are `stately`. The two pre-verification jobs are `stately` although each creates one FP object: they poll by enqueuing their own key while they run, which `exclusive` refuses, and the create runs once because its id is stored before the first poll. E21 notes that a return or webhook nudge is refused while a delayed poll is queued; that poll then applies the result. The `Jobs.enqueue` spies in E4, E6, E7, E11, E20 and E21 now resolve a job id, because `enqueue` returns `Promise<string | null>` (RV-02-69) and a spy resolving `undefined` fails `typecheck` (checked with the repo's TypeScript 6.0.3 against Vitest 5.0.1's typings).
 - **RV-03-25 (2026-10-05): no dev stack in Plan 03's text (R-31; minor).** The execution-order note said E18 and E19 fund "the protected dev stack", and RV-03-10 and E1's review fix 7 spoke of "the dev worker and migrate containers". R-31 removes the AWS dev environment: E25's protected S2 stack is the paused prod stack, so the note and both sentences now name it and the deployed containers. Wording only: `devSecrets` and the `'dev'` app-env test cases stay, because `SANCHAY_APP_ENV` keeps `dev` as a code value (Plan 01 `env.ts`). Checked by a full-text scan of Plan 03 for dev hosts, dev stacks and dev deploys.
+- **RV-03-26 (2026-10-05): E16 says what keeps `nav_history` current (follows Plan 02 RV-02-73; minor).** E16's returns read only `nav_history`. D9's backfill loads five years of it on prod before GO-1 (R-33), and D9's daily sync now appends every accepted NAV, so the latest point and the anniversaries move with each sync. E16's prerequisites say so; its code, tests and counts are unchanged.
+- **RV-03-27 (2026-10-05): a purchase LOOKUP-ADOPT adopts goes back to `orders.purchase.advance` (R-32 queue review; major).** E20's `fp.reconcile.nonfinal` moved the purchase it adopted by `source_ref_id` from RECONCILING to UNDER_REVIEW and enqueued nothing, while the submit job enqueues `orders.purchase.advance` only after a clean POST and E21's `mf_purchase` handler (like F4's, which replaces it) leaves orders before PROCESSING to the saga jobs: the H-2 checkout never ran, so the order stayed UNDER_REVIEW and the investor was never offered the payment. The adoption now runs in one transaction with the enqueue of `orders.purchase.advance` `{orderId, challengeId}`, `singletonKey` = order id (on R-32's `stately` queue a null return means one is already queued), and the job's miss-branch insert is written in Biome's stable form, because the file needed two `--write` passes and Step 5's `pnpm lint` failed after one (reproduced on the original text). A new `orders.int.test.ts` case checks the enqueue and that the job then PATCHes the adopted purchase's consent at FP `pending`; E20's Step 4 count becomes 19/19, and E21's count of that suite, stale at 16 since RV-03-16, follows. Checked in a scratch prototype (Plan 01 with D2's `Jobs` as written, pg-boss 12.34.0, PostgreSQL 18.6 in Testcontainers): the adoption and its job commit together, a failing enqueue rolls the adoption back, an advance job already queued makes the send return null while the adoption still commits (the original text left no job), and `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome` are clean on the job and the whole test file.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -16351,7 +16353,7 @@ git commit -m "feat(catalogue): add FundFactsProvider, publish-gate rules R1-R7 
   - `apps/api/src/modules/catalogue/catalogue.module.ts` (add `ReturnsComputeJob` to the `providers` list, every role)
 
 **Interfaces:**
-- Prerequisites: Plan 02 **D8** (`schemes`, `navHistory`, `schemeReturns` tables). Plan 02 **D9** (`runNavSync` already enqueues `catalogue.returns.compute` after every successful sync; the `packages/test-fixtures` shell). Plan 02 **D2** (class-level `@JobHandler`, `type Job<N>`; `'catalogue.returns.compute'` is already in `JOB_NAMES`). Plan 02 **D10** (`CatalogueModule.forRoot(env)`).
+- Prerequisites: Plan 02 **D8** (`schemes`, `navHistory`, `schemeReturns` tables). Plan 02 **D9** (`runNavSync` already enqueues `catalogue.returns.compute` after every successful sync and appends that sync's accepted NAVs to `nav_history`, which D9's backfill fills with five years of history before GO-1, R-33; the `packages/test-fixtures` shell). Plan 02 **D2** (class-level `@JobHandler`, `type Job<N>`; `'catalogue.returns.compute'` is already in `JOB_NAMES`). Plan 02 **D10** (`CatalogueModule.forRoot(env)`).
 - Consumes (Plan-01, verified): `Dec`, `Rounding` (`@sanchay/money`, `packages/money/src/decimal.ts` — `Dec` is the shared `decimal.js` clone at 64-digit precision, whose `.pow()` accepts a fractional exponent); `isIsoDate`, `toIsoDate`, `type IsoDate` (`@sanchay/domain`, `packages/domain/src/ids.ts`). Consumes (D8, verified against the D8 draft): `schemes`, `navHistory`, `schemeReturns` (`apps/api/src/modules/catalogue/catalogue.schema.ts`).
 - Produces:
   - `packages/domain/src/rules/returns.ts`:
@@ -17771,7 +17773,7 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
   - `OrderSchema` (the `orders.get`/`orders.list` wire): `{id, type, status, schemeId, schemeName, amount, paymentMethod, failureCode, cancellable, next, createdAt}`. `cancellable` is gap-rulings GAP-01(b)'s server flag and `next` (`'PAYMENT' | 'DONE' | null`) is GAP-01 step 4's CNF-02 handoff (RV-03-16).
   - `isCancellable(order: {status, submitAttempts})` and `orderNextStep(status)` in `order-transitions.ts`; `orders.cancel` and `toWire` share `isCancellable`.
   - `CONSENT_SUBJECT_JOBS.PURCHASE = 'orders.purchase.submit'` (registered at `orders.module.ts` load).
-  - Jobs (worker only): `orders.purchase.submit` (`ConsentApprovedJobData`), `orders.purchase.advance` (`{orderId, challengeId}`), `fp.reconcile.nonfinal` (every 5 min).
+  - Jobs (worker only): `orders.purchase.submit` (`ConsentApprovedJobData`), `orders.purchase.advance` (`{orderId, challengeId}`), `fp.reconcile.nonfinal` (every 5 min; a purchase its LOOKUP-ADOPT adopts gets `orders.purchase.advance` in the adopting transaction, RV-03-27).
   - `PurchaseAdvanceJob.checkout(consent, order, purchase)`: the H-2 step run at FP `pending`. In E20 it PATCHes the consent and returns `false` (order stays `CONFIRMING`). E21 extends it to create the payment and PATCH `confirmed`.
   - `toFpPurchaseView(raw)` in `fp-purchase.ts`.
 - **H-2 custom checkout** (research fp-api §3.2):
@@ -17793,6 +17795,7 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
 - Review fix (RV-03-14): Plan 01's `packages/contract/src/errors.test.ts` pinned the catalogue exactly (`toHaveLength(66)` and a per-status count table), so this task's two codes turned CI's contract tests red, and Plan 04's F2 and F11 would have had to edit the pins again. This task, the first to append a code (no Plan 02 task appends one), replaces that test with "keeps the 66 Plan 01 codes with their HTTP statuses": a `toMatchObject` against Plan 01's code-to-status map, plus a 4xx/5xx range check on every code. A removed, renamed or re-statused Plan 01 code still fails it; an appended code needs no edit. Checked: Plan 01's test fails on these two codes (68 against 66), the new one passes with them and with F2's two more, and it fails when a Plan 01 status changes.
 - Review fix (RV-03-15): `SANCHAY_PLATFORM_ARN` is required, but Plan 01's `integrations.module.test.ts` (`base`) and `crypto.test.ts` (`localRaw`) build their own env objects, so `parseEnv` threw `EnvError` there from this task on (reproduced), the same gap RV-03-5 closed for `SANCHAY_API_ORIGIN`. Both gain `SANCHAY_PLATFORM_ARN: 'ARN-000000'`, the closed-list pin in `env.test.ts` gains the key, and Step 4 runs the three files.
 - Review fix (RV-03-16): E23's CNF-02 and E24's ORD-01/ORD-02 read `state`, `next`, `schemeName` and `cancellable`, and `OrderSchema` had none of them (the field is `status`). The wire gains the three that need the server: `schemeName` (joined from `schemes`, as F12 does for plans), `cancellable` (gap-rulings GAP-01(b) names it a server flag; `orders.cancel` and `toWire` share `isCancellable`) and `next` (GAP-01 step 4: PAYMENT at `AWAITING_PAYMENT`, DONE once the order is past payment or has ended, `null` while FP still places it). E23 and E24 read `status`.
+- Review fix (RV-03-27): a purchase `fp.reconcile.nonfinal` adopted went to UNDER_REVIEW with nothing queued to move it on (the submit job enqueues `orders.purchase.advance` only after a clean POST, and E21's `mf_purchase` handler starts at PROCESSING), so its H-2 checkout never ran. The adoption now enqueues `orders.purchase.advance` (`singletonKey` = order id) in the same transaction, and a new `orders.int.test.ts` case pins it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -18097,6 +18100,26 @@ describe('orders.purchase.submit / advance (H-2)', () => {
     expect(row?.fpOrderId).toMatch(/^mfp_/);
     expect(row?.status).toBe('UNDER_REVIEW');
     expect(t.fakeFp.calls({ op: 'purchase.create' })).toHaveLength(createsBefore + 1);
+  });
+
+  it('the adopted purchase rejoins the H-2 saga: orders.purchase.advance, keyed by the order id (RV-03-27)', async () => {
+    const draft = await draftOrder();
+    const data = await approve(draft);
+    t.fakeFp.script('purchase.create', 'timeout');
+    await submit(data);
+    expect(enqueued.map((j) => j.name)).not.toContain('orders.purchase.advance');
+    await t.app.get(ReconcileNonfinalJob).handle(jobOf('fp.reconcile.nonfinal', {}));
+    expect(t.app.get(Jobs).enqueue).toHaveBeenCalledWith(
+      expect.anything(),
+      'orders.purchase.advance',
+      { orderId: draft.orderId, challengeId: data.challengeId },
+      { singletonKey: draft.orderId },
+    );
+    // That job takes the adopted purchase through the H-2 checkout: at FP pending it PATCHes the consent.
+    const fpOrderId = (await orderOf(draft.orderId))?.fpOrderId as string;
+    t.fakeFp.advance(fpOrderId, 'pending');
+    await advance(draft.orderId, data.challengeId);
+    expect(t.fakeFp.state.purchases.get(fpOrderId)?.consent).toEqual({ isd_code: '91', mobile: draft.investor.mobile, email: draft.investor.email });
   });
 
   it('absent at FP twice, 10 minutes apart -> FAILED with PROVIDER_OBJECT_ABSENT', async () => {
@@ -18852,6 +18875,7 @@ import { DB, type DbHandle } from '../../db/client.js';
 import { FpRead } from '../../integrations/fp/fp-read.js';
 import { CLOCK, type Clock, MINUTE } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
+import { Jobs } from '../platform/jobs/jobs.service.js';
 import { toFpPurchaseView } from './fp-purchase.js';
 import { moveOrder } from './order-transitions.js';
 import { orderEvents, orders } from './orders.schema.js';
@@ -18861,6 +18885,9 @@ const MISS_TRIGGER = 'fp.reconcile.nonfinal.miss';
 /**
  * Worker only, every 5 minutes. LOOKUP-ADOPT for RECONCILING orders: list by source_ref_id (= order id) and
  * adopt the one FP object; absent at two checks at least 10 minutes apart -> FAILED(PROVIDER_OBJECT_ABSENT).
+ * The adopted order goes back to UNDER_REVIEW and, in the same transaction, to orders.purchase.advance, which
+ * runs the H-2 checkout from there; nothing else would, since the submit job enqueues it only after a clean
+ * POST (RV-03-27).
  */
 @Injectable()
 @JobHandler('fp.reconcile.nonfinal')
@@ -18869,6 +18896,7 @@ export class ReconcileNonfinalJob {
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(FpRead) private readonly fpRead: FpRead,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(Jobs) private readonly jobs: Jobs,
   ) {}
 
   async handle(_job: Job<'fp.reconcile.nonfinal'>): Promise<void> {
@@ -18879,7 +18907,13 @@ export class ReconcileNonfinalJob {
       const found = items[0];
       if (found !== undefined) {
         const purchase = toFpPurchaseView(found);
-        await moveOrder(db, order, 'UNDER_REVIEW', 'lookup_adopt_mapped', { fpOrderId: purchase.id, fpOldId: purchase.oldId, fpState: purchase.state });
+        await db.transaction(async (tx) => {
+          await moveOrder(tx, order, 'UNDER_REVIEW', 'lookup_adopt_mapped', { fpOrderId: purchase.id, fpOldId: purchase.oldId, fpState: purchase.state });
+          // stately, keyed by the order id (R-32): a null return means an advance job is already queued for it.
+          if (order.consentChallengeId !== null) {
+            await this.jobs.enqueue(tx, 'orders.purchase.advance', { orderId: order.id, challengeId: order.consentChallengeId }, { singletonKey: order.id });
+          }
+        });
         continue;
       }
       const [lastMiss] = await db
@@ -18894,13 +18928,19 @@ export class ReconcileNonfinalJob {
         continue;
       }
       if (lastMiss === undefined) {
-        await db.insert(orderEvents).values({ orderId: order.id, fromStatus: order.status, toStatus: order.status, trigger: MISS_TRIGGER, occurredAt: now });
+        await db.insert(orderEvents).values({
+          orderId: order.id,
+          fromStatus: order.status,
+          toStatus: order.status,
+          trigger: MISS_TRIGGER,
+          occurredAt: now,
+        });
       }
     }
   }
 }
 ```
-(The adopted order re-enters `UNDER_REVIEW`; the E21 `mf_purchase` event handler and the next `orders.purchase.advance` take it from there. `RECONCILING → UNDER_REVIEW` is one of D5's `RECONCILING_EXITS`; if D5's list lacks it, add it there — Plan 02 errata RV-02-13.)
+(The adopted order re-enters `UNDER_REVIEW`, and the adopting transaction enqueues `orders.purchase.advance`, which takes it through the H-2 checkout; E21's `mf_purchase` event handler acts only from `PROCESSING` on (RV-03-27). `RECONCILING → UNDER_REVIEW` is one of D5's `RECONCILING_EXITS`; if D5's list lacks it, add it there — Plan 02 errata RV-02-13.)
 
 `packages/contract/src/orders.ts`:
 ```ts
@@ -19188,13 +19228,13 @@ pnpm --filter=@sanchay/app-core test
 pnpm --filter=@sanchay/api openapi
 pnpm --filter=@sanchay/api test openapi
 ```
-Expected: `fp-purchase` 2/2 and `order-transitions` 2/2; the three env files green, with `SANCHAY_PLATFORM_ARN` in every fixture and in the closed-list pin (RV-03-15); the contract suite green with the relaxed `errors.test.ts` (RV-03-14); `orders.int.test.ts` 18/18 (the two RV-03-16 wire cases included); the app-core all-codes test green; the B10 drift test passes against the regenerated `openapi.json`, which Step 5 commits.
+Expected: `fp-purchase` 2/2 and `order-transitions` 2/2; the three env files green, with `SANCHAY_PLATFORM_ARN` in every fixture and in the closed-list pin (RV-03-15); the contract suite green with the relaxed `errors.test.ts` (RV-03-14); `orders.int.test.ts` 19/19 (the two RV-03-16 wire cases and the RV-03-27 adoption case included); the app-core all-codes test green; the B10 drift test passes against the regenerated `openapi.json`, which Step 5 commits.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm exec biome check --write apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fp-read.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/integrations/integrations.module.test.ts apps/api/src/modules/platform apps/api/src/config apps/api/src/app.module.ts apps/api/test/int packages/contract/src packages/app-core/src/errors/messages.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract test
 pnpm --filter=@sanchay/api test fp-purchase order-transitions
@@ -19935,7 +19975,7 @@ pnpm --filter=@sanchay/api test:int -- payments orders infra-routes fp-webhooks
 pnpm --filter=@sanchay/api openapi
 git diff --exit-code apps/api/openapi.json
 ```
-Expected: `payments.int.test.ts` 9/9; E20's `orders.int.test.ts` still 16/16 (its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
+Expected: `payments.int.test.ts` 9/9; E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
 
 - [ ] **Step 5: Commit**
 

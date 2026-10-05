@@ -196,7 +196,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | Plan 04 is assembled (§8), and the Plan 02 backlog list was worked on 10-05 (§9). Next: the owner rulings listed in §9 and Plan 04's header; then start **Sprint 2** (Plan 02, Task D0 first) on Mon 10-12 on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude + Owner |
+| 1 | Plan 04 is assembled (§8); the Plan 02 backlog was worked and rulings R-31 to R-34 were written into the plans on 10-05 (§9). Next: review and merge [Platizio/Sanchay#4](https://github.com/Platizio/Sanchay/pull/4) (after or with #3), settle the open decisions in §9, then start **Sprint 2** (Plan 02, Task D0 first) on Mon 10-12 on branch `feat/plan-02-mvp-kernel` from `main`, and update AGENTS.md's branch line | Claude + Owner |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
 | 4 | ~~Create the GitHub repo~~ **Done:** `Platizio/Sanchay`. Push local `main` when ready: it contains PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1) (F4) plus the merge, so the PR then shows as merged. | Owner |
@@ -205,7 +205,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 **Key milestones:**
 - Wed 10-21: login end to end on web + Android (already achieved on web).
-- Fri 10-23: identity and profile onboarding, plus catalogue data on dev AWS.
+- Fri 10-23: identity and profile onboarding, plus catalogue data on the paused prod stack (R-24 as amended by R-31; what prod can show by then is an open owner decision, §9).
 - Fri 11-06: onboarding and lumpsum end to end, and the Cybrilla demo.
 - Fri 11-13: production credentials.
 - Fri 11-20: feature freeze.
@@ -402,7 +402,7 @@ Observed only, not changed:
   - AppShell hydration mismatch.
 - **RV-02-67 and RV-02-68:** D1's `ReconBreaks.open` and D6's `Notify.enqueue` use `ON CONFLICT DO NOTHING`. A caught `23505` inside a caller's transaction made its COMMIT a silent ROLLBACK. Verified on PostgreSQL 18 (the old class fails with "current transaction is aborted"). F4 no longer edits `runtime-config.ts` (RV-04-F4-3).
 - **Backlog** (`docs/delivery/plan-errata-backlog.md`): 39 items ticked with their RV id or reason. Open items: Plan 01 1 (the deployed curated-list run, tracked under Plan 04), Plan 02 4, Plan 03 59, Plan 04 79.
-- **Owner rulings needed before Sprint 2:**
+- **Owner rulings needed before Sprint 2** (settled later the same day as R-31 to R-34; see below):
   1. pg-boss queue policies. `singletonKey` does not dedupe on the default `standard` policy, which Plans 03 and 04 rely on, and a policy cannot change after `createQueue`.
   2. RV-02-64: keep one log group and the per-image ECR names, or follow spec §2.4.
   3. PB-41's delegated `dev.sanchay.in` zone versus E25's lookup (ADR-0014).
@@ -411,6 +411,33 @@ Observed only, not changed:
 - **Environment:**
   - The main checkout's `node_modules/serialize-error` was a stub an agent left on 10-01 (`0.0.0-f1stub`). It was restored to the lockfile's 2.1.0.
   - Docker Desktop was started for the integration tests.
+- **Later on 10-05: owner rulings, PR and CI.**
+  - **Git:** pushes now go as **vinayakty230** only (owner's instruction for the session; the GitHub CLI and git's stored credential were switched by the owner).
+  - **PR:** [Platizio/Sanchay#4](https://github.com/Platizio/Sanchay/pull/4) carries this branch. It includes PR #3's commits.
+  - **Prototype archives:** the five uncommitted agent prototypes (Plan 04 F12–F27, about 11,300 lines) are pushed as `archive/proto-*-2026-10-01`. They are reference only and must never be merged. The other 24 leftover folders in `.claude/worktrees` held nothing unique.
+  - **CI audit:** two new high advisories with no fixed version (node-forge via Expo's CLI, braces via Metro) failed `pnpm audit`. They are now exact `auditConfig.ignoreGhsas` entries with an ADR-0001 row; re-check 2026-11-02.
+- **Rulings** (`docs/delivery/rulings.md`):
+  - **R-31:** no AWS dev; E25 deploys prod paused in S2 week 2, and F1 hardens it.
+  - **R-32:** pg-boss queue policies.
+  - **R-33:** NAV history and the curated list are loaded on prod before GO-1.
+  - **R-34:** one log group and two image repositories (LLM-council verdict, accepted), with `RETAIN_ON_UPDATE_OR_DELETE`, a `service` field, metric-filter proofs, PAN/mobile masking and a ten-alarm drill.
+- **Written into the plans:** seven agents, about 830 verified patch edits.
+  - Plan 02 RV-02-69 to RV-02-75 and Plan 03 RV-03-24 to RV-03-27.
+  - Plan 04 RV-04-HDR-1, F1-2 to F1-11, F2-5, F4-4, F5-1, F7-2 to F7-4, F18-1, F19-3, F20-1, F21-1, F22-1, F23-1, F24-2, F25-1, F27-1 and F28-1.
+  - The MVP spec, sprint plans, outlines, pilot checklist and rulings R-05, R-15 and R-24 now follow R-31 to R-34.
+- **Fixes made along the way:**
+  - D9 now backfills NAV history month by month and keeps `nav_history` current. It also handles two live AMFI feed quirks (RV-02-73, RV-02-74).
+  - An adopted purchase now reaches the checkout (RV-03-27, RV-04-F7-4).
+  - **D0's log redaction now works through pino-http**, the app's real logger; the first version only worked with plain pino (RV-02-75). Verified on a clean checkout of `main`: api unit 134, api integration 130, features 23, typechecks and lint clean.
+- **Open, for the owner:**
+  1. A public host for FP sandbox webhooks and payment returns before the 11-06 demo (R-05's purpose; no dev stack now).
+  2. The 10-23 milestone content: prod has no reference tables until F1 and no FP production credentials until 11-16.
+  3. Spec §7 / F23's NO-GO fallback ("continue invitee onboarding") conflicts with R-31.
+  4. Confirm the founders' canary windows (F20, F27) as allowed under R-31.
+  5. S4 capacity after R-33/R-34.
+  6. PB-76: an active vendor test on paused prod.
+  7. R-34's "every log line" for Next.js and CLI output.
+  8. Lead: `ops:nav-release` semantics.
 - **Next:**
   - The owner rulings above and in Plan 04's header.
   - Push `docs/plan-04-f5` and open its PR once PR #3 merges (stacked on it).

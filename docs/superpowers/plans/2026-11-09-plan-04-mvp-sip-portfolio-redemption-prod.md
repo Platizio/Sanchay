@@ -168,6 +168,14 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F24-2 (2026-10-05): runbooks and their lint know one stack (R-31; minor).** `KNOWN_ALARMS` drops `sanchay-dev-nav-age`, `{env}` and `<env>` now stand for prod, and any `sanchay-dev-` name is an `ALARM` problem; the README, the kill-switch and OTP runbooks and the credential-rotation sections lose their dev variants. Verified in a scratch copy: `node --test scripts/check-runbooks.test.ts` 18/18, `tsc` exits 0, `biome check` clean; the new tests fail 2/18 against the old script; and every `sanchay-<env>-` name in F1's and F24's runbook text passes the new rule.
 - **RV-04-F25-1 (2026-10-05): the G-E6 collector checks prod's app host (R-31; minor).** The "sandbox-chain build" on `app.dev.sanchay.in` is gone: the prerequisites, the review note, the `--host` error message and Step 6 name only `app.sanchay.in`, and the test fixture for a build that declares another host uses the test origin `app.sanchay.test`. Verified: `node --test scripts/android-evidence.test.ts` 13/13, `tsc` exits 0, `biome check` clean.
 - **RV-04-F27-1 (2026-10-05): the invitee dry run runs on the paused prod stack (R-31; major).** The drill used a dev stack on Wed 11-25 and seeded the PO's list on prod on Thu 11-26, before GO-1. Now the drill (D1-D7) runs on prod on Wed 11-25 with one founder-owned spare SIM (a founders' test account) and a founder's canary account for D5-D7 (the spare SIM has no KYC on prod), orders are on only for the few minutes D7 and D5 take and off again at once, Thu 11-26 checks that orders are off, and the PO's list (D8) is seeded only after the GO-1 decision. The integration test and its counts are unchanged.
+- **RV-04-F1-5 (2026-10-05): every log line names its container, and each metric filter reads one container (F1; R-34; major).** Plan 01's `buildPinoOptions` stamped `service: "sanchay-api"` on every line of every role, and F1's filters matched `{ $.msg = … }` alone, so in R-34's one log group an `ops.gauges` or `otp.send_failed` line from another container would have moved the alarms. `logging.ts` now sets `service` to `SANCHAY_APP_ROLE` (api, worker, migrate; ops from F7), which each task definition sets, so the image carries no service name; the migrate task logs its three lines through pino, and the filters are `{ ($.service = "worker") && ($.msg = "ops.gauges") }` and the same with `api` for the two OTP counts. `log-lines.test.ts` writes the lines the real loggers produce to `apps/api/test/fixtures/app-log-lines.jsonl` (pino-http as nestjs-pino uses it, the real `OpsGaugesJob`, Nest's `Logger` routed as after `app.useLogger`); levels there are pino's numbers (30, 40, 50) under the `msg` key, and no filter tests a level name. The web container's Next.js output and the ops CLIs' `console.log` results stay plain text, which no JSON filter matches (open question 5).
+- **RV-04-F1-6 (2026-10-05): every gauge alarm treats a period without a gauge line as breaching (F1; R-34; major).** Only `worker-heartbeat-stale` did; the six other gauge alarms were `notBreaching`, so a stopped worker turned an open `money-invariant-breach` OK (and sent the OK notification), and a gauge filter that stopped matching would have read as OK for good. All seven gauge alarms are now `breaching` and say so in their descriptions; the count alarms (`alb-5xx`, `target-unhealthy`, `otp-send-failure-rate`) stay `notBreaching`, because no line there means no error. A stopped worker now pages the seven gauge alarms together, which F1's rollout notes (the 0-task window) and the G-E8 worker-down runbook have to expect.
+- **RV-04-F1-7 (2026-10-05): every metric filter is proven against captured log lines with `aws logs test-metric-filter` (F1; R-34; major).** `infra/bin/log-checks.ts prove-filters` synthesises this commit's stack, sends each `AWS::Logs::MetricFilter` pattern the fixture's lines plus the web container's plain text, and fails unless CloudWatch matches exactly the lines of the container and `msg` that `METRIC_LINES` names, with a number at each gauge's selector. It needs AWS credentials, so `deploy.yml` runs it after the OIDC step and before anything is built (the deploy role gains `ProveMetricFilters`: `logs:TestMetricFilter`), and the alarm drill runs it by hand; PR CI runs only its offline half, `log-proof.test.ts`. Against F1's previous patterns the proof reports both OTP filters matching the worker's lines (checked with a local stand-in for the CLI).
+- **RV-04-F1-8 (2026-10-05): both log groups mask PAN and Indian mobile numbers (F1; R-34; major).** A CloudWatch Logs data-protection policy (aws-cdk-lib 2.216.0 `logs.DataProtectionPolicy` with three `CustomDataIdentifier`s, `PanIndia`, `MobileIndia` and `MobileIndiaWithCountryCode`) audits and masks them at every egress, metric filters included, behind Plan 01's key-based scrubber; the shapes follow F21's PII scan, except that any fourth PAN letter counts. CloudWatch's custom identifiers allow no parentheses, hence no lookaround, so each regex consumes one bounding character and stays off pino's 13-digit `time`, UUIDs and longer numbers: a masked digit of `time` would break the JSON of every gauge line. `log-masking.test.ts` pins the policy on both groups, CloudWatch's limits (10 identifiers, name characters, 200-character regexes, the regex character set), the shapes it must mask and every captured line it must leave alone; the drill reads a fake PAN and mobile back masked.
+- **RV-04-F1-9 (2026-10-05): the alarm drill triggers all ten alarms end to end on the paused prod stack before GO-1 (F1; R-34; major).** The drill forced two alarms with `set-alarm-state`, which proves only the SNS routing. Now five alarms get their real signal (the service at 0 tasks, a 404 health-check path on the api target group, 20 OTP requests that answer 503 while MSG91 holds a broken key, 4 unsigned FP webhooks), and the five other gauge alarms get the worker's own `ops.gauges` line with one gauge raised (`pnpm --filter=@sanchay/infra logs:drill <alarm>`), because their real signal would mean fake orders, breaks or SMS rows in prod. Each alarm's ALARM and OK transitions and both developers' email and SMS receipts go into the G-E5 evidence, and the new output `ApiTargetGroupArn` names the target group the drill changes.
+- **RV-04-F1-10 (2026-10-05): R-33's NAV history runbook follows D9's month-by-month backfill (F1 `db-access.md`; follows Plan 02 RV-02-73; major).** D9 now fetches one calendar month per AMFI request inside a run, waits up to 5 minutes for AMFI, inserts 1,000 rows per statement and reports the rows it inserted, so the runbook drops the 7-day windows and the 260 weekly runs: prod's history is six runs, one per calendar year, newest first, back to 2021-11-01, about half an hour to an hour in all. It also gives each run's log lines and pass line, the resume line a failed run prints, the 10-minute limit of `aws ecs wait tasks-stopped` (run it again), and a read-only `--check` run that lists rows and NAV dates per month. Measured on 2026-10-05 with D9's built CLI against AMFI and PostgreSQL 18.6: a month took 21 to 29 s (download, parse and inserts), a re-run wrote 0, the heap peaked at 166 MB under `--max-old-space-size=256` (173 MB without it), and AMFI's report for a month with no NAVs yet is an HTML page, on which the run stops with the resume line.
+- **RV-04-F1-11 (2026-10-05): F1 follows D0's pino-http redaction (Plan 02 RV-02-75; minor).** D0's `logging.test.ts` now imports `buildPinoHttpOptions` and has a second EF-B4 case that logs through pino-http, so F1's key-level import keeps `buildPinoHttpOptions`, that case passes `SANCHAY_APP_ROLE: 'api'` once `LogEnv` needs the role, and the file has 9 cases (Step 2: 2 failed, 7 passed; Step 4: 9). Open question 6 is resolved.
+- **RV-04-F7-4 (2026-10-05): F7's `adoptPurchase` keeps E20's hand-off to `orders.purchase.advance` (follows Plan 03 RV-03-27; major).** F7's full-content rewrite of `fp.reconcile.nonfinal` moved an adopted purchase to UNDER_REVIEW and enqueued nothing, unlike its own `adoptRedemption`, so the H-2 checkout never ran for it: F4's `mf_purchase` handler leaves orders before PROCESSING to the saga jobs. `adoptPurchase` now moves the order and enqueues `orders.purchase.advance` `{orderId, challengeId}` (`singletonKey` = order id) in one transaction, as E20 does. `recon-fp.int.test.ts` gains the matching case (19/19), Consumes and Produces name the job, and Step 4's last line, which runs E20's `orders` suite with its own adoption case, now says what that suite guards. Checked in the scratch prototype: `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome ci` are clean on F7's job and on `recon-fp.int.test.ts` as written, and the purchase branch, run on PostgreSQL 18.6 with pg-boss 12.34.0 and D2's `Jobs`, commits the move with its job and rolls both back when the enqueue fails (the original text left no job).
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -200,6 +208,13 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 > running stack onto the D6 logins with E25's `-c noTasks=true`, and `db-access.md` gains R-33's
 > deployed runs after the migrate task: the curated list (F19), then the NAV history (D9). The round-2
 > notes below are kept as history; where they disagree with this note, this note wins.
+
+> **Amended 2026-10-05 for R-34 (RV-04-F1-5 to RV-04-F1-9).** Every api-image line names its
+> container (`service` is the task definition's `SANCHAY_APP_ROLE`; the migrate task logs through pino),
+> each metric filter reads one container's lines, every gauge alarm treats missing data as breaching,
+> `infra/bin/log-checks.ts` proves each filter with `aws logs test-metric-filter` against lines the real
+> loggers wrote (in `deploy.yml` and by hand), both log groups mask PAN and Indian mobile numbers, and the
+> drill triggers all ten alarms on the paused prod stack before GO-1.
 
 > **Review notes (2026-10-01, assembly round 2: FR-0, FR-3, FR-5 and the ops task role; BRIEF D5, D6,
 > D8, D9).** This text replaces the round-1 F1. What changed and why:
@@ -236,20 +251,20 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
 >   OIDC `sub` exactly (`StringEquals`); test filters without `--` (D8); `curl.exe`.
 
 **Files:**
-- **Create (infra):** `infra/lib/alarms.ts`, `infra/test/stack-fixtures.ts`, `infra/test/prod-stack.test.ts`, `infra/test/alarms.test.ts`
-- **Create (api):** `apps/api/src/db/db-logins.ts`, `apps/api/src/db/db-logins.test.ts`, `apps/api/test/int/db-logins.int.test.ts`, `apps/api/src/cli/reference-data.ts`, `apps/api/test/int/reference-data.int.test.ts`, `apps/api/src/modules/platform/ops-gauges.job.ts`, `apps/api/src/modules/platform/ops-gauges.job.test.ts`, `apps/api/src/config/env-roles.test.ts`, `apps/api/test/int/ops-gauges.int.test.ts`, `apps/api/test/int/otp-send-metrics.int.test.ts`
+- **Create (infra):** `infra/lib/alarms.ts`, `infra/test/stack-fixtures.ts`, `infra/test/prod-stack.test.ts`, `infra/test/alarms.test.ts`; R-34: `infra/lib/log-masking.ts`, `infra/lib/log-proof.ts`, `infra/bin/log-checks.ts`, `infra/test/log-masking.test.ts`, `infra/test/log-proof.test.ts`
+- **Create (api):** `apps/api/src/db/db-logins.ts`, `apps/api/src/db/db-logins.test.ts`, `apps/api/test/int/db-logins.int.test.ts`, `apps/api/src/cli/reference-data.ts`, `apps/api/test/int/reference-data.int.test.ts`, `apps/api/src/modules/platform/ops-gauges.job.ts`, `apps/api/src/modules/platform/ops-gauges.job.test.ts`, `apps/api/src/config/env-roles.test.ts`, `apps/api/test/int/ops-gauges.int.test.ts`, `apps/api/test/int/otp-send-metrics.int.test.ts`; R-34: `apps/api/src/modules/platform/log-lines.test.ts` and the fixture it writes, `apps/api/test/fixtures/app-log-lines.jsonl`
 - **Create (docs):** `docs/runbooks/credential-rotation.md`, `docs/runbooks/db-access.md`
-- **Modify (E25, key-level; fragments in Step 3):** `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts` (two expectations), `.github/workflows/deploy.yml` (two `env` lines in the `cdk deploy` step), `apps/api/Dockerfile` (one `COPY` line; RV-04-F1-1). `infra/bin/sanchay.ts` stays E25's: it already builds `SanchayMvpStack-prod` (R-31).
+- **Modify (E25, key-level; fragments in Step 3):** `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts` (two expectations), `.github/workflows/deploy.yml` (two `env` lines in the `cdk deploy` step and the step `Prove the metric filters`, R-34), `apps/api/Dockerfile` (one `COPY` line; RV-04-F1-1), `infra/package.json` (two scripts, R-34). `infra/bin/sanchay.ts` stays E25's: it already builds `SanchayMvpStack-prod` (R-31).
 - **Replace whole (other owners; same behaviour, now exported and importable):** `apps/api/src/cli/migrate.ts` (Plan 01 B23, 8 lines), `apps/api/src/cli/ops-legal-seed.ts` (E3), `apps/api/src/cli/ops-ref-seed.ts` (E6 with E7's IFSC pass)
-- **Modify (other owners, key-level):** `apps/api/src/cli/ops-catalogue-seed.ts` (D8: its first four loops move into an exported function), `apps/api/src/config/env.ts` (B2: two keys and invariant 14), `apps/api/src/config/env.test.ts` (B2 pin list: two keys), `apps/api/src/modules/identity/otp.service.ts` (Plan 01 B13: two log lines), `apps/api/src/modules/platform/jobs/job-registry.ts` (D2: one name), `apps/api/src/modules/platform/jobs/schedules.ts` (D2: one schedule), `apps/api/src/modules/platform/platform.module.ts` (Plan 01: one provider), `apps/api/package.json` (two scripts), root `package.json` (two script values)
+- **Modify (other owners, key-level):** `apps/api/src/cli/ops-catalogue-seed.ts` (D8: its first four loops move into an exported function), `apps/api/src/config/env.ts` (B2: two keys and invariant 14), `apps/api/src/config/env.test.ts` (B2 pin list: two keys), `apps/api/src/modules/identity/otp.service.ts` (Plan 01 B13: two log lines), `apps/api/src/modules/platform/jobs/job-registry.ts` (D2: one name), `apps/api/src/modules/platform/jobs/schedules.ts` (D2: one schedule), `apps/api/src/modules/platform/platform.module.ts` (Plan 01: one provider), `apps/api/package.json` (two scripts), root `package.json` (two script values), `apps/api/src/modules/platform/logging.ts` (Plan 01 B4 with D0's serializer: the role as `service`, R-34), `apps/api/src/modules/platform/logging.test.ts` (B4: the capture helper takes the role, one case, R-34)
 - **Migrations:** none. The two LOGIN roles are not migration objects (their passwords come from Secrets Manager at run time), and the migrate task upserts the reference data after the migrations.
 
 **Interfaces:**
-- **Prerequisites:** E25 as amended by Plan 02 RV-02-16 to RV-02-23, RV-02-33 and RV-02-70 (`SanchayMvpStack-prod` deployed paused in S2, R-05 and R-31; F1 changes that running stack); Plan 01 B2, B4, B6, B13, B23 (`0000_bootstrap`'s roles `sanchay_migrator`, `sanchay_app`, `sanchay_retention`, `sanchay_readonly`; `0003_grants`); Plan 02 D1, D2 (including `runMigrations`' pg-boss bootstrap and `0005_worker_heartbeats`' pgboss grants), D3, D6, D7, D8 (with RV-02-27 and RV-02-34), D9; Plan 03 E1 (with RV-03-10), E2, E3, E6, E7, E10, E20, E21. F1 needs none of F2-F4: its RECONCILING count reads the plan and mandate rows F2 will write, through `order_events` only.
+- **Prerequisites:** E25 as amended by Plan 02 RV-02-16 to RV-02-23, RV-02-33 and RV-02-70 (`SanchayMvpStack-prod` deployed paused in S2, R-05 and R-31; F1 changes that running stack); Plan 01 B2, B4, B6, B13, B23 (`0000_bootstrap`'s roles `sanchay_migrator`, `sanchay_app`, `sanchay_retention`, `sanchay_readonly`; `0003_grants`); Plan 02 D0 (B4's `logging.ts` with `serializeErr` and its `logMethod` hook), D1, D2 (including `runMigrations`' pg-boss bootstrap and `0005_worker_heartbeats`' pgboss grants), D3, D6, D7, D8 (with RV-02-27 and RV-02-34), D9; Plan 03 E1 (with RV-03-10), E2, E3, E6, E7, E10, E20, E21. F1 needs none of F2-F4: its RECONCILING count reads the plan and mandate rows F2 will write, through `order_events` only.
 - **Consumes:**
   - E25 `infra/lib/sanchay-mvp-stack.ts`: `SanchayMvpStack`, `SanchayMvpStackProps`, `SERVICE_NAME` (`sanchay-app`), `DB_MASTER_USER` (`sanchay_master`), `ARM64_LINUX`, `HEALTH_CHECK` (`/api/v1/health` on port `'3000'`), the constructor locals `vpc`, `apiRepo`, `webRepo`, `keyringSecret`, `msg91Secret`, `dbInstance`, `dbMasterSecret`, `appLogGroup`, `cluster`, `taskRole`, `logging`, `migrateTaskDef`, `migrateDbLogin`, `appDbLogin`, `dbEnv(user)`, `dbPassword(secret)`, `bootEnv`, `senderEnv`, `service`, `serviceSecurityGroup`, `alb`, `apiTargetGroup`; the web container's `PORT`, `HOSTNAME`, `SANCHAY_WWW_ORIGIN` and `SANCHAY_APP_ORIGIN`; `minHealthyPercent: 100`; the context flag `-c noTasks=true` (the service at 0 tasks); the GitHub OIDC provider and the least-privilege deploy role that trusts only the GitHub `prod` environment (RV-02-70); statement `SesSendFromSanchayDomain`; construct ids `NatEip`, `Database`, `AppTaskDef`, `MigrateTaskDef`, `Service`, `GithubOidc`, `GithubDeployRole`; outputs `NatEipAddress`, `AlbDnsName`, `ClusterName`, `MigrateTaskDefinitionArn`, `ApiRepoUri`, `WebRepoUri`, `AppSubnetIds`, `ServiceSecurityGroupId`; secrets `sanchay/{env}/{keyring,fp,fp-webhook,msg91,db-master}`.
   - E25 `infra/lib/config.ts`: `loadStackConfig(envName, source = process.env)` (refuses a missing or malformed `SANCHAY_PLATFORM_ARN` or `SANCHAY_SMS_RETRIEVER_HASH` and a malformed `SANCHAY_GITHUB_REPOSITORY`), `assertDeployInputs(config)` (refuses a missing repository), `SanchayStackConfig` (`githubRepo: string | undefined`, `dbInstanceSize`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `StaticConfig`, `PROD_CONFIG`, `GITHUB_REPOSITORY`, `blankToUndefined`, `DeployInputSource`, `StackConfigError`, `SanchayEnvName` (`'prod'`, R-31); `infra/tsconfig.json` (`exactOptionalPropertyTypes: false` for infra only, RV-02-17), `infra/cdk.json`, `.gitignore`'s `cdk.out/`; `infra/test/sanchay-mvp-stack.test.ts` (24 tests; its inputs `DEPLOY_INPUTS` and `WITH_REPO`); `infra/certs/rds-global-bundle.pem`; `apps/api/docker-entrypoint.sh` (composes `DATABASE_URL` from `SANCHAY_DB_HOST/PORT/NAME/USER` and `SANCHAY_DB_PASSWORD`); `apps/api/Dockerfile`'s runtime stage (the `/repo` layout, `dist/` under `/repo/apps/api`, `data/` at `/repo/data`); `.github/workflows/deploy.yml` (`prod` its only environment, QEMU, linux/arm64 builds, the web build arguments, `ENV_NAME`, the `Run the migrate task` step before `cdk deploy`, the rollout check, `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`); ADR-0014's first-deploy runbook.
-  - `parseEnv`, `assertBootInvariants`, `EnvError`, `EnvSchema`, `SANCHAY_APP_ROLE` (B2, `apps/api/src/config/env.ts`) and its pin test (`env.test.ts`); E25's constants `role` and `sends` with role-aware invariants 1 and 7 (RV-02-20); invariant 13 with `role === 'api'` (owner: Plan 03 E1, RV-03-10); `scrub` (B4, `platform/logging.ts`); `OtpService.issue`, `OTP_POLICY.smsPerIstDay` = 2,000, the IST-day window, `otpFixture`, `CaptureSmsSender.failNext` (B13); `createDb`, `Database`, `DbExecutor`, `DbHandle`, `DB` (B6); `loadDotEnvFile` (B23); `pgErrorCodeOf` (`platform/pg-errors.ts`); `CLOCK`, `Clock`, `FakeClock`; `PlatformModule`; `newId` and `TableName` (`platform/ids.ts`); `LEGAL_DOCUMENT_KEYS`, `isOneOf` (`@sanchay/domain`); `createTestDatabase`, `TestDatabase`, `insertOtp`, `inject('pgAdminUrl')` (Plan 01 test helpers)
+  - `parseEnv`, `assertBootInvariants`, `EnvError`, `EnvSchema`, `SANCHAY_APP_ROLE` (B2, `apps/api/src/config/env.ts`) and its pin test (`env.test.ts`); E25's constants `role` and `sends` with role-aware invariants 1 and 7 (RV-02-20); invariant 13 with `role === 'api'` (owner: Plan 03 E1, RV-03-10); `scrub`, `buildPinoOptions` and `buildPinoHttpOptions` (B4, `platform/logging.ts`, with D0's `serializeErr` and `logMethod` hook) and its `logging.test.ts`; nestjs-pino 5.2.0's `Logger` (its root logger is `pinoHttp(options).logger`, and inside a request it logs to pino-http's `req.log`); `OtpService.issue`, `OTP_POLICY.smsPerIstDay` = 2,000, the IST-day window, `otpFixture`, `CaptureSmsSender.failNext` (B13); `createDb`, `Database`, `DbExecutor`, `DbHandle`, `DB` (B6); `loadDotEnvFile` (B23); `pgErrorCodeOf` (`platform/pg-errors.ts`); `CLOCK`, `Clock`, `FakeClock`; `PlatformModule`; `newId` and `TableName` (`platform/ids.ts`); `LEGAL_DOCUMENT_KEYS`, `isOneOf` (`@sanchay/domain`); `createTestDatabase`, `TestDatabase`, `insertOtp`, `inject('pgAdminUrl')` (Plan 01 test helpers)
   - `runMigrations` (D2: bootstraps schema `pgboss` as the migrating login), `GRANT … ON SCHEMA pgboss TO sanchay_app` (D2 `0005`), `JOB_NAMES`, `JobHandler`, `Job<N>`, `registerSchedules(boss)` with keyed `boss.schedule`, `worker_heartbeats`, `PgBoss` (D2); `ReconBreaks.open`, `recon_breaks`, `RUNTIME_CONFIG_DEFAULTS['orders.enabled'] = false`, `['plans.sip.enabled'] = false` (D1)
   - `SANCHAY_PROVIDER_MODE_FP` (`sandbox` | `production`), `SANCHAY_FP_BASE_URL`, invariants 8 and 9 (D3); `SANCHAY_PROVIDER_MODE_SMS = 'msg91'`, `SANCHAY_PROVIDER_MODE_EMAIL = 'ses'`, `SANCHAY_SES_FROM`, `SANCHAY_MSG91_CREDENTIALS_JSON`, invariants 11 and 12, `SesEmailSender` (D6); `SANCHAY_PILOT_INVITE_ONLY`, invariant 10 (D7); `seedCatalogue(db, dataDir)`, `DEFAULT_DATA_DIR`, its private `readCsv` and `cell`, its first four loops (`amcs.csv`, `sebi-categories.csv`, `category-aliases.csv`, `market-holidays-2026-2027.csv`), `amcs`, `sebiCategories`, `categoryAliases`, `marketHolidays`, `scheme_navs` (`nav_date`, `quarantined`), `market_holidays` (`holiday_date`) (D8); the NAV syncs at 21:30, 23:30, 07:00 and 10:30 IST (D9)
   - `inbound_webhook_events` (`signature_valid`, `received_at`), `SANCHAY_FP_WEBHOOK_SECRET` (E1); `SANCHAY_API_ORIGIN`, `GET /api/v1/app/config` `flags` (E2); `legalDocuments`, `LEGAL_DOCUMENT_STATUSES`, `LegalDocumentStatus`, the front matter of `docs/legal/documents/*.md` (`key`, `version`, `status`, optional `effective_from`) and its upsert in `apps/api/src/cli/ops-legal-seed.ts` (E3); `refPincodes`, `data/ref-pincodes.csv` (E6) and `refIfsc`, `data/ref-ifsc.csv` (E7), both upserted by `apps/api/src/cli/ops-ref-seed.ts`; the public route `GET /api/v1/legal/documents/{key}` (`legal.getDocument`, 404 for an unpublished key) (E10); `order_events`, `SANCHAY_PLATFORM_ARN` (required, `ARN-<digits>`), the `fp.reconcile.nonfinal.miss` self-events (E20)
@@ -258,27 +273,31 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
   - **D6 logins:** RDS master `sanchay_master` (E25; secret `sanchay/{env}/db-master`, migrate only); `sanchay_app_login` (secret `sanchay/{env}/db-app`; api, worker, ops; member of `sanchay_app` WITH INHERIT, SET); `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`; people over SSM; member of `sanchay_readonly`; `default_transaction_read_only = on`, `statement_timeout = 60s`). The two login secrets are generated JSON `{username, password}` with 40 letters and digits.
   - `apps/api/src/db/db-logins.ts`: `ensureDbLogins(db, {app, readonly}) → string[]`, `DB_LOGINS`, `DbLoginPasswords`, `scramSha256Verifier(password, salt?)`, `DbLoginError`.
   - **Reference data (FR-3):** `apps/api/src/cli/reference-data.ts`: `seedReferenceData(db, dirs = REFERENCE_DATA_DIRS) → summary`, `REFERENCE_DATA_DIRS`, `ReferenceDataDirs`. Its three idempotent steps: `seedLegalDocumentFiles(db, dir = LEGAL_DOCUMENTS_DIR) → count`, `LEGAL_DOCUMENTS_DIR`, `LegalSeedError` (`ops-legal-seed.ts`; a version that is no longer DRAFT keeps its text); `seedRefTables(db, dataDir = REF_DATA_DIR) → {pincodes, ifsc}`, `REF_DATA_DIR` (`ops-ref-seed.ts`); `seedCatalogueReference(db, dataDir)` (`ops-catalogue-seed.ts`: AMCs, SEBI categories, aliases, market holidays; never schemes, fund facts or commission lines). `pnpm ops:legal:seed` and `pnpm ops:ref:seed` run the compiled modules. The api image holds `/repo/docs/legal` and `/repo/data`.
-  - `apps/api/src/cli/migrate.ts`: with `SANCHAY_APP_ROLE=migrate` it also syncs the logins (both passwords set) and seeds the reference data; its log lines are `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login` and `reference data seeded: <n> legal documents, <n> pincodes, <n> IFSC codes, catalogue reference tables`. A developer's `pnpm db:migrate` (role `api`) only migrates.
+  - `apps/api/src/cli/migrate.ts`: with `SANCHAY_APP_ROLE=migrate` it also syncs the logins (both passwords set) and seeds the reference data; its pino lines (`service` `migrate`, R-34) are `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login` and `reference data seeded: <n> legal documents, <n> pincodes, <n> IFSC codes, catalogue reference tables`. A developer's `pnpm db:migrate` (role `api`) only migrates.
   - Env (B2 schema): `SANCHAY_DB_APP_PASSWORD`, `SANCHAY_DB_READONLY_PASSWORD` (migrate container only); boot invariant **14** (outside local/test, `SANCHAY_APP_ROLE=migrate` requires both).
   - ECS: task families `sanchay-{env}-migrate` (container `migrate`, command `node dist/cli/migrate.js`, login `sanchay_master`, E25's task role) and `sanchay-{env}-ops` (container `ops`, `SANCHAY_APP_ROLE=ops`, login `sanchay_app_login`, secrets `SANCHAY_DB_PASSWORD` and `SANCHAY_KEYRING_JSON` only, default command `node dist/main.js`, task role `OpsTaskRole` whose only statement is `ReadOpsInviteParameters`: `ssm:GetParameter` on `arn:aws:ssm:<region>:<account>:parameter/sanchay/{env}/invites/*`).
   - `infra/lib/config.ts`: `SanchayStackConfig` gains `alarmEmails`, `alarmSmsNumbers` (deploy inputs `SANCHAY_ALARM_EMAILS`, `SANCHAY_ALARM_SMS_NUMBERS`; a malformed entry is refused by `loadStackConfig`); E25's `assertDeployInputs` also refuses a deploy without either list (`SANCHAY_ALARM_EMAILS is required (SNS email recipients of the alarms)`, `SANCHAY_ALARM_SMS_NUMBERS is required (SNS SMS recipients of the alarms)`). No new CDK context: E25's `-c noTasks=true` (the service at 0 tasks) serves F1's rollout. Deploy inputs: E25's `SANCHAY_GITHUB_REPOSITORY`, `SANCHAY_PLATFORM_ARN` and `SANCHAY_SMS_RETRIEVER_HASH`, plus `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS`.
   - `infra/lib/sanchay-mvp-stack.ts` exports `DB_APP_LOGIN`, `DB_READONLY_LOGIN`, `migrateFamily(env)`, `opsFamily(env)` beside E25's `SERVICE_NAME` and `DB_MASTER_USER`.
-  - `infra/lib/alarms.ts`: `buildOpsMetrics`, `buildNavAgeAlarm`, `buildAlarms`, `ALARM_SUFFIXES`, `alarmName(env, suffix)`, `OPS_GAUGES_MESSAGE`, `OPS_GAUGE_KEYS`, `OTP_SENT_MESSAGE`, `OTP_SEND_FAILED_MESSAGE`, `SMS_CAP_ALARM_THRESHOLD` (1,800).
-  - Alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (one email and one SMS subscription per recipient, actions on ALARM and OK).
-  - Outputs: E25's (with `GithubDeployRoleArn`, which every real deploy has) plus `OpsTaskDefinitionArn`, `DbInstanceIdentifier`, `DbEndpointAddress` and `OpsAlertsTopicArn`.
+  - `infra/lib/alarms.ts`: `buildOpsMetrics`, `buildNavAgeAlarm`, `buildAlarms`, `ALARM_SUFFIXES`, `alarmName(env, suffix)`, `OPS_GAUGES_MESSAGE`, `OPS_GAUGE_KEYS`, `OTP_SENT_MESSAGE`, `OTP_SEND_FAILED_MESSAGE`, `SMS_CAP_ALARM_THRESHOLD` (1,800), and (R-34) `GAUGES_SERVICE` (`worker`), `OTP_SERVICE` (`api`), `AppLines`, `appLinesPattern(lines)` (`{ ($.service = "…") && ($.msg = "…") }`) and `METRIC_LINES` (each metric's container and `msg`).
+  - `infra/lib/log-masking.ts` (R-34): `PII_IDENTIFIERS` (`PanIndia`, `MobileIndia`, `MobileIndiaWithCountryCode`), `PiiIdentifier`, `piiMaskingPolicy(name)`: the data-protection policies `sanchay-{env}-app-pii` and `sanchay-{env}-ecs-exec-pii` on the two log groups.
+  - `infra/lib/log-proof.ts` (R-34): `LOG_FIXTURE`, `WEB_LINES`, `parseLogLines`, `jsonOf`, `valueAt`, `filterCases`, `checkMatches`, `DRILL_GAUGES`, `isDrillName`, `drillEvents`, `MASK_DRILL_VALUES`, `maskDrillEvent`, types `FilterCase`, `DrillName`, `LogEvent`; `infra/bin/log-checks.ts` (`prove-filters`, `drill <name>`) behind `pnpm --filter=@sanchay/infra prove:filters` and `pnpm --filter=@sanchay/infra logs:drill <name>`.
+  - `apps/api/src/modules/platform/logging.ts` (R-34): `LogEnv` (`Pick<Env, 'SANCHAY_LOG_LEVEL' | 'SANCHAY_APP_ROLE'>`); every pino line's `service` is its container's `SANCHAY_APP_ROLE`. `apps/api/test/fixtures/app-log-lines.jsonl`: the captured lines, written and checked by `log-lines.test.ts`.
+  - Alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (one email and one SMS subscription per recipient, actions on ALARM and OK). Every gauge alarm treats a period without a gauge line as breaching; `alb-5xx`, `target-unhealthy` and `otp-send-failure-rate` as not breaching (R-34).
+  - Outputs: E25's (with `GithubDeployRoleArn`, which every real deploy has) plus `OpsTaskDefinitionArn`, `DbInstanceIdentifier`, `DbEndpointAddress`, `OpsAlertsTopicArn` and `ApiTargetGroupArn` (the alarm drill, R-34).
   - Job `ops.gauges.emit` (`OpsGaugesJob`, worker, every minute, schedule key `ops-gauges`), `readOpsGauges(exec, now)`, `OPS_GAUGE_KEYS`, `OPS_GAUGES_MESSAGE`, `NAV_NEVER_SYNCED` (99), types `OpsGauges`, `OpsGaugeKey`. Log lines `otp.sent` (info) and `otp.send_failed` (warn) from `OtpService.issue`.
-  - `.github/workflows/deploy.yml` (E25's; `prod` its only environment): build and push, **run the migrate task** (with F1's image the task also syncs the two logins and loads the reference data), `cdk deploy`, force a new deployment of `sanchay-app` and fail unless its rollout completes. F1 adds only the GitHub `prod` environment secrets `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` to the `cdk deploy` step's `env`, beside E25's variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image's `/site`), `SANCHAY_SMS_RETRIEVER_HASH` and `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`.
-  - `docs/runbooks/credential-rotation.md` (seven secrets, PITR restore test, alarm drill) and `docs/runbooks/db-access.md` (the logins, the migrate run-task form, what the migrate task loads, the ops task and its role, R-33's deployed runs after the migrate task (the curated list, then the NAV history), read-only SQL over SSM, the 0-task deploy that moves the stack onto new logins).
+  - `.github/workflows/deploy.yml` (E25's; `prod` its only environment): build and push, **run the migrate task** (with F1's image the task also syncs the two logins and loads the reference data), `cdk deploy`, force a new deployment of `sanchay-app` and fail unless its rollout completes. F1 adds the step `Prove the metric filters` after the OIDC step (R-34; the deploy role's statement `ProveMetricFilters`, `logs:TestMetricFilter`) and the GitHub `prod` environment secrets `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` in the `cdk deploy` step's `env`, beside E25's variables `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` (the web image's `/site`), `SANCHAY_SMS_RETRIEVER_HASH` and `SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}`.
+  - `docs/runbooks/credential-rotation.md` (seven secrets, PITR restore test, the drill of all ten alarms with the masking check, R-34) and `docs/runbooks/db-access.md` (the logins, the migrate run-task form, what the migrate task loads, the ops task and its role, R-33's deployed runs after the migrate task (the curated list, then the NAV history), read-only SQL over SSM, the 0-task deploy that moves the stack onto new logins).
 - **For later tasks (use exactly these):**
   - **F7:** run ops commands on `--task-definition sanchay-{env}-ops` with `"name": "ops"` in `containerOverrides` (its environment already sets `SANCHAY_APP_ROLE=ops`); network configuration `"awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}"`, or `describe-services --services sanchay-app`. The login is `sanchay_app_login`, so `opsDatabaseUrl`'s `-c role=sanchay_app` and `assertOpsPrivileges` pass (tested here). The ops task role is `OpsTaskRole`, not the service's task role: no document bucket, no SES, and `ssm:GetParameter` only on `/sanchay/{env}/invites/*`. `ops:invite --mobiles-param /sanchay/{env}/invites/<name>` reads a SecureString under the default `aws/ssm` key with `GetParameter` and `WithDecryption: true` (a customer-managed key would also need `kms:Decrypt`, which F1 does not grant). F7's EMF metrics are not needed (BRIEF D5): `criticalBreaksOpen` and `reconcilingOverSla` are F1's gauges. Its runbook links `db-access.md` for the read-only session.
   - **F19:** `seedCatalogueReference(db, dataDir)` sits directly above `seedCatalogue`, whose first statement calls it. F19's validation block goes at the very start of `seedCatalogue`'s body, before that call, so an invalid list still writes nothing. The migrate task never loads the curated list; `DEFAULT_DATA_DIR` resolves to `/repo/data` in the api image, so `ops:catalogue:seed --pilot-list` run on the ops task reads the CSVs the deployed image carries. On prod that run is `node dist/cli/ops-catalogue-seed.js --pilot-list` on `sanchay-prod-ops`, before D9's NAV history backfill (R-33, RV-04-F1-4; `db-access.md`, "After the migrate task").
-  - **F24-F27, F20, F22, F23:** the alarm names above; the ECS service is `sanchay-app` in cluster `sanchay-{env}`; `credential-rotation.md` starts `# Runbook: credential rotation`, has an `Owner:` line and ends with the "If an alarm fires mid-rotation" section (append the G-E8 sections after its last bullet); `db-access.md` keeps the section "Read-only SQL over SSM (spec §2.4)"; app log group `/sanchay/{env}/app`, stream prefix `{env}/{container}`. In infra tests use `synthTemplate('prod', inputs?, {noTasks?})`, `PROD_INPUTS`, `containersOf`, `envOf`, `secretNamesOf`, `familyOf` from `infra/test/stack-fixtures.ts` (R-31: there is no dev stack and no `DEV_INPUTS`; `sanchay-{env}` is `sanchay-prod`).
+  - **F24-F27, F20, F22, F23:** the alarm names above; the ECS service is `sanchay-app` in cluster `sanchay-{env}`; `credential-rotation.md` starts `# Runbook: credential rotation`, has an `Owner:` line and ends with the "If an alarm fires mid-rotation" section (append the G-E8 sections after its last bullet); `db-access.md` keeps the section "Read-only SQL over SSM (spec §2.4)"; app log group `/sanchay/{env}/app`, stream prefix `{env}/{container}`, and every api-image line's `service` is its container (R-34); every gauge alarm counts a period without a gauge line as breaching, so a stopped worker pages all seven gauge alarms with `sanchay-prod-worker-heartbeat-stale`. In infra tests use `synthTemplate('prod', inputs?, {noTasks?})`, `PROD_INPUTS`, `containersOf`, `envOf`, `secretNamesOf`, `familyOf` from `infra/test/stack-fixtures.ts` (R-31: there is no dev stack and no `DEV_INPUTS`; `sanchay-{env}` is `sanchay-prod`).
   - **F18:** `SANCHAY_SMS_RETRIEVER_HASH` reaches the `api` container only from the GitHub environment variable of the same name (the `prod` environment), read by `loadStackConfig` during `cdk deploy`.
 - **Deviations from the outline:**
   1. Metrics come from CloudWatch Logs metric filters on one JSON log line a minute, not EMF or `PutMetricData`: the worker needs no CloudWatch permission, and a dead worker is itself the missing-data signal.
   2. D6's logins and the ops task definition with its own SSM-only task role are not in the outline; each is needed for R-16. The prod stack itself, its 0-task deploy flag (`-c noTasks=true`), its deploy role and the migrate step in `deploy.yml` are E25's (spec §2.4, R-31).
   3. Invariant 14 is new (`env.ts` is B2's file). Invariants 1 and 7 are E25's, 13 is E1's.
   4. The migrate task loads the reference data on every deploy (FR-3), and refuses to change the text of a published legal-document version. E3's and E6's seeds become exported functions, and their `pnpm` scripts run the compiled modules.
+  5. R-34's `service` field comes from `SANCHAY_APP_ROLE`, which every api-image task definition already sets, not from a new variable. The web container's Next.js output and the results the ops CLIs print (`console.log` in F7, F19 and D9) carry none and are told apart by their stream prefix; no metric filter reads them.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -326,6 +345,7 @@ export interface ContainerDef {
   Name: string;
   Environment?: Array<{ Name: string; Value: unknown }>;
   Secrets?: Array<{ Name: string; ValueFrom: unknown }>;
+  LogConfiguration?: { LogDriver: string; Options?: Record<string, unknown> };
 }
 
 /** Every container definition in the template, by container name (web, api, worker, migrate, ops). */
@@ -455,9 +475,39 @@ describe('SanchayMvpStack-prod hardened (F1)', () => {
       'DbEndpointAddress',
       'GithubDeployRoleArn',
       'OpsAlertsTopicArn',
+      'ApiTargetGroupArn',
     ]) {
       t.hasOutput(name, {});
     }
+  });
+
+  it('R-34: every container logs to /sanchay/prod/app; each api-image container names itself by role', () => {
+    const appLogGroup = Object.keys(
+      t.findResources('AWS::Logs::LogGroup', { Properties: { LogGroupName: '/sanchay/prod/app' } }),
+    );
+    for (const [name, c] of containersOf(t)) {
+      expect(c.LogConfiguration).toMatchObject({
+        LogDriver: 'awslogs',
+        Options: { 'awslogs-group': { Ref: appLogGroup[0] }, 'awslogs-stream-prefix': 'prod' },
+      });
+      // logging.ts: every pino line's `service` is SANCHAY_APP_ROLE; the web image has no pino.
+      if (name !== 'web') expect(envOf(c).SANCHAY_APP_ROLE).toBe(name);
+    }
+    expect([...containersOf(t).keys()].sort()).toEqual(['api', 'migrate', 'ops', 'web', 'worker']);
+  });
+
+  it('R-34: the deploy role may replay log lines through the metric filters, and nothing more', () => {
+    const statements = Object.values(t.findResources('AWS::IAM::Policy'))
+      .filter((p) => JSON.stringify(p.Properties.Roles).includes('GithubDeployRole'))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement as Array<Record<string, unknown>>);
+    expect(statements.filter((s) => JSON.stringify(s.Action).includes('logs:'))).toEqual([
+      {
+        Sid: 'ProveMetricFilters',
+        Effect: 'Allow',
+        Action: 'logs:TestMetricFilter',
+        Resource: '*',
+      },
+    ]);
   });
 
   it('D6: the two LOGIN roles get generated letters-and-digits secrets', () => {
@@ -569,12 +619,12 @@ describe('ops metrics (F1)', () => {
     ]);
   });
 
-  it('one metric filter per gauge plus the two OTP counters, in namespace Sanchay/prod', () => {
+  it('one metric filter per gauge (worker lines) plus the two OTP counters (api lines), in Sanchay/prod', () => {
     const t = synthTemplate('prod');
     t.resourceCountIs('AWS::Logs::MetricFilter', OPS_GAUGE_KEYS.length + 2);
     for (const key of OPS_GAUGE_KEYS) {
       t.hasResourceProperties('AWS::Logs::MetricFilter', {
-        FilterPattern: '{ $.msg = "ops.gauges" }',
+        FilterPattern: '{ ($.service = "worker") && ($.msg = "ops.gauges") }',
         MetricTransformations: [
           Match.objectLike({
             MetricNamespace: 'Sanchay/prod',
@@ -586,7 +636,7 @@ describe('ops metrics (F1)', () => {
     }
     for (const message of [OTP_SENT_MESSAGE, OTP_SEND_FAILED_MESSAGE]) {
       t.hasResourceProperties('AWS::Logs::MetricFilter', {
-        FilterPattern: `{ $.msg = "${message}" }`,
+        FilterPattern: `{ ($.service = "api") && ($.msg = "${message}") }`,
         MetricTransformations: [
           Match.objectLike({ MetricName: message, MetricValue: '1', DefaultValue: 0 }),
         ],
@@ -659,6 +709,29 @@ describe('prod alarms (F1)', () => {
     });
   });
 
+  it('R-34: every gauge alarm treats a period without a gauge line as breaching; the count alarms do not', () => {
+    const gauges: readonly string[] = OPS_GAUGE_KEYS;
+    const missing = Object.values(t.findResources('AWS::CloudWatch::Alarm')).map((a) => [
+      a.Properties.AlarmName,
+      a.Properties.TreatMissingData,
+    ]);
+    const expected = Object.values(t.findResources('AWS::CloudWatch::Alarm')).map((a) => [
+      a.Properties.AlarmName,
+      gauges.includes(a.Properties.MetricName) ? 'breaching' : 'notBreaching',
+    ]);
+    expect(missing).toEqual(expected);
+    expect(
+      expected
+        .filter(([, treat]) => treat === 'notBreaching')
+        .map(([name]) => name)
+        .sort(),
+    ).toEqual([
+      'sanchay-prod-alb-5xx',
+      'sanchay-prod-otp-send-failure-rate',
+      'sanchay-prod-target-unhealthy',
+    ]);
+  });
+
   it('money-invariant-breach fires on any open CRITICAL break; reconciling-sla on any 2 h straggler', () => {
     t.hasResourceProperties('AWS::CloudWatch::Alarm', {
       AlarmName: 'sanchay-prod-money-invariant-breach',
@@ -699,6 +772,225 @@ describe('prod alarms (F1)', () => {
       MetricName: 'smsSentToday',
       Threshold: 1800,
     });
+  });
+});
+```
+
+`infra/test/log-masking.test.ts` (R-34):
+```ts
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DataIdentifier } from 'aws-cdk-lib/aws-logs';
+import { describe, expect, it } from 'vitest';
+import { PII_IDENTIFIERS } from '../lib/log-masking.js';
+import { LOG_FIXTURE, parseLogLines } from '../lib/log-proof.js';
+import { synthTemplate } from './stack-fixtures.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const fixture = parseLogLines(readFileSync(path.join(repoRoot, LOG_FIXTURE), 'utf8'));
+/** CloudWatch applies these regexes; JavaScript reads this subset (classes, counts, anchors, |) the same way. */
+const patterns = PII_IDENTIFIERS.map((id) => ({ name: id.name, re: new RegExp(id.regex) }));
+const maskedBy = (text: string) => patterns.filter((p) => p.re.test(text)).map((p) => p.name);
+
+describe('PII masking on the log groups (R-34, F1)', () => {
+  it('both log groups audit and mask the three identifiers', () => {
+    const groups = Object.values(synthTemplate('prod').findResources('AWS::Logs::LogGroup'));
+    expect(groups).toHaveLength(2);
+    for (const group of groups) {
+      const policy = group.Properties.DataProtectionPolicy;
+      const names = PII_IDENTIFIERS.map((id) => id.name);
+      expect(policy.Configuration.CustomDataIdentifier).toEqual(
+        PII_IDENTIFIERS.map((id) => ({ Name: id.name, Regex: id.regex })),
+      );
+      expect(policy.Statement).toEqual([
+        expect.objectContaining({ DataIdentifier: names, Operation: { Audit: expect.anything() } }),
+        expect.objectContaining({
+          DataIdentifier: names,
+          Operation: { Deidentify: { MaskConfig: {} } },
+        }),
+      ]);
+    }
+  });
+
+  it("fits CloudWatch's limits on custom data identifiers", () => {
+    const managed = Object.values(DataIdentifier).map((d) => String(d));
+    expect(PII_IDENTIFIERS.length).toBeLessThanOrEqual(10);
+    for (const { name, regex } of PII_IDENTIFIERS) {
+      expect(name).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
+      expect(managed).not.toContain(name);
+      expect(regex.length).toBeLessThanOrEqual(200);
+      // Letters, digits, _ # = @ / ; , - space, and ^ $ ? [ ] { } | \ * + . (no parentheses).
+      expect(regex).toMatch(/^[A-Za-z0-9_#=@/;, ^$?[\]{}|\\*+.-]+$/);
+    }
+  });
+
+  it('masks a PAN and an Indian mobile number wherever a log line can carry one', () => {
+    for (const line of ['{"msg":"kyc","pan":"ABCPE1234F"}', 'pan ABCDE1234F seen', 'ABCDE1234F']) {
+      expect(maskedBy(line)).toContain('PanIndia');
+    }
+    for (const line of [
+      '{"msg":"failed query","err":{"message":"params: 9876543210,inv-1"}}',
+      'otp to 9876500001',
+      '9876500001',
+    ]) {
+      expect(maskedBy(line)).toContain('MobileIndia');
+    }
+    for (const line of [
+      'otp to +919876500001',
+      '{"mobiles":"919876500001"}',
+      'call +91 9876500001 now',
+      'call +91-9876500001',
+    ]) {
+      expect(maskedBy(line)).toContain('MobileIndiaWithCountryCode');
+    }
+  });
+
+  it('leaves every captured app log line alone, so the metric filters read them unchanged', () => {
+    for (const line of fixture) expect([line, maskedBy(line)]).toEqual([line, []]);
+    for (const line of [
+      '{"time":1795432100123,"id":12345678}',
+      '{"req":{"id":"01a0f5c6-2c50-732a-b49d-8084083458b1"}}',
+      '{"isin":"INF209K01YN0","amount":"100000.00","folioCount":3}',
+      'sent to ******0001',
+    ]) {
+      expect([line, maskedBy(line)]).toEqual([line, []]);
+    }
+  });
+});
+```
+
+`infra/test/log-proof.test.ts` (R-34):
+```ts
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { METRIC_LINES } from '../lib/alarms.js';
+import { PII_IDENTIFIERS } from '../lib/log-masking.js';
+import {
+  checkMatches,
+  DRILL_GAUGES,
+  type DrillName,
+  drillEvents,
+  filterCases,
+  jsonOf,
+  LOG_FIXTURE,
+  maskDrillEvent,
+  parseLogLines,
+  valueAt,
+  WEB_LINES,
+} from '../lib/log-proof.js';
+import { synthTemplate } from './stack-fixtures.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const fixture = parseLogLines(readFileSync(path.join(repoRoot, LOG_FIXTURE), 'utf8'));
+const template = synthTemplate('prod');
+const cases = filterCases(template.toJSON().Resources, fixture);
+
+describe('the metric filter proof (R-34, F1)', () => {
+  it("the fixture holds the api image's real lines: JSON naming its container, numeric level, pino time", () => {
+    expect(fixture.length).toBeGreaterThanOrEqual(8);
+    for (const line of fixture) {
+      const json = jsonOf(line);
+      expect(json?.service).toMatch(/^(api|worker|migrate|ops)$/);
+      expect([30, 40, 50]).toContain(json?.level);
+      expect(String(json?.time)).toMatch(/^\d{13}$/);
+      expect(typeof json?.msg).toBe('string');
+    }
+  });
+
+  it('sends every filter the whole fixture and the web lines, within what test-metric-filter takes', () => {
+    expect(cases.map((c) => c.metricName).sort()).toEqual(Object.keys(METRIC_LINES).sort());
+    for (const c of cases) {
+      expect(c.lines).toEqual([...fixture, ...WEB_LINES]);
+      expect(c.lines.length).toBeLessThanOrEqual(50);
+      expect(c.pattern.length).toBeLessThanOrEqual(1024);
+    }
+  });
+
+  it('each filter has lines to match and the same msg from another container to refuse', () => {
+    for (const c of cases) {
+      const want = METRIC_LINES[c.metricName];
+      expect(c.pattern).toBe(
+        `{ ($.service = "${want?.service}") && ($.msg = "${want?.message}") }`,
+      );
+      expect(c.expected.length).toBeGreaterThan(0);
+      const sameMsgElsewhere = fixture.filter((line) => {
+        const json = jsonOf(line);
+        return json?.msg === want?.message && json?.service !== want?.service;
+      });
+      expect(sameMsgElsewhere.length).toBeGreaterThan(0);
+      expect(checkMatches(c, c.expected)).toEqual([]);
+    }
+  });
+
+  it('names a missed line, a foreign match and a gauge that is not a number', () => {
+    const gauge = cases.find((c) => c.metricName === 'smsSentToday');
+    if (gauge === undefined) throw new Error('no smsSentToday filter');
+    const [line] = gauge.expected;
+    if (line === undefined) throw new Error('no smsSentToday line');
+    const other = fixture.find((l) => !gauge.expected.includes(l)) ?? '';
+    expect(checkMatches(gauge, [other])).toEqual([
+      `missed: ${line}`,
+      `matched a line it must refuse: ${other}`,
+    ]);
+    const nulled = line.replace(/"smsSentToday":\d+/, '"smsSentToday":null');
+    expect(checkMatches({ ...gauge, expected: [nulled] }, [nulled])).toEqual([
+      `$.gauges.smsSentToday is not a number in: ${nulled}`,
+    ]);
+  });
+});
+
+/** The value an alarm sees per period from the drill lines alone (statistic Maximum, as every gauge alarm). */
+function breachedPeriods(name: DrillName, now: number): boolean[] {
+  const alarm = Object.values(template.findResources('AWS::CloudWatch::Alarm')).find(
+    (a) => a.Properties.AlarmName === `sanchay-prod-${name}`,
+  );
+  if (alarm === undefined) throw new Error(`no alarm sanchay-prod-${name}`);
+  const { MetricName, Period, Threshold, ComparisonOperator, EvaluationPeriods } = alarm.Properties;
+  const events = drillEvents(name, now);
+  return Array.from({ length: EvaluationPeriods as number }, (_, i) => {
+    const end = Math.floor(now / 1000 / Period) * Period + Period - i * Period;
+    const values = events
+      .filter((e) => e.timestamp / 1000 >= end - Period && e.timestamp / 1000 < end)
+      .map((e) => valueAt(e.message, `$.gauges.${MetricName}`) as number);
+    const max = Math.max(...values);
+    return ComparisonOperator === 'GreaterThanThreshold' ? max > Threshold : max >= Threshold;
+  });
+}
+
+describe('the alarm drill lines (R-34, F1)', () => {
+  it('raise their gauge past its alarm in every evaluated period, and no other gauge', () => {
+    const now = Date.UTC(2026, 10, 18, 9, 30, 45);
+    for (const name of Object.keys(DRILL_GAUGES) as DrillName[]) {
+      expect([name, breachedPeriods(name, now)]).toEqual([
+        name,
+        breachedPeriods(name, now).map(() => true),
+      ]);
+      const raised = drillEvents(name, now).flatMap((e) =>
+        Object.entries((jsonOf(e.message)?.gauges ?? {}) as Record<string, number>)
+          .filter(([key, value]) => value > (key === 'workerHeartbeatAgeSeconds' ? 10 : 0))
+          .map(([key]) => key),
+      );
+      expect(new Set(raised)).toEqual(new Set([DRILL_GAUGES[name].key]));
+      for (const e of drillEvents(name, now)) {
+        expect(jsonOf(e.message)).toMatchObject({
+          service: 'worker',
+          msg: 'ops.gauges',
+          drill: true,
+        });
+        // The masking patterns leave the line whole, or the gauge filters could not read it.
+        expect(PII_IDENTIFIERS.filter((id) => new RegExp(id.regex).test(e.message))).toEqual([]);
+      }
+    }
+  });
+
+  it('the masking drill line is no metric line and carries the values the policy must hide', () => {
+    const line = maskDrillEvent(Date.UTC(2026, 10, 18, 9, 30)).message;
+    expect(jsonOf(line)).toMatchObject({ service: 'worker', drill: true });
+    expect(line).toContain('ABCDE1234F');
+    for (const c of cases) expect(c.expected).not.toContain(line);
   });
 });
 ```
@@ -1328,6 +1620,176 @@ describe('OpsGaugesJob (F1)', () => {
 });
 ```
 
+`apps/api/src/modules/platform/log-lines.test.ts` (R-34). Its first run writes the fixture the infra tests and the filter proof read, `apps/api/test/fixtures/app-log-lines.jsonl` (3.16):
+```ts
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
+import { Writable } from 'node:stream';
+import { ConsoleLogger, Logger as NestLogger } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
+import { pino } from 'pino';
+import { pinoHttp } from 'pino-http';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { DbHandle } from '../../db/client.js';
+import { FakeClock } from './clock.js';
+import { buildPinoHttpOptions, buildPinoOptions, type LogEnv } from './logging.js';
+import { type OpsGauges, OpsGaugesJob } from './ops-gauges.job.js';
+
+/**
+ * R-34 (F1): lines exactly as the api image writes them to /sanchay/{env}/app, from the app's own pino
+ * options and call sites. pino-http's logger is nestjs-pino's root logger, and its `req.log` is the one
+ * nestjs-pino uses inside a request. infra replays the fixture through every metric filter
+ * (`pnpm --filter=@sanchay/infra prove:filters`) and checks the masking patterns against it. A logging
+ * change fails here until the fixture is rewritten: `pnpm --filter=@sanchay/api test log-lines -u`.
+ */
+const FIXTURE = '../../../test/fixtures/app-log-lines.jsonl';
+/** Tue 24 Nov 2026, 12:00 IST: pino's 13-digit `time`, which no masking pattern may touch. */
+const NOW = new Date('2026-11-24T06:30:00.000Z');
+const GAUGES: OpsGauges = {
+  workerHeartbeatAgeSeconds: 12,
+  jobQueueOldestAgeSeconds: 0,
+  reconcilingOverSla: 0,
+  criticalBreaksOpen: 0,
+  webhookSignatureFailures5m: 0,
+  smsSentToday: 40,
+  navBusinessDaysBehind: 0,
+};
+
+type Role = LogEnv['SANCHAY_APP_ROLE'];
+const lines: string[] = [];
+const sink = new Writable({
+  write(chunk, _encoding, done) {
+    lines.push(String(chunk).trimEnd());
+    done();
+  },
+});
+
+/** The container's HTTP logger, as nestjs-pino builds it from AppModule's env. */
+const appLogger = (role: Role) =>
+  pinoHttp(buildPinoHttpOptions({ SANCHAY_LOG_LEVEL: 'info', SANCHAY_APP_ROLE: role }), sink);
+
+/** OpsGaugesJob.handle, logging through nestjs-pino as in the worker. */
+async function gauges(role: Role): Promise<void> {
+  const dbh = { db: { execute: async () => ({ rows: [GAUGES] }) } } as unknown as DbHandle;
+  const logger = new Logger(appLogger(role).logger as never, {});
+  await new OpsGaugesJob(dbh, new FakeClock(), logger).handle({
+    id: '0199b2c4-0000-7000-8000-00000000a001',
+    name: 'ops.gauges.emit',
+    data: {},
+  });
+}
+
+/** One request through pino-http; returns its response and the logger nestjs-pino uses inside it. */
+function request(role: Role, method: string, url: string, id: string) {
+  const req = Object.assign(new IncomingMessage(new Socket()), { method, url, id });
+  const res = new ServerResponse(req);
+  appLogger(role)(req, res);
+  return { res, log: new Logger(req.log as never, {}) };
+}
+
+/** OtpService.issue's line (F1): Nest's Logger reaches nestjs-pino as after app.useLogger. */
+function otpLine(log: Logger, message: 'otp.sent' | 'otp.send_failed'): void {
+  NestLogger.overrideLogger(log);
+  const otp = new NestLogger('OtpService');
+  if (message === 'otp.sent') otp.log(message);
+  else otp.warn(message);
+}
+
+beforeAll(async () => {
+  vi.useFakeTimers({ now: NOW });
+  await gauges('worker');
+  // A delivered code, then pino-http's line when the 200 is sent.
+  const sent = request('api', 'POST', '/api/v1/auth/otp', '0199b2c4-5d6e-7f80-9a1b-2c3d4e5f6a01');
+  otpLine(sent.log, 'otp.sent');
+  sent.res.statusCode = 200;
+  sent.res.end();
+  sent.res.emit('finish');
+  // A provider failure (the 503's own pino-http line carries a stack with machine paths: not kept).
+  const failed = request('api', 'POST', '/api/v1/auth/otp', '0199b2c4-5d6e-7f80-9a1b-2c3d4e5f6a02');
+  otpLine(failed.log, 'otp.send_failed');
+  // ApiExceptionFilter on an unmapped error (a stack without paths).
+  const broken = request(
+    'api',
+    'GET',
+    '/api/v1/auth/session',
+    '0199b2c4-5d6e-7f80-9a1b-2c3d4e5f6a03',
+  );
+  const err = Object.assign(new Error('drill: unmapped'), {
+    stack: 'Error: drill: unmapped\n    at handler (dist/modules/identity/session.js:1:1)',
+  });
+  broken.log.error(
+    { err, requestId: '0199b2c4-5d6e-7f80-9a1b-2c3d4e5f6a03' },
+    'ApiExceptionFilter',
+  );
+  // migrate.ts (F1): pino with the same options, outside Nest.
+  pino(buildPinoOptions({ SANCHAY_LOG_LEVEL: 'info', SANCHAY_APP_ROLE: 'migrate' }), sink).info(
+    'migrations applied',
+  );
+  // The same messages from another container: a service-scoped filter must not count them.
+  await gauges('api');
+  const elsewhere = new Logger(appLogger('worker').logger as never, {});
+  otpLine(elsewhere, 'otp.sent');
+  otpLine(elsewhere, 'otp.send_failed');
+});
+
+afterAll(() => {
+  NestLogger.overrideLogger(new ConsoleLogger());
+  vi.useRealTimers();
+});
+
+describe('app log lines (R-34, F1)', () => {
+  it('every line is pino JSON naming its container, with a numeric level and the msg key', () => {
+    const parsed = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(parsed.map((l) => [l.service, l.level, l.msg])).toEqual([
+      ['worker', 30, 'ops.gauges'],
+      ['api', 30, 'otp.sent'],
+      ['api', 30, 'request completed'],
+      ['api', 40, 'otp.send_failed'],
+      ['api', 50, 'drill: unmapped'],
+      ['migrate', 30, 'migrations applied'],
+      ['api', 30, 'ops.gauges'],
+      ['worker', 30, 'otp.sent'],
+      ['worker', 40, 'otp.send_failed'],
+    ]);
+    expect(parsed[0]).toMatchObject({
+      time: NOW.getTime(),
+      context: 'OpsGaugesJob',
+      gauges: GAUGES,
+    });
+    expect(parsed[3]).toMatchObject({ context: 'OtpService', req: { method: 'POST' } });
+  });
+
+  it('is the fixture infra replays through the metric filters', async () => {
+    await expect(`${lines.join('\n')}\n`).toMatchFileSnapshot(FIXTURE);
+  });
+});
+```
+
+`apps/api/src/modules/platform/logging.test.ts` (Plan 01 B4 with D0's case; key-level, R-34). `type LogEnv` joins the `./logging.js` import (`import { buildPinoHttpOptions, buildPinoOptions, isRedactedKey, type LogEnv, REDACTED, scrub } from './logging.js';`), D0's pino-http case passes the role too (`buildPinoHttpOptions({ SANCHAY_LOG_LEVEL: 'info', SANCHAY_APP_ROLE: 'api' })`, RV-04-F1-11), and `capture` takes the container's role:
+```ts
+function capture(role: LogEnv['SANCHAY_APP_ROLE'] = 'api') {
+  const lines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      lines.push(String(chunk));
+      callback();
+    },
+  });
+  const options = buildPinoOptions({ SANCHAY_LOG_LEVEL: 'info', SANCHAY_APP_ROLE: role });
+  return { logger: pino(options, stream), lines };
+}
+```
+In the first case, `expect(line.service).toBe('sanchay-api');` becomes `expect(line.service).toBe('api');`. Before "leaves non-plain objects untouched and bounds depth", add:
+```ts
+  it("names the container on every line: service is the task's SANCHAY_APP_ROLE (R-34)", () => {
+    for (const role of ['api', 'worker', 'migrate'] as const) {
+      const { logger, lines } = capture(role);
+      logger.info('hello');
+      expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ service: role, msg: 'hello' });
+    }
+  });
+```
+
 `apps/api/test/int/ops-gauges.int.test.ts`:
 ```ts
 import { sql } from 'drizzle-orm';
@@ -1629,12 +2091,12 @@ PowerShell and Git Bash (the same lines; the first refreshes the `dist/` of the 
 ```
 pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/infra test
-pnpm --filter=@sanchay/api test ops-gauges db-logins env
+pnpm --filter=@sanchay/api test ops-gauges db-logins env logging log-lines
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics db-logins reference-data
 ```
 Expected:
-- infra: `alarms.test.ts` fails to load (`../lib/alarms.js` does not exist yet); `prod-stack.test.ts` 8 failed (no alarm-recipient check, D6 login secrets, ops task definition, task families or F1 outputs yet); E25's `sanchay-mvp-stack.test.ts` 23 passed, 1 failed (the migrate task's secrets).
-- api unit: `db-logins.test.ts` and `ops-gauges.job.test.ts` cannot load their modules; `env-roles.test.ts` 2 failed, 6 passed (the migrate boot reads `SANCHAY_DB_APP_PASSWORD`, and invariant 14); `env.test.ts` 1 failed (the pin list names the two new keys).
+- infra: `alarms.test.ts`, `log-masking.test.ts` and `log-proof.test.ts` fail to load (`../lib/alarms.js`, `../lib/log-masking.js` and `../lib/log-proof.js` do not exist yet); `prod-stack.test.ts` 10 failed (no alarm-recipient check, D6 login secrets, ops task definition, task families, F1 outputs or `ProveMetricFilters` yet); E25's `sanchay-mvp-stack.test.ts` 24 passed, 1 failed (the migrate task's secrets).
+- api unit: `db-logins.test.ts` and `ops-gauges.job.test.ts` cannot load their modules; `env-roles.test.ts` 2 failed, 6 passed (the migrate boot reads `SANCHAY_DB_APP_PASSWORD`, and invariant 14); `env.test.ts` 1 failed (the pin list names the two new keys); `logging.test.ts` 2 failed, 7 passed (every line still says `sanchay-api`); `log-lines.test.ts` cannot load `./ops-gauges.job.js`.
 - api int: `db-logins.int.test.ts`, `ops-gauges.int.test.ts` and `reference-data.int.test.ts` cannot load their modules (`db-logins.js`, `ops-gauges.job.js`, `reference-data.js` and E3's file has no `LegalSeedError`); `otp-send-metrics.int.test.ts` 2 failed, 1 passed (no `otp.sent` / `otp.send_failed` line yet; the cooldown case passes).
 
 - [ ] **Step 3: Minimal implementation**
@@ -1702,8 +2164,8 @@ import type { SanchayEnvName } from './config.js';
 
 /**
  * The worker's `ops.gauges.emit` job (F1, apps/api/src/modules/platform/ops-gauges.job.ts) logs one
- * JSON line a minute: `{"msg":"ops.gauges","gauges":{...}}`. These names mirror its OPS_GAUGE_KEYS;
- * a rename on either side must change both (each side has a test pinning the list).
+ * JSON line a minute: `{"service":"worker",…,"gauges":{...},"msg":"ops.gauges"}`. These names mirror its
+ * OPS_GAUGE_KEYS; a rename on either side must change both (each side has a test pinning the list).
  */
 export const OPS_GAUGES_MESSAGE = 'ops.gauges';
 export const OPS_GAUGE_KEYS = [
@@ -1720,6 +2182,37 @@ export type OpsGaugeKey = (typeof OPS_GAUGE_KEYS)[number];
 /** OtpService (F1 log lines): one `otp.sent` per delivered code, one `otp.send_failed` per provider failure. */
 export const OTP_SENT_MESSAGE = 'otp.sent';
 export const OTP_SEND_FAILED_MESSAGE = 'otp.send_failed';
+
+/**
+ * R-34: every api-image container writes to the one group, and every pino line carries `service`, the
+ * SANCHAY_APP_ROLE of its task definition (Plan 01 B4's logging.ts). Each filter reads one container's
+ * lines: the gauges come only from the worker, the OTP counts only from the api.
+ */
+export const GAUGES_SERVICE = 'worker';
+export const OTP_SERVICE = 'api';
+
+/** The lines one metric counts: one container's pino lines with one `msg`. */
+export interface AppLines {
+  service: string;
+  message: string;
+}
+
+/** `{ ($.service = "…") && ($.msg = "…") }`: JSON lines only, so the web's plain text never matches. */
+export function appLinesPattern(lines: AppLines): logs.IFilterPattern {
+  return logs.FilterPattern.all(
+    logs.FilterPattern.stringValue('$.service', '=', lines.service),
+    logs.FilterPattern.stringValue('$.msg', '=', lines.message),
+  );
+}
+
+/** Each metric's lines, by metric name: what the filter proof (log-proof.ts) expects each filter to match. */
+export const METRIC_LINES: Readonly<Record<string, AppLines>> = {
+  ...Object.fromEntries(
+    OPS_GAUGE_KEYS.map((key) => [key, { service: GAUGES_SERVICE, message: OPS_GAUGES_MESSAGE }]),
+  ),
+  [OTP_SENT_MESSAGE]: { service: OTP_SERVICE, message: OTP_SENT_MESSAGE },
+  [OTP_SEND_FAILED_MESSAGE]: { service: OTP_SERVICE, message: OTP_SEND_FAILED_MESSAGE },
+};
 
 /** OTP_POLICY.smsPerIstDay (Plan 01) is 2,000; page at 90 % so there is time to act before logins stop. */
 export const SMS_CAP_ALARM_THRESHOLD = 1_800;
@@ -1764,7 +2257,7 @@ export interface OpsMetricsProps {
  */
 export function buildOpsMetrics(scope: Construct, props: OpsMetricsProps): OpsMetrics {
   const namespace = `Sanchay/${props.envName}`;
-  const gaugesPattern = logs.FilterPattern.stringValue('$.msg', '=', OPS_GAUGES_MESSAGE);
+  const gaugesPattern = appLinesPattern({ service: GAUGES_SERVICE, message: OPS_GAUGES_MESSAGE });
   const gauges = Object.fromEntries(
     OPS_GAUGE_KEYS.map((key) => [
       key,
@@ -1780,7 +2273,7 @@ export function buildOpsMetrics(scope: Construct, props: OpsMetricsProps): OpsMe
   const counter = (id: string, message: string) =>
     new logs.MetricFilter(scope, id, {
       logGroup: props.logGroup,
-      filterPattern: logs.FilterPattern.stringValue('$.msg', '=', message),
+      filterPattern: appLinesPattern({ service: OTP_SERVICE, message }),
       metricNamespace: namespace,
       metricName: message,
       metricValue: '1',
@@ -1793,6 +2286,15 @@ export function buildOpsMetrics(scope: Construct, props: OpsMetricsProps): OpsMe
     namespace,
   };
 }
+
+/**
+ * R-34: the worker logs every gauge each minute, so a gauge alarm counts a period without a gauge line as
+ * breaching. A stopped worker, or a filter that no longer matches (a renamed `service` or `msg`), then
+ * pages instead of reading as OK. The count alarms (5xx, unhealthy targets, OTP failures) treat no data
+ * as not breaching: no line, no error.
+ */
+const NO_GAUGES =
+  'A period without a gauge line counts as breaching: with worker-heartbeat-stale in ALARM too, the worker stopped logging the gauges.';
 
 /**
  * R-12: NAV missing for a business day after 11:00 IST (construct id `NavAgeAlarm`); buildAlarms
@@ -1812,9 +2314,8 @@ export function buildNavAgeAlarm(
     threshold: 1,
     evaluationPeriods: 1,
     comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-    treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    alarmDescription:
-      'NAV missing for a business day after 11:00 IST (R-12): the per-scheme STALE grade blocks new purchases and AMOUNT redemptions in the affected schemes only. Verify the AMFI file, then ops:nav-release.',
+    treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    alarmDescription: `NAV missing for a business day after 11:00 IST (R-12): the per-scheme STALE grade blocks new purchases and AMOUNT redemptions in the affected schemes only. Verify the AMFI file, then ops:nav-release. ${NO_GAUGES}`,
   });
 }
 
@@ -1842,13 +2343,13 @@ interface GaugeAlarmSpec {
   comparison: cloudwatch.ComparisonOperator;
   threshold: number;
   evaluationPeriods: number;
-  missing: cloudwatch.TreatMissingData;
   description: string;
 }
 
 const GT = cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD;
 const GTE = cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD;
 
+/** Every one treats missing data as breaching (NO_GAUGES above). */
 const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
   {
     id: 'WorkerHeartbeatStaleAlarm',
@@ -1858,8 +2359,6 @@ const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
     comparison: GT,
     threshold: 120,
     evaluationPeriods: 3,
-    // The gauges are emitted by the worker itself: no data means no worker.
-    missing: cloudwatch.TreatMissingData.BREACHING,
     description:
       'Newest worker heartbeat older than 2 min for 3 min, or the worker stopped emitting gauges.',
   },
@@ -1871,8 +2370,7 @@ const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
     comparison: GT,
     threshold: 120,
     evaluationPeriods: 2,
-    missing: cloudwatch.TreatMissingData.NOT_BREACHING,
-    description: 'A due pg-boss job has waited more than 2 min, two minutes running.',
+    description: `A due pg-boss job has waited more than 2 min, two minutes running. ${NO_GAUGES}`,
   },
   {
     id: 'ReconcilingSlaAlarm',
@@ -1882,8 +2380,7 @@ const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
     comparison: GT,
     threshold: 0,
     evaluationPeriods: 1,
-    missing: cloudwatch.TreatMissingData.NOT_BREACHING,
-    description: 'An order, plan or mandate has been RECONCILING for more than 2 h.',
+    description: `An order, plan or mandate has been RECONCILING for more than 2 h. ${NO_GAUGES}`,
   },
   {
     id: 'MoneyInvariantBreachAlarm',
@@ -1893,9 +2390,7 @@ const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
     comparison: GT,
     threshold: 0,
     evaluationPeriods: 1,
-    missing: cloudwatch.TreatMissingData.NOT_BREACHING,
-    description:
-      'An OPEN CRITICAL recon break: the M1/M3/M4 integrity invariants, SHORTFALL-BREAK, an ambiguous create, an invalid allotment. Runbook: kill switch first. Stays in ALARM until every CRITICAL break is resolved.',
+    description: `An OPEN CRITICAL recon break: the M1/M3/M4 integrity invariants, SHORTFALL-BREAK, an ambiguous create, an invalid allotment. Runbook: kill switch first. Stays in ALARM until every CRITICAL break is resolved. ${NO_GAUGES}`,
   },
   {
     id: 'WebhookSignatureFailuresAlarm',
@@ -1905,8 +2400,7 @@ const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
     comparison: GT,
     threshold: 3,
     evaluationPeriods: 1,
-    missing: cloudwatch.TreatMissingData.NOT_BREACHING,
-    description: 'More than 3 FP webhooks with an invalid signature in 5 min.',
+    description: `More than 3 FP webhooks with an invalid signature in 5 min. ${NO_GAUGES}`,
   },
   {
     id: 'SmsCapReachedAlarm',
@@ -1916,9 +2410,7 @@ const GAUGE_ALARMS: readonly GaugeAlarmSpec[] = [
     comparison: GTE,
     threshold: SMS_CAP_ALARM_THRESHOLD,
     evaluationPeriods: 1,
-    missing: cloudwatch.TreatMissingData.NOT_BREACHING,
-    description:
-      'SMS OTPs sent since IST midnight reached 1,800, 90 % of the 2,000/day cap; logins stop at the cap.',
+    description: `SMS OTPs sent since IST midnight reached 1,800, 90 % of the 2,000/day cap; logins stop at the cap. ${NO_GAUGES}`,
   },
 ];
 
@@ -1975,7 +2467,7 @@ export function buildAlarms(scope: Construct, props: AlarmsProps): Alarms {
           threshold: spec.threshold,
           comparisonOperator: spec.comparison,
           evaluationPeriods: spec.evaluationPeriods,
-          treatMissingData: spec.missing,
+          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
         }),
     ),
     new cloudwatch.Alarm(scope, 'OtpSendFailureRateAlarm', {
@@ -2006,9 +2498,381 @@ export function buildAlarms(scope: Construct, props: AlarmsProps): Alarms {
 }
 ```
 
+**3.2a `infra/lib/log-masking.ts` (new, R-34):**
+```ts
+import * as logs from 'aws-cdk-lib/aws-logs';
+
+/**
+ * R-34 (F1): CloudWatch Logs data protection on the log groups. A PAN or an Indian mobile number that
+ * slips past Plan 01's key-based scrubber (an error message, a provider's response text) is masked
+ * wherever the line leaves CloudWatch: the console, `get-log-events`, Logs Insights, metric and
+ * subscription filters; only `logs:Unmask` shows it. The shapes follow F21's PII scan.
+ *
+ * CloudWatch takes at most 10 custom identifiers, names of up to 128 `[A-Za-z0-9_-]` characters, and
+ * regexes of up to 200 characters without `(` or `)`, so there is no lookaround. Each pattern therefore
+ * consumes one bounding character on either side (or meets the start or end of the line). That keeps it
+ * off the 13-digit pino `time`, UUIDs and longer numbers, which matters: metric filters read the masked
+ * line, and a masked digit would end the JSON of every gauge line.
+ */
+function bounded(body: string, before: string, after: string): string {
+  const shapes = [`${before}${body}${after}`, `^${body}${after}`, `${before}${body}$`, `^${body}$`];
+  return shapes.join('|');
+}
+
+export interface PiiIdentifier {
+  name: string;
+  regex: string;
+}
+
+export const PII_IDENTIFIERS: readonly PiiIdentifier[] = [
+  // PAN: five letters, four digits, a letter. Any fourth letter (F21's scan wants a holder type).
+  { name: 'PanIndia', regex: bounded('[A-Z]{5}[0-9]{4}[A-Z]', '[^0-9A-Za-z_]', '[^0-9A-Za-z_]') },
+  // A 10-digit mobile starting 6-9, not inside a longer number, a word or a hyphenated id.
+  { name: 'MobileIndia', regex: bounded('[6-9][0-9]{9}', '[^0-9A-Za-z_+-]', '[^0-9A-Za-z_-]') },
+  // The same with the country code, as MSG91 and FP write it: 91, +91, +91 or +91-.
+  {
+    name: 'MobileIndiaWithCountryCode',
+    regex: bounded('\\+?91[ -]?[6-9][0-9]{9}', '[^0-9A-Za-z_+-]', '[^0-9A-Za-z_-]'),
+  },
+];
+
+/** The data-protection policy one log group carries: audit and mask PAN and Indian mobile numbers. */
+export function piiMaskingPolicy(name: string): logs.DataProtectionPolicy {
+  return new logs.DataProtectionPolicy({
+    name: `${name}-pii`,
+    description: 'R-34: audit and mask PAN and Indian mobile numbers',
+    identifiers: PII_IDENTIFIERS.map((id) => new logs.CustomDataIdentifier(id.name, id.regex)),
+  });
+}
+```
+
+**3.2b `infra/lib/log-proof.ts` (new, R-34).** The offline half of the filter proof and the alarm drill; `log-proof.test.ts` covers it without AWS.
+```ts
+import {
+  GAUGES_SERVICE,
+  METRIC_LINES,
+  OPS_GAUGE_KEYS,
+  OPS_GAUGES_MESSAGE,
+  type OpsGaugeKey,
+} from './alarms.js';
+
+/**
+ * R-34 (F1): the captured app log lines (written by the api image's real loggers; Vitest pins them in
+ * apps/api/src/modules/platform/log-lines.test.ts), relative to the repository root.
+ */
+export const LOG_FIXTURE = 'apps/api/test/fixtures/app-log-lines.jsonl';
+/** The plain text the web container (Next.js 16 standalone) writes; no JSON filter may match it. */
+export const WEB_LINES = ['▲ Next.js 16.3.6', '✓ Ready in 162ms'] as const;
+
+export function parseLogLines(text: string): string[] {
+  return text.split(/\r?\n/).filter((line) => line.trim() !== '');
+}
+
+/** A pino line as an object; undefined for a line that is not a JSON object (the web's plain text). */
+export function jsonOf(line: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(line);
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The value a metric filter's `$.a.b` selector reads from a line. */
+export function valueAt(line: string, selector: string): unknown {
+  let value: unknown = jsonOf(line);
+  for (const key of selector.replace(/^\$\./, '').split('.')) {
+    value =
+      typeof value === 'object' && value !== null
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
+  }
+  return value;
+}
+
+interface CfnResource {
+  Type: string;
+  Properties?: Record<string, unknown>;
+}
+
+/** One metric filter of the synthesised stack, the lines the proof sends it and the ones it must match. */
+export interface FilterCase {
+  metricName: string;
+  pattern: string;
+  metricValue: string;
+  /** The fixture lines and WEB_LINES: test-metric-filter takes at most 50 per call. */
+  lines: string[];
+  /** The lines of the container and `msg` that METRIC_LINES names for this metric. */
+  expected: string[];
+}
+
+export function filterCases(
+  resources: Record<string, CfnResource>,
+  fixture: string[],
+): FilterCase[] {
+  const lines = [...fixture, ...WEB_LINES];
+  return Object.values(resources)
+    .filter((r) => r.Type === 'AWS::Logs::MetricFilter')
+    .map((r) => {
+      const [transform] = (r.Properties?.MetricTransformations ?? []) as Array<{
+        MetricName: string;
+        MetricValue: string;
+      }>;
+      if (transform === undefined) throw new Error('a metric filter without a transformation');
+      const want = METRIC_LINES[transform.MetricName];
+      if (want === undefined) throw new Error(`no METRIC_LINES entry for ${transform.MetricName}`);
+      return {
+        metricName: transform.MetricName,
+        pattern: String(r.Properties?.FilterPattern),
+        metricValue: transform.MetricValue,
+        lines,
+        expected: lines.filter((line) => {
+          const json = jsonOf(line);
+          return json?.service === want.service && json.msg === want.message;
+        }),
+      };
+    });
+}
+
+/** What CloudWatch matched that it should not have, and what it missed; empty when the filter is right. */
+export function checkMatches(c: FilterCase, matched: readonly string[]): string[] {
+  const problems = c.expected
+    .filter((line) => !matched.includes(line))
+    .map((line) => `missed: ${line}`);
+  for (const line of matched) {
+    if (!c.expected.includes(line)) problems.push(`matched a line it must refuse: ${line}`);
+  }
+  if (c.metricValue !== '1') {
+    for (const line of c.expected) {
+      if (typeof valueAt(line, c.metricValue) !== 'number') {
+        problems.push(`${c.metricValue} is not a number in: ${line}`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** A healthy worker's gauges; each drill raises one past its alarm. */
+const HEALTHY: Record<OpsGaugeKey, number> = Object.fromEntries(
+  OPS_GAUGE_KEYS.map((key) => [key, key === 'workerHeartbeatAgeSeconds' ? 10 : 0]),
+) as Record<OpsGaugeKey, number>;
+
+/**
+ * The alarm drill's synthetic gauge lines (R-34, F1): the worker's `ops.gauges` line with one gauge past
+ * its alarm, one line a minute for `minutes` minutes up to now. They test the path from the log group to
+ * SNS without writing prod data; the SQL behind each gauge is ops-gauges.int.test.ts's.
+ */
+export const DRILL_GAUGES = {
+  'job-queue-age': { key: 'jobQueueOldestAgeSeconds', value: 600, minutes: 3 },
+  'reconciling-sla': { key: 'reconcilingOverSla', value: 1, minutes: 1 },
+  'money-invariant-breach': { key: 'criticalBreaksOpen', value: 1, minutes: 1 },
+  'sms-cap-reached': { key: 'smsSentToday', value: 1800, minutes: 1 },
+  'nav-age': { key: 'navBusinessDaysBehind', value: 1, minutes: 1 },
+} as const satisfies Record<string, { key: OpsGaugeKey; value: number; minutes: number }>;
+export type DrillName = keyof typeof DRILL_GAUGES;
+
+export function isDrillName(name: string): name is DrillName {
+  return Object.hasOwn(DRILL_GAUGES, name);
+}
+
+export interface LogEvent {
+  timestamp: number;
+  message: string;
+}
+
+const drillLine = (timestamp: number, fields: Record<string, unknown>): string =>
+  JSON.stringify({
+    level: 30,
+    time: timestamp,
+    service: GAUGES_SERVICE,
+    context: 'AlarmDrill',
+    drill: true,
+    ...fields,
+  });
+
+export function drillEvents(name: DrillName, now: number): LogEvent[] {
+  const { key, value, minutes } = DRILL_GAUGES[name];
+  return Array.from({ length: minutes }, (_, i) => {
+    const timestamp = now - (minutes - 1 - i) * 60_000;
+    const gauges = { ...HEALTHY, [key]: value };
+    return { timestamp, message: drillLine(timestamp, { gauges, msg: OPS_GAUGES_MESSAGE }) };
+  });
+}
+
+/** The masking drill: Plan 01's test PAN and mobile, which the data-protection policy must hide. */
+export const MASK_DRILL_VALUES = ['ABCDE1234F', '9876543210', '+919876543210'] as const;
+
+export function maskDrillEvent(now: number): LogEvent {
+  const [pan, mobile, withCode] = MASK_DRILL_VALUES;
+  return {
+    timestamp: now,
+    message: drillLine(now, { msg: `masking drill: pan ${pan}, mobile ${mobile}, ${withCode}` }),
+  };
+}
+```
+
+**3.2c `infra/bin/log-checks.ts` (new, R-34).** The half that needs AWS credentials and the AWS CLI v2: `deploy.yml` runs `prove-filters` before every deploy (3.5), and people run both commands by hand (credential-rotation runbook, "Alarm drill"). Each request reaches the CLI as a JSON file, so no shell quotes a log line.
+```ts
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+import { App } from 'aws-cdk-lib';
+import { Template } from 'aws-cdk-lib/assertions';
+import { loadStackConfig } from '../lib/config.js';
+import {
+  checkMatches,
+  drillEvents,
+  filterCases,
+  isDrillName,
+  LOG_FIXTURE,
+  type LogEvent,
+  MASK_DRILL_VALUES,
+  maskDrillEvent,
+  parseLogLines,
+} from '../lib/log-proof.js';
+import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
+
+/**
+ * R-34 (F1), with AWS credentials for the prod account and the AWS CLI v2 (never in PR CI):
+ *   prove-filters   replay the captured app log lines through every metric filter of this commit's
+ *                   stack with `aws logs test-metric-filter` (deploy.yml runs it before each deploy)
+ *   drill <name>    write the alarm drill's synthetic gauge lines (job-queue-age, reconciling-sla,
+ *                   money-invariant-breach, sms-cap-reached, nav-age) to /sanchay/prod/app
+ *   drill mask      write a fake PAN and mobile there and fail unless they read back masked
+ */
+const REGION = 'ap-south-1';
+const LOG_GROUP = '/sanchay/prod/app';
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+
+/** One AWS CLI call; the request goes through a JSON file, so no shell quotes a log line. */
+function aws(command: string[], request: object): unknown {
+  const dir = mkdtempSync(path.join(tmpdir(), 'sanchay-logs-'));
+  const file = path.join(dir, 'request.json');
+  try {
+    writeFileSync(file, JSON.stringify(request));
+    const args = [...command, '--cli-input-json', `file://${file}`, '--region', REGION];
+    const out = execFileSync('aws', [...args, '--output', 'json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return out.trim() === '' ? {} : JSON.parse(out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The metric filters do not depend on the deploy inputs, so the tests' placeholders synthesise them. */
+function synthResources() {
+  const config = loadStackConfig('prod', {
+    SANCHAY_PLATFORM_ARN: 'ARN-000000',
+    SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
+  });
+  const stack = new SanchayMvpStack(new App(), 'SanchayMvpStack-prod', {
+    env: { account: '111111111111', region: REGION },
+    config,
+  });
+  return Template.fromStack(stack).toJSON().Resources;
+}
+
+function proveFilters(): number {
+  const fixture = parseLogLines(readFileSync(path.join(repoRoot, LOG_FIXTURE), 'utf8'));
+  let failed = 0;
+  for (const c of filterCases(synthResources(), fixture)) {
+    const result = aws(['logs', 'test-metric-filter'], {
+      filterPattern: c.pattern,
+      logEventMessages: c.lines,
+    }) as { matches?: Array<{ eventMessage?: string }> };
+    const matched = (result.matches ?? []).map((m) => m.eventMessage ?? '');
+    const problems = checkMatches(c, matched);
+    console.log(
+      `${problems.length === 0 ? 'ok  ' : 'FAIL'} ${c.metricName}: ${matched.length} of ${c.lines.length} lines matched ${c.pattern}`,
+    );
+    for (const problem of problems) console.log(`     ${problem}`);
+    if (problems.length > 0) failed += 1;
+  }
+  console.log(
+    failed === 0 ? 'every metric filter matches exactly its lines' : `${failed} filter(s) wrong`,
+  );
+  return failed === 0 ? 0 : 1;
+}
+
+function putDrillEvents(events: LogEvent[]): string {
+  const logStreamName = `drill/${new Date().toISOString().slice(0, 10)}`;
+  try {
+    aws(['logs', 'create-log-stream'], { logGroupName: LOG_GROUP, logStreamName });
+  } catch (error) {
+    const stderr = String((error as { stderr?: unknown }).stderr);
+    if (!stderr.includes('ResourceAlreadyExistsException')) throw error;
+  }
+  aws(['logs', 'put-log-events'], { logGroupName: LOG_GROUP, logStreamName, logEvents: events });
+  return logStreamName;
+}
+
+async function drill(name: string | undefined): Promise<number> {
+  const now = Date.now();
+  if (name === 'mask') {
+    const event = maskDrillEvent(now);
+    const logStreamName = putDrillEvents([event]);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await sleep(3_000);
+      const read = aws(['logs', 'get-log-events'], {
+        logGroupName: LOG_GROUP,
+        logStreamName,
+        startTime: now,
+        startFromHead: true,
+      }) as { events?: Array<{ message?: string }> };
+      const line = (read.events ?? [])
+        .map((e) => e.message ?? '')
+        .find((m) => m.includes('masking drill'));
+      if (line === undefined) continue;
+      const visible = MASK_DRILL_VALUES.filter((value) => line.includes(value));
+      console.log(`read back from ${LOG_GROUP} ${logStreamName}: ${line}`);
+      console.log(
+        visible.length === 0
+          ? 'masked: PAN and mobile numbers are hidden'
+          : `NOT MASKED: ${visible.join(', ')}`,
+      );
+      return visible.length === 0 ? 0 : 1;
+    }
+    console.log('the masking drill line did not come back within 30 s');
+    return 1;
+  }
+  if (name === undefined || !isDrillName(name)) {
+    console.error(
+      'usage: drill <job-queue-age|reconciling-sla|money-invariant-breach|sms-cap-reached|nav-age|mask>',
+    );
+    return 2;
+  }
+  const events = drillEvents(name, now);
+  const logStreamName = putDrillEvents(events);
+  console.log(
+    `${events.length} drill line(s) for sanchay-prod-${name} in ${LOG_GROUP} ${logStreamName}`,
+  );
+  return 0;
+}
+
+const [command, arg] = process.argv.slice(2);
+if (command === 'prove-filters') process.exitCode = proveFilters();
+else if (command === 'drill') process.exitCode = await drill(arg);
+else {
+  console.error('usage: log-checks.js prove-filters | drill <name>');
+  process.exitCode = 2;
+}
+```
+`infra/package.json` (E25's file, key-level): in `scripts`, after `"deploy": "cdk deploy"` (which gains a comma), add:
+```json
+"prove:filters": "tsc -p tsconfig.json && node dist/bin/log-checks.js prove-filters",
+"logs:drill": "tsc -p tsconfig.json && node dist/bin/log-checks.js drill"
+```
+
 **3.3 `infra/lib/sanchay-mvp-stack.ts` (E25's file, key-level).** The edits below, in file order; everything else is E25's.
 
-Imports: add `import { buildAlarms, buildNavAgeAlarm, buildOpsMetrics } from './alarms.js';` (biome sorts it before `./config.js`). After `export const DB_MASTER_USER = 'sanchay_master';`:
+Imports: add `import { buildAlarms, buildNavAgeAlarm, buildOpsMetrics } from './alarms.js';` (biome sorts it before `./config.js`) and, after `./config.js`, `import { piiMaskingPolicy } from './log-masking.js';` (R-34). After `export const DB_MASTER_USER = 'sanchay_master';`:
 ```ts
 /** F1 (D6): the two LOGIN roles the migrate task creates (apps/api/src/db/db-logins.ts). */
 export const DB_APP_LOGIN = 'sanchay_app_login';
@@ -2044,6 +2908,14 @@ In the secrets section, after the `msg91Secret` declaration:
       DB_READONLY_LOGIN,
       'LOGIN member of sanchay_readonly (people, over an SSM port-forward only)',
     );
+```
+In E25's two log groups, after `removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,` (R-34, RV-04-F1-8): in `appLogGroup`
+```ts
+      dataProtectionPolicy: piiMaskingPolicy(`sanchay-${envName}-app`),
+```
+and in `execLogGroup`
+```ts
+      dataProtectionPolicy: piiMaskingPolicy(`sanchay-${envName}-ecs-exec`),
 ```
 After the `appLogGroup` declaration:
 ```ts
@@ -2115,13 +2987,25 @@ E25's three-line comment that starts `// R-12's NAV-age alarm is not built here`
     });
     new CfnOutput(this, 'OpsAlertsTopicArn', { value: topic.topicArn });
 ```
-E25's `// --- GitHub OIDC deploy role` section stays as it is: the deploy role, its trust (jobs of the GitHub `prod` environment only) and its least-privilege statements, `migrateTaskDef.grantRun` included, are E25's (Plan 02 RV-02-70).
+E25's `// --- GitHub OIDC deploy role` section stays as it is: the deploy role, its trust (jobs of the GitHub `prod` environment only) and its least-privilege statements, `migrateTaskDef.grantRun` included, are E25's (Plan 02 RV-02-70). F1 adds one statement for `deploy.yml`'s filter proof (R-34), directly before `new CfnOutput(this, 'GithubDeployRoleArn', { value: deployRole.roleArn });`. `TestMetricFilter` takes only a pattern and some lines, no log group, so its resource is `*`:
+```ts
+      // R-34 (F1): deploy.yml replays the captured app log lines through every metric filter first.
+      deployRole.addToPolicy(
+        new iam.PolicyStatement({
+          sid: 'ProveMetricFilters',
+          actions: ['logs:TestMetricFilter'],
+          resources: ['*'],
+        }),
+      );
+```
 After E25's last output (`ServiceSecurityGroupId`):
 ```ts
     // F1: the ops run-task (F7), the read-only session and the PITR test (runbooks/db-access.md).
     new CfnOutput(this, 'OpsTaskDefinitionArn', { value: opsTaskDef.taskDefinitionArn });
     new CfnOutput(this, 'DbInstanceIdentifier', { value: dbInstance.instanceIdentifier });
     new CfnOutput(this, 'DbEndpointAddress', { value: dbInstance.instanceEndpoint.hostname });
+    // R-34 (F1): the alarm drill turns this target group's health check off and on again.
+    new CfnOutput(this, 'ApiTargetGroupArn', { value: apiTargetGroup.targetGroupArn });
 ```
 
 **3.4 `infra/bin/sanchay.ts`: no change.** E25's entry point already builds `SanchayMvpStack-prod` (R-31) from `loadStackConfig('prod')` and calls `assertDeployInputs`, which now also requires the alarm recipients (3.1); the stack reads E25's `-c noTasks=true` itself.
@@ -2131,6 +3015,13 @@ After E25's last output (`ServiceSecurityGroupId`):
           # F1: the alarm recipients (GitHub `prod` environment secrets); assertDeployInputs needs both.
           SANCHAY_ALARM_EMAILS: ${{ secrets.SANCHAY_ALARM_EMAILS }}
           SANCHAY_ALARM_SMS_NUMBERS: ${{ secrets.SANCHAY_ALARM_SMS_NUMBERS }}
+```
+Directly after E25's step `Assume the GitHub deploy role via OIDC`, before `Register arm64 emulation`, add the filter proof (R-34). It needs only the role's credentials and the checked-out code, and a wrong filter stops the run before an image is built or anything is deployed:
+```yaml
+      # R-34 (F1): every metric filter of this commit's stack against the captured app log lines
+      # (aws logs test-metric-filter; the deploy role's ProveMetricFilters).
+      - name: Prove the metric filters
+        run: pnpm --filter=@sanchay/infra prove:filters
 ```
 
 **3.6 `apps/api/Dockerfile` (E25's file, key-level).** E25 already copies `data/` to `/repo/data` (Plan 02 RV-02-59: from Plan 03 E9 on, the api imports `data/risk-questionnaire-v1.0.0.json` when its module loads). In the runtime stage, E25's comment line `# docs/legal/ is copied here by F1 (Plan 04), whose migrate task seeds it; E3 (Plan 03) creates it.` becomes:
@@ -2571,17 +3462,22 @@ Root `package.json` (key-level; E3's and E6's two script values become):
 
 **3.9 `apps/api/src/cli/migrate.ts` (Plan 01 B23; replace the whole file):**
 ```ts
+import { pino } from 'pino';
 import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
 import { ensureDbLogins } from '../db/db-logins.js';
 import { runMigrations } from '../db/migrate.js';
+import { buildPinoOptions } from '../modules/platform/logging.js';
 import { seedReferenceData } from './reference-data.js';
 
 loadDotEnvFile();
 const env = parseEnv(process.env);
+// R-34: pino JSON lines with the app's options, so in the deployed task each one carries
+// service "migrate" (its SANCHAY_APP_ROLE) like every other line in /sanchay/{env}/app.
+const log = pino(buildPinoOptions(env));
 await runMigrations(env.DATABASE_URL);
-console.log('migrations applied');
+log.info('migrations applied');
 
 // F1: the deployed one-off migrate task (SANCHAY_APP_ROLE=migrate, logged in as the RDS master)
 // also syncs the D6 logins (boot invariant 14 guarantees both passwords outside local/test) and
@@ -2595,9 +3491,9 @@ if (env.SANCHAY_APP_ROLE === 'migrate') {
     const readonly = env.SANCHAY_DB_READONLY_PASSWORD;
     if (app !== undefined && readonly !== undefined) {
       const logins = await ensureDbLogins(handle.db, { app, readonly });
-      console.log(`db logins synced: ${logins.join(', ')}`);
+      log.info(`db logins synced: ${logins.join(', ')}`);
     }
-    console.log(`reference data seeded: ${await seedReferenceData(handle.db)}`);
+    log.info(`reference data seeded: ${await seedReferenceData(handle.db)}`);
   } finally {
     await handle.close();
   }
@@ -2737,6 +3633,19 @@ export class OpsGaugesJob {
     this.logger.log({ gauges }, OPS_GAUGES_MESSAGE, OpsGaugesJob.name);
   }
 }
+```
+
+**3.11a `apps/api/src/modules/platform/logging.ts` (Plan 01 B4 with Plan 02 D0's serializer and hook; key-level, R-34).** Every line names its container: the role its task definition sets, so the migrate and ops tasks, which run the api image, say so too. Directly above `export function buildPinoOptions(`:
+```ts
+/** What the loggers read from the env: the level, and the role that names every line (R-34). */
+export type LogEnv = Pick<Env, 'SANCHAY_LOG_LEVEL' | 'SANCHAY_APP_ROLE'>;
+```
+In `buildPinoOptions` and `buildPinoHttpOptions` the parameter `env: Pick<Env, 'SANCHAY_LOG_LEVEL'>` becomes `env: LogEnv` (AppModule passes its whole env), and `base: { service: 'sanchay-api' },` becomes:
+```ts
+    // R-34: every api-image container (api, worker, migrate, ops) logs to the one group
+    // /sanchay/{env}/app, so each line names its container: the SANCHAY_APP_ROLE its task
+    // definition sets. Metric filters select one container's lines with { $.service = "worker" }.
+    base: { service: env.SANCHAY_APP_ROLE },
 ```
 
 **3.12 Registration (D2 and Plan 01 files, key-level).**
@@ -2929,30 +3838,111 @@ aws rds delete-db-instance --db-instance-identifier sanchay-prod-restore-test --
 
 ## Alarm drill (Wed 11-18, G-E5)
 
+All ten alarms fire once on the paused prod stack before GO-1 (R-34), end to end, while prod is still
+closed to investors (R-31): from the signal through CloudWatch to both developers' email and SMS. Five
+alarms get their real signal. The five other gauge alarms get the worker's own `ops.gauges` line with one
+gauge raised, in the log stream `drill/<yyyy-mm-dd>` of `/sanchay/prod/app`: their real signal would need
+fake orders, breaks or SMS rows in prod's tables, and `ops-gauges.int.test.ts` already proves the SQL
+behind each gauge. Allow half a day (`sanchay-prod-nav-age` stays in ALARM for about an hour). Run the
+`pnpm` lines from the repo root at the deployed commit; they need the AWS CLI v2.
+
 1. Both developers have confirmed their SNS email subscription; nothing may show `PendingConfirmation`:
 
 ```
 aws sns list-subscriptions-by-topic --topic-arn <OpsAlertsTopicArn> --query "Subscriptions[].[Protocol,SubscriptionArn]" --output table
 ```
 
-2. Force one alarm; both developers must receive the email and the SMS within 5 minutes:
+2. Nothing is in ALARM ("Before you start", step 2), and every metric filter passes its proof against the
+   captured log lines (`aws logs test-metric-filter`; `deploy.yml` runs the same before each deploy):
 
 ```
-aws cloudwatch set-alarm-state --alarm-name sanchay-prod-job-queue-age --state-value ALARM --state-reason "alarm drill"
+pnpm --filter=@sanchay/infra prove:filters
 ```
 
-3. The next evaluation (within 2 minutes) returns it to OK, which sends the OK notification.
-4. Repeat with `sanchay-prod-money-invariant-breach`.
-5. Record who received what and when. A missing SMS is a gate finding: a new account's SNS SMS is in the
-   sandbox (each destination must be verified there first), and India needs the sender ID and DLT
-   registration for SNS before GO-1.
+3. Trigger one alarm at a time, in the table's order, and wait until it is OK again before the next. For
+   each, record in the G-E5 evidence the trigger and the time it started (IST), the ALARM and OK
+   transitions from the line below, and when the ALARM and the OK email and SMS reached each developer:
+
+```
+aws cloudwatch describe-alarm-history --alarm-name <alarm> --history-item-type StateUpdate --max-items 4 --query "AlarmHistoryItems[].[Timestamp,HistorySummary]" --output table
+```
+
+| Alarm | Trigger | ALARM after | OK again |
+|---|---|---|---|
+| `sanchay-prod-job-queue-age` | `pnpm --filter=@sanchay/infra logs:drill job-queue-age` (a due job waited 600 s, three minutes running) | about 2 min | about 2 min later |
+| `sanchay-prod-reconciling-sla` | `pnpm --filter=@sanchay/infra logs:drill reconciling-sla` | up to 5 min | 5 min later |
+| `sanchay-prod-money-invariant-breach` | `pnpm --filter=@sanchay/infra logs:drill money-invariant-breach` | up to 5 min | 5 min later |
+| `sanchay-prod-sms-cap-reached` | `pnpm --filter=@sanchay/infra logs:drill sms-cap-reached` (1,800 sent) | up to 5 min | 5 min later |
+| `sanchay-prod-nav-age` | `pnpm --filter=@sanchay/infra logs:drill nav-age` (one business day behind) | a few minutes | about an hour later |
+| `sanchay-prod-webhook-signature-failures` | four unsigned FP webhooks (4a) | up to 5 min | 5 min later |
+| `sanchay-prod-target-unhealthy` | the api target group checks a path that answers 404 (4b) | 3 to 5 min | about 3 min after the path is back |
+| `sanchay-prod-alb-5xx`, `sanchay-prod-otp-send-failure-rate` | MSG91 with a broken key (4c): 20 OTP requests that answer 503 | 5 and 15 min | 5 and 15 min after the last request |
+| `sanchay-prod-worker-heartbeat-stale` | the service at 0 tasks (4d) | about 3 min | about 2 min after the tasks are back |
+
+4. The real triggers.
+   a. Four unsigned FP webhooks within 5 minutes: each answers `401`, and E1 keeps a row with
+      `signature_valid = false`, which the worker's gauge counts. Run this line four times (both shells):
+
+```
+curl.exe -s -o NUL -w "%{http_code}\n" -X POST -H "content-type: application/json" --data "{}" https://api.sanchay.in/api/v1/webhooks/fp
+```
+
+   b. Point the api target group's health check (stack output `ApiTargetGroupArn`) at a path that answers
+      404, wait for the ALARM, then point it back at `/api/v1/health` and read the path to check. While
+      it fails, ECS replaces the tasks it reports unhealthy, so `sanchay-prod-worker-heartbeat-stale` may
+      fire too: record it.
+      - PowerShell: `aws elbv2 modify-target-group --target-group-arn <ApiTargetGroupArn> --health-check-path /api/v1/drill-unhealthy`
+      - Git Bash: `MSYS_NO_PATHCONV=1 aws elbv2 modify-target-group --target-group-arn <ApiTargetGroupArn> --health-check-path /api/v1/drill-unhealthy`
+      - PowerShell: `aws elbv2 modify-target-group --target-group-arn <ApiTargetGroupArn> --health-check-path /api/v1/health`
+      - Git Bash: `MSYS_NO_PATHCONV=1 aws elbv2 modify-target-group --target-group-arn <ApiTargetGroupArn> --health-check-path /api/v1/health`
+      - Both shells: `aws elbv2 describe-target-groups --target-group-arns <ApiTargetGroupArn> --query "TargetGroups[0].HealthCheckPath" --output text`
+   c. MSG91 with a broken key, after 15:30 IST; tell the other developer, because nobody can sign in until
+      it is rolled back. Print the current value
+      (`aws secretsmanager get-secret-value --secret-id sanchay/prod/msg91 --query SecretString --output text`)
+      and store a copy with only `authKey` changed to `drill-invalid` as a new version ("Rotate a provider
+      secret", steps 1-5). Save `{"mobile": "<a founder's mobile>"}` as UTF-8 `otp-drill.json` outside
+      the repo and, from that folder, run this line 20 times within 5 minutes. Each prints `503`
+      (`SMS_UNAVAILABLE`) and logs `otp.send_failed`; an undelivered code costs no cooldown or quota.
+
+```
+curl.exe -s -o NUL -w "%{http_code}\n" -X POST -H "content-type: application/json" -H "x-sanchay-client: android" -H "x-installation-id: 00000000-0000-4000-8000-0000000000d1" --data-binary "@otp-drill.json" https://api.sanchay.in/api/v1/auth/otp
+```
+
+      Once both alarms are in ALARM, roll the secret back ("Roll back a provider secret", then steps 4-5)
+      and delete `otp-drill.json`. A founder then signs in on prod, and the SMS arrives.
+   d. Stop the service's tasks. Meanwhile `www`, `app` and `api.sanchay.in` answer 503 (prod is closed to
+      investors), and the other gauge alarms go to ALARM as well once their periods pass without a gauge
+      line (R-34): record them as the missing-data evidence.
+
+```
+aws ecs update-service --cluster sanchay-prod --service sanchay-app --desired-count 0
+```
+
+      After the ALARM, start the tasks again and wait for them:
+
+```
+aws ecs update-service --cluster sanchay-prod --service sanchay-app --desired-count 2
+aws ecs wait services-stable --cluster sanchay-prod --services sanchay-app
+```
+
+5. Masking (R-34): write a fake PAN and mobile into the drill stream and read them back. Pass = the
+   command prints the line with both masked and then `masked: PAN and mobile numbers are hidden`;
+   record that output.
+
+```
+pnpm --filter=@sanchay/infra logs:drill mask
+```
+
+6. A missing SMS is a gate finding: a new account's SNS SMS is in the sandbox (each destination must be
+   verified there first), and India needs the sender ID and DLT registration for SNS before GO-1.
 
 ## If an alarm fires mid-rotation
 
 - `alb-5xx` or `target-unhealthy`: the new tasks cannot use the new secret. Roll the secret back (above)
   and force a new deployment; the circuit breaker has usually rolled the task set back already.
 - `worker-heartbeat-stale`: the worker is crash-looping at boot (the boot guard names the bad variable in
-  the first lines of the `prod/worker/...` stream in `/sanchay/prod/app`). Roll back the secret.
+  the first lines of the `prod/worker/...` stream in `/sanchay/prod/app`). Roll back the secret. The other
+  gauge alarms fire with it, because a period without a gauge line counts as breaching (R-34).
 - A login rotation: tasks failing with `password authentication failed` mean the migrate task did not run
   after the new secret version. Run it, then restart again.
 - `webhook-signature-failures` after an fp-webhook rotation: expected once; if it does not clear 10 minutes
@@ -3004,8 +3994,9 @@ aws ecs wait tasks-stopped --cluster sanchay-prod --tasks <task arn>
 aws ecs describe-tasks --cluster sanchay-prod --tasks <task arn> --query "tasks[0].containers[0].exitCode" --output text
 ```
 
-Pass = `0`. Its log is in the app log group under the stream prefix `prod/migrate`, three lines:
-`migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login` and
+Pass = `0`. Its log is in the app log group under the stream prefix `prod/migrate`: three JSON lines
+with `"service":"migrate"` (R-34) whose `msg` is `migrations applied`,
+`db logins synced: sanchay_app_login, sanchay_readonly_login` and
 `reference data seeded: <n> legal documents, <n> pincodes, <n> IFSC codes, catalogue reference tables`.
 
 - PowerShell: `aws logs tail /sanchay/prod/app --log-stream-name-prefix prod/migrate --since 30m`
@@ -3048,7 +4039,7 @@ exact `aws ecs run-task --overrides` form is F7's (`docs/runbooks/ops-cli.md`).
 ## After the migrate task: the curated list, then the NAV history (R-33)
 
 Before GO-1 prod also needs the curated list (G-B10) and the NAV history (FUND-01's 1-, 3- and 5-year
-returns, which E16 computes from `nav_history`). The migrate task loads neither. Both run once, in this
+returns, which E16 computes from `nav_history`). The migrate task loads neither. They run in this
 order, as one-off tasks of `sanchay-prod-ops` ("Ops commands" above): `SANCHAY_APP_ROLE=ops`, login
 `sanchay_app_login` (DML through `sanchay_app`, which is all they need; the seed only inserts into the
 append-only `fund_facts_revisions`), the app subnets and the service security group, whose route to the
@@ -3071,32 +4062,52 @@ written outside the repo in an editor and saved as UTF-8 (PowerShell 5.1's `>` w
    fresh NAV stays DRAFT until the next `catalogue.fp.sync` (07:30 IST, F19) re-runs the gate. A re-run
    is safe: every write is an upsert, and a fact revision is added only for a changed row.
 
-2. **The NAV history** (D9's backfill), one window per run. `ops-overrides.json`:
+2. **The NAV history** (D9's backfill), one run per calendar year, newest year first.
+   `ops-overrides.json`:
 
    ```json
    {"containerOverrides": [{"name": "ops", "command": ["node", "dist/cli/ops-nav-backfill.js", "--from", "<yyyy-mm-dd>", "--to", "<yyyy-mm-dd>"]}]}
    ```
 
-   Dates are ISO (AMFI's history report accepts them, and D9 also uses `--to` as the parser's upper
-   date bound). Pass = exit code `0` and `nav history backfill: <n> row(s) written`, where `<n>` counts
-   the rows AMFI returned for every scheme, not the rows inserted: every insert is
-   `ON CONFLICT DO NOTHING`, so a window can be run again, or overlap another, without writing a row
-   twice, and a failed run is simply repeated.
-   - **Window: at most 7 days with D9 as written.** Its AMFI client stops waiting for the first byte
-     after 10 s (`amfi-client.ts`), and on 2026-10-05 the history report took roughly 0.6 to 1 s per
-     day of range before its first byte (1 day 1.3 s, 7 days 4.0 s, 14 days 9.6 s, a month 31 s,
-     three months 66 s); a June 2026 month failed all three attempts with `UND_ERR_HEADERS_TIMEOUT`.
-     Never use more than one calendar month, even with a longer timeout: a month (about 25 MB and
-     250,000 rows) peaked at 173 MB of heap and 363 MB resident through the fetch, the parse and the
-     inserts, and the ops task has 1 GiB.
-   - **Depth and order:** the latest year first (FUND-01 shows a scheme's returns only once a 1-year
-     return exists, E16's `displayEligible`), then back to a week more than five years before GO-1
-     (the 3- and 5-year rows): about 260 weekly runs and 12 million rows.
-   - **Time:** D9 inserts one row per statement, which took 0.7 ms a row against a local PostgreSQL
-     18.6 (a month, 253,150 rows: 178 s; its re-run, which inserted nothing, 74 s); against Multi-AZ
-     RDS every statement is also a network round trip, and every run is a task start. Expect a day or
-     more of runs: start at least a week before GO-1 and run one window at a time (AMFI is a public
-     site).
+   - **One run** walks `--from`..`--to` (ISO dates, both included) one calendar month at a time: one
+     AMFI history request per month (D9 waits up to 5 minutes for its first byte and tries a network
+     error, a timeout or a 5xx twice more), then inserts of 1,000 rows each, all
+     `ON CONFLICT DO NOTHING`. It logs a line per month,
+     `nav history <from>..<to>: <n> row(s) parsed, <m> written, <s> s`, and ends with
+     `nav history backfill: <m> row(s) written, <n> parsed`. Pass = exit code `0` and that last line.
+     A whole month parses about 200,000 to 280,000 rows (10,500 to 12,200 NAVs a business day, 750 to
+     1,150 on a weekend or holiday; 207,225 for November 2021, 277,416 for July 2026), and a window of
+     a week or more under 1,000 rows fails the run (NAV-06).
+   - **The six runs:** `--from 2026-01-01 --to <yesterday>` first (`<yesterday>` is the day before the
+     run; FUND-01 shows a scheme's returns only once its 1-year return exists, E16's
+     `displayEligible`), then each whole year back to 2022 (`--from 2025-01-01 --to 2025-12-31` and so
+     on), and last `--from 2021-11-01 --to 2021-12-31`: the 5-year return on GO-1 (Fri 11-27) needs
+     the NAV of 27 Nov 2021 or the last one before it. Never give a `--to` after yesterday: AMFI answers
+     a month with no NAVs yet with an HTML page, and the run stops there. The NAV syncs have added
+     every accepted NAV to `nav_history` since E25's first deploy, so overlapping them is harmless.
+   - **Time and size:** on 2026-10-05 a month took 21 to 32 s end to end from a developer machine
+     (AMFI's download, the parse and the inserts into PostgreSQL 18.6), and AMFI alone has taken up to
+     31 s before a month's first byte, so a year takes about 5 to 15 minutes and the six runs about half
+     an hour to an hour. A run holds one month's report at a time: the heap peaked at 173 MB, inside
+     the ops task's 1 GiB. The history ends up at about 15 million rows, about 1.8 GB with its primary
+     key (126 MB per million rows), in the 20 GB database. Start the runs at least two days before
+     GO-1, so a failed month can be run again.
+   - **Re-runs are safe:** any range can be run again, or overlap another, and only missing rows are
+     written (a month already loaded logs `0 written`). A run stops at the first month that fails,
+     exits `1` and logs `nav history backfill stopped; to resume, run it again with --from <date> --to <date>`;
+     run exactly that.
+   - **Check the rows** when the six runs are done (read-only: AMFI is not called, nothing is written).
+     The same override with `"--check"` after the dates, once for the whole range:
+
+     ```json
+     {"containerOverrides": [{"name": "ops", "command": ["node", "dist/cli/ops-nav-backfill.js", "--from", "2021-11-01", "--to", "<yesterday>", "--check"]}]}
+     ```
+
+     It logs `nav history stored <from>..<to>: <n> row(s) on <d> of <days> day(s)` for every month.
+     Overnight and liquid funds publish a NAV every calendar day, so pass = every month shows all its
+     days (`30 of 30`; the current month up to yesterday), and a whole month holds roughly 200,000
+     to 280,000 rows. Run the backfill again for any month that falls short (`--from` its first day,
+     `--to` its last), then check again.
    - The returns appear after the next successful NAV sync (21:30, 23:30, 07:00 or 10:30 IST): D9's
      sync enqueues E16's `catalogue.returns.compute`, which reads `nav_history`.
 
@@ -3108,7 +4119,11 @@ aws ecs wait tasks-stopped --cluster sanchay-prod --tasks <task arn>
 aws ecs describe-tasks --cluster sanchay-prod --tasks <task arn> --query "tasks[0].containers[0].exitCode" --output text
 ```
 
-Read the result line from the log stream `prod/ops/<task-id>` (the task id is the last part of the ARN):
+`aws ecs wait tasks-stopped` gives up after 10 minutes (100 checks, 6 s apart) with
+`Waiter TasksStopped failed: Max attempts exceeded` while the task keeps running. A NAV history run
+can take longer: run the wait line again until it returns, then read the exit code.
+
+Read the result lines from the log stream `prod/ops/<task-id>` (the task id is the last part of the ARN):
 
 - PowerShell: `aws logs get-log-events --log-group-name /sanchay/prod/app --log-stream-name prod/ops/<task-id> --query "events[].message" --output text`
 - Git Bash: `MSYS_NO_PATHCONV=1 aws logs get-log-events --log-group-name /sanchay/prod/app --log-stream-name prod/ops/<task-id> --query "events[].message" --output text`
@@ -3174,6 +4189,12 @@ Without `deploy.yml`, do the same by hand: push `<ApiRepoUri>:latest` and `<WebR
 `-c noTasks=true`, then `aws ecs wait services-stable --cluster sanchay-prod --services sanchay-app`.
 ````
 
+**3.16 The captured log lines (R-34).** Write the fixture that the infra tests and the filter proof read. The first run writes `apps/api/test/fixtures/app-log-lines.jsonl` (a Vitest file snapshot), a later run fails when the loggers write anything else, and CI (`CI=true`) fails while the file is missing, so Step 5 commits it. The same line in both shells:
+```
+pnpm --filter=@sanchay/api test log-lines
+```
+After a deliberate logging change, rewrite it with `pnpm --filter=@sanchay/api test log-lines -u`, review the diff and commit it.
+
 - [ ] **Step 4: Run tests to confirm they pass**
 
 PowerShell and Git Bash (the same lines):
@@ -3182,12 +4203,12 @@ pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/infra typecheck
 pnpm --filter=@sanchay/infra test
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test ops-gauges db-logins env
+pnpm --filter=@sanchay/api test ops-gauges db-logins env logging log-lines
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics otp-issue db-logins reference-data
 ```
 Expected:
-- infra typecheck exits 0; infra test: 41 passed (E25's 24, `prod-stack.test.ts` 8, `alarms.test.ts` 9).
-- api typecheck exits 0; unit: `ops-gauges.job.test.ts` 3, `db-logins.test.ts` 4, `env-roles.test.ts` 8; `env.test.ts` (B2, D3, D6, D7, E1, E2, E20 and E25 cases plus the pin) and `dotenv.test.ts` green.
+- infra typecheck exits 0; infra test: 55 passed (E25's 25, `prod-stack.test.ts` 10, `alarms.test.ts` 10, `log-masking.test.ts` 4, `log-proof.test.ts` 6).
+- api typecheck exits 0; unit: `ops-gauges.job.test.ts` 3, `db-logins.test.ts` 4, `env-roles.test.ts` 8, `logging.test.ts` 9, `log-lines.test.ts` 2 (against the fixture 3.16 wrote); `env.test.ts` (B2, D3, D6, D7, E1, E2, E20 and E25 cases plus the pin) and `dotenv.test.ts` green.
 - api int: `ops-gauges.int.test.ts` 8, `otp-send-metrics.int.test.ts` 3, `otp-issue.int.test.ts` 14 (unchanged), `db-logins.int.test.ts` 8, `reference-data.int.test.ts` 6.
 
 Synth gate check (no AWS needed: the config is refused before any lookup; same line in both shells):
@@ -3196,12 +4217,18 @@ pnpm --filter=@sanchay/infra exec cdk synth
 ```
 Expected: `StackConfigError: Stack config prod refused:` naming `SANCHAY_PLATFORM_ARN is required` and `SANCHAY_SMS_RETRIEVER_HASH is required` (E25's messages). With those two set, it is refused for `SANCHAY_GITHUB_REPOSITORY` (E25), `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` (F1; `prod-stack.test.ts` pins the alarm part).
 
+**Filter proof (R-34; needs the AWS CLI v2 and credentials for the prod account, so never in PR CI).** `deploy.yml` runs it before every deploy (the rollout's step 3 is its first run); by hand from a developer machine, the same line in both shells:
+```
+pnpm --filter=@sanchay/infra prove:filters
+```
+Expected: an `ok` line for each of the nine filters, then `every metric filter matches exactly its lines`; a `FAIL` line names each line a filter missed or matched wrongly, and the command exits 1.
+
 **`SANCHAY_SMS_RETRIEVER_HASH`.** The `api` container gets it only from the GitHub environment variable of the same name (the `prod` environment), which `deploy.yml` passes to `cdk deploy` and `loadStackConfig` reads. Its value is the line `SANCHAY_SMS_RETRIEVER_HASH (in.sanchay.app): <hash>` that `node scripts/android-cert-info.ts <deployment_cert.der>` prints for the Play App Signing certificate (F18, `docs/runbooks/android-release.md` §3). Until that certificate exists, use the hash of the certificate that signs the builds being tested: any 11 characters from `[A-Za-z0-9+/]` boot the api, and Android auto-read simply does not match a wrong one (OTPs are then typed).
 
 **Roll F1 out onto the running prod stack (once; manual, owner-authorised).** E25 deployed `SanchayMvpStack-prod` in S2 and it runs, closed to investors (R-31); F1 moves it onto the D6 logins in place. Dispatching `deploy.yml` with F1's code before step 2 is harmless: its migrate step runs E25's migrate task definition, which carries no login passwords, so boot invariant 14 stops it before `cdk deploy`, and the running tasks keep their images.
 1. On the GitHub `prod` environment, add the secrets `SANCHAY_ALARM_EMAILS` and `SANCHAY_ALARM_SMS_NUMBERS` (both founders); `deploy.yml` passes them, and a deploy without them is refused.
-2. The 0-task deploy from a developer machine with the prod profile and the five inputs (`docs/runbooks/db-access.md`, "Move the stack onto new logins", both shells). The service drops to 0 tasks until step 3 finishes, a few minutes in which `www`, `app` and `api.sanchay.in` answer 503 (prod is closed to investors, R-31), and `sanchay-prod-worker-heartbeat-stale` pages (missing gauges count as breaching) until step 3's worker emits them.
-3. Dispatch `deploy.yml` for `prod` at the ref that carries F1, then a founder approves the environment (same line in both shells): `gh workflow run deploy.yml --ref <ref with F1> -f environment=prod`. It pushes the images, runs the migrate task (the two logins and the reference data), deploys without `-c noTasks=true` (2 tasks, logging in as `sanchay_app_login`) and waits for the rollout. The migrate log shows `db logins synced: …` and `reference data seeded: …` (`docs/runbooks/db-access.md`, "Run the migrate task").
+2. The 0-task deploy from a developer machine with the prod profile and the five inputs (`docs/runbooks/db-access.md`, "Move the stack onto new logins", both shells). The service drops to 0 tasks until step 3 finishes, a few minutes in which `www`, `app` and `api.sanchay.in` answer 503 (prod is closed to investors, R-31), and the seven gauge alarms page, `sanchay-prod-worker-heartbeat-stale` first (a period without a gauge line counts as breaching, R-34), until step 3's worker logs the gauges again; they are OK again a few minutes later.
+3. Dispatch `deploy.yml` for `prod` at the ref that carries F1, then a founder approves the environment (same line in both shells): `gh workflow run deploy.yml --ref <ref with F1> -f environment=prod`. It proves the metric filters (R-34), pushes the images, runs the migrate task (the two logins and the reference data), deploys without `-c noTasks=true` (2 tasks, logging in as `sanchay_app_login`) and waits for the rollout. The migrate log shows `db logins synced: …` and `reference data seeded: …` (`docs/runbooks/db-access.md`, "Run the migrate task").
 4. Both founders confirm their SNS email subscription; verify both numbers in the SNS SMS sandbox (owner decision 5).
 5. `curl.exe -s -i https://api.sanchay.in/api/v1/health` starts with a `200` status line, and within two minutes the worker's gauges arrive and the heartbeat alarm is OK:
 ```
@@ -3214,22 +4241,22 @@ aws cloudwatch describe-alarms --alarm-names sanchay-prod-worker-heartbeat-stale
 2. Roll F1 out (above).
 3. `curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config` shows `"ordersEnabled":false` and `"sipEnabled":false` (R-06, R-31: nothing has written `app_config`; GO-1 and GO-2 flip them with F7's ops CLIs, never in CDK). Before GO-1 only the founders' test accounts are invited (F7's `ops:invite`, SSM form).
 4. Once G-C1's docs commit (`status: PUBLISHED`) has been deployed, `curl.exe -s -i -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/legal/documents/TPL_PURCHASE` starts with a `200` status line (`404` while the version is DRAFT).
-5. R-33, once F19 is deployed and before GO-1 (Fri 11-27): load the curated list, then the NAV history (`docs/runbooks/db-access.md`, "After the migrate task: the curated list, then the NAV history"). The backfill is many runs; start it at least a week before GO-1.
-6. Run the PITR restore test and the alarm drill (credential-rotation runbook); record both in the G-E5 evidence.
+5. R-33, once F19 is deployed and before GO-1 (Fri 11-27): load the curated list, then the NAV history (`docs/runbooks/db-access.md`, "After the migrate task: the curated list, then the NAV history"). The backfill is six yearly runs, about half an hour to an hour in all (RV-04-F1-10); start it at least two days before GO-1.
+6. Run the PITR restore test and the alarm drill (credential-rotation runbook: all ten alarms and the masking check, before GO-1, R-34); record both in the G-E5 evidence.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write infra .github/workflows/deploy.yml apps/api/src/db/db-logins.ts apps/api/src/db/db-logins.test.ts apps/api/src/cli/migrate.ts apps/api/src/cli/reference-data.ts apps/api/src/cli/ops-legal-seed.ts apps/api/src/cli/ops-ref-seed.ts apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/config/env-roles.test.ts apps/api/src/modules/platform/ops-gauges.job.ts apps/api/src/modules/platform/ops-gauges.job.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/identity/otp.service.ts apps/api/test/int/db-logins.int.test.ts apps/api/test/int/reference-data.int.test.ts apps/api/test/int/ops-gauges.int.test.ts apps/api/test/int/otp-send-metrics.int.test.ts apps/api/package.json package.json
+pnpm exec biome check --write infra .github/workflows/deploy.yml apps/api/src/db/db-logins.ts apps/api/src/db/db-logins.test.ts apps/api/src/cli/migrate.ts apps/api/src/cli/reference-data.ts apps/api/src/cli/ops-legal-seed.ts apps/api/src/cli/ops-ref-seed.ts apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/config/env-roles.test.ts apps/api/src/modules/platform/ops-gauges.job.ts apps/api/src/modules/platform/ops-gauges.job.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/identity/otp.service.ts apps/api/test/int/db-logins.int.test.ts apps/api/test/int/reference-data.int.test.ts apps/api/test/int/ops-gauges.int.test.ts apps/api/test/int/otp-send-metrics.int.test.ts apps/api/package.json package.json apps/api/src/modules/platform/logging.ts apps/api/src/modules/platform/logging.test.ts apps/api/src/modules/platform/log-lines.test.ts
 pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/infra typecheck
 pnpm --filter=@sanchay/infra test
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test ops-gauges db-logins env
+pnpm --filter=@sanchay/api test ops-gauges db-logins env logging log-lines
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics otp-issue db-logins reference-data
 pnpm lint
-git add infra/lib/config.ts infra/lib/alarms.ts infra/lib/sanchay-mvp-stack.ts infra/test/stack-fixtures.ts infra/test/prod-stack.test.ts infra/test/alarms.test.ts infra/test/sanchay-mvp-stack.test.ts .github/workflows/deploy.yml apps/api/Dockerfile apps/api/src/db/db-logins.ts apps/api/src/db/db-logins.test.ts apps/api/src/cli/migrate.ts apps/api/src/cli/reference-data.ts apps/api/src/cli/ops-legal-seed.ts apps/api/src/cli/ops-ref-seed.ts apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/config/env-roles.test.ts apps/api/src/modules/platform/ops-gauges.job.ts apps/api/src/modules/platform/ops-gauges.job.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/identity/otp.service.ts apps/api/test/int/db-logins.int.test.ts apps/api/test/int/reference-data.int.test.ts apps/api/test/int/ops-gauges.int.test.ts apps/api/test/int/otp-send-metrics.int.test.ts apps/api/package.json package.json docs/runbooks/credential-rotation.md docs/runbooks/db-access.md
-git commit -m "feat(infra): harden the prod stack: D6 database logins, deploy-time reference data, ops task, gauges and the 10-alarm SNS topic (F1)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add infra/lib/config.ts infra/lib/alarms.ts infra/lib/sanchay-mvp-stack.ts infra/test/stack-fixtures.ts infra/test/prod-stack.test.ts infra/test/alarms.test.ts infra/test/sanchay-mvp-stack.test.ts .github/workflows/deploy.yml apps/api/Dockerfile apps/api/src/db/db-logins.ts apps/api/src/db/db-logins.test.ts apps/api/src/cli/migrate.ts apps/api/src/cli/reference-data.ts apps/api/src/cli/ops-legal-seed.ts apps/api/src/cli/ops-ref-seed.ts apps/api/src/cli/ops-catalogue-seed.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/config/env-roles.test.ts apps/api/src/modules/platform/ops-gauges.job.ts apps/api/src/modules/platform/ops-gauges.job.test.ts apps/api/src/modules/platform/platform.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/modules/identity/otp.service.ts apps/api/test/int/db-logins.int.test.ts apps/api/test/int/reference-data.int.test.ts apps/api/test/int/ops-gauges.int.test.ts apps/api/test/int/otp-send-metrics.int.test.ts apps/api/package.json package.json apps/api/src/modules/platform/logging.ts apps/api/src/modules/platform/logging.test.ts apps/api/src/modules/platform/log-lines.test.ts apps/api/test/fixtures/app-log-lines.jsonl infra/package.json infra/lib/log-masking.ts infra/lib/log-proof.ts infra/bin/log-checks.ts infra/test/log-masking.test.ts infra/test/log-proof.test.ts docs/runbooks/credential-rotation.md docs/runbooks/db-access.md
+git commit -m "feat(infra): harden the prod stack: D6 database logins, deploy-time reference data, ops task, gauges and the 10-alarm SNS topic, service-scoped filters with their proof, PII masking (F1, R-34)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fake recipients in `stack-fixtures.ts` are `example.com` addresses and reserved-looking test numbers, and the test-only master password matches the existing `sanchay_(local|test)_only` allowlist; if gitleaks still flags a line, add a narrow regex for that exact value to `.gitleaks.toml` in this commit.
 
@@ -3242,12 +4269,15 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fak
 - **Re-checked 2026-10-05 (RV-04-F1-1), after Plan 02 RV-02-59, RV-02-61, RV-02-62 and RV-02-63 amended E25:** F1's infra fragments applied to the amended E25 matched every anchor once; `tsc` exits 0 and the infra suite passes 57/57 (E25's 22, 24, 11); the Step 2 shape gives E25's file 21 passed, 1 failed; and the workflow F1 now produces is identical to the one before apart from two comments (js-yaml parse, `bash -n` on every `run:` block).
 - **Re-checked 2026-10-05 for R-31 and R-33 (RV-04-F1-3, RV-04-F1-4):** F1's Step 1 files and Step 3 fragments were applied by script to E25 as extracted from the reworked Plan 02 (every anchor matched once). `tsc` exits 0, the infra suite passes 41/41 (E25's 24, 8, 9), and `biome ci` is clean after one `biome check --write` (it only rewraps `StaticConfig`'s `Omit`). With F1's tests on E25's code alone (Step 2), `alarms.test.ts` fails to load, `prod-stack.test.ts` fails 8 of 8 and E25's file passes 23 of 24. The compiled `bin/sanchay.ts`, run the way the CDK CLI runs it, refuses a synth without the ARN and the hash, then without the repository and the two alarm lists, and with all five inputs synthesises 10 alarms, 1 topic and 2 tasks (0 with `-c noTasks=true`) and a deploy role that trusts exactly `repo:<owner>/<repo>:environment:prod`. In the synthesised template the app subnets route `0.0.0.0/0` to the NAT gateway and the service security group allows all egress, so an ops task reaches AMFI. R-33's runs were checked against the plans (D9's `ops-nav-backfill.ts`; F19's entry point under `import.meta.main`, which Node 24.21.0 sets only for the file it starts; F7's `ops` role; `0003_grants`' default privileges; D8's one append-only catalogue table) and against AMFI and a local PostgreSQL 18.6 (the numbers are in `db-access.md`). Not run: any AWS deploy, the ops task itself, or the api code inside a container.
 - **Not run:** the api image build with the `COPY docs/legal` line (the Plans 02-03 code it compiles is not in the repo; the paths were checked by URL resolution and by the compiled run); `cdk synth` through the real CLI (aws-cdk 2.1143.0 is not in the scratch package); `ops-gauges.int.test.ts` and `ops-gauges.job.ts` inside a booted D2 worker; `deploy.yml` on GitHub; any AWS deploy, SNS delivery or SSM session.
+- **Re-checked 2026-10-05 for R-34 (RV-04-F1-5 to RV-04-F1-9):** F1's infra files and fragments were applied by script to E25 as amended by Plan 02 RV-02-72 (aws-cdk-lib 2.216.0, constructs 10.4.2, TypeScript 6.0.3, Vitest 5.0.1): `tsc` exits 0, the infra suite passes 55/55 (E25's 25, 10, 10, 4, 6), `biome ci` is clean, and the Step 2 shape is as written. Twelve single mutations each fail the test meant for them: a log group back to `Delete` or a repository to `Retain`, no masking on the ECS Exec group, an unbounded mobile regex, a parenthesis in a regex, the gauges read from `api`, unscoped OTP filters, gauge alarms `notBreaching`, the ops container as `api`, `logs:PutLogEvents` on the deploy role, a one-minute `job-queue-age` drill, a drill value under its threshold. On Plan 01's `apps/api` with D0's `logging.ts` and D2's job registry as the plans give them (scratch clone): `typecheck` is clean; `logging.test.ts` failed 2 of 8 before 3.11a and passes 8/8 after; `log-lines.test.ts` wrote the 9-line fixture, passed against it, failed on a one-character change, and with `CI=true` failed while the file was missing; `migrate.ts` typechecks against `ensureDbLogins` and `seedReferenceData` as F1 declares them. The compiled `log-checks.js` ran against a stand-in for the AWS CLI that answers these patterns: `prove-filters` passes, and reports both OTP filters when they are unscoped; `drill` writes its lines and refuses an unknown name; `drill mask` reads its line back masked. Not run: `aws logs test-metric-filter`, the masking or the drill on AWS (no AWS CLI or credentials on the checking machine).
 
 **Open questions.**
 1. **Owner (with F7's open question 2):** `money-invariant-breach` stays in ALARM while any CRITICAL break is open, so a break nobody can resolve (no CLI resolves non-invariant breaks) masks the next one. An `ops:resolve-break` with two founders would close this.
-2. **Owner:** SNS SMS to Indian numbers needs the account out of the SNS SMS sandbox (or both numbers verified in it) and a sender ID with DLT registration for SNS; without them the SMS half of the alarms does not arrive (G-E5 drill, step 5).
+2. **Owner:** SNS SMS to Indian numbers needs the account out of the SNS SMS sandbox (or both numbers verified in it) and a sender ID with DLT registration for SNS; without them the SMS half of the alarms does not arrive (G-E5 drill, step 6).
 3. **Assembler:** until F1 is deployed, prod gets no reference data: E25's migrate task only migrates. Every demo before F1 that needs published legal documents or catalogue data (Plan 03's 11-06 lumpsum demo) runs locally (R-31: there is no dev stack to seed).
-4. **Lead (R-33, Plan 02 D9):** D9's backfill now has a deployed run form (`db-access.md`, "After the migrate task"), but as written five years of history take about 260 weekly runs: its AMFI client gives up after 10 s while AMFI's history report needs roughly 0.6 to 1 s per day of range before its first byte, and it inserts one row per statement (on a local PostgreSQL 18.6, 1,000-row inserts loaded a 277,439-row month in 16 s; D9's loop took 178 s for a 253,150-row one). Nothing appends the daily NAV to `nav_history` either (`nav.sync.daily` writes `scheme_navs` only), so after the backfill E16's returns are computed against a frozen last history date. Proposed for D9: a history timeout of a few minutes, month-sized chunks inside one run, multi-row inserts that report the rows actually inserted, and a `nav_history` insert in the daily sync. E15's `ops:facts:import` is still local-only.
+4. **Lead (R-33, Plan 02 D9):** D9's backfill now has a deployed run form (`db-access.md`, "After the migrate task"), but as written five years of history take about 260 weekly runs: its AMFI client gives up after 10 s while AMFI's history report needs roughly 0.6 to 1 s per day of range before its first byte, and it inserts one row per statement (on a local PostgreSQL 18.6, 1,000-row inserts loaded a 277,439-row month in 16 s; D9's loop took 178 s for a 253,150-row one). Nothing appends the daily NAV to `nav_history` either (`nav.sync.daily` writes `scheme_navs` only), so after the backfill E16's returns are computed against a frozen last history date. Proposed for D9: a history timeout of a few minutes, month-sized chunks inside one run, multi-row inserts that report the rows actually inserted, and a `nav_history` insert in the daily sync. E15's `ops:facts:import` is still local-only. **Resolved 2026-10-05 (Plan 02 RV-02-73 and RV-02-74; RV-04-F1-10):** D9 now waits up to 5 minutes for AMFI and retries transient failures, walks month by month inside one run with 1,000-row inserts, counts inserted rows, and appends each daily sync to `nav_history`; the runbook gives six yearly runs.
+5. **Owner (R-34):** R-34 says every log line carries `service`. Every line the api image writes through pino does (api, worker, migrate; ops once F7 adds the role), but three kinds of line stay plain text without it: the web container's Next.js output, the results the ops CLIs print with `console.log` (F7's runner, F19's seed, D9's backfill), and Node's own crash output before a logger exists. No metric filter or alarm reads them, and their stream prefix (`prod/web/`, `prod/ops/`) names the container; giving them `service` needs a JSON logger in `apps/web` and in those CLIs, which this task does not add.
+6. **Lead (Plan 02 D0):** the app logs through pino-http's logger (nestjs-pino), and pino-http wraps the `err` serializer, so D0's `serializeErr` receives the already-serialised object (`err instanceof Error` is false) and returns it unredacted: a `DrizzleQueryError` logged through `pinoHttp(buildPinoHttpOptions(env)).logger` keeps its bound mobile number in `err.message` and `err.stack`, with `"type":"Object"` (reproduced in the scratch clone; D0's test passes because it uses a bare `pino`). F1's fixture shows that `"type":"Object"`. The masking policy now hides such a number at every CloudWatch egress, but D0 should also redact the serialised form (or pass pino-http `wrapSerializers: false`), and its test should log through `pinoHttp`. **Resolved 2026-10-05 (Plan 02 RV-02-75):** D0's `serializeErr` now also takes pino's serialised form and redacts through its `raw` Error, and D0's test logs through pino-http, so the fixture's `err` lines keep their real `type` and no bound value.
 
 ---
 
@@ -15470,7 +16500,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
 - **Prerequisites:** in BRIEF D2 order, F1, F2, F3, F4 and F5 (both parts) have run: F1 for the alarm names, the `sanchay-app` service, its stack outputs, D6's logins, the ops task definition `sanchay-{env}-ops` and its task role's `ssm:GetParameter` on `/sanchay/{env}/invites/*`; F4 for RV-04-F4-2's `NEST_APP_OPTIONS`. Plan 03 E1, E3/E4 **with RV-03-1** (`useConsumed` stamps `consent_records.first_attempt_at` before the first P/M write and refuses a CONSUMED_UNUSED challenge; `consent.expiry.sweep` sweeps only records with `first_attempt_at IS NULL`; `ConsentEngine.markUnused` is called only when no P/M write happened), E11, E20, E21; Plan 02 D1–D5, D7 (pilot invites) and D9 (NAV release).
 - **Consumes (Plan 01):** `Env`, `EnvSchema`, `parseEnv`, `loadDotEnvFile` (config); `AppConfig` (`config/app-config.ts`; `opsContextOf` reads `SANCHAY_APP_ENV` from it); `createDb`, `DB`, `DbHandle`, `Database`, `DbExecutor` (`db/client.ts`); `AuditService.record`, `AUDIT_DATA_ALLOWLIST` (`audit.service.ts`); `auditEvents` (`platform.schema.ts`); `Crypto.blindIndex` (`crypto.ts`); `CLOCK`, `Clock`, `MINUTE`, `HOUR`, `DAY` (`clock.ts`); `newId`, `UUID_RE` (`ids.ts`); `pgErrorCodeOf` (`pg-errors.ts`); `NEST_APP_OPTIONS` (`bootstrap.ts`, added by F4's RV-04-F4-2); the roles `sanchay_app` and `sanchay_readonly` (0000_bootstrap, 0003_grants); `createTestDatabase` (`test/int/db.ts`); `ConsentSubjectType`, `OrderStatus`, `PlanStatus` (`@sanchay/domain`, D5's state unions).
 - **Consumes (Plan 02, as written):** `appConfig`, `reconBreaks` (D1 `kernel.schema.ts`); `RuntimeConfig.get`, `ReconBreaks.open` (D1, static; F4's `ON CONFLICT` fix) and the keys `orders.enabled`, `plans.sip.enabled`; `Jobs.enqueue`, `JobHandler`, `Job`, `JOB_NAMES`, `registerSchedules`, `AppModule.forRoot(env)`, the D2 `main.ts` worker branch and D2's `pgboss` grants to `sanchay_app` (D2); `FpRead.purchases({mfInvestmentAccount, sourceRefId})`, `FpRead.purchasePlans/redemptions/folios({mfInvestmentAccount})` (D3, E20's `sourceRefId`); `FakeFp.state` (`purchases`, `purchasesByOldId`, `nextId`, `nextOldId`), `FakeFp.script`, `FakeFp.advance`, `bootFpTestApp`, `FpTestApp` (D4); `PilotInvites.add(exec, {mobileBidx, invitedBy, note, ttlDays})`, `pilotInvites`, `AUDIT_ACTIONS.PILOT_INVITE_ADDED` (D7); `schemeNavs` (D8 `catalogue.schema.ts`) and D9's `NAV_RELEASE` audit action; E25's cluster `sanchay-{env}`, app log group `/sanchay/{env}/app` (awslogs stream prefix `{env}`) and `docker-entrypoint.sh`.
-- **Consumes (Plan 03, as written):** `inboundWebhookEvents`, `FpEventJob` (`fp.event.process`, `{eventRowId}`), `jobOf` (E1); `consentChallenges`, `consentRecords` (`kind`, `subjectType`, `subjectIds`, `consumedAt`, `executeBefore`, `sagaExpiresAt`, `firstAttemptAt`), `consentSubjects` (E3); `ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds}` (E4); `investors.fpMfInvestmentAccountId` (E11); `orders`, `orderEvents`, `moveOrder`, `toFpPurchaseView`, `ReconcileNonfinalJob`, `seedInvestableInvestor`, `seedScheme` (E20); `paymentAttempts` (E21).
+- **Consumes (Plan 03, as written):** `inboundWebhookEvents`, `FpEventJob` (`fp.event.process`, `{eventRowId}`), `jobOf` (E1); `consentChallenges`, `consentRecords` (`kind`, `subjectType`, `subjectIds`, `consumedAt`, `executeBefore`, `sagaExpiresAt`, `firstAttemptAt`), `consentSubjects` (E3); `ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds}` (E4); `investors.fpMfInvestmentAccountId` (E11); `orders`, `orderEvents`, `moveOrder`, `toFpPurchaseView`, `ReconcileNonfinalJob`, `orders.purchase.advance` with `{orderId, challengeId}` (`singletonKey` = order id; RV-04-F7-4), `seedInvestableInvestor`, `seedScheme` (E20); `paymentAttempts` (E21).
 - **Consumes (Plan 04):** `ops.gauges.emit` with its gauges `criticalBreaksOpen` and `reconcilingOverSla`, the alarms `sanchay-prod-money-invariant-breach`, `sanchay-prod-reconciling-sla` and `sanchay-prod-nav-age`, the ECS service `sanchay-app`, the stack outputs `AppSubnetIds` and `ServiceSecurityGroupId`, and under D6 the logins `sanchay_app_login` (secret `sanchay/{env}/db-app`) and `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`) and the one-off ops task definition (family `sanchay-{env}-ops`, container `ops` with `SANCHAY_APP_ROLE=ops` in its environment, output `OpsTaskDefinitionArn`), whose task role may `ssm:GetParameter` on `/sanchay/{env}/invites/*` (see "For F1" below) (F1); `plans`, `mandates`, the `MANDATE_CREATE_AMBIGUOUS` break kind, `plans.sip.advance` with `SipAdvanceData = {planId, challengeId}`, FakeFp `state.purchasePlans`/`StoredPurchasePlan` (F2); `folios`, `lots`, `lotConsumptions`, `redemptionReservations`, `Ledger.applyExit`/`reverseAllotment`, `FP_ORDER_STATE_UNEXPECTED` (reused), FakeFp `state.folios`, the `mf_purchase` handler through `PurchaseSettlement`, and `ledger-seed.ts` (`seedProcessingPurchase`, `settledPurchase`, `seedRedemption`, `allot`, `Investor`, `Scheme`) (F4); `releaseReservation(tx, audit, {orderId, evidence, now})` (`portfolio/reservations.ts`), `orders.redemption.submit` (`ConsentApprovedJobData`, enqueued by approve with `singletonKey` = challenge id) and its CONSENT_EXPIRED path (`execute_before_missed`, evidence `consent_expired`), `orders.redemption.advance` with `{orderId, challengeId}` (`singletonKey` = order id), `PayoutWatchJob` (`payout.watch`), the `mf_redemption` event handler, `orders.payoutRef`/`payoutUpdatedAt`/`payoutExpectedOn`/`payoutDueBy`, FakeFp `state.redemptions`/`StoredRedemption` and its `redemption.list` route, F5's purchases-only filter in `reconcile-nonfinal.job.ts`, and F5's `redemption.int.test.ts` helpers (`fresh`, `draft`, `approve`, `submit`, `quote`, `orderOf`, `reservationOf`, `enqueued`) (F5).
 - **Produces:**
   - `SANCHAY_APP_ROLE=ops` (R-16): `runOpsCli(env, argv) → exit code` (0 done, 1 refused, 2 usage), `OPS_COMMANDS` and `opsContextOf(app: INestApplicationContext): OpsContext` (`ops-runner.ts`), reached through `main.ts` (`SANCHAY_APP_ROLE=ops node dist/main.js ops:<command> …`) or `node dist/cli/ops.js ops:<command> …` (the `pnpm ops:*` scripts). The application context is built with `{ ...NEST_APP_OPTIONS, bufferLogs: true }` (BRIEF D1) and logs through nestjs-pino. No HTTP listener, no job worker, no FP client.
@@ -15491,7 +16521,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
   - **Deployed run form (every deployed ops run; every runbook copies it):** a one-off ECS task on F1's ops task definition: family `sanchay-{env}-ops` (ECS runs its latest revision, which is the stack output `OpsTaskDefinitionArn`), container `ops`, which already sets `SANCHAY_APP_ROLE=ops` and logs in as `sanchay_app_login`. The command is `aws ecs run-task --cluster sanchay-{env} --launch-type FARGATE --task-definition sanchay-{env}-ops --network-configuration "awsvpcConfiguration={subnets=[<AppSubnetIds>],securityGroups=[<ServiceSecurityGroupId>],assignPublicIp=DISABLED}" --overrides file://ops-overrides.json --query "tasks[0].taskArn" --output text`. `ops-overrides.json` (UTF-8, written in an editor) is `{"containerOverrides": [{"name": "ops", "command": ["node", "dist/main.js", "ops:<command>", "<flag>", "<value>", …]}]}`, with no `environment` override. Then run `aws ecs wait tasks-stopped …` and `aws ecs describe-tasks … --query "tasks[0].containers[0].exitCode"`, and read the result line from log stream `{env}/ops/<task-id>` in `/sanchay/{env}/app` (`docs/runbooks/ops-cli.md` has every line in both shells). `ops:invite` adds the SSM steps around this form: `put-parameter` before the run and `delete-parameter` after it. Never use the migrate task definition `sanchay-{env}-migrate` (D6: it logs in as `sanchay_master`).
   - Jobs (worker only): `integrity.invariants` (hourly at :05 IST, key `integrity-invariants`; `IntegrityInvariantsJob.runChecks() → counts per kind`) and `recon.fp.daily` (02:00 IST, key `recon-fp-daily`; `ReconFpDailyJob.reconcileInvestor(investorId, mfia)`); `ReconModule.forRoot(env)`.
   - `INVARIANT_KINDS`, `INVARIANT_CHECKS`, `InvariantCheck`, `InvariantViolation` (`invariant-checks.ts`); `RECON_FP_KINDS` (`recon-fp-daily.job.ts`); `fpObjectRef`/`FpObjectRef`, `folioNumberOf`, `purchaseDrift`/`DriftSeverity`, `planDrift`, `redemptionAdoptTarget`, `redemptionResumeAction`/`RedemptionResumeAction`/`RedemptionResumeInput`, `SUBMIT_GRACE_MS` (2 minutes) (`recon-rules.ts`).
-  - `fp.reconcile.nonfinal` extended, in this order: (1) the redemption saga backstop: UNDER_REVIEW/CONFIRMING redemptions get `orders.redemption.advance` again; approved redemptions (CONSENT_PENDING or CONSENTED with a CONSUMED or CONSUMED_UNUSED challenge) get `orders.redemption.submit` again with approve's `ConsentApprovedJobData` while their consent is usable, or end CONSENT_EXPIRED (`execute_before_missed`) with `releaseReservation(…, 'consent_expired')` when it is not; (2) RECONCILING purchases (E20) and redemptions are adopted (to the mapped state) or failed with `releaseReservation(…, 'provider_object_absent')`; (3) plans in review, confirmation or RECONCILING get `plans.sip.advance` re-enqueued; (4) RECONCILING mandates keep `MANDATE_CREATE_AMBIGUOUS` open. It emits no metric.
+  - `fp.reconcile.nonfinal` extended, in this order: (1) the redemption saga backstop: UNDER_REVIEW/CONFIRMING redemptions get `orders.redemption.advance` again; approved redemptions (CONSENT_PENDING or CONSENTED with a CONSUMED or CONSUMED_UNUSED challenge) get `orders.redemption.submit` again with approve's `ConsentApprovedJobData` while their consent is usable, or end CONSENT_EXPIRED (`execute_before_missed`) with `releaseReservation(…, 'consent_expired')` when it is not; (2) RECONCILING purchases (E20) and redemptions are adopted (to the mapped state) or failed with `releaseReservation(…, 'provider_object_absent')`, and an adopted purchase gets E20's `orders.purchase.advance` in the adopting transaction (RV-04-F7-4); (3) plans in review, confirmation or RECONCILING get `plans.sip.advance` re-enqueued; (4) RECONCILING mandates keep `MANDATE_CREATE_AMBIGUOUS` open. It emits no metric.
   - Recon break kinds: `INVARIANT_M1_PROVIDER_ID_WITHOUT_CONSENT`, `INVARIANT_M2_LOT_CONSERVATION`, `INVARIANT_M3_DUPLICATE_PAYMENT_SUCCESS`, `INVARIANT_M4_SETTLED_PURCHASE_LOT`, `INVARIANT_RESERVATIONS_OVER_HELD`, `RECON_FP_OBJECT_UNKNOWN`, `RECON_ORDER_OUTCOME_DIFFERS` (CRITICAL); `FP_PLAN_STATE_UNEXPECTED`, `RECON_FOLIO_UNKNOWN`, `RECON_FP_DAILY_FAILED` (WARNING); F4's `FP_ORDER_STATE_UNEXPECTED` and F2's `MANDATE_CREATE_AMBIGUOUS` reused.
   - Columns `payment_attempts.refund_ref`, `payment_attempts.refund_recorded_at`; check `payment_attempts_refund_ref_pair_ck`.
   - Views `app.v_reconciling_orders`, `app.v_units_pending`, `app.v_recon_breaks_open`, `app.v_payouts_due`, `app.v_ops_audit(action, actor_type, actor_id, entity_type, entity_id, reason, occurred_at)`, `app.v_pilot_invites_count(status, invites)`, and `GRANT SELECT … TO sanchay_readonly` on exactly these six.
@@ -17005,6 +18035,33 @@ describe('fp.reconcile.nonfinal, extended to redemptions, plans and mandates (F7
       ['CONSENT_PENDING', 'CONSENTED', 'approve'],
       ['CONSENTED', 'CONSENT_EXPIRED', 'execute_before_missed'],
     ]);
+  });
+
+  it('adopts a RECONCILING purchase FP holds and hands it back to E20’s orders.purchase.advance (RV-04-F7-4)', async () => {
+    const seeded = await seedProcessingPurchase(t, investor, scheme);
+    const challengeId = newId('consent_challenges');
+    await t.db.db
+      .update(orders)
+      .set({
+        status: 'RECONCILING',
+        fpOrderId: null,
+        fpOldId: null,
+        fpState: null,
+        consentChallengeId: challengeId,
+      })
+      .where(eq(orders.id, seeded.orderId));
+    t.fakeFp.advance(seeded.fpOrderId, 'under_review');
+    await nonfinal();
+    expect(await orderOf(seeded.orderId)).toMatchObject({
+      status: 'UNDER_REVIEW',
+      fpOrderId: seeded.fpOrderId,
+      fpState: 'under_review',
+    });
+    expect(enqueued).toContainEqual({
+      name: 'orders.purchase.advance',
+      data: { orderId: seeded.orderId, challengeId },
+      opts: { singletonKey: seeded.orderId },
+    });
   });
 
   it('adopts a RECONCILING redemption FP holds in review and hands it back to F5’s advance job', async () => {
@@ -20173,15 +21230,31 @@ export class ReconcileNonfinalJob {
     });
   }
 
+  /**
+   * E20's rule, kept (RV-04-F7-4): the adopted purchase goes back to UNDER_REVIEW and, in the same
+   * transaction, to E20's orders.purchase.advance (stately, singletonKey = order id; null means one is
+   * already queued), which runs the H-2 checkout from there. F4's mf_purchase handler leaves orders before
+   * PROCESSING to the saga jobs, so nothing else would move it on.
+   */
   private async adoptPurchase(order: OrderRow): Promise<void> {
     const { items } = await this.fpRead.purchases({ sourceRefId: order.id });
     const found = items[0];
     if (found === undefined) return this.recordMiss(order);
     const purchase = toFpPurchaseView(found);
-    await moveOrder(this.dbh.db, order, 'UNDER_REVIEW', 'lookup_adopt_mapped', {
-      fpOrderId: purchase.id,
-      fpOldId: purchase.oldId,
-      fpState: purchase.state,
+    await this.dbh.db.transaction(async (tx) => {
+      await moveOrder(tx, order, 'UNDER_REVIEW', 'lookup_adopt_mapped', {
+        fpOrderId: purchase.id,
+        fpOldId: purchase.oldId,
+        fpState: purchase.state,
+      });
+      if (order.consentChallengeId !== null) {
+        await this.jobs.enqueue(
+          tx,
+          'orders.purchase.advance',
+          { orderId: order.id, challengeId: order.consentChallengeId },
+          { singletonKey: order.id },
+        );
+      }
     });
   }
 
@@ -20634,8 +21707,8 @@ After the `--custom` command, paste the Step 3 SQL into the empty `0033_ops_view
 Expected:
 - The generated `ops_refund_ref` migration is the three statements shown in Step 3 and nothing else; `ops_views` creates the six views and the grant.
 - Unit: `ops-common` 37/37 (35 plus the two boundary cases for `ops-inputs.ts`), `ops-db` 2/2, `ops-inputs` 20/20 (AWS's 4 SigV4 vectors, the signed `GetParameter`, 9 SSM refusal cases, 6 file cases), `ops-invite` 15/15, `recon-rules` 45/45; `env.test.ts` gains one passing case (the `env` filter also runs Plan 01's `dotenv.test.ts`, unchanged).
-- Integration: `integrity-invariants.int.test.ts` 12/12, `recon-fp.int.test.ts` 18/18, `ops-cli.int.test.ts` 23/23 (the `ops:invite` describe has 3 cases: the SSM list, the refusals and the file path, and a concurrent invite), `ops-views.int.test.ts` 4/4; F5's `redemption.int.test.ts` keeps its case count, with the edited case green. The last `ops-cli` cases boot a second application context through `runOpsCli` as the pinned `sanchay_app` role: they need D2's `pgboss` grants to `sanchay_app`, the same ones the api role uses.
-- The last line stays green: E20's `orders` (its RECONCILING purchase still adopts to UNDER_REVIEW and its absent purchase still fails), F4's `ledger` and `folio-sync`, F2's `sip-mandate`, E21's `payments`, E1's `fp-webhooks`, and the migration and grant suites. D7's and D9's own tests never import their CLIs, so rewriting `ops-invite.ts` and `ops-nav-release.ts` changes no other test.
+- Integration: `integrity-invariants.int.test.ts` 12/12, `recon-fp.int.test.ts` 19/19, `ops-cli.int.test.ts` 23/23 (the `ops:invite` describe has 3 cases: the SSM list, the refusals and the file path, and a concurrent invite), `ops-views.int.test.ts` 4/4; F5's `redemption.int.test.ts` keeps its case count, with the edited case green. The last `ops-cli` cases boot a second application context through `runOpsCli` as the pinned `sanchay_app` role: they need D2's `pgboss` grants to `sanchay_app`, the same ones the api role uses.
+- The last line stays green: E20's `orders` (its RECONCILING purchase still adopts to UNDER_REVIEW and gets `orders.purchase.advance` in the same transaction, RV-04-F7-4; its absent purchase still fails), F4's `ledger` and `folio-sync`, F2's `sip-mandate`, E21's `payments`, E1's `fp-webhooks`, and the migration and grant suites. D7's and D9's own tests never import their CLIs, so rewriting `ops-invite.ts` and `ops-nav-release.ts` changes no other test.
 
 Locally, after `pnpm db:migrate`, against the dev database (`SANCHAY_APP_ENV=local`), the CLI runs end to end; it refuses with exit code 1 when the role check fails and prints the usage with exit code 2 (both lines run unchanged in PowerShell 5.1 and Git Bash):
 ```
@@ -42523,7 +43596,9 @@ domain.
 F1 creates these ten alarms in prod only (`infra/lib/alarms.ts`), on the SNS topic `sanchay-ops-alerts-prod`;
 each notifies on ALARM and again on OK. The gauges come from the worker's `ops.gauges.emit` log line, once a
 minute, and every gauge alarm reads its maximum per period. "N consecutive periods" means every one of the
-last N periods breached.
+last N periods breached. Every gauge alarm (all but `alb-5xx`, `target-unhealthy` and `otp-send-failure-rate`) also
+counts a period without a gauge line as breaching (F1, RV-04-F1-6), so a stopped worker puts all seven gauge
+alarms into ALARM together: start with [Worker down](worker-down.md).
 
 | Alarm | Fires when (F1's threshold, period and evaluation periods) | Runbook |
 |---|---|---|
@@ -43001,6 +44076,9 @@ Owner: on-call developer (Dev A primary, Dev B secondary; rota per G-B12). Gate:
   one-minute periods; a period with no gauge line counts as breaching, because the worker itself emits the
   gauges) or `sanchay-prod-job-queue-age` (a due pg-boss job has waited more than 120 s in 2 consecutive
   one-minute periods): the worker is not processing pg-boss jobs.
+- All seven gauge alarms in ALARM together: the worker stopped writing its gauge lines, and each of them counts
+  a period without one as breaching (F1, RV-04-F1-6). Start here; the other runbooks apply only if their
+  alarm stays in ALARM once the worker is back.
 - `sanchay-prod-alb-5xx` (more than 10 target 5xx responses in one 5-minute period) or
   `sanchay-prod-target-unhealthy` (an api target fails `/api/v1/health` in 3 consecutive one-minute periods):
   the api is failing (this runbook's API section).

@@ -15,7 +15,7 @@
 
 **Gate** refers to MVP spec §7, which is **tiered (R-06)**: GO-1 on Fri 11-27 covers onboarding, lumpsum and redemption; GO-2 enables SIP after its canary evidence.
 
-**Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`).** Where this text and a ruling differ, the ruling wins.
+**Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`).** Where this text and a ruling differ, the ruling wins. **Amended 2026-10-05 by the owner decisions R-31, R-33 and R-34.**
 
 ### 1. Governance
 
@@ -33,15 +33,15 @@
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
 | PB-10 | Send Deliverable 1 (without the internal appendix) **after** PB-40 has registered the domain (R-22). If registration is not complete, the letter's URL table is marked "final by 09-30" | PO | Mon 09-28 (after PB-40) | PB-40 (domain named in the letter) | Sent mail plus Cybrilla ticket number | G-B1 |
-| PB-11 | R3 sandbox readiness: both tokens, pre-verification access, UPI Autopay in sandbox, sandbox webhook secret | DEV-A (PO chases) | Wed 10-07 | PB-10 | Token calls in the probe log; secret in nonprod Secrets Manager (name only recorded) | S1 |
+| PB-11 | R3 sandbox readiness: both tokens, pre-verification access, UPI Autopay in sandbox, sandbox webhook secret | DEV-A (PO chases) | Wed 10-07 | PB-10 | Token calls in the probe log; secret kept with the other sandbox credentials in the git-ignored `apps/api/.env` (R-31: no nonprod environment; name only recorded) | S1 |
 | PB-12 | Sandbox probes: P-04 (EUIN blank, no partner), P-05 (ARN visible), P-07 (allotted units), P-09 (units / first instalment), lumpsum custom-checkout order | DEV-A | Fri 10-09 (P-07 and P-09 may run to Fri 10-16) | PB-11 | `docs/probes/*.md` with run ids | G-B8 |
 | PB-13 | Written answers: [Priority] by Fri 10-16; the rest by Fri 10-30; everything by Fri 11-13. Chase every Monday. Map each answer to its flag (`fp.sendPartner`, `fp.lumpsumFlow`, `features.redeemByUnits`, UPI Autopay on/off) | PO; DEV-A maps flags | 10-16 / 10-30 / 11-13 | PB-10 | `docs/probes/cybrilla-answers.md` with mail references | G-B6 |
 | PB-14 | ONDC portal signup with Platizio's ARN (legal name and address exactly as on the ARN certificate) | OWNER + PO | Submit Fri 10-16; activation Fri 10-30 | PB-20, R2 | ONDC confirmation naming Platizio and the ARN | G-B7 |
 | PB-15 | Execute the POA agreement (counsel review first) | OWNER / COUNSEL | Fri 10-23 | R2, PB-02 | Executed agreement filed | G-B7 |
 | PB-16 | CAMS and KFintech mailback subscriptions for the ARN | PO/OPS | Request Fri 10-16; confirmed Fri 11-06 | PB-20 | RTA confirmations | G-B7 |
-| PB-17 | Cybrilla demo part 1 (sandbox): existing-KYC onboarding, lumpsum by UPI and netbanking, returns, webhooks (on the dev AWS host, protected in S2 by R-05). Fallback agreed in writing now: an API-driven lumpsum demo (Playwright against the sandbox) | PO + DEV-A + DEV-B | Fri 11-06 | lumpsum end to end in sandbox (R-03) | Cybrilla's written sign-off | G-B7 |
+| PB-17 | Cybrilla demo part 1 (sandbox): existing-KYC onboarding, lumpsum by UPI and netbanking, returns, webhooks (R-31 leaves no dev AWS host, and E25's prod config runs FP in production mode, so where this demo's sandbox webhooks and returns land is open for the owner; R-05). Fallback agreed in writing now: an API-driven lumpsum demo (Playwright against the sandbox) | PO + DEV-A + DEV-B | Fri 11-06 | lumpsum end to end in sandbox (R-03) | Cybrilla's written sign-off | G-B7 |
 | PB-18 | Cybrilla demo part 2: SIP with UPI Autopay/eNACH (including the investor cancel, R-08), redemption (live or recorded runs) | PO + DEV-A + DEV-B | Wed 11-18 | S4 sandbox build | Written sign-off | G-B7 |
-| PB-19 | Allocate the prod NAT Elastic IP (retained, referenced by the CDK stack) and send it for allowlisting | DEV-A | Fri 11-06 | PB-45 | EIP in CDK context; Cybrilla acknowledgement | G-B7 |
+| PB-19 | Send the prod NAT Elastic IP for allowlisting. E25 allocates it inside the stack in S2 week 2 (output `NatEipAddress`, R-31); it must stay retained | DEV-A | After E25 deploys; by Fri 11-06 | PB-47 | Stack output; Cybrilla acknowledgement | G-B7 |
 | PB-19a | Receive production credentials (FP and POA) **only** through Cybrilla's secure channel. Store in `sanchay/prod/*`, injected only into the `worker` container. Never in email, chat or GitHub | PO → DEV-A | **Fri 11-13** (latest **Mon 11-16**, R-21; later ⇒ GO-1 moves to Fri 12-04) | PB-14–17 | Secret names listed; token call from the prod worker logged | G-B7 |
 | PB-19b | Register prod webhooks at `https://api.sanchay.in/api/v1/webhooks/fp` for every MVP event; store the signing secret; verify one signed prod event | DEV-A | Mon 11-16 (verified by Thu 11-26) | PB-19a, PB-47 | `GET /v2/notification_webhooks` output; verified event id | G-B7, G-E7 |
 | PB-19c | UPI Autopay enabled on the production tenant | PO | Fri 11-13 | Q24 | Cybrilla mail, plus the canary mandate APPROVED | OX-17 |
@@ -64,7 +64,7 @@
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
-| PB-30 | Contract MSG91: India data residency, DPA, DLR webhook; API key in nonprod Secrets Manager | PO | Fri 10-09 | none | Order form, DPA | G-B3 |
+| PB-30 | Contract MSG91: India data residency, DPA, DLR webhook; API key in the prod account's Secrets Manager (`sanchay/prod/msg91`; R-31: no nonprod environment) | PO | Fri 10-09 | none | Order form, DPA | G-B3 |
 | PB-31 | DLT Principal Entity registration for Platizio on one operator portal; bind MSG91 as telemarketer; 6-character service header (candidates `SNCHAY`, `SANCHY`), with brand-ownership documents linking "Sanchay" to Platizio if the portal asks; **whitelist `app.sanchay.in` for URLs** (it appears in the WebOTP line) | OWNER/PO | Submit Tue 09-29; entity and header approved Fri 10-09 | PB-40 | Entity id, header id, URL whitelist screenshot | G-B4 |
 | PB-32a | CO and counsel sign off the **four** SMS texts below (R-10) before filing; a later wording change means refiling | CO + COUNSEL | **Thu 10-08** | PB-02, PB-03 | Signed texts filed in `docs/legal/` | G-B4, G-C1 |
 | PB-32 | Register the **four** Service-Implicit templates (details below; R-10). Submit Mon 10-12; **approved Fri 10-23** | CO (wording) + DEV-A | Fri 10-23 | PB-31, PB-32a | Four template ids mapped in `apps/api/src/integrations/sms/templates.ts` (Plan-01 B12; its tests assert the WebOTP last line with and without a hash for all four) | G-B4 |
@@ -104,7 +104,7 @@ SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
-| PB-35 | SES in ap-south-1 (nonprod and prod accounts): domain identity `sanchay.in`; Easy DKIM (3 CNAMEs); custom MAIL FROM `mail.sanchay.in` (MX to `feedback-smtp.ap-south-1.amazonses.com`, TXT `v=spf1 include:amazonses.com -all`); DMARC `v=DMARC1; p=none; rua=mailto:dmarc@sanchay.in`. Production-access request covers OTP, transactional and security emails only | DEV-A | Request Fri 10-16; granted Fri 10-23 | PB-40, PB-41, PB-45 | "Production access granted"; `Resolve-DnsName -Type TXT _dmarc.sanchay.in` output | G-B5 |
+| PB-35 | SES in ap-south-1 (the prod account; R-31 leaves no nonprod environment): domain identity `sanchay.in`; Easy DKIM (3 CNAMEs); custom MAIL FROM `mail.sanchay.in` (MX to `feedback-smtp.ap-south-1.amazonses.com`, TXT `v=spf1 include:amazonses.com -all`); DMARC `v=DMARC1; p=none; rua=mailto:dmarc@sanchay.in`. Production-access request covers OTP, transactional and security emails only | DEV-A | Request Fri 10-16; granted Fri 10-23 | PB-40, PB-41, PB-45 | "Production access granted"; `Resolve-DnsName -Type TXT _dmarc.sanchay.in` output | G-B5 |
 | PB-36 | DMARC to `p=quarantine` after two clean report weeks | DEV-A | Fri 11-20 | PB-35 | DNS output; report summary | G-B5 |
 | PB-37 | Mailboxes on sanchay.in (e.g. a Workspace secondary domain; apex SPF for that provider): appstores@ first, then support@, grievance@, privacy@, security@, dmarc@ | OPS/PO | appstores@ Fri 10-16; others Fri 11-13 | PB-40 | Test mails received; owner per mailbox | G-B12 |
 
@@ -113,7 +113,7 @@ SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
 | PB-40 | **First action on Mon 09-28 (R-22):** check `sanchay.in` availability and register it in Platizio's name (registrar lock, 2FA, auto-renew, at least 2 years) **before** PB-10 sends the letter. If registration is not complete at sending, the letter's URL table is marked "final by 09-30". If the name is taken, the PO names an alternative within 3 working days (DLT, SES, Play and the letter all depend on it) | PO | **Mon 09-28** (registration complete by Wed 09-30 at the latest) | none | Registrar record | G-B3 |
-| PB-41 | Route 53 zone `sanchay.in` in the prod account, plus delegation (details below) | DEV-A (DNS), DEV-B (assetlinks) | Zone Fri 10-09; dev records Fri 10-23; prod records Fri 11-13 | PB-40, PB-45 | `nslookup` / `Resolve-DnsName` outputs; ACM certificates issued | G-B3 |
+| PB-41 | Route 53 public hosted zone `sanchay.in` in the prod account, before E25 deploys (R-31; details below) | DEV-A (DNS), DEV-B (assetlinks) | Zone Fri 10-09; E25 creates the prod records when it deploys (S2 week 2, R-31) | PB-40, PB-45 | `nslookup` / `Resolve-DnsName` outputs; ACM certificates issued | G-B3 |
 
 **PB-41 records**
 - `www`, `app` and `api`: ALIAS to the prod ALB.
@@ -122,19 +122,19 @@ SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 - CAA: `0 issue "amazon.com"`.
 - Mail records per PB-35 and PB-37.
 - `https://app.sanchay.in/.well-known/assetlinks.json` is served.
-- Nonprod: a delegated `dev.sanchay.in` zone in the nonprod account (proposal; confirm in ADR-0014).
+- Nonprod: none. R-31 removes the AWS dev environment and the dev domain, so the delegated `dev.sanchay.in` zone is moot.
 
 ### 7. AWS (ap-south-1)
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
 | PB-45 | AWS Organization owned by Platizio (details below) | OWNER (payment) / DEV-A | Fri 10-09 | payment method | Account ids; SCP JSON reviewed by both developers | G-B3 |
-| PB-46 | Billing alarms: AWS Budgets per account with alerts at 50%, 80% and 100% actual and 100% forecast, to both developers and the PO; Cost Anomaly Detection on. Suggested budgets are estimates for the PO to confirm: about USD 250/month nonprod and USD 600/month prod | DEV-A | Fri 10-09 | PB-45 | Test alert email received | G-E5 |
-| PB-47 | Prod stack `SanchayMvpStack-prod` up with no investor data: Multi-AZ RDS, PITR, `rds.force_ssl=1`, secrets per container. Business Support plan recommended for real money | DEV-A | Fri 11-13 | PB-45, PB-19 | CDK deploy log | milestone 11-13 |
-| PB-48 | Service quotas: Elastic IPs, Fargate vCPU, SES daily quota of at least 1,000 | DEV-A | Fri 11-06 | PB-45 | Quota view | none |
+| PB-46 | Billing alarms: AWS Budgets per account with alerts at 50%, 80% and 100% actual and 100% forecast, to both developers and the PO; Cost Anomaly Detection on. Suggested budgets are estimates for the PO to confirm: about USD 600/month prod (R-31: no nonprod environment; prod spend starts when E25 deploys in S2 week 2) | DEV-A | Fri 10-09 | PB-45 | Test alert email received | G-E5 |
+| PB-47 | Prod stack `SanchayMvpStack-prod` up with no investor data: E25 deploys it in S2 week 2 and keeps it paused until GO-1 (R-31: invite-only, orders and SIP off, the founders' test accounts only); Multi-AZ RDS, PITR, `rds.force_ssl=1`, secrets per container; F1 hardens it by Fri 11-13. Business Support plan recommended for real money | DEV-A | E25 deploy S2 week 2; hardened Fri 11-13 | PB-45, PB-41 | CDK deploy logs (E25, F1) | milestone 11-13 |
+| PB-48 | Service quotas: Elastic IPs, Fargate vCPU, SES daily quota of at least 1,000 | DEV-A | Elastic IPs and Fargate vCPU before E25 deploys (S2 week 2, R-31); SES Fri 11-06 | PB-45 | Quota view | none |
 
 **PB-45 AWS Organization**
-- Accounts: management (billing only), nonprod and prod.
+- Accounts: management (billing only) and prod. R-31 leaves no AWS dev environment, so the MVP needs no nonprod account.
 - **One billing entity for all of them.** AISPL (India-billed) and AWS Inc accounts cannot sit in the same organisation.
 - Root user on a hardware MFA key, with no access keys.
 - IAM Identity Center with MFA for both developers.
@@ -148,7 +148,7 @@ SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 | PB-50 | GitHub organisation owned by Platizio (Team plan): two owners (OWNER, DEV-A), 2FA enforced, empty private repo `sanchay` | OWNER/DEV-B | Tue 09-29 | none | Org settings screenshot | none |
 | PB-51 | **Owner authorises the first push of `main`** after Plan-01 A12 (was A13; CI) is green locally | OWNER | Fri 10-09 | PB-50, A1–A12 | Written instruction filed in `docs/decisions/` | G-B2 |
 | PB-52 | `main` ruleset (details below) | DEV-B | Mon 10-12 | PB-51 | `gh api repos/<org>/sanchay/rulesets` JSON exported | H-16 |
-| PB-53 | GitHub Actions OIDC deploy role to AWS (no long-lived keys); `dev` and `prod` environments with a required reviewer on prod. FP, MSG91 and SES secrets never go into GitHub | DEV-A | Fri 10-23 | PB-45, PB-52 | IAM trust policy; environment settings | none |
+| PB-53 | GitHub Actions OIDC deploy role to AWS (no long-lived keys; E25's stack creates it); one `prod` environment (no `dev`, R-31) with both founders as required reviewers. FP, MSG91 and SES secrets never go into GitHub | DEV-A | Fri 10-23 | PB-45, PB-52 | IAM trust policy; environment settings | none |
 | PB-54 | Reserve the npm org `sanchay` (never publish) against dependency confusion | DEV-B | Fri 10-09 | none | npm org page | critic |
 
 **PB-52 ruleset on `main`**
@@ -221,24 +221,24 @@ SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 |---|---|---|---|---|---|---|
 | PB-70 | Appoint a named Grievance Officer (SPDI rule 5(9), DPDP notice, AMFI code). `/grievance` states: acknowledge within 1 working day; resolve within 21 calendar days; escalate Grievance Officer → AMC → SEBI SCORES → SMART ODR. It never calls Platizio SEBI-registered | OWNER | Appointed Fri 11-13; page **Mon 11-23** | PB-37, PB-61 | Appointment letter; live page | G-B12 |
 | PB-71 | Support channel: support@sanchay.in; hours Mon–Sat 09:00–19:00 IST; first response 1 working day; macros for KYC not verified, payment failed, refund pending, mandate, redemption payout, SIP cancel; contact shown on Account → Support | OPS/PO | Mon 11-23 | PB-37 | One test ticket closed end to end | G-B12 |
-| PB-72 | Incident contact and on-call rota (both developers; PO as incident lead); CloudWatch alarms routed by SNS email and SMS | PO / DEV-A | Alarms Wed 11-18; rota Mon 11-23 | PB-47 | Rota doc; alarm test page | G-B12, G-E5 |
-| PB-73 | CERT-In: designate the Point of Contact and send the details as required by the Directions of 28-Apr-2022 (check the current address and format on cert-in.org.in); 6-hour reporting runbook; ICT logs kept in India for at least 180 days (CloudWatch ap-south-1, 400 days); AWS time sync documented | CO / DEV-A | Mon 11-23 | none | POC mail and acknowledgement; runbook | G-B12, G-E8 |
+| PB-72 | Incident contact and on-call rota (both developers; PO as incident lead); CloudWatch alarms routed by SNS email and SMS | PO / DEV-A | Alarms Wed 11-18; rota Mon 11-23 | PB-47 | Rota doc; alarm test page (all ten alarms triggered on the paused prod stack before GO-1, R-34) | G-B12, G-E5 |
+| PB-73 | CERT-In: designate the Point of Contact and send the details as required by the Directions of 28-Apr-2022 (check the current address and format on cert-in.org.in); 6-hour reporting runbook; ICT logs kept in India for at least 180 days (CloudWatch ap-south-1: the app log group `/sanchay/prod/app` keeps 400 days, and a stack teardown never deletes it, R-34); AWS time sync documented | CO / DEV-A | Mon 11-23 | none | POC mail and acknowledgement; runbook | G-B12, G-E8 |
 | PB-74 | Runbooks (G-E8 list) in `docs/runbooks/` | DEV-B (DEV-A reviews) | Mon 11-23 | none | Merged PR | G-E8 |
 
 ### 12. Security review
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
-| PB-75 | Internal security checklist (G-E3): OWASP ASVS basics; gitleaks; secrets only in Secrets Manager; BOLA suite on every investor endpoint; HostGuard cross-host suite; OTP-abuse suite; CSRF headers; PII log scan; TLS only; RDS encryption and `force_ssl`; `pnpm audit --prod` clean; one ZAP baseline | DEV-A, cross-signed by DEV-B | Wed 11-25 | PB-47 | Checklist with links | G-E3 |
-| PB-76 | *Optional:* external quick test (3-day black-box of web, API and Android APK) by a CERT-In-empanelled vendor | PO | Budget decision Fri 10-16; booked Fri 10-30; test Wed 11-18 to Fri 11-20 on the prod-like stack; report Mon 11-23; critical/high fixed before 11-27 | budget | Report; fix list closed | G-E3 (optional) |
+| PB-75 | Internal security checklist (G-E3): OWASP ASVS basics; gitleaks; secrets only in Secrets Manager; BOLA suite on every investor endpoint; HostGuard cross-host suite; OTP-abuse suite; CSRF headers; PII log scan; TLS only; RDS encryption and `force_ssl`; `pnpm audit --prod` clean; one passive ZAP baseline on the paused prod stack (R-31) | DEV-A, cross-signed by DEV-B | Wed 11-25 | PB-47 | Checklist with links | G-E3 |
+| PB-76 | *Optional:* external quick test (3-day black-box of web, API and Android APK) by a CERT-In-empanelled vendor | PO | Budget decision Fri 10-16; booked Fri 10-30; test Wed 11-18 to Fri 11-20 on the paused prod stack (R-31: the only deployed stack); report Mon 11-23; critical/high fixed before 11-27 | budget | Report; fix list closed | G-E3 (optional) |
 | PB-77 | Credential hygiene: rotation procedure for FP, POA, MSG91 and SES keys; never share credentials in mail or chat | DEV-A | Fri 11-13 | PB-19a | Runbook entry | G-E3 |
 
 ### 13. Pilot operations
 
 | ID | Action | Owner | Due | Depends on | Evidence of done | Gate |
 |---|---|---|---|---|---|---|
-| PB-80 | Curated-list sign-off (criteria below) | PO + CO sign-off | v1 **Fri 11-06**; final **Fri 11-20** | PB-21, PB-22, R9 | Merged `data/curated-schemes.csv` and `data/fund-facts.csv` with CO approval | G-B10 |
-| PB-81 | Pilot invitees and consent (details below) | PO | List and seed Fri 11-20; invitations only after GO | PB-61 | Seed audit_events; opt-ins filed | G-B11 |
+| PB-80 | Curated-list sign-off (criteria below) | PO + CO sign-off | v1 **Fri 11-06**; final **Fri 11-20** | PB-21, PB-22, R9 | Merged `data/curated-schemes.csv` and `data/fund-facts.csv` with CO approval; the list loaded on prod with F19's seed `--pilot-list` through the ops one form before GO-1 (R-33) | G-B10 |
+| PB-81 | Pilot invitees and consent (details below) | PO | List Fri 11-20; seeded only after the GO-1 decision (R-31: before GO-1 only the founders' test accounts are invited); invitations only after GO | PB-61 | Seed audit_events; opt-ins filed | G-B11 |
 | PB-82 | Founders' canary plan and execution (details below) | PO + DEV-A + DEV-B | Plan Fri 11-13; execute Tue 11-17 to Mon 11-23; report **Thu 11-26** | PB-19a, PB-19b, PB-19c, PB-47 | `docs/probes/canary-2026-11.md` | G-E7 |
 
 **PB-80 curated-list criteria.** 40–60 Regular-Growth ISINs, each:
@@ -270,6 +270,7 @@ The list must include at least one liquid or debt fund for the canary.
   - FP: order, payment, plan and mandate;
   - the RTA: units within 0.001, ARN present, EUIN blank;
   - the bank: debit, and payout to the folio bank.
+- R-31 keeps `orders.enabled` and `plans.sip.enabled` false until GO-1. Plan 04 turns one on only for a canary leg, with two founders, and off again straight after; the owner confirms these windows.
 
 ### 14. Gate evidence map (MVP spec §7 → checklist)
 
@@ -301,7 +302,7 @@ The gate is tiered (R-06): every item below is GO-1 evidence (Fri 11-27) except 
 | G-E8 runbooks | PB-73, PB-74 |
 
 **Top watch items, in critical-path order**
-1. PB-40: domain availability and registration on **Mon 09-28, before the letter** (R-22).
+1. PB-40: domain availability and registration on **Mon 09-28, before the letter** (R-22); then PB-45/PB-41: the prod account and the `sanchay.in` hosted zone in it before E25 deploys in S2 week 2 (R-31).
 2. PB-31/32a/32: DLT entity and the four templates (entity 10-09, texts signed 10-08, filed 10-12, approved 10-23).
 3. PB-13: Cybrilla priority answers (10-16), which feed the 10-23 trims.
 4. PB-55/56: D-U-N-S and Play verification (10-30).

@@ -2,7 +2,7 @@
 
 # Sanchay MVP task outlines: Plan 02 (S2), Plan 03 (S3), Plan 04 (S4 and pilot week)
 
-This was planned read-only. Nothing was created or changed. It is based on the MVP spec (§0–§8, H-1..H-21), the sprint plans, and the Plan-01 delta sheet (new ids A1–A12, B1–B23, C1–C15). **Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`); where this text and a ruling differ, the ruling wins.** I also checked the Plan-01 interface sheet (§5 API layout and symbols) and the v1 test sources (`XirrCalculatorTest`, `AmfiNavParserTest`, `RedemptionAvailability`, and the research:rules-money vectors).
+This was planned read-only. Nothing was created or changed. It is based on the MVP spec (§0–§8, H-1..H-21), the sprint plans, and the Plan-01 delta sheet (new ids A1–A12, B1–B23, C1–C15). **Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`); where this text and a ruling differ, the ruling wins.** **Amended 2026-10-05 by the owner decisions R-31, R-33 and R-34** in the E25, F1 and dev-stack text; R-32 (queue policies) is applied in Plan 02 D2, which wins over this outline. I also checked the Plan-01 interface sheet (§5 API layout and symbols) and the v1 test sources (`XirrCalculatorTest`, `AmfiNavParserTest`, `RedemptionAvailability`, and the research:rules-money vectors).
 
 ## 0. Conventions, capacity ledger and rulings these outlines depend on
 
@@ -10,7 +10,7 @@ This was planned read-only. Nothing was created or changed. It is based on the M
 - **IDs.** Plan 02 uses D1..D10, Plan 03 uses E1..E25, Plan 04 uses F1..F28. Tasks that can be trimmed are tagged `[T#]` using the spec §6 numbering: T1 www, T2 filters, T3 allocation chart, T4 NAV chart, T5 redeem by units, T6 eNACH, T7 Android native, T8 SIP. The design tactics are named **LOOKUP-ADOPT** (list by `source_ref_id` and adopt) and **SHORTFALL-BREAK** (ledger shortfall → CRITICAL break) (R-04); they are never trimmed.
 - **Estimates** are in ideal hours at human pace (1 ideal day = 8 h), the same unit as the delta sheet.
 - **Plan files** go in `C:/Users/pc/Desktop/sanchay/docs/superpowers/plans/`:
-  - `2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md` (E25 dev AWS runs in the Plan-02 window, R-05)
+  - `2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md` (E25 runs in the Plan-02 window, R-05, and deploys the paused prod stack, R-31; the file name keeps "dev-aws")
   - `2026-10-26-plan-03-mvp-consent-onboarding-catalogue-lumpsum.md`
   - `2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md`
   
@@ -71,11 +71,11 @@ This was planned read-only. Nothing was created or changed. It is based on the M
 
 | Sprint | Net capacity | Committed before this plan | Available | Plan demand (after T1–T6) | Result |
 |---|---|---|---|---|---|
-| S2 | 172.3 | Plan-01 tail 92.0 (delta §7: B13–B23, C3, C6–C15) | **80.0** (A 42 / B 38) | Plan 02: 80.0 **+ E25 CDK dev 12 h (Dev A, week 2, protected by R-05)** | Dev A over by 12 h: D4 (10 h) and the last 2 h of D3 move to S3 week 1 |
+| S2 | 172.3 | Plan-01 tail 92.0 (delta §7: B13–B23, C3, C6–C15) | **80.0** (A 42 / B 38) | Plan 02: 80.0 **+ E25 CDK prod, deployed paused, 12 h (Dev A, week 2, protected by R-05; R-31)** | Dev A over by 12 h: D4 (10 h) and the last 2 h of D3 move to S3 week 1 |
 | S3 | 192.8 | S2 carry 12 h | 180.8 | Plan 03: 234 (already without E18/E19) − E25 12 (now in S2) + R-18 4 (E13 `legal.pending`, E24 SYS-01) = 226 | **over by ≈ 45 h**, carried into S4 in the order given in Plan 03 |
 | S4 | 152.0 | S3 carry ≈ 45 h | 107 | Plan 04: 136 (already without T3/T5/T6) + F28 `plans.cancel` 8 (R-08) + R-18 2 (F14 AccountScreen v2) = 146 | **over by ≈ 39 h (4.9 d)** |
 
-The R-05 funding (E18, E19) and the R-08 funding (T3, T5) are real relative to the untrimmed plan, but these after-T1–T6 figures had already excluded those tasks, so the protected dev stack, `plans.cancel` and the R-18 screens add ≈ 26 h here. This is why the break-even factor sits at ≈ 1.67 even with T1–T6.
+The R-05 funding (E18, E19) and the R-08 funding (T3, T5) are real relative to the untrimmed plan, but these after-T1–T6 figures had already excluded those tasks, so the protected E25 stack (the paused prod stack, R-31), `plans.cancel` and the R-18 screens add ≈ 26 h here. This is why the break-even factor sits at ≈ 1.67 even with T1–T6.
 | Pilot week | 51.2 (factor 1.0) | — | 51.2 | F20–F27: 51 | not a sprint; F26 fix budget is the last absorber |
 
 **How these figures were reached (one capacity model, R-01):**
@@ -93,7 +93,7 @@ The R-05 funding (E18, E19) and the R-08 funding (T3, T5) are real relative to t
 
 ### 0.4 Rulings and conflicts (items 2 and 3 are now closed by controller rulings)
 1. **Onboarding screens batch 1 moves from S2 to Plan 03 (E12).** The Plan-01 tail consumes S2, and the screens need the S3 backend anyway.
-2. **Superseded by R-05: the CDK dev stack (E25) is protected in S2** (Dev A, week 2, ≈ 12 h). It is out of the overflow ranking and is funded by taking E18 [T2] and E19 [T4] out of the committed S3 load. Fallback: a fixed-hostname tunnel to the local API for sandbox webhooks and payment returns, recorded in ADR-0014. Milestones are per R-03: Fri 10-09 packages/platform/OTP senders green; **Wed 10-21** login E2E; Fri 10-23 existing-KYC onboarding E2E in the FP sandbox and catalogue data on dev AWS; Fri 11-06 lumpsum E2E. **Open point for the controller:** onboarding E2E needs E3/E4/E6/E11 (consent engine, KRA, attest, provisioning), which these outlines schedule in S3, so the 10-23 onboarding milestone is not met by this sequence.
+2. **Superseded by R-05 and R-31: the E25 stack is protected in S2** (Dev A, week 2, ≈ 12 h). It is out of the overflow ranking and is funded by taking E18 [T2] and E19 [T4] out of the committed S3 load. R-31: there is no AWS dev environment or dev domain; E25 deploys `SanchayMvpStack-prod`, paused until GO-1, and F1 hardens it in S4. R-05's fallback, a fixed-hostname tunnel to the local API for sandbox webhooks and payment returns (ADR-0014), has no dev hostname left: open for the owner. Milestones are per R-03, with 10-23 redefined by R-24 and amended by R-31: Fri 10-09 packages/platform/OTP senders green; **Wed 10-21** login E2E; Fri 10-23 ONB-01..07 on web + Android against FakeFp, the KRA pre-verification sandbox probe green and catalogue data on the paused prod stack; Fri 11-06 full onboarding E2E and lumpsum E2E. R-24 closed the open point on onboarding E2E.
 3. **Redemption quote vs "providers only in the worker" — ruled by R-09.** Spec §4.4 now matches:
    - `folio.sync` (worker) stores `folios.fp_holdings_snapshot jsonb` and `fp_holdings_synced_at`. These are additive columns and need acknowledgement.
    - The quote reads the snapshot and returns `REFRESHING` (enqueueing `folio.sync`) when it is older than 24 h.
@@ -107,7 +107,7 @@ The R-05 funding (E18, E19) and the R-08 funding (T3, T5) are real relative to t
 
 ## 1. PLAN 02 (S2, after the Plan-01 tail): platform kernel, FP gateway, FakeFp, catalogue data
 
-**Goal.** By Fri 10-23 the money kernel runs under Testcontainers and the dev AWS stack (E25, R-05) is up with the catalogue data on it:
+**Goal.** By Fri 10-23 E25's prod stack is up and paused (R-05, R-31), with D9's NAV syncs running on it (R-24 as amended by R-31), and the money kernel runs under Testcontainers:
 - idempotency;
 - the pg-boss worker role;
 - FpGateway with lossless-json and `provider_calls`;
@@ -119,7 +119,7 @@ The R-05 funding (E18, E19) and the R-08 funding (T3, T5) are real relative to t
 
 Everything Plan 03 consumes exists with the exact names below.
 
-**Window:** Dev A from about Mon 10-19, Dev B from about Mon 10-19, both after their Plan-01 tails (Tue 10-20 is a holiday; login E2E is Wed 10-21, R-03). Budget 80 h: Dev A 42, Dev B 38, plus **E25 CDK dev (12 h, Dev A, week 2) protected in this window (R-05)**; D4 and the last 2 h of D3 therefore start S3 week 1.
+**Window:** Dev A from about Mon 10-19, Dev B from about Mon 10-19, both after their Plan-01 tails (Tue 10-20 is a holiday; login E2E is Wed 10-21, R-03). Budget 80 h: Dev A 42, Dev B 38, plus **E25 CDK prod, deployed paused (12 h, Dev A, week 2), protected in this window (R-05, R-31)**; D4 and the last 2 h of D3 therefore start S3 week 1.
 
 **Prerequisites from Plan 01 (new ids):**
 
@@ -618,11 +618,11 @@ Everything Plan 03 consumes exists with the exact names below.
   - Playwright `explore.smoke.spec.ts` (search → fund page)
   - www pages static (no client JS on `/site/legal/*`)
 
-### E18. [T2] Explore filters and user sorts (Dev B, 6 h). **Not committed: funds the protected dev stack (R-05); built only as an extension if f₂ allows.**
+### E18. [T2] Explore filters and user sorts (Dev B, 6 h). **Not committed: funds the protected E25 stack (R-05; the paused prod stack, R-31); built only as an extension if f₂ allows.**
 - Filters: riskometer, AMC, `minSipMax`; sorts 1Y/3Y/5Y with DSC-26.
 - **Tests:** `sort by 3Y shows DSC-26 caption`, `filter combination query string round-trip`.
 
-### E19. [T4] NAV chart and `catalogue.navHistory` (Dev B, 8 h). **Not committed: funds the protected dev stack (R-05); extension only.**
+### E19. [T4] NAV chart and `catalogue.navHistory` (Dev B, 8 h). **Not committed: funds the protected E25 stack (R-05; the paused prod stack, R-31); extension only.**
 - `catalogue.navHistory` GET `/catalogue/schemes/{slug}/nav-history?range=1Y|3Y|5Y|MAX` (≤ 260 points, downsampled). Chart built with react-native-svg.
 - **Tests:** `downsample keeps first/last/min/max`, `≤260 points`.
 
@@ -708,20 +708,20 @@ Everything Plan 03 consumes exists with the exact names below.
   - Playwright `lumpsum.smoke.spec.ts` (explore → quote → consent (Mailpit OTP) → FakeFp payment → result SETTLED)
   - Maestro local `lumpsum-return.yaml`
 
-### E25. CDK `SanchayMvpStack-dev` (Dev A, 12 h). **Protected; runs in S2 week 2 (R-05)**, not in the overflow ranking.
-- **Why S2:** FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06 demo all need a public dev host. Funded by taking E18 [T2] and E19 [T4] out of the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1. **Fallback:** a fixed-hostname tunnel (for example a named Cloudflare Tunnel on `api.dev.sanchay.in`) to the local API, recorded in ADR-0014 and registered with Cybrilla by 10-23. E20/E21 and D4's lumpsum smoke depend on a public dev API host.
-- **Files (create):** `infra/{package.json, bin/sanchay.ts, lib/sanchay-mvp-stack.ts, lib/config.ts, test/sanchay-mvp-stack.test.ts}`, `.github/workflows/deploy.yml` (GitHub OIDC; manual dispatch), `apps/api/Dockerfile` (bakes in the RDS CA bundle and copies `docs/legal/` for the seed), `apps/web/Dockerfile`, `docs/adr/0014-minimal-aws-topology.md` (also records the dev hosts and the tunnel fallback).
+### E25. CDK `SanchayMvpStack-prod`, deployed paused (Dev A, 12 h). **Protected; runs in S2 week 2 (R-05, R-31)**, not in the overflow ranking.
+- **Why S2 (R-31):** there is no AWS dev environment and no dev domain; development runs locally on docker compose. E25 deploys the one stack, `SanchayMvpStack-prod`, in S2 week 2 and keeps it paused until GO-1: sign-in stays invite-only (D7; prod boot invariant 10), `orders.enabled` and `plans.sip.enabled` stay false, and no invite is added except the founders' test accounts. F1 hardens the same stack in S4. `sanchay.in` and its hosted zone must exist in the prod account before E25 deploys. Funded by taking E18 [T2] and E19 [T4] out of the committed S3 load; Dev A's D4 and the last 2 h of D3 move to S3 week 1. **Open for the owner:** R-05 protected this slot because FP sandbox webhooks, payment returns, the 10-23 callback URLs promised to Cybrilla and the 11-06 demo need a public host; E25's prod config runs FP in production mode, and the tunnel fallback (a named tunnel on `api.dev.sanchay.in`) has no dev domain now, so where E20/E21 and D4's lumpsum smoke receive sandbox traffic is not settled.
+- **Files (create):** `infra/{package.json, bin/sanchay.ts, lib/sanchay-mvp-stack.ts, lib/config.ts, test/sanchay-mvp-stack.test.ts}`, `.github/workflows/deploy.yml` (GitHub OIDC; manual dispatch), `apps/api/Dockerfile` (bakes in the RDS CA bundle and copies `docs/legal/` for the seed), `apps/web/Dockerfile`, `docs/adr/0014-minimal-aws-topology.md` (also records the prod hosts, the paused state and the first deploy, R-31).
 - **Produces** (spec §2.4):
   - VPC with 2 AZs and 1 NAT with an EIP.
   - ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `xff_header_processing.mode=append`.
   - **Listener rules (R-11):** host `app` + path `/api/v1/*` → api target group (3000); host `api` → api; `www` and the rest of `app` → web (3001). One ECS service registers both target groups. The ALB and ECS health checks use `/api/v1/health` (liveness, R-12).
   - One ECS arm64 service with containers `web`, `api` and `worker`. FP secrets go only into `worker`; `SANCHAY_KEYRING_JSON` into api and worker (R-19 owning containers). ECS Exec enabled with logging to CloudWatch (R-16).
-  - The one-off `migrate` task. RDS PG 18 with `rds.force_ssl=1`, and the app connects with **`sslmode=verify-full` against the baked-in RDS CA bundle (R-15)**. S3, ECR, Secrets Manager, log groups with 400-day retention, Route 53 records for the dev hosts (`www.dev`, `app.dev`, `api.dev`; noindex).
+  - The one-off `migrate` task. RDS PG 18 with `rds.force_ssl=1`, and the app connects with **`sslmode=verify-full` against the baked-in RDS CA bundle (R-15)**. S3, ECR `sanchay-{env}-api` and `sanchay-{env}-web` (each keeps its last 20 images), Secrets Manager, and one container log group `/sanchay/{env}/app` (400 days) with awslogs stream prefixes and a `service` field per task definition on every line (R-34); the log group and both repositories use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `RetainExceptOnCreate`, R-34). Route 53 records for `www`, `app`, `api` and the apex (301 to `www`) in the prod account's `sanchay.in` zone (R-31).
   - CloudWatch alarm on NAV age (R-12).
 - **Tests:**
   - CDK assertions: `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rule app host + /api/v1/* → api target group`, `health check path /api/v1/health`, `SG: RDS reachable only from service`, `log retention 400`, `ECS Exec logging configured`
-  - `DATABASE_URL on dev/prod carries sslmode=verify-full and the CA file exists in the image`
-  - deploy to dev: `/api/v1/health` 200 on `app.dev` and `api.dev`; `POST /api/v1/webhooks/fp` reaches the api container from the internet; `https://app.dev.sanchay.in/.well-known/assetlinks.json` returns 200 `application/json` without auth
+  - `DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image`
+  - deploy to prod, paused (R-31): `/api/v1/health` 200 on `app.sanchay.in` and `api.sanchay.in`; `POST /api/v1/webhooks/fp` reaches the api container from the internet; `https://app.sanchay.in/.well-known/assetlinks.json` returns 200 `application/json` without auth
 
 **Plan 03 overflow order at f = 1.6** (≈ 45 h after the R-05/R-18 changes, §0.3; these carry into the first days of Plan 04 in this order):
 1. The E24 ORD-01/02 list and detail (4 h).
@@ -744,7 +744,7 @@ The lumpsum UI (E23/E24 core) and the E21 core are protected ahead of E13 polish
 ## 3. PLAN 04 (S4 Wed 11-11 → Fri 11-20, plus pilot week Mon 11-23 → Fri 11-27): SIP and mandates, ledger, portfolio, redemption, production, gate
 
 **Goal.**
-- **Fri 11-13:** the prod stack is up.
+- **Fri 11-13:** the prod stack, up and paused since E25's S2 deploy (R-31), is hardened (F1).
 - **Tue 11-17 → Thu 11-19:** canaries (a) and (b) run; **Wed 11-18** Cybrilla demo part 2 (SIP and redemption).
 - **Fri 11-20 (feature freeze):** SIP (UPI Autopay) with the investor cancel (R-08), the ledger, the dashboard and holdings, and redemption (amount and all) work in the sandbox on web and on the Play-internal Android build.
 - **Wed 11-25:** G-E4 sandbox smoke evidence (3 runs on 3 days from 11-16, R-21).
@@ -758,12 +758,12 @@ The lumpsum UI (E23/E24 core) and the E21 core are protected ahead of E13 polish
 - **Plan 01:** `@sanchay/money` (`marketValue`, `unitsForAmount`, `formatXirr` PO-5, `holdingMoney`, `allocatePercentages`).
 - **Business:** G-B7 prod credentials (11-13; latest Mon 11-16, R-21), G-B9 Play Console (10-30) and app/signing key (11-06), G-B10 curated list v1 (11-06), probe P-09 (units, SIP).
 
-### F1. CDK prod, alarms (Dev A, 8 h; E25 dev already ran in S2, R-05)
+### F1. Harden the prod stack, alarms (Dev A, 8 h; E25 deployed it paused in S2, R-05, R-31)
 - **Files (modify):** `infra/lib/{sanchay-mvp-stack.ts, config.ts}`; create `infra/lib/alarms.ts`, `docs/runbooks/credential-rotation.md`.
 - **Produces:**
-  - `SanchayMvpStack-prod`: Multi-AZ, PITR 14 days, deletion protection, 2 tasks, NAT EIP output for Cybrilla allowlisting; the same R-11 listener rules, liveness health check (R-12), `sslmode=verify-full` (R-15) and ECS Exec logging (R-16) as E25.
-  - Alarms routed to SNS email and SMS for both developers: 5xx, worker heartbeat, queue age > 2 min, RECONCILING SLA, M1/M3/M4, webhook signature failures, OTP send failure > 5%, SMS cap, NAV age (R-12).
-  - Prod deploys with `orders.enabled=false` and `plans.sip.enabled=false` (SIP waits for GO-2, R-06).
+  - F1 hardens the `SanchayMvpStack-prod` that E25 deployed paused (R-31) instead of adding a second environment; the stack keeps E25's Multi-AZ, PITR 14 days, deletion protection, 2 tasks, NAT EIP output for Cybrilla allowlisting, R-11 listener rules, liveness health check (R-12), `sslmode=verify-full` (R-15) and ECS Exec logging (R-16).
+  - Alarms routed to SNS email and SMS for both developers: 5xx, worker heartbeat, queue age > 2 min, RECONCILING SLA, M1/M3/M4, webhook signature failures, OTP send failure > 5%, SMS cap, NAV age (R-12). Every metric filter is proven against captured log lines with `aws logs test-metric-filter`, a CloudWatch Logs data-protection policy masks PAN and Indian mobile numbers, and all ten alarms are triggered on the paused prod stack before GO-1 (R-34).
+  - Prod deploys with `orders.enabled=false` and `plans.sip.enabled=false` (SIP waits for GO-2, R-06). Before GO-1, D9's NAV history backfill and F19's curated list (`--pilot-list`) run on prod through the ops one form (`aws ecs run-task` with a command override on `sanchay-prod-ops`, R-33).
 - **Tests:**
   - CDK assertions: `prod MultiAz true`, `BackupRetention 14`, `DeletionProtection`, `alarm count 10 with SNS actions`
   - one PITR restore test into a scratch instance (G-E5)
@@ -994,7 +994,7 @@ The lumpsum UI (E23/E24 core) and the E21 core are protected ahead of E13 polish
 |---|---|---|---|---|
 | F20 | Canary (c): partial redemption Mon 11-23; reconciliation report `docs/probes/canary-2026-11.md` (units to 0.001, ARN present, EUIN blank, bank debit and payout, one signed prod webhook) | A 8 / B 4 | 12 | G-E7, G-B8 prod |
 | F21 | G-E3 checklist: ASVS basics, gitleaks, `pnpm audit --prod`, PII log scan of e2e logs, TLS, RDS encryption and `force_ssl`, remaining suites | A | 4 | `docs/security/g-e3-checklist.md` |
-| F22 | ZAP baseline on prod-like dev stack; cross-sign G-E3 | B | 4 | ZAP report |
+| F22 | Passive ZAP baseline on the paused prod stack before GO-1 (R-31); cross-sign G-E3 | B | 4 | ZAP report |
 | F23 | Gate evidence pack for GO-1 linking G-E1/E2/E4/E5 CI runs and smoke logs (3 runs on 3 days, runs from Mon 11-16, due **Wed 11-25**, R-21); a separate GO-2 section for SIP (mandate APPROVED + plan ACTIVE + first-instalment date; debit and allotment when they land, R-06) | A | 4 | `docs/probes/gate-2026-11-27.md` |
 | F24 | G-E8 runbooks consolidated (13 listed in spec §7) from sprint stubs | B | 7 | `docs/runbooks/*.md` |
 | F25 | G-E6 adb and screenshot evidence | B | 2 | — |
@@ -1047,10 +1047,10 @@ Money/format vectors already exist from A3–A8.
 | T8 | F2, F3, F10, F12, F13, F28 |
 
 **Totals** (ideal hours):
-- **Plan 02:** 80, plus E25 CDK dev 12 run in the Plan-02 window (R-05).
+- **Plan 02:** 80, plus E25 (CDK prod, deployed paused, R-31) 12 run in the Plan-02 window (R-05).
 - **Plan 03:** 248 (234 after T2/T4; E25's 12 now counted in S2), plus R-18 4 (E13, E24).
 - **Plan 04:** 152 in S4 (136 after T3/T5/T6), plus F28 `plans.cancel` 8 (R-08) and F14 AccountScreen v2 2 (R-18), plus 51 in the pilot week.
-- **Remaining MVP after Plan 01:** 480 h (60.0 d) at spec budgets, against 424.8 h of S2-remaining to S4 capacity at f = 1.6; MVP-wide **86.4 d against 80.4** (R-01). Break-even measured factor **≈ 1.75** without trims, **≈ 1.67** with T1–T6 (R-01). The ruling additions (R-05 dev stack, R-08, R-18) add ≈ 26 h on top of the after-trim figures (§0.3).
+- **Remaining MVP after Plan 01:** 480 h (60.0 d) at spec budgets, against 424.8 h of S2-remaining to S4 capacity at f = 1.6; MVP-wide **86.4 d against 80.4** (R-01). Break-even measured factor **≈ 1.75** without trims, **≈ 1.67** with T1–T6 (R-01). The ruling additions (R-05's protected stack, the paused prod stack under R-31; R-08; R-18) add ≈ 26 h on top of the after-trim figures (§0.3).
 
 ### Critical Files for Implementation
 - C:/Users/pc/AppData/Local/Temp/claude/C--Users-pc-Desktop-sanchay/2f00d411-382c-43a6-bd67-ecaf60c67db1/tasks/wk14xlx18.output (`result.interfaceSheet` §5.7–§5.8 platform symbols and layout; `result.planChunks`; `result.registerMoney` D-MONEY-004/041/109 for the class list and approve steps)
