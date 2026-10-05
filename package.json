@@ -17,7 +17,8 @@
     "db:up": "docker compose up -d postgres mailpit",
     "db:migrate": "pnpm --filter=@sanchay/api db:migrate",
     "e2e:web": "turbo run e2e:web --filter=@sanchay/web",
-    "check-brand": "node scripts/check-brand.ts"
+    "check-brand": "node scripts/check-brand.ts",
+    "scan-pii-logs": "node scripts/scan-pii-logs.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

@@ -29,6 +29,8 @@ export default defineConfig({
       url: `${API_ORIGIN}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
+      // G-E3: print the server logs as "[WebServer] …" so CI can scan them for PII values.
+      stdout: 'pipe',
       env: {
         ...baseEnv,
         PORT: '3000',
@@ -48,6 +50,7 @@ export default defineConfig({
       url: `http://localhost:${WEB_PORT}/login`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
+      stdout: 'pipe',
       env: {
         ...baseEnv,
         SANCHAY_PLATFORM_ARN: 'ARN-000000',
