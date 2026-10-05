@@ -20,6 +20,12 @@ const webSession: PlatformAdapters['session'] = {
   clearSessionToken: async () => undefined,
 };
 
+// F13: FP sends no postback for an eNACH mandate, so the bank page opens beside the app and the
+// mandate screen re-reads the status when this tab is visible again.
+async function openInNewTab(url: string): Promise<void> {
+  globalThis.open(url, '_blank', 'noopener,noreferrer');
+}
+
 export function WebAppProviders({
   children,
   privacyNoticeUrl,
@@ -51,7 +57,7 @@ export function WebAppProviders({
     [router],
   );
   const platform = useMemo<PlatformAdapters>(
-    () => ({ session: webSession, privacyNoticeUrl }),
+    () => ({ session: webSession, privacyNoticeUrl, openAuthSession: openInNewTab }),
     [privacyNoticeUrl],
   );
   return (

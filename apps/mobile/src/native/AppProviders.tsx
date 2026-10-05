@@ -10,6 +10,7 @@ import {
 import { QueryClientProvider } from '@tanstack/react-query';
 import { type Href, router } from 'expo-router';
 import { type ReactNode, useMemo, useState } from 'react';
+import { openMandateAuthSession } from './authSession';
 import { mobileConfig } from './config';
 import { useSession } from './SessionProvider';
 
@@ -34,6 +35,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     () => ({
       session: { saveSessionToken: signIn, clearSessionToken: signOut },
       privacyNoticeUrl: `${mobileConfig.wwwOrigin}/legal/privacy`,
+      openAuthSession: openMandateAuthSession,
     }),
     [signIn, signOut],
   );

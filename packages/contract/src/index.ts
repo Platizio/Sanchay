@@ -1,12 +1,22 @@
 import { authContract } from './auth.js';
 import { healthContract } from './health.js';
+import { mandatesContract } from './mandates.js';
 import { meContract } from './me.js';
+import { plansContract } from './plans.js';
 
 export * from './auth.js';
 export * from './common.js';
 export * from './errors.js';
 export * from './health.js';
+export * from './mandates.js';
 export * from './me.js';
+export * from './plans.js';
 
-export const contract = { health: healthContract, auth: authContract, me: meContract };
+export const contract = {
+  health: healthContract,
+  auth: authContract,
+  me: meContract,
+  plans: plansContract,
+  mandates: mandatesContract,
+};
 export type Contract = typeof contract;

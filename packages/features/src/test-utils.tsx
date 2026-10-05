@@ -27,6 +27,7 @@ export function makePlatform() {
       clearSessionToken: vi.fn(async () => undefined),
     },
     privacyNoticeUrl: 'https://www.sanchay.in/legal/privacy',
+    openAuthSession: vi.fn(async (_url: string) => undefined),
   } satisfies PlatformAdapters;
 }
 

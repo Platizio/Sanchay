@@ -5,6 +5,11 @@ import {
   ComingSoonScreen,
   HomeScreen,
   LoginScreen,
+  MandateScreen,
+  SipDetailScreen,
+  SipListScreen,
+  SipReviewScreen,
+  SipSetupScreen,
 } from '@sanchay/features';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -38,4 +43,24 @@ export function AppShellRoute({ children }: { children: ReactNode }) {
       <main className="min-w-0 flex-1">{children}</main>
     </AppShell>
   );
+}
+
+export function SipSetupRoute({ schemeId }: { schemeId: string }) {
+  return <SipSetupScreen schemeId={schemeId} />;
+}
+
+export function SipReviewRoute({ schemeId }: { schemeId: string }) {
+  return <SipReviewScreen schemeId={schemeId} />;
+}
+
+export function SipListRoute() {
+  return <SipListScreen />;
+}
+
+export function SipDetailRoute({ planId }: { planId: string }) {
+  return <SipDetailScreen planId={planId} />;
+}
+
+export function MandateRoute({ mandateId }: { mandateId: string }) {
+  return <MandateScreen mandateId={mandateId} />;
 }
