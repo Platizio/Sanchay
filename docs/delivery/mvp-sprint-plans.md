@@ -2,7 +2,7 @@
 
 > **Task ids (R-04):** this document now uses the **new Plan-01 ids** (delta sheet §2), which are authoritative everywhere; an old id appears only as "(was Bxx)". The mapping is below. The design tactics once called T6/T7 are **LOOKUP-ADOPT** and **SHORTFALL-BREAK**, so they cannot be confused with trims T6/T7.
 >
-> **Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`).** Where this text and a ruling differ, the ruling wins.
+> **Amended 2026-09-28 by the controller rulings R-01..R-23 (`docs/delivery/rulings.md`).** Where this text and a ruling differ, the ruling wins. **Amended 2026-10-05 by the owner decisions R-31..R-34.**
 
 ## 2. Mapping old → new
 
@@ -81,15 +81,15 @@ This is a read-only planning deliverable. No files were created or changed.
 
 1. **S1/S2 content (R-03, R-04).** The delta sheet §7 and the Plans 02–04 outlines are the bottom-up source. S1 = all of Part A, B1–B12 (new ids), B5, B17, C1, C2, C4, C5 and the probes; the Plan-01 tail (B13–B23, C3, C6–C15) runs in S2 weeks 1–2, and login lands end to end on **Wed 10-21**.
 2. **Probes.** All 1.5 probe days stay on Dev A in S1; P-07 and P-09 may finish by Fri 10-16 inside that budget (business PB-12).
-3. **Milestones (R-03).** Fri 10-09: packages, API platform and OTP senders green under Testcontainers, contract/api-client conformance, CI ready for the first push, probe readout. Wed 10-21: login E2E on web + Android. Fri 10-23: existing-KYC onboarding E2E in the FP sandbox, and catalogue data on dev AWS. Fri 11-06: lumpsum E2E. **Open point for the controller:** the backlog below (and the outlines) builds the consent engine and attest in S3, so onboarding E2E in the sandbox is not scheduled before 10-23; see the S2 note.
+3. **Milestones (R-03, R-24, R-31).** Fri 10-09: packages, API platform and OTP senders green under Testcontainers, contract/api-client conformance, CI ready for the first push, probe readout. Wed 10-21: login E2E on web + Android. Fri 10-23 (R-24, amended by R-31): ONB-01..07 on web + Android against FakeFp, the KRA pre-verification sandbox probe green, and catalogue data on the paused prod stack. Fri 11-06: full onboarding E2E (attest + FP provisioning, R-24) and lumpsum E2E. R-24 closed the open point on onboarding E2E; the S2 note lists what is still open.
 4. **Trim numbering.** Spec §6 is authoritative and spec §1 now uses it: T1 www, T2 filters, T3 allocation list, T4 NAV chart, T5 units, T6 eNACH, T7 Android, T8 SIP.
 5. **Capacity (R-01).** One model; see section 0.1. T1–T6 do not close the gap at 1.35.
 6. **S4 load.** Catalogue polish is 0.5 so S4 fits at 19.0; `plans.cancel` is funded by T3 + T5 (R-08).
 7. **DLT templates (R-10).** Four templates; the hash line is a DLT `{#var#}`; counsel signs the texts off before the 10-12 filing.
-8. **Dev hostnames.** `www.dev`, `app.dev` and `api.dev.sanchay.in` (noindex), and the `sanchay://` scheme for the dev Android variant. Recorded in ADR-0005 and ADR-0014; dev WebOTP autofill is manual because the WebOTP line names `app.sanchay.in`.
+8. **Hostnames (R-31).** There is no dev domain, so `www.dev`, `app.dev` and `api.dev.sanchay.in` are dropped. The deployed hosts are `www`, `app` and `api.sanchay.in` on the paused prod stack (E25; ADR-0014); development runs on the local stack, and the `sanchay://` scheme stays for the non-production Android variant (H-1).
 9. **SIP canary timing (R-06).** Tiered gate: GO-1 on 11-27 covers onboarding, lumpsum and redemption; GO-2 enables SIP after mandate APPROVED + plan ACTIVE + first-instalment date recorded, with the debit and allotment evidenced when they land.
 10. **Runbooks.** G-E8 runbooks are due Mon 11-23, and S4 has no capacity for them. Every sprint's Definition of Done therefore includes a runbook stub for each new job or failure mode. The pilot week consolidates them.
-11. **Dev AWS (R-05).** Protected in S2 (Dev A, week 2, ≈ 12 h), funded by taking E18 [T2] and E19 [T4] out of the committed S3 load. Fallback: a fixed-hostname tunnel to the local API, recorded in ADR-0014.
+11. **The E25 stack (R-05, R-31).** Protected in S2 (Dev A, week 2, ≈ 12 h), funded by taking E18 [T2] and E19 [T4] out of the committed S3 load. R-31: there is no AWS dev environment; E25 deploys `SanchayMvpStack-prod`, paused until GO-1, and F1 hardens it in S4. R-05's fixed-hostname tunnel fallback for sandbox webhooks and payment returns is open (see the S2 note).
 
 ---
 
@@ -152,11 +152,11 @@ This is a read-only planning deliverable. No files were created or changed.
 
 ---
 
-## Sprint Plan: S2 — Plan-01 tail (login E2E), money kernel, catalogue data, dev AWS
+## Sprint Plan: S2 — Plan-01 tail (login E2E), money kernel, catalogue data, the paused prod stack
 **Dates:** Mon 2026-10-12 — Fri 2026-10-23 | **Team:** 2 engineers + AI agents
-**Sprint Goal (R-03, R-05):** login works end to end on web and Android against the local API by **Wed 10-21**; the kernel (idempotency, worker, FP gateway) is green under Testcontainers; NAV and catalogue data sync on **dev AWS**, which is up by Fri 10-23 with public dev hosts for sandbox webhooks and payment returns.
+**Sprint Goal (R-03, R-05, R-31):** login works end to end on web and Android against the local API by **Wed 10-21**; the kernel (idempotency, worker, FP gateway) is green under Testcontainers; E25's `SanchayMvpStack-prod` is up by Fri 10-23 on `www`, `app` and `api.sanchay.in`, paused until GO-1, with D9's NAV syncs running on it.
 
-> **Open point for the controller (R-03 vs this backlog).** R-03 sets Fri 10-23 as "existing-KYC onboarding E2E in the FP sandbox". Attest needs the consent engine (Plan 03 E3/E4) and provisioning (E11), which this backlog, the delta sheet and the outlines place in S3. As sequenced, the 10-23 demo can show the KRA pre-verification probe and the catalogue on dev AWS; onboarding E2E in the sandbox lands in S3. Either pull E3/E4/E6/E11 into S2 (≈ 64 h of Dev A, not available) or re-word the 10-23 milestone.
+> **Closed by R-24, amended by R-31.** The 10-23 milestone is ONB-01..07 on web + Android against FakeFp, the KRA pre-verification sandbox probe green, and catalogue data on the paused prod stack; full onboarding E2E (attest + FP provisioning) moves to 11-06 with lumpsum. **Open for the owner:** (1) this backlog builds the ONB screens (E12) and D4's stateful FakeFp in S3, not S2; (2) by 10-23 the paused prod stack's catalogue data is D9's NAV syncs only: the reference tables arrive with F1 (S4), the FP scheme flags after the production credentials (R-21), and the curated list and NAV history before GO-1 (R-33); (3) R-05 protected E25 for a public host for FP sandbox webhooks, payment returns and the 10-23 sandbox callback URLs for Cybrilla, but E25's prod config runs FP in production mode and the tunnel fallback has no dev domain, so S3's sandbox E2E (E20/E21) has no inbound host yet.
 
 ### Capacity
 | Person | Available Days | Allocation | Notes |
@@ -170,12 +170,12 @@ This is a read-only planning deliverable. No files were created or changed.
 | Priority | Item | Estimate | Owner | Dependencies |
 |---|---|---|---|---|
 | P0 | Plan-01 tail (API), week 1: B13 (was B14) `OtpService.issue` (R-14 HMAC, D-17 5 s timeout), B14 (was B15) verify, B15 (was B16) accounts and devices, B16 (was B17) sessions, B18 (was B20) guards, cookies and the R-11 `InfraRoute` exemptions, B19 (was B21+B22) login/logout/revoke-all, B20 (was B23) email verify, B21 (was B24) throttler, B22 (was B25) typed error round-trip, B23 (was B26) runnable locally | 5.5 | Dev A | S1 B-lane |
-| P0 | Plan 02 D1 idempotency interceptor + `app_config`/`RuntimeConfig` + recon_breaks; D2 pg-boss worker, heartbeats, cleanup (LOGIN and VERIFY_EMAIL rows only, R-13), liveness `/health` (R-12); D3 FpGateway base (last 2 h slip to S3) | 3.75 | Dev A | B23 |
-| P0 | **CDK `SanchayMvpStack-dev` (outline E25, protected by R-05), week 2:** VPC, NAT EIP, ALB with TLS 1.3 and the R-11 listener rules, one ECS service with 3 containers, RDS PG 18 (`sslmode=verify-full`, R-15), S3, Secrets, logs, ECS Exec, GitHub OIDC; ALB health check on `/api/v1/health`. Fallback: fixed-hostname tunnel (ADR-0014). | 1.5 | Dev A | AWS nonprod account, Route 53 |
+| P0 | Plan 02 D1 idempotency interceptor + `app_config`/`RuntimeConfig` + recon_breaks; D2 pg-boss worker with an explicit policy per queue (R-32), heartbeats, cleanup (LOGIN and VERIFY_EMAIL rows only, R-13), liveness `/health` (R-12); D3 FpGateway base (last 2 h slip to S3) | 3.75 | Dev A | B23 |
+| P0 | **CDK `SanchayMvpStack-prod`, deployed paused (outline E25, protected by R-05; R-31), week 2:** VPC, NAT EIP, ALB with TLS 1.3 and the R-11 listener rules, one ECS service with 3 containers, RDS PG 18 (`sslmode=verify-full`, R-15), S3, Secrets, one container log group `/sanchay/prod/app` and ECR `sanchay-prod-api` and `sanchay-prod-web`, all retained except on create (R-34), ECS Exec, GitHub OIDC; ALB health check on `/api/v1/health`. Closed to investors until GO-1: invite-only, `orders.enabled` and `plans.sip.enabled` false. | 1.5 | Dev A | AWS prod account with the `sanchay.in` hosted zone (R-31) |
 | P0 | Plan-01 tail (clients), weeks 1–2: C3 transports, C6 app-core copy (legal entity from `packages/domain/src/legal-entity.ts`, R-19), C7 `useOtpLogin`, C8 Login/Welcome, C9 Home shell with 4 tabs, C10 web routing, C11 wiring + shell smoke, C12 web e2e + CI job, C13 mobile libraries, C14 Expo wiring, C15 Maestro (local; first trim candidate) | 6.0 | Dev B | S1 lanes, B23 |
 | P0 | Plan 02 D5 domain states + `canTransition` + `gen:states`; D6 MSG91 (DLT, four template ids) and SES adapters + `Notify`; D7 pilot invite gate | 2.25 | Dev B | A11, B12, B19 |
 | P0 | Plan 02 D8 catalogue schema and seeds; D9 AMFI NAVAll port + `nav.sync.daily` + backfill; D10 `catalogue.fp.sync` + `catalogue.categories` + basic `listSchemes` | 2.5 | Dev B | D2, D3 |
-| — | Moved to S3 week 1 because of CDK dev: D4 FakeFp + smoke harness (10 h) and the last 2 h of D3 | (1.5) | Dev A | — |
+| — | Moved to S3 week 1 because of E25: D4 FakeFp + smoke harness (10 h) and the last 2 h of D3 | (1.5) | Dev A | — |
 | P2 | Stretch: E3 session list and revoke-one | (0.5) | Dev A | B19 |
 
 ### Planned Capacity: 21.5 | Sprint Load: 21.5 (Dev A 10.75 / Dev B 10.75)
@@ -183,8 +183,8 @@ This is a read-only planning deliverable. No files were created or changed.
 ### Risks
 | Risk | Impact | Mitigation |
 |---|---|---|
-| DLT templates not approved by 10-23 | No real SMS on dev AWS | Hash line registered as `{#var#}` (R-10); the demo falls back to the local stack; capture mode stays forbidden in prod |
-| AWS accounts or domain late | Dev deploy slips | Domain on Mon 09-28 (R-22), AWS accounts 10-09; CDK synth and tests run offline; tunnel fallback (R-05) |
+| DLT templates not approved by 10-23 | No real SMS on the paused prod stack | Hash line registered as `{#var#}` (R-10); the demo falls back to the local stack; capture mode stays forbidden in prod |
+| AWS accounts or domain late | E25's prod deploy slips | Domain on Mon 09-28 (R-22), AWS accounts 10-09, the hosted zone in the prod account before E25 (R-31); CDK synth and tests run offline; development continues on the local stack |
 | FP sandbox flakiness or unknown fields | FakeFp drifts from reality | Contract smoke runs daily once D4 lands; lossless-json; unknown fields logged, never guessed |
 | Dev A overloaded (Plan-01 tail + kernel + CDK) | Kernel is the critical path | D4 moves to S3 week 1; Dev B owns states, adapters, invite gate and catalogue |
 | Dussehra, plus the re-baseline landing on the last day | Decisions rushed | Velocity data frozen Thu 10-22; the **owner** decides T7/T8 on 10-23 (R-02) |
@@ -193,8 +193,8 @@ This is a read-only planning deliverable. No files were created or changed.
 - [ ] The S1 checklist, plus: every [K] mutation has an idempotency replay test.
 - [ ] No provider call inside a DB transaction (lint/test guard); OTP senders are the accepted D-17 exception with a 5 s timeout (R-07).
 - [ ] R-11 exemption tests green (health, webhook and return stand-ins skip ClientGuard, SessionGuard and the throttler).
-- [ ] Deployed to dev AWS through the GitHub OIDC pipeline. `migrate` runs as a one-off task. Secrets are only in Secrets Manager.
-- [ ] Demo: login E2E (web + Android) against the local API (Wed 10-21); web on `app.dev.sanchay.in`; NAV sync run report and catalogue data on dev AWS; KRA pre-verification probe green.
+- [ ] E25's prod stack deployed and paused (R-31): the first deploy by hand per ADR-0014, later deploys through `deploy.yml` (GitHub OIDC, environment `prod`). `migrate` runs as a one-off task. Secrets are only in Secrets Manager.
+- [ ] Demo: login E2E (web + Android) against the local API (Wed 10-21); `www`, `app` and `api.sanchay.in` answering on the paused prod stack, with D9's NAV syncs running there (R-24 as amended by R-31); KRA pre-verification probe green.
 - [ ] Runbook stubs: worker down, NAV sync failure.
 - [ ] Product sign-off.
 
@@ -206,7 +206,7 @@ This is a read-only planning deliverable. No files were created or changed.
 | Tue 10-20 | Dussehra |
 | **Wed 10-21** | **Login end to end on web + Android (R-03)** |
 | Thu 10-22 | Plan-03 drafted; velocity data frozen |
-| Fri 10-23 | Demo (R-03 milestone); **re-baseline; owner decision on T7/T8 (R-02)**; DLT approved; SES production access; sandbox callback URLs on `api.dev.sanchay.in` to Cybrilla; legal drafts and `regulatory-sources.md` due |
+| Fri 10-23 | Demo (R-24 milestone, amended by R-31); **re-baseline; owner decision on T7/T8 (R-02)**; DLT approved; SES production access; the NAT EIP and the prod webhook URL to Cybrilla after E25's deploy (ADR-0014); the sandbox callback URLs are open (R-05, see the S2 note); legal drafts and `regulatory-sources.md` due |
 
 ---
 
@@ -240,7 +240,7 @@ This is a read-only planning deliverable. No files were created or changed.
 | P0 | `catalogue.returns.compute` (1Y/3Y/5Y) | 0.35 | Dev B | nav_history |
 | P0 | Catalogue API core (list q/category, getScheme, amcs, commissionRates) + www static legal/commission/grievance pages | 0.5 | Dev B | facts |
 | P0 | Explore browse/search + Fund page (facts, returns table, DSC disclosures, regular-plan notice, commission line) | 0.5 | Dev B | API core |
-| — [T2] | Explore filters (riskometer, AMC, min SIP) + user sorts with DSC-26 (outline E18). **Not committed: funds the protected dev AWS stack (R-05)**; built only as an extension if f₂ allows. | (0.75) | Dev B | API core |
+| — [T2] | Explore filters (riskometer, AMC, min SIP) + user sorts with DSC-26 (outline E18). **Not committed: funds the protected E25 stack (R-05; the paused prod stack, R-31)**; built only as an extension if f₂ allows. | (0.75) | Dev B | API core |
 | — [T4] | NAV chart + `navHistory` (outline E19). **Not committed (R-05)**; extension only. | (1.0) | Dev B | nav_history |
 | P0 | `quotePurchase` + cut-off engine + stamp duty + suitability hook | 0.75 | Dev B | domain |
 | P0 | INV-01/02, CNF-01/02/03 screens (payment method chosen before consent) | 1.0 | Dev B | consent API |
@@ -291,7 +291,7 @@ This is a read-only planning deliverable. No files were created or changed.
 ### Sprint Backlog
 | Priority | Item | Estimate | Owner | Dependencies |
 |---|---|---|---|---|
-| P0 | CDK prod: Multi-AZ, PITR, alarms routed to both developers (G-E5); deployed by Fri 11-13 | 1.0 | Dev A | prod account, prod credentials |
+| P0 | F1 hardens E25's paused prod stack by Fri 11-13 (R-31): D6 logins, ops task, alarms routed to both developers (G-E5); every metric filter proven with `aws logs test-metric-filter`, a data-protection policy masking PAN and Indian mobile numbers, and all ten alarms triggered before GO-1 (R-34); NAV history backfill and the curated list (`--pilot-list`) run on prod through the ops task before GO-1 (R-33) | 1.0 | Dev A | prod account, prod credentials |
 | P0 | SIP + mandate backend (UPI Autopay ₹1,00,000): `createSip`, mandate reuse/headroom, `mandates.submit/poll`, `emandate/auth` return, `plans.sip.submit`, `instalments.sync`, MANDATE_REVOKED email | 2.25 | Dev A | consent, H-1 returns |
 | P1 [T6] | eNACH rail + limit ladder in the backend | 0.75 | Dev A | above |
 | P0 | Ledger `applyAllotment/applyExit` (FIFO), folio upsert, `folio.sync`, `orders.units.reconcile` | 1.5 | Dev A | lumpsum |
@@ -310,16 +310,16 @@ This is a read-only planning deliverable. No files were created or changed.
 | P0 | RED-01/02 + CNF (amount / all; `SANCHAY_CONSENT_UNITS_OTP_V1` for "all"), payout status; quote reads the FP holdings snapshot (R-09) | 1.5 | Dev B | redemption backend |
 | — [T5] | Units-mode UI. **Not committed: funds `plans.cancel` (R-08).** | (0.25) | Dev B | P-09 |
 | P0 | Android internal build: local Gradle AAB → Play internal testing, App Links `assetlinks.json`, FLAG_SECURE, SMS hash taken from Play App Signing | 1.0 | Dev B | G-B9 |
-| P1 | Catalogue polish (curated v1 import, empty/error states, a11y) | 0.5 | Dev B | G-B10 |
+| P1 | Catalogue polish (curated v1 import, empty/error states, a11y). **The curated v1 import stays: R-33 loads the list on prod before GO-1.** | 0.5 | Dev B | G-B10 |
 
-### Planned Capacity: 19.0 | Sprint Load: 19.5 before the P1 drop (Dev A 10.0 / Dev B 9.5): `plans.cancel` costs 1.0 against the 0.75 freed by T3 + T5, and AccountScreen v2 adds 0.25. The P1 catalogue polish (0.5) is dropped first, which brings the load back to 19.0. The Plan 03 carry (outlines §0.3) comes on top.
+### Planned Capacity: 19.0 | Sprint Load: 19.5 before the P1 drop (Dev A 10.0 / Dev B 9.5): `plans.cancel` costs 1.0 against the 0.75 freed by T3 + T5, and AccountScreen v2 adds 0.25. The P1 catalogue polish (0.5) is dropped first, which brings the load back to 19.0; R-33 keeps its curated v1 import, so only the polish part can go (open for the owner: the S4 load). The Plan 03 carry (outlines §0.3) comes on top.
 
 ### Risks
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Production credentials later than Fri 11-13 | Canary misses 11-17 | Escalate from 11-06; the latest acceptable date is **Mon 11-16** (R-21); later ⇒ GO-1 moves to 12-04 |
 | SIP not deployed to prod by Wed 11-18 | Canary (b) slips | SIP is Dev A's first feature item; fallback registration Fri 11-20 or Mon 11-23, which only delays GO-2 (SIP); GO-1 (onboarding, lumpsum, redemption) is unaffected (R-06) |
-| Only 3 working days before the prod milestone (Diwali) | Prod stack late | The dev stack is parameterised; prod is config plus Multi-AZ; alarm test on Wed 11-18 |
+| Only 3 working days before the prod milestone (Diwali) | Prod hardening late | E25 already deployed the prod stack, paused, in S2 (R-31), so F1 only hardens it; alarm test on Wed 11-18 |
 | UPI Autopay approval latency or not enabled (OX-17) | SIP blocked | Written answer by 11-13; eNACH (unless T6 was taken); otherwise T8 with PO sign-off |
 | Freeze pressure erodes the review line | Money bugs reach the canary | Review 1.5 days is non-negotiable; P1 items are dropped before review is cut |
 
@@ -336,8 +336,8 @@ This is a read-only planning deliverable. No files were created or changed.
 |---|---|
 | Fri 11-06 (pm) | S4 planning |
 | Mon 11-09 – Tue 11-10 | Diwali leave |
-| Wed 11-11 | Work starts; prod CDK |
-| Fri 11-13 | **Prod stack up; production credentials (latest Mon 11-16, R-21); counsel approvals; all Cybrilla answers** |
+| Wed 11-11 | Work starts; F1 hardens the prod stack (R-31) |
+| Fri 11-13 | **Prod stack hardened (up and paused since S2, R-31); production credentials (latest Mon 11-16, R-21); counsel approvals; all Cybrilla answers** |
 | Mon 11-16 | Prod deploy; founders onboard in prod |
 | Tue 11-17 | Canary (a): lumpsum by UPI and by netbanking |
 | Wed 11-18 | **Cybrilla demo part 2 (SIP and redemption)**; alarm test (G-E5) |
@@ -362,12 +362,12 @@ This is a read-only planning deliverable. No files were created or changed.
 |---|---|---|---|---|
 | P0 | Canary (c): partial redemption Mon 11-23; reconciliation report `docs/probes/canary-2026-11.md` (units to 0.001, ARN present, EUIN blank, bank debit and payout, a signed prod webhook) | 1.5 | A 1.0 / B 0.5 | canary (a) and (b) |
 | P0 | G-E3: security checklist + remaining OTP-abuse/BOLA suites | 0.5 | Dev A | S4 suites |
-| P0 | ZAP baseline on the prod-like stack; cross-sign G-E3 | 0.5 | Dev B | prod |
+| P0 | Passive ZAP baseline on the paused prod stack before GO-1 (R-31); cross-sign G-E3 | 0.5 | Dev B | prod |
 | P0 | Gate evidence pack (G-E1/E2/E4/E5 links) | 0.5 | Dev A | CI |
 | P0 | G-E8 runbooks consolidated (13); stubs exist from each sprint | 0.9 | Dev B | stubs |
 | P0 | G-E6: `adb shell pm get-app-links in.sanchay.app`, screenshots | 0.25 | Dev B | Play build |
 | P0 | Fix budget for canary and gate defects | 2.0 | A 1.2 / B 0.8 | — |
-| P1 | Invitee dry run: `pilot_invites` seed, `app_config` caps, kill-switch drill | 0.25 | Dev B | G-B11 |
+| P1 | Invitee dry run: `pilot_invites` seed (before GO-1 one founders' test account only; the PO's list only after the GO-1 decision, R-31), `app_config` caps, kill-switch drill | 0.25 | Dev B | G-B11 |
 
 ### Planned Capacity: 6.4 | Sprint Load: 6.4 (100%)
 
@@ -380,6 +380,7 @@ This is a read-only planning deliverable. No files were created or changed.
 
 ### Definition of Done
 - [ ] Every G-item has a linked evidence artefact.
+- [ ] Prod holds D9's NAV history and the G-B10 curated list, each loaded through the ops one form (R-33).
 - [ ] Zero open CRITICAL defects, zero RECONCILING items older than 2 h, and M1/M3/M4 green for 72 h.
 - [ ] Both developers are on the on-call rota.
 - [ ] Signed GO/NO-GO minute.
@@ -408,14 +409,14 @@ No due date falls on 10-02, 10-20, 11-09, 11-10 or 11-24.
 
 | Due | Action | Owner | Evidence / gate |
 |---|---|---|---|
-| Mon 09-28 (first) | **Check `sanchay.in` availability and register it before the letter goes out (R-22)**; create the Route 53 zone by 09-30 | PO / Dev A | G-B3 |
+| Mon 09-28 (first) | **Check `sanchay.in` availability and register it before the letter goes out (R-22)**; create the Route 53 hosted zone in the prod account before E25 deploys (R-31; PB-41) | PO / Dev A | G-B3 |
 | Mon 09-28 | Send the revised Cybrilla questionnaire (hosts, `/api/v1/pg/return/`, `/api/v1/webhooks/fp`, `partner` omitted, `euin` null). If the domain registration is not complete, the URL table is marked "final by 09-30". Request production onboarding: ONDC signup with the ARN, POA agreement eSign, RTA mailback. Confirm sandbox FP + POA credentials. | PO | G-B1, G-B7 start |
 | Mon 09-28 | Request a D-U-N-S number for Platizio (needed for the Play organisation account; lead time is the risk) | PO | G-B9 prerequisite |
 | Wed 09-30 | Route 53 zone for `sanchay.in` (registered on 09-28); verify the SES domain identity; the letter's URL table is final | PO / Dev A | G-B3 |
 | Wed 09-30 | MSG91 account; apply for DLT principal entity (Platizio) and sender header | PO | G-B4 |
 | Thu 10-01 | Engage counsel: legal texts, OI-1/OX-05 opinion, OX-18 position | PO | G-C1, C3, C4 |
 | Thu 10-01 | Confirm ARN valid-till (→ `SANCHAY_PLATFORM_ARN_VALID_TILL`) and the execution-only / blank-EUIN policy | Compliance | G-B8 |
-| Fri 10-09 | AWS organisation, nonprod and prod accounts (SCP ap-south-1), billing alarms | PO + Dev A | G-B3 |
+| Fri 10-09 | AWS organisation and prod account (SCP ap-south-1; R-31: no AWS dev environment, so no nonprod account for the MVP), billing alarms | PO + Dev A | G-B3 |
 | Fri 10-09 | DLT principal entity and header approved; P-04/P-05 sandbox results | PO / Dev A | G-B4, G-B8 (sandbox) |
 | Fri 10-09 | Owner authorises the first push; private GitHub repo with branch protection | Owner | G-B2 |
 | Thu 10-08 | CO/counsel sign-off of the four DLT SMS texts (PB-32a, R-10) | Compliance / Counsel | G-B4 |
@@ -449,9 +450,9 @@ The Plan-01 file is `2026-09-28-plan-01-foundation.md` (the lean MVP plan with t
 | File | Scope |
 |---|---|
 | `2026-09-28-plan-01-foundation.md` | S1 and the S2 Plan-01 tail. New ids: A1–A12, B1–B23, C1–C15 (old B18 step-up dropped; old B21+B22 lean merged into B19). Delta §3 DAG. H-4/H-12/H-15 enums, B3 `secrets` KeyService, B2 invariant 7 (R-10), B12 four DLT templates (R-10), B13 HMAC input (R-14) and D-17 5 s send timeout (R-07), B18 guards with the R-11 `InfraRoute` exemptions, C10 per H-1/H-7, C13/C14 env per H-8, A12 `check-brand` with the R-19 allowlist, C6 legal entity in `packages/domain/src/legal-entity.ts`. Exit: login on web and Android on Wed 10-21. |
-| `2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md` | S2. Idempotency, pg-boss worker, FpGateway + FakeFp, MSG91/SES, invite gate, domain states, catalogue schema + FP sync + AMFI NAV, **CDK dev stack (protected, R-05)**. (Webhooks, HostGuard and onboarding screens batch 1 are Plan 03.) |
+| `2026-10-12-plan-02-mvp-kernel-fp-gateway-catalogue-data-dev-aws.md` | S2. Idempotency, pg-boss worker, FpGateway + FakeFp, MSG91/SES, invite gate, domain states, catalogue schema + FP sync + AMFI NAV, **CDK `SanchayMvpStack-prod`, deployed paused (protected, R-05; R-31; the file name keeps "dev-aws")**. (Webhooks, HostGuard and onboarding screens batch 1 are Plan 03.) |
 | `2026-10-26-plan-03-mvp-consent-onboarding-catalogue-lumpsum.md` | S3. Consent engine (JCS v2, approve transaction, guard trigger, delivery evidence R-13), existing-KYC onboarding backend and screens through provisioning, readiness and re-attest (R-17), `legal.pending` UI and SYS-01 (R-18), FundFactsProvider/publish gate/returns/Explore/Fund page (T2/T4 not committed, R-05), lumpsum H-2 saga + payments + returns on web and Android, HostGuard reading the R-11 exemptions. |
-| `2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md` | S4 and the pilot week. SIP + mandates (T6 flagged), investor `plans.cancel` (R-08), ledger, PortfolioQueries + XIRR vectors, redemption on the FP holdings snapshot (R-09; T5 flagged), AccountScreen v2 (R-18), lean recon/invariants/ops CLIs (`SANCHAY_APP_ROLE=ops`, R-16), security suites, CDK prod, Android internal build + App Links, tiered-gate checklist (R-06; links to `docs/runbooks/*`, `docs/probes/canary-2026-11.md`). |
+| `2026-11-09-plan-04-mvp-sip-portfolio-redemption-prod.md` | S4 and the pilot week. SIP + mandates (T6 flagged), investor `plans.cancel` (R-08), ledger, PortfolioQueries + XIRR vectors, redemption on the FP holdings snapshot (R-09; T5 flagged), AccountScreen v2 (R-18), lean recon/invariants/ops CLIs (`SANCHAY_APP_ROLE=ops`, R-16), security suites, F1 prod-stack hardening (R-31, R-34), Android internal build + App Links, tiered-gate checklist (R-06; links to `docs/runbooks/*`, `docs/probes/canary-2026-11.md`). |
 
 ---
 

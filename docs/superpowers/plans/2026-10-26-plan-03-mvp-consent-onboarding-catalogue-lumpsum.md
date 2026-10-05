@@ -21,7 +21,7 @@ Every task's requirements include this section. It is the Plan 02 contract **as 
 
 - **Jobs (D2).**
   - `Jobs` is `@Injectable()` and global: `jobs.enqueue(exec, name, data, opts?)`, where `opts` is `{singletonKey?, startAfter?: Date | number (seconds), retryLimit?}`. It uses pg-boss's `send(…, {db})`, so the job commits with `exec`'s transaction.
-  - `JobName` values are dotted string literals appended to `JOB_NAMES` in `apps/api/src/modules/platform/jobs/job-registry.ts` by the task that introduces them.
+  - `JobName` values are dotted string literals added to D2's `JOB_POLICIES` in `apps/api/src/modules/platform/jobs/job-registry.ts` as `'name': 'policy', // reason` by the task that introduces them (R-32: `stately` for sync, poll, reconcile and sweep jobs, `exclusive` for FP submits, `standard` for `notifications.send`). `jobs.enqueue` returns `Promise<string | null>`; `null` means the queue's policy refused a duplicate, which is not an error.
   - Handlers are classes decorated `@Injectable() @JobHandler('name')` with `handle(job: Job<'name'>)`, reading `job.data`.
   - Crons go only into `registerSchedules(boss)` in `jobs/schedules.ts` as `await boss.schedule(name, cron, data, { tz: 'Asia/Kolkata', key })`, with a distinct `key` per schedule.
   - `identity.cleanup`, `nav.sync.daily` (D9) and the tasks below are the only schedules.
@@ -45,7 +45,7 @@ Every task's requirements include this section. It is the Plan 02 contract **as 
   - `seedReadyInvestor(app, opts?)` and `seedRiskProfile` (E11, `test/int/onboarding-seed.ts`).
   - `seedScheme(app)` and `seedInvestableInvestor(app)` (E20, `test/int/orders-seed.ts`).
   - Plan 01's `signInWeb(app, mobile)` (`test/int/flows.ts`) and `webHeaders`/`cookiesFrom` (`test/int/http.ts`).
-  - Tests that drive a job call its `handle(jobOf(…))` directly and spy on the injected `Jobs` (`vi.spyOn(app.app.get(Jobs), 'enqueue')`) so nothing races the pg-boss worker.
+  - Tests that drive a job call its `handle(jobOf(…))` directly and spy on the injected `Jobs` (`vi.spyOn(app.app.get(Jobs), 'enqueue')`) so nothing races the pg-boss worker. The spy resolves a job id (for example `.mockResolvedValue('job-id')`): `enqueue` returns `Promise<string | null>`, and a spy resolving `undefined` fails typecheck (R-32).
   - BOLA tests apply only to id-addressed procedures; session-scoped ones assert isolation instead.
 - **Types:** the base tsconfig sets `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. Never pass an explicit `undefined` to an optional property; index lookups need `?? fallback`. `AadRef.rowId` is branded: use `asRowId(table, id)`.
 - **Shared files:**
@@ -74,9 +74,9 @@ Every task's requirements include this section. It is the Plan 02 contract **as 
 | 14 | E20 lumpsum saga | Dev A | E4, E11 |
 | 15 | E21 payments | Dev A | E20 |
 | 16 | E22 quote, cut-off | Dev B | E20, E9 |
-| 17 | E23, E24 order and payment screens | Dev B | E20–E22 |
+| 17 | E23, E24 order and payment screens | Dev B | E13, E17, E20–E22 |
 
-E18 [T2] and E19 [T4] are not committed (they fund the protected dev stack, R-05); they are built only as extensions if f₂ allows. The overflow order into S4 is the outline's §2.
+E18 [T2] and E19 [T4] are not committed (they fund E25's protected S2 stack, R-05, which R-31 makes the paused prod stack; RV-03-25); they are built only as extensions if f₂ allows. The overflow order into S4 is the outline's §2.
 
 ## Migration numbers
 
@@ -126,6 +126,56 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 - **E22:** owns its edit to `purchase.service.ts`; E22 appends to the `test-fixtures` barrel rather than recreating the package.
 - Also: absolute paths removed; commit trailers corrected to Opus 5.5.
 
+Later errata (found while writing Plan 04; already applied below):
+- **RV-03-1 (2026-10-01): consent approve, `markUnused`, expiry sweep (E3/E4).**
+  - `approve` rebuilt the snapshot with `destinationsMasked: []` and only the four `render_*` fields, while `create` hashed the resolved masks and the caller's full `fields`. `create` refuses zero destinations, so every approval failed with `CONSENT_MISMATCH`. `approve` now decrypts the challenge's stored snapshot and passes its `destinationsMasked` and `fields` back into the builder. A builder that derives facts from subject rows still re-reads them and overwrites the echoed fields, so a changed subject still mismatches (E3's `SnapshotBuilderContext` documents this).
+  - New `ConsentEngine.markUnused(exec, challengeId, reason)`: CONSUMED → CONSUMED_UNUSED plus an `AUDIT_ACTIONS.CONSENT_MARKED_UNUSED` row. It is idempotent and refuses any other status. A saga calls it only when no P/M write happened, for example when a live pre-check fails inside `useConsumed` before any FP write. `useConsumed` now refuses a CONSUMED_UNUSED challenge.
+  - `consent.expiry.sweep` marks CONSUMED → CONSUMED_UNUSED only when the `consent_records` row has `first_attempt_at IS NULL` and `execute_before < now`. A saga whose first attempt happened runs to `saga_expires_at` and is never swept. Each sweep update and its audit row share one transaction.
+  - `legalDocuments: []` (E3 generic builder) against `ConsentSnapshotV2Schema`'s `.min(1)`: no conflict in practice, because builder output is never schema-parsed. Only E3's tests parse hand-built snapshots. `approve` reads the stored snapshot with a narrow echo schema, not `ConsentSnapshotV2Schema`, so it does not create a conflict either.
+  - E4's test setup no longer calls `ta.app.get('Crypto' as never)`, a string token that does not exist. `seedLegalDoc` is `onConflictDoNothing`, because `legal_documents_key_version_uq` rejected the second test's seed.
+- **RV-03-2 (2026-10-01): consent OTPs reach the investor (E4).**
+  - `ConsentDestinationResolver` returned the base64 ciphertext of `investors.mobile_enc` and `investor_contacts.value_enc` as the destination. `sendOtp` handed that to `OtpService.issue`, so no consent OTP was ever delivered; in tests `t.sms.latestCode` threw "no code sent", so every approve-based test (E4, E20, E21, Plan 04) failed.
+  - The resolver is now `@Injectable()`. It decrypts the mobile with Plan 01's `InvestorAccounts.decryptMobile` (AAD `investors.mobile_enc:<investorId>`) and the email with `Crypto.decrypt` (AAD `investor_contacts.value_enc:<contactId>`). `masked` stays a mask: `maskMobile` (••••••2345, the mask the OTP row and the MOBILE contact carry) and the contact's stored `masked`.
+  - E4's test seed encrypts `'9999999999'` under that AAD (a `Buffer.from('x')` mobile cannot be decrypted), and the resolver test takes the resolver from DI and asserts plaintext values and masks.
+- **RV-03-3 (2026-10-01): E22's seven port adapters (E22).**
+  - E22 registered `DrizzleQuoteThresholdsAdapter`, `DrizzleQuoteNavGradeAdapter`, `DrizzleQuoteSuitabilityAdapter`, `DrizzleQuoteReadinessAdapter`, `DrizzleQuoteBankAdapter`, `RuntimeConfigPilotCapsAdapter` and `MarketHolidaysAdapter` as "supplied by D8–D10, E9, E11 and E2", but no task defined them, so `OrdersModule` did not compile. E22 now defines them, with `schemeCutoffClass`, in `orders/quote.adapters.ts`.
+  - The holidays port is `QuoteHolidaysPort.load(): Promise<CutoffHolidays>`, read per quote: a synchronous `has` cannot query `market_holidays`. The suitability adapter is read-only, because E9's `SuitabilityService.check` writes a `suitability_checks` row and a quote never writes.
+  - The same fragments did not compile either: the router handler assigned `requireAuth`'s whole `AuthContext` to `investorId`, called an undefined `schemeCutoffClass` member and injected neither `QuoteService`, `CLOCK` nor `DB`; the contract fragment used an undefined `MoneyWireSchema`; `paymentMethods` now excludes UPI collect, as E20's `ORDER_PAYMENT_METHODS` does.
+  - `createPurchase` stamps `cutoff_class` and `expected_nav_date` through `QuoteService.navDateFor`, after E20's own checks. It does not re-run the whole quote: its NAV-age, riskometer and TPV checks would refuse every seeded scheme without a NAV row, and Plan 04's F11 needs `seedScheme` without one. The quote stays INV-02's read (R-12).
+  - The pilot-cap unit case used 100000.01, which fails the ₹1 multiple first; it now uses 100001.00. The unit test's unused `QutePilotCapsPortAlias` import (no safe Biome fix, so `pnpm lint` failed) is removed with the alias.
+- **RV-03-4 (2026-10-01): the consent-first window uses one clock (E4).** `consent_challenges.created_at` was the DB's `defaultNow()`, while FakeFp's call log and `consumed_at` use the app Clock. `expectNoPmWritesBeforeConsumed` therefore compared two clocks: its window was empty (a vacuous pass) once the wall clock passed FakeClock's 2026-10-12 start, and before that it caught earlier tests' calls. `ConsentEngine.create` now writes `createdAt` and `updatedAt` from the app Clock, and a test pins `created_at = expires_at − CHALLENGE_EXPIRY_MS`.
+- **RV-03-5 (2026-10-01): E2's tests send the right host; the contract key test is relaxed once (E2).**
+  - `test/int/http.ts` gains `appHost()`. With HostGuard live, these Plan 01 cases sent no `Host` and got 404: auth-login "rejects a missing client header", session-endpoint "rejects requests without x-sanchay-client" and infra-routes "keeps both guards on every other route (control)" now send the app host; throttle "never throttles the R-11 infra routes" sends the api host, and its webhook row posts a parseable envelope because E1's real controller replaced the stand-in. client-roundtrip (real HTTP to 127.0.0.1) declares 127.0.0.1 the app host; F8 later moves it to the api host.
+  - The 426 case first upserts `minAppVersion.android = '1.1.0'`: D1's default floor is `'1.0.0'`, which `nativeHeaders`' 1.0.0 meets.
+  - Plan 01's `auth.test.ts` "exposes exactly the 9 MVP procedures" asserted the exact top-level and `me` keys, and Plan 02 D10 (`catalogue`), E2 (`meta`), E4 (`consents`) and E5 (`me.get`) each add one. E2, the first Plan 03 task to add a key, changes both checks to `expect.arrayContaining`, so no later task edits that test. Superseded by RV-03-11: Plan 02 D10 now makes that change.
+  - Found by running the suite: the closed env-var list sorts `SANCHAY_API_ORIGIN` after `PORT`, not after `SANCHAY_APP_ORIGIN`; Plan 01's `integrations.module.test.ts` and `crypto.test.ts` build their own env and need `SANCHAY_API_ORIGIN` too; the infra-routes fragment passed `headers: undefined` (exactOptionalPropertyTypes).
+- **RV-03-6 (2026-10-01): orders enabled in the order suites; `@sanchay/money` in apps/api (E20, E21).** `RUNTIME_CONFIG_DEFAULTS['orders.enabled']` is false, so E20's and E21's suites failed with ORDERS_DISABLED. Both `beforeAll`s upsert `orders.enabled = true`, and E20's kill-switch case restores `true` instead of deleting the row. E20, the first Plan 03 task that imports `@sanchay/money` in `apps/api`, adds `"@sanchay/money": "workspace:*"` to `apps/api/package.json` (skip it if Plan 02 already did: D3's `fp-json.ts` is the first importer).
+- **RV-03-7 (2026-10-01): mobile normalisation (E11, E20, E21).** `.replace(/^\+?91/, '')` cut a 10-digit mobile starting with 91 to 8 digits (about one seeded mobile in ten). FP's phone number and both consent PATCHes use `.replace(/\D/g, '').slice(-10)`, and E20's PATCH test asserts the exact mobile.
+- **RV-03-8 (2026-10-01): the scheme id on the catalogue wire (E14, E17).** `SchemeSummarySchema` and `SchemeDetailSchema` gain `id: z.uuid()`, the scheme uuid that `orders.*` and `plans.*` take, mapped from `schemes.id`. E17's `FundScreen` gains an "Invest" link to `/invest/${scheme.id}/lumpsum`.
+- **RV-03-9 (2026-10-01): the consent facade and ui batch 2 as documented (E12, E13, E17, E23, E24).**
+  - E13: `ConsentOtpSheet` read `useApi().consents`, which no task created. E13 adds `consents: ConsentApi` to `ApiContextValue`, built by `consentsApiFrom(client)` (`consent/consentsApi.ts`), which maps E4's wire: `challengeId` becomes `id`, there are no masks, and `{ok: true}` becomes a 30 s resend timer. `approve`'s codes may be `undefined` (exactOptionalPropertyTypes rejected the sheet's call), and the resend countdown starts when the send lands (it showed 0:31). The sheet test uses E4's wire shape and `aria-disabled` (no jest-dom is installed), plus a new approve case.
+  - E12: `AmountInput` destructures `[whole = '', fraction]` (TS2322 under noUncheckedIndexedAccess), and `packages/ui` depends on `@sanchay/money` for `MoneyText`. The AmountInput test drives a controlled value (it expected '12.34' from an input pinned to ''), and the Checkbox test reads `textContent`.
+  - E17, the first `packages/features` importer of `@sanchay/money`, adds the dependency.
+  - E23 and E24 use E12's props: `AmountInput onChangeValue`, `MoneyText value={Money | null}`, and a string `ListRow value`. E24's smoke and Maestro flows tap "Confirm" (E13's label) and no longer tap "Send code", since the sheet sends on open.
+- **RV-03-10 (2026-10-01): boot invariant 13 binds the api role (E1).** R-19 gives `SANCHAY_FP_WEBHOOK_SECRET` to the api container alone, and only the api serves HTTP, but invariant 13 refused every role outside local/test, so the deployed worker and migrate containers (E25's stack, prod under R-31) stopped booting from E1 on. The condition is now `!localOrTest && role === 'api' && env.SANCHAY_FP_WEBHOOK_SECRET === undefined`, reusing the `role` constant that Plan 02 E25 adds to `assertBootInvariants` (RV-02-20), as invariant 7 does. A new `env.test.ts` case boots worker and migrate without the secret and still refuses the api. Checked against Plan 01's `env.ts` with E25's constants and a reduced D3 FP-mode invariant: 18/18, and the new case fails against the role-free condition.
+- **RV-03-11 (2026-10-01): E2 no longer edits `auth.test.ts` (E2).** Plan 02 D10 adds the first new contract key (`catalogue`), so it now relaxes Plan 01's `packages/contract/src/auth.test.ts` itself, with the fragment E2 carried under RV-03-5 (RV-02-30): the top-level and `me` key checks become `expect.arrayContaining`. E2's fragment is now a note; `auth.test.ts` leaves its Files, Biome and `git add` lists, and Step 4 still runs the contract suite with `meta` added.
+- **RV-03-12 (2026-10-01): `ConsentEngine.cancel` cannot overwrite a consumed challenge (E4).** `cancel` read the challenge without a lock and then updated it with no status guard, so a cancel racing `approve` could turn CONSUMED into CANCELLED after approve committed; the queued subject job then failed in `useConsumed` on every retry, and for plans F2's and F28's guards refused the write. `cancel` is one `UPDATE … WHERE id = ? AND status = 'PENDING' RETURNING investor_id`. Zero rows re-reads the status: absent is NOT_FOUND, an ended challenge (CANCELLED, EXPIRED, SUPERSEDED) is left as it is, anything else is CONSENT_ALREADY_USED. Four new cases, one holding approve's row lock open. Checked on PostgreSQL 18 (Testcontainers) with the exact query: the old body overwrote CONSUMED in the race, the new one answers CONSENT_ALREADY_USED and leaves CONSUMED, stable over four runs.
+- **RV-03-13 (2026-10-01): no jest-dom; `@sanchay/validation` in `packages/features` (E12, E13, E23).** The IdentityScreen, PersonalDetailsScreen, AddressScreen, FatcaScreen, LegalPendingBanner and LumpsumReviewScreen tests used `toBeDisabled`, `toBeEnabled` and `toHaveValue`. `@testing-library/jest-dom` is neither installed nor in the `catalog:` (which nobody edits), and react-native-web renders Plan 01's `Button` as a `div` with `role="button"` and `aria-disabled`, so `toBeDisabled` would fail even with it. The tests read `aria-disabled` and `HTMLInputElement.value`, as Plan 01's tests do. E12's screens are the first `features` importers of `@sanchay/validation`, which `packages/features` did not depend on; E12 adds it (one lockfile importer line). E12's Step 2 and Step 4 placeholder lines (`X=v cmd`, `SANCHAY_PLACEHOLDER=1`) and the unknown Playwright project `chromium` are replaced.
+- **RV-03-14 (2026-10-01): the error-catalogue test stops pinning counts (E20).** Plan 01's `errors.test.ts` pinned `toHaveLength(66)` and a per-status table, so E20's `ORDERS_DISABLED` and `PROVIDER_OBJECT_ABSENT` turned CI's contract tests red (reproduced: 68 against 66), and Plan 04's F2 and F11 would have had to edit the pins again. No Plan 02 task appends a code, so E20, the first appender, replaces that test with "keeps the 66 Plan 01 codes with their HTTP statuses": `toMatchObject` against Plan 01's code-to-status map plus a 4xx/5xx range check. Later tasks (F2, F11) append codes without editing it. Checked: 41/41 contract tests with E20's and F2's codes, and the test still fails when a Plan 01 status changes.
+- **RV-03-15 (2026-10-01): `SANCHAY_PLATFORM_ARN` in Plan 01's own env fixtures (E20).** E20 makes the variable required, but Plan 01's `integrations.module.test.ts` (`base`) and `crypto.test.ts` (`localRaw`) build their own env objects, so `parseEnv` threw `EnvError` there from E20 through Plan 04 (reproduced), the gap RV-03-5 closed for `SANCHAY_API_ORIGIN`. Both gain `SANCHAY_PLATFORM_ARN: 'ARN-000000'` after E2's line, `env.test.ts`'s closed-list pin gains the key, and E20's Files, Step 4, Biome and `git add` lists name the two files. Checked: 15/15 in the two files, 33/33 with `env.test.ts`.
+- **RV-03-16 (2026-10-01): `orders.get` carries what CNF-02 and ORD-01/02 read (E20, E23, E24).** The screens read `state`, `next`, `schemeName` and `cancellable`; `OrderSchema` had none of them (its field is `status`), so `features` failed typecheck. E20's wire gains `schemeName` (joined from `schemes`, as F12 does for plans), `cancellable` (gap-rulings GAP-01(b) makes it a server flag; `orders.cancel` and `toWire` share `isCancellable`) and `next` (GAP-01 step 4: PAYMENT at `AWAITING_PAYMENT`, DONE once past payment or ended, `null` while FP still places the order), with a unit test and two int cases; the screens read `status`. ORD-02's cancel now sends an `Idempotency-Key` ([K]). Open item for the owner: PAY-01 read `tpvBankLast4`, `tpvBankName` and `paymentUrl`, and no procedure returns the payment link (E21 stores `token_url` and `upi_uri` encrypted and exposes neither) or the TPV bank, so E24's PAY-01 shows the order and offers no pay action until that read exists. Checked: the join, `toWire` and both helpers on PostgreSQL 18 against the built `OrderSchema`, and `features` typecheck with the screens.
+- **RV-03-17 (2026-10-01): INV-02 approves the purchase in CNF-01; INV-01 loads its facts; web pages use client wrappers (E23, E24).** Continue went from `createPurchase` straight to `/confirm/{challengeId}`, so nothing approved the PURCHASE challenge; it also dropped the `orderId` CNF-02 reads and sent no `Idempotency-Key`. INV-02 now opens `ConsentOtpSheet` and only `onApproved` goes to `/confirm/{challengeId}?orderId={orderId}`; the key follows F28's rule. INV-01's web page called an undefined `fetchSchemeThresholds` and the mobile route hardcoded the limits; INV-01 takes FUND-01's cached `catalogue.getScheme` detail by uuid (`useSchemeFacts`, no new procedure) and validates with `amountSchema` instead of `Number()`. E23's and E24's web pages imported `@sanchay/features` into server components, which `next build` refuses, so they render client wrappers from `apps/web/src/client/routes.tsx`. `SuitabilityWarning` is an inline `Card` (it rendered E12's `Sheet` without its required props). Checked: `features` 33/33 tests and typecheck, `web` typecheck (`next typegen`, the pages and `e2e/**`).
+- **RV-03-18 (2026-10-01): the lumpsum smoke is gated and follows the real flow (E24).** It ran in CI's e2e job unconditionally, never signed in, clicked a fund name no seed has, read Mailpit's newest message unfiltered and filled only the SMS code. It is skipped unless `SANCHAY_E2E_LUMPSUM_MOBILE` and `SANCHAY_E2E_LUMPSUM_SCHEME_SLUG` are set; it signs in, opens `/funds/<slug>`, clicks "Invest", reads each CNF-01 code with `readNextOtp`, clicks `{ name: 'Confirm', exact: true }` and waits until the worker has taken the order past CONSENT_PENDING (no quick-settlement assumption, BRIEF D7). `smsInbox`, `newestMessageId` and `readNextOtp` move into E24 from Plan 04's F12, which runs later and must consume them instead of appending them. Checked: `web` typecheck and `playwright test --list` (1 test); the smoke itself was not run.
+- **RV-03-19 (2026-10-01): command lines in the tasks this round edits (E1, E2, E4, E12, E13, E20, E22, E23, E24).** Chained scripts (`pnpm --filter=X test typecheck` runs `vitest run "typecheck"` and exits 1; reproduced) are one script per line. Test filters drop the literal `--` (BRIEF D8). Steps that change `packages/contract` or `packages/domain` start with `pnpm exec turbo run build --filter=@sanchay/api^...` (or `--filter=@sanchay/features^...` for the screens), because those packages export only `dist`. The OpenAPI check after a regeneration is the B10 drift test (`pnpm --filter=@sanchay/api test openapi`): a bare `git diff --exit-code apps/api/openapi.json` fails on a real, unstaged regeneration. E22 regenerates `openapi.json` for `quotePurchase`. `(app)` and `(tabs)` paths are quoted, not backslash-escaped, so they work in PowerShell 5.1.
+- **RV-03-20 (2026-10-05): E23's key comment follows D1 (Plan 02 RV-02-37; minor).** `LumpsumReviewScreen`'s `isFinalRefusal` comment said D1 keeps a 4xx key `IN_PROGRESS` for 24 hours; D1 now releases the key of any refusal. The rule stays (a new key after a final 4xx, one key per intent, as in E24's `OrderDetailScreen` and F28), so only the comment changes.
+- **RV-03-21 (2026-10-05): E1's glob note follows Plan 02 D2's config (D2 review 2026-10-05; minor).** E1's first deviation said `drizzle.config.ts` only globs `./src/modules/*/*.schema.ts`; Plan 02 RV-02-41 adds `./src/modules/*/*/*.schema.ts` and `./src/integrations/*/*.schema.ts`. The note now says so. Its conclusion stands: `integrations/fp/webhooks/inbound-webhook.schema.ts` is two levels under `src/integrations`, and D2's `drizzle-config.test.ts` reports such a file (checked).
+- **RV-03-22 (2026-10-05): the catalogue wire tells SIP apart from lumpsum (E14, E17, E23; follows RV-02-55; major).** Plan 02 D10 now leaves the SIP limits null without FP's monthly SIP row and stores a fail-closed `sip_allowed`, so E14's `SchemeThresholdsWireSchema` makes `sipMin`/`sipMultiple` nullable and `SchemeDetailSchema` gains `sipAllowed: z.boolean()`, which FUND-01's "Start SIP" reads (Plan 04 F19). E14's int test asserts `sipAllowed` and adds a lumpsum-only case. E17's "Minimum SIP" row shows a dash unless `sipAllowed`, and E17's and E23's scheme fixtures gain `sipAllowed: true` (E23's is typed `SchemeDetailView` and fails with TS2741 without it). Verified in the scratch build: E14's two cases pass on PostgreSQL 18.2, and a type probe compiles the new E17/F19 expressions while the old `Money.parse(t.sipMin)` no longer compiles.
+- **RV-03-23 (2026-10-05): E14's appended router case uses D10's real helpers (follows RV-02-56; blocker).** E14 appends a `sort=name` case to D10's `catalogue-router.int.test.ts` that called `insertInvestor`, `signIn` and `httpGet`, and the last two never existed. It now reads with D10's file-level `get` and `cookies` (Plan 01's `signInWeb`), and the file passes 5/5 on PostgreSQL 18.2.
+- **RV-03-24 (2026-10-05): Plan 03's jobs register their pg-boss policy (R-32; major).** Every name Plan 03 appends now goes into D2's `JOB_POLICIES`. `onboarding.provision` and `orders.purchase.submit` are `exclusive`. `onboarding.preverify`, `onboarding.bank.verify`, `orders.purchase.advance`, `fp.reconcile.nonfinal` and `payments.poll` are `stately`. The two pre-verification jobs are `stately` although each creates one FP object: they poll by enqueuing their own key while they run, which `exclusive` refuses, and the create runs once because its id is stored before the first poll. E21 notes that a return or webhook nudge is refused while a delayed poll is queued; that poll then applies the result. The `Jobs.enqueue` spies in E4, E6, E7, E11, E20 and E21 now resolve a job id, because `enqueue` returns `Promise<string | null>` (RV-02-69) and a spy resolving `undefined` fails `typecheck` (checked with the repo's TypeScript 6.0.3 against Vitest 5.0.1's typings).
+- **RV-03-25 (2026-10-05): no dev stack in Plan 03's text (R-31; minor).** The execution-order note said E18 and E19 fund "the protected dev stack", and RV-03-10 and E1's review fix 7 spoke of "the dev worker and migrate containers". R-31 removes the AWS dev environment: E25's protected S2 stack is the paused prod stack, so the note and both sentences now name it and the deployed containers. Wording only: `devSecrets` and the `'dev'` app-env test cases stay, because `SANCHAY_APP_ENV` keeps `dev` as a code value (Plan 01 `env.ts`). Checked by a full-text scan of Plan 03 for dev hosts, dev stacks and dev deploys.
+- **RV-03-26 (2026-10-05): E16 says what keeps `nav_history` current (follows Plan 02 RV-02-73; minor).** E16's returns read only `nav_history`. D9's backfill loads five years of it on prod before GO-1 (R-33), and D9's daily sync now appends every accepted NAV, so the latest point and the anniversaries move with each sync. E16's prerequisites say so; its code, tests and counts are unchanged.
+- **RV-03-27 (2026-10-05): a purchase LOOKUP-ADOPT adopts goes back to `orders.purchase.advance` (R-32 queue review; major).** E20's `fp.reconcile.nonfinal` moved the purchase it adopted by `source_ref_id` from RECONCILING to UNDER_REVIEW and enqueued nothing, while the submit job enqueues `orders.purchase.advance` only after a clean POST and E21's `mf_purchase` handler (like F4's, which replaces it) leaves orders before PROCESSING to the saga jobs: the H-2 checkout never ran, so the order stayed UNDER_REVIEW and the investor was never offered the payment. The adoption now runs in one transaction with the enqueue of `orders.purchase.advance` `{orderId, challengeId}`, `singletonKey` = order id (on R-32's `stately` queue a null return means one is already queued), and the job's miss-branch insert is written in Biome's stable form, because the file needed two `--write` passes and Step 5's `pnpm lint` failed after one (reproduced on the original text). A new `orders.int.test.ts` case checks the enqueue and that the job then PATCHes the adopted purchase's consent at FP `pending`; E20's Step 4 count becomes 19/19, and E21's count of that suite, stale at 16 since RV-03-16, follows. Checked in a scratch prototype (Plan 01 with D2's `Jobs` as written, pg-boss 12.34.0, PostgreSQL 18.6 in Testcontainers): the adoption and its job commit together, a failing enqueue rolls the adoption back, an advance job already queued makes the send return null while the adoption still commits (the original text left no job), and `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome` are clean on the job and the whole test file.
+
 ## Known gaps (fix at the start of the named task, before Step 1)
 
 - **E8–E10 test harness (fixed in place).** Their tests called a nonexistent `authedRequest` and `bootTestApp(db)`. They now use `signedInInvestor(app)` (new helper created by E8, built on Plan 01's `signInWeb`), `bootTestApp()` and `app.db.db`. (`insertInvestor` in Plan 01's `test/int/factories.ts` is real; E14's use of it is correct.) The production code in E8–E10 was reviewed for Plan 02 drift only.
@@ -152,8 +202,8 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 - Create: `apps/api/test/int/jobs.ts` (`jobOf` test helper, reused by every later job test)
 - Modify: `apps/api/src/app.module.ts` (import `FpWebhooksModule.forRoot(env)`)
 - Modify: `apps/api/src/modules/platform/ids.ts` (append `'inbound_webhook_events'` to `TableName`)
-- Modify: `apps/api/src/config/env.ts` (append `SANCHAY_FP_WEBHOOK_AUTH`, `SANCHAY_FP_WEBHOOK_SECRET`, boot invariant 13)
-- Modify: `apps/api/src/config/env.test.ts` (closed variable-list pin test, `devSecrets`, new invariant-8 test)
+- Modify: `apps/api/src/config/env.ts` (append `SANCHAY_FP_WEBHOOK_AUTH`, `SANCHAY_FP_WEBHOOK_SECRET`, boot invariant 13 for the api role, RV-03-10)
+- Modify: `apps/api/src/config/env.test.ts` (closed variable-list pin test, `devSecrets`, two invariant-13 cases)
 - Modify: `apps/api/.env.example` (append the two new keys)
 - Modify: `apps/api/test/int/env.ts` (`SANCHAY_API_ORIGIN` is added by E2, not here — see E2)
 - Modify: `apps/api/test/int/infra-routes.ts` (remove the `fpWebhook` stand-in handler)
@@ -164,7 +214,7 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 **Interfaces:**
 - **Prerequisites:** none (first Plan 03 task; independently testable ahead of E2).
 - **Consumes (Plan 01, real code):** `InfraRoute`, `INFRA_ROUTE`, `Public` (`apps/api/src/modules/platform/http-decorators.ts`); `AppError`, `envelopeFor` (`errors.ts`); `DB`, `DbHandle`, `DbExecutor`, `createDb` (`db/client.ts`); `Crypto` (`crypto.ts`, method `encrypt/decrypt(plaintext, {table, column, rowId})`, `sha256`); `CLOCK`, `Clock`, `FakeClock` (`clock.ts`); `newId`, `TableName`, `RowId` (`ids.ts`); `AppConfig` (`config/app-config.ts`); `parseEnv`, `assertBootInvariants`, `EnvSchema` (`config/env.ts`); `headerValue`, `SanchayClsStore` (`request-context.ts`); `SESSION_COOKIE`, `readCookie` (`cookies.ts`); `API_PREFIX`, `buildFastifyAdapter`, `configureApp` (`bootstrap.ts`); `bootTestApp`, `TestApp` (`test/int/app.ts`); `webHeaders`, `nativeHeaders`, `TEST_IP` (`test/int/http.ts`); `testEnv`, `TEST_APP_ORIGIN` (`test/int/env.ts`); `InfraRoutesTestController`, `InfraRoutesTestModule` (`test/int/infra-routes.ts`).
-- **Consumes (Plan 02, as built):** `Jobs` (D2, injectable, global: `enqueue(exec, name: JobName, data, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?})`, `apps/api/src/modules/platform/jobs/jobs.service.ts`); `JobHandler` (class decorator), `type Job<N>`, `type JobName` (`.../jobs/job-registry.ts`; `'fp.event.process'` is already in `JOB_NAMES`); `ReconBreaks.open(exec, {kind, entityType, entityId, severity, detail?})` (D1, **static**, `apps/api/src/modules/platform/runtime-config.ts`); `reconBreaks` table (D1, `apps/api/src/modules/platform/kernel.schema.ts`); `FpRead` (D3, worker-only via the global `FpModule`); `bootFpTestApp`, `type FpTestApp` (D4, `apps/api/test/int/fake-fp.ts`).
+- **Consumes (Plan 02, as built):** `Jobs` (D2, injectable, global: `enqueue(exec, name: JobName, data, opts?: {singletonKey?, startAfter?: Date | number, retryLimit?})`, `apps/api/src/modules/platform/jobs/jobs.service.ts`); `JobHandler` (class decorator), `type Job<N>`, `type JobName` (`.../jobs/job-registry.ts`; `'fp.event.process'` is already in `JOB_NAMES`); `ReconBreaks.open(exec, {kind, entityType, entityId, severity, detail?})` (D1, **static**, `apps/api/src/modules/platform/runtime-config.ts`); `reconBreaks` table (D1, `apps/api/src/modules/platform/kernel.schema.ts`); `FpRead` (D3, worker-only via the global `FpModule`); `bootFpTestApp`, `type FpTestApp` (D4, `apps/api/test/int/fake-fp.ts`); the `role` constant (`env.SANCHAY_APP_ROLE`) that E25 adds to B2's `assertBootInvariants` right after the `stagingOrProd` line (RV-02-20), and `devSecrets`' `SANCHAY_PROVIDER_MODE_FP: 'sandbox'` (D3, RV-02-25).
 - **Produces:**
   - Table `inbound_webhook_events` — see schema below; appended to `TableName`.
   - `POST /api/v1/webhooks/fp`, decorated `@InfraRoute('API_HOST')`, raw body via a route-scoped Fastify content-type parser (100 KiB), `FpWebhookController`.
@@ -176,12 +226,13 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   - Valid, signature-checked events → `INSERT … ON CONFLICT (provider, event_id) DO NOTHING` + `Jobs.enqueue(tx, 'fp.event.process', {eventRowId}, {singletonKey: eventRowId})` in the same transaction → `200 {received: true}`.
   - Invalid-signature events → `401 AUTH_REQUIRED`, with only metadata stored (`payload_enc` left `null`; a synthetic `event_id`/`event_type` so the append still succeeds without trusting the unverified body).
 - **Deviations from outline (found by reading Plan-01 ground truth):**
-  1. `apps/api/drizzle.config.ts` only globs `./src/modules/*/*.schema.ts`. `apps/api/src/integrations/fp/webhooks/inbound-webhook.schema.ts` (as literally named in the outline) would never be picked up by `db:generate`. The Drizzle table is moved one level up to `apps/api/src/modules/fp-webhooks/inbound-webhook.schema.ts`; everything else (controller, job, handlers) stays under `integrations/fp/webhooks/` per the outline and imports the table from there.
+  1. `apps/api/drizzle.config.ts` globs `*.schema.ts` one level under `src/modules` and `src/integrations` and two levels under `src/modules` (Plan 02 D2, RV-02-41; RV-03-21). `apps/api/src/integrations/fp/webhooks/inbound-webhook.schema.ts` (as literally named in the outline) sits two levels under `src/integrations`, so it would never be picked up by `db:generate`, and D2's `drizzle-config.test.ts` would fail on it. The Drizzle table is moved one level up to `apps/api/src/modules/fp-webhooks/inbound-webhook.schema.ts`; everything else (controller, job, handlers) stays under `integrations/fp/webhooks/` per the outline and imports the table from there.
   2. `bootstrap.ts` creates the Nest app with `{bodyParser: false}`, but that flag only disables *Nest's own* body-parser registration — Fastify's built-in default `application/json` content-type parser (which always parses into an object) is still active, which is why `MeRouter` etc. already receive parsed JSON with no parser code anywhere in the repo. To get the *raw* bytes for HMAC verification on exactly this one route without disturbing every other JSON route, `fp-webhook-body-parser.ts` **replaces** Fastify's default `application/json` parser (there is no per-route content-type-parser scoping available from a single top-level Nest app) with one that returns the raw `Buffer` when `request.url` starts with `/api/v1/webhooks/fp` and otherwise re-implements the default `JSON.parse` behaviour, installed from `FpWebhooksModule.onModuleInit` via `HttpAdapterHost`.
   3. The outline's own "cookie-authenticated app host → 404" test needs host classification, which only exists once E2 adds `HostGuard`/`SANCHAY_API_ORIGIN` — but E1 runs before E2. To keep E1 independently testable in order, the controller instead rejects (404) any request that carries the session cookie (`SESSION_COOKIE`, `__Host-sanchay_sid`) at all (a real FP webhook call never carries Sanchay session cookies), which gives the same practical protection without depending on E2. E2's `HostGuard` later makes this redundant-but-harmless (defense in depth); no follow-up needed.
   4. `SANCHAY_FP_WEBHOOK_SECRET`/`SANCHAY_FP_WEBHOOK_AUTH` (listed in outline §0.2 as an "R-19 addendum" env var, owner unspecified) are not added by any of Plan 02's D1–D10 tasks (checked: D3's Files list never touches `config/env.ts`). E1 is the first task that actually needs them, so E1 adds them here, together with a new boot invariant (13; 8–10 belong to D3/D7 per outline §0.2 and 11–12 to D6) and the corresponding fragment to the closed variable-list test in `env.test.ts` and to `devSecrets`.
   5. Plan 02 as built: `Jobs` is injected; `ReconBreaks` and `RuntimeConfig` are static (`ReconBreaks.open(exec, …)`), so they are called, not injected.
   6. Review fix: the provider re-fetch never runs inside a DB transaction (outline §0.1, "providers only from worker jobs" plus the `ProviderCallInTransactionError` guard), so the job does not lock the row across the handler. pg-boss's `singletonKey` (the row id) keeps one active job per event, and handlers are idempotent.
+  7. Review fix (RV-03-10): invariant 13 binds the api role only. R-19 gives `SANCHAY_FP_WEBHOOK_SECRET` to the api container alone, and only the api serves HTTP (the worker is an application context, migrate a one-off task), so as written the deployed worker and migrate containers (E25's stack, prod under R-31) stopped booting from this task on. The condition reuses E25's `role` constant (Plan 02 RV-02-20), the way invariant 7 does, and a new case boots worker and migrate without the secret.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -447,7 +498,7 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   });
   ```
 
-  Append to `apps/api/src/config/env.test.ts` (new invariant test, after the `SANCHAY_SMS_RETRIEVER_HASH` block at line 111–130 shown above):
+  Append to `apps/api/src/config/env.test.ts` (two invariant-13 cases, after the `SANCHAY_SMS_RETRIEVER_HASH` block at line 111–130 shown above; with E25's cases there, after E25's second case). The first uses the default role, `api`; the second (RV-03-10) sets the role, and the FP mode the way E25's cases do:
   ```ts
   it('requires SANCHAY_FP_WEBHOOK_SECRET outside local/test (invariant 13)', () => {
     for (const appEnv of ['dev', 'staging', 'prod']) {
@@ -458,17 +509,33 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
       ).toMatch(/SANCHAY_FP_WEBHOOK_SECRET is required outside local\/test/);
     }
     expect(parseEnv(base).SANCHAY_FP_WEBHOOK_SECRET).toBeUndefined();
-    expect(parseEnv(devSecrets).SANCHAY_FP_WEBHOOK_SECRET).toBe(devSecrets.SANCHAY_FP_WEBHOOK_SECRET);
+    expect(parseEnv(devSecrets).SANCHAY_FP_WEBHOOK_SECRET).toBe(
+      devSecrets.SANCHAY_FP_WEBHOOK_SECRET,
+    );
+  });
+
+  it('binds the FP webhook secret (invariant 13) to the api role only (R-19 owning containers, RV-03-10)', () => {
+    const noSecret = {
+      ...omit(devSecrets, 'SANCHAY_FP_WEBHOOK_SECRET'),
+      SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+    };
+    expect(errorMessage(() => parseEnv({ ...noSecret, SANCHAY_APP_ROLE: 'api' }))).toMatch(
+      /SANCHAY_FP_WEBHOOK_SECRET is required outside local\/test/,
+    );
+    for (const role of ['worker', 'migrate']) {
+      expect(parseEnv({ ...noSecret, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
+    }
   });
   ```
   And edit the closed-list array (line 86–108) to add, kept alphabetically sorted: `'SANCHAY_FP_WEBHOOK_AUTH'` and `'SANCHAY_FP_WEBHOOK_SECRET'`.
   And edit `devSecrets` (line 39–46) to add one line: `SANCHAY_FP_WEBHOOK_SECRET: 'x'.repeat(32),`.
 
 - [ ] **Step 2: Run it to confirm it fails**
+  PowerShell and Git Bash (the same commands; a test filter goes without `--`, BRIEF D8):
   ```
-  pnpm --filter=@sanchay/api test -- src/integrations/fp/webhooks/fp-signature.test.ts
-  pnpm --filter=@sanchay/api test -- src/config/env.test.ts
-  pnpm --filter=@sanchay/api test:int -- test/int/fp-webhooks.int.test.ts
+  pnpm --filter=@sanchay/api test src/integrations/fp/webhooks/fp-signature.test.ts
+  pnpm --filter=@sanchay/api test src/config/env.test.ts
+  pnpm --filter=@sanchay/api test:int test/int/fp-webhooks.int.test.ts
   ```
   Expected failure: the first two fail with "Cannot find module './fp-signature.js'" / the invariant-13 assertion not matching (invariant doesn't exist yet); the third fails to boot (`FpWebhooksModule` and `inbound-webhook.schema.ts` do not exist, and `SANCHAY_FP_WEBHOOK_SECRET` is rejected by `parseEnv` as an unknown key).
 
@@ -559,7 +626,8 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
    * providers that do not relay byte-stable bodies. `shared_secret` mode compares the header directly
    * to the secret. Fails closed: any parse/verify problem is `valid: false`, never a thrown exception.
    * `secret === undefined` is NONE mode (always valid) and is only reachable in local/test, because
-   * boot invariant 13 refuses to start elsewhere without SANCHAY_FP_WEBHOOK_SECRET set.
+   * boot invariant 13 refuses the api role elsewhere without SANCHAY_FP_WEBHOOK_SECRET set, and only
+   * the api serves HTTP (RV-03-10).
    */
   export function verifyFpSignature(
     raw: Buffer,
@@ -952,18 +1020,19 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
     SANCHAY_FP_WEBHOOK_AUTH: z.enum(['hmac', 'shared_secret']).default('hmac'),
     SANCHAY_FP_WEBHOOK_SECRET: z.string().min(16).optional(),
   ```
-  And after the last invariant (12, D6) in `assertBootInvariants`:
+  And after the last invariant (12, D6) in `assertBootInvariants` (`role` is E25's constant, declared after the `stagingOrProd` line; RV-03-10):
   ```ts
     // 13 (E1): the FP webhook needs a secret to verify FP-Signature; without it verifyFpSignature
-    // falls back to NONE mode, which accepts any body, so that is refused outside local/test.
-    if (!localOrTest && env.SANCHAY_FP_WEBHOOK_SECRET === undefined) {
+    // falls back to NONE mode, which accepts any body, so that is refused outside local/test. Only the
+    // api receives the webhook (R-19 gives it the secret alone), so the worker and migrate boot without.
+    if (!localOrTest && role === 'api' && env.SANCHAY_FP_WEBHOOK_SECRET === undefined) {
       problems.push('SANCHAY_FP_WEBHOOK_SECRET is required outside local/test');
     }
   ```
 
   Fragment for `apps/api/.env.example` (append):
   ```
-  # HMAC verification for POST /api/v1/webhooks/fp; required outside local/test (boot invariant 13)
+  # HMAC verification for POST /api/v1/webhooks/fp; the api role needs it outside local/test (boot invariant 13)
   SANCHAY_FP_WEBHOOK_AUTH=hmac
   # SANCHAY_FP_WEBHOOK_SECRET=
   ```
@@ -1080,19 +1149,21 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
+  PowerShell and Git Bash (the same commands):
   ```
   pnpm --filter=@sanchay/api db:generate --name=inbound_webhook_events
-  pnpm --filter=@sanchay/api test -- src/integrations/fp/webhooks/fp-signature.test.ts
-  pnpm --filter=@sanchay/api test -- src/config/env.test.ts
-  pnpm --filter=@sanchay/api test:int -- test/int/fp-webhooks.int.test.ts test/int/infra-routes.int.test.ts
+  pnpm --filter=@sanchay/api test src/integrations/fp/webhooks/fp-signature.test.ts
+  pnpm --filter=@sanchay/api test src/config/env.test.ts
+  pnpm --filter=@sanchay/api test:int test/int/fp-webhooks.int.test.ts test/int/infra-routes.int.test.ts
   pnpm --filter=@sanchay/api typecheck
   ```
-  Expected: all green; `drizzle/0010_inbound_webhook_events.sql` (or the next free number, assigned at merge per §0.1) is generated and applied by the Testcontainers harness; `infra-routes.int.test.ts` still passes with 3 rows instead of 4.
+  Expected: all green, including both invariant-13 cases (the worker and migrate boot in dev without the secret; the api does not); `drizzle/0010_inbound_webhook_events.sql` (or the next free number, assigned at merge per §0.1) is generated and applied by the Testcontainers harness; `infra-routes.int.test.ts` still passes with 3 rows instead of 4.
 
 - [ ] **Step 5: Commit**
   ```
   pnpm exec biome check --write apps/api/src/modules/fp-webhooks apps/api/src/integrations/fp/webhooks apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/fp-webhooks.int.test.ts apps/api/test/int/jobs.ts apps/api/test/int/infra-routes.ts apps/api/test/int/infra-routes.int.test.ts apps/api/.env.example apps/api/drizzle
-  pnpm --filter=@sanchay/api test:int -- test/int/fp-webhooks.int.test.ts test/int/infra-routes.int.test.ts
+  pnpm --filter=@sanchay/api test src/config/env.test.ts
+  pnpm --filter=@sanchay/api test:int test/int/fp-webhooks.int.test.ts test/int/infra-routes.int.test.ts
   pnpm --filter=@sanchay/api typecheck
   pnpm lint
   git add apps/api/src/modules/fp-webhooks apps/api/src/integrations/fp/webhooks apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/fp-webhooks.int.test.ts apps/api/test/int/jobs.ts apps/api/test/int/infra-routes.ts apps/api/test/int/infra-routes.int.test.ts apps/api/.env.example apps/api/drizzle
@@ -1113,8 +1184,11 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 - Modify: `apps/api/src/config/env.test.ts` (closed variable-list pin test, `base`)
 - Modify: `apps/api/.env.example` (append `SANCHAY_API_ORIGIN`)
 - Modify: `apps/api/test/int/env.ts` (`testEnv` default + `TEST_API_ORIGIN` export)
-- Modify: `apps/api/test/int/http.ts` (`webHeaders`/`nativeHeaders` send a `host` header by default; add `apiHost()`)
-- Modify: `apps/api/test/int/infra-routes.int.test.ts` (the two `pg/return` rows now need the api host)
+- Modify: `apps/api/test/int/http.ts` (`webHeaders`/`nativeHeaders` send a `host` header by default; add `apiHost()` and `appHost()`)
+- Modify: `apps/api/test/int/infra-routes.int.test.ts` (the two `pg/return` rows now need the api host; the control case needs the app host)
+- Modify (RV-03-5, Plan 01 tests HostGuard would otherwise 404): `apps/api/test/int/auth-login.int.test.ts`, `apps/api/test/int/session-endpoint.int.test.ts`, `apps/api/test/int/throttle.int.test.ts`, `apps/api/test/int/client-roundtrip.int.test.ts`
+- Modify (RV-03-5, Plan 01 unit tests that build their own env): `apps/api/src/integrations/integrations.module.test.ts`, `apps/api/src/modules/platform/crypto.test.ts`
+- Not modified (RV-03-11): `packages/contract/src/auth.test.ts`. Plan 02 D10 (RV-02-30) already made its top-level and `me` key checks `expect.arrayContaining`, so `meta` needs no edit there.
 - Modify: `packages/contract/src/index.ts` (append `meta` to `contract`)
 - Test: `apps/api/test/int/host-guard.int.test.ts`
 
@@ -1133,13 +1207,20 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   3. `AppVersionGuard` is not in the outline's Files list for E2, but the 426 behaviour it describes ("x-app-version below the minimum → 426 … the client side, SYS-01, is E24") has nowhere else to live: `ClientGuard` (Plan 01) only *records* `appVersion`, and nothing in Plan 02's D1–D10 or elsewhere in Plan 03's E-tasks touches version gating. It is added here as its own guard (not folded into `ClientGuard`, which this task's Files list does not permit modifying) and registered right after `ClientGuard` so it can read `cls.get('client').appVersion`.
   4. The existing `test/int/infra-routes.int.test.ts` (already trimmed by E1) issues bare `app.inject({method, url})` calls with no `Host` header for the `pg/return` rows. Once `HostGuard` is live those would 404 (host `null` is neither app nor api). This task adds `host: apiHost()` to those two rows; the `health` row is untouched since `APP_AND_API_HOSTS` bypasses the host check.
   5. The outline's test "health 200 while the newest NAV is 5 days old; AGED scheme refuses a purchase quote (R-12)" bundles two behaviours from different, not-yet-built layers. This task's own test covers only the first half (liveness never depends on NAV age — trivially true today since `HealthRouter` has no NAV code path, verified as a regression guard). The AGED-scheme purchase refusal is `NavService.latest` (Plan 02 D9) feeding the quote procedure (Plan 03 E22); that half of the assertion belongs in E22's own task, once a quote procedure exists to refuse.
+- **Review fix (RV-03-5):**
+  - Deviation 2's claim that every existing int test keeps passing was wrong for requests that set their own headers. These now send a host: auth-login "rejects a missing client header", session-endpoint "rejects requests without x-sanchay-client (ORIGIN_REJECTED)" and infra-routes "keeps both guards on every other route (control)" use `appHost()`. throttle "never throttles the R-11 infra routes" uses `apiHost()`, and its webhook row posts a parseable envelope, because E1 replaced the stand-in with the real controller, which answers 200 only for an envelope. client-roundtrip's real HTTP calls carry `Host: 127.0.0.1:<port>`, so its app declares `SANCHAY_APP_ORIGIN=http://127.0.0.1:3000` (F8 moves these native calls to the api host under H-1).
+  - The 426 case upserts `app_config` `minAppVersion.android = '1.1.0'` first and deletes the row afterwards. D1's default floor `'1.0.0'` is not above `nativeHeaders`' `1.0.0`.
+  - Plan 01's `packages/contract/src/auth.test.ts` asserted the exact top-level keys `['auth', 'health', 'me']` and the exact `me` keys. Plan 02 D10 adds `catalogue`, this task `meta`, E4 `consents`, E5 `me.get`, and so on. Superseded by RV-03-11: Plan 02 D10, the first task to add a key, makes both checks `expect.arrayContaining` (RV-02-30, the same fragment), so this task and every later one leave that test alone.
+  - `SANCHAY_API_ORIGIN` is required, so Plan 01's `integrations.module.test.ts` and `crypto.test.ts`, which build their own env objects, gain it too, and the closed-list test sorts it right after `'PORT'`.
 
 - [ ] **Step 1: Write the failing tests**
 
   `apps/api/test/int/host-guard.int.test.ts`:
   ```ts
   import { randomUUID } from 'node:crypto';
+  import { eq } from 'drizzle-orm';
   import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+  import { appConfig } from '../../src/modules/platform/kernel.schema.js';
   import { bootTestApp, type TestApp } from './app.js';
   import { apiHost, fromIp, nativeHeaders, webHeaders } from './http.js';
 
@@ -1297,12 +1378,21 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
 
   describe('AppVersionGuard (426)', () => {
     it('an android client below minAppVersion.android gets 426 APP_VERSION_UNSUPPORTED', async () => {
-      const res = await t.app.inject({
-        method: 'GET',
-        url: '/api/v1/app/config',
-        headers: nativeHeaders({ installationId: randomUUID(), platform: 'android' }), // 1.0.0, default floor is higher
-      });
-      expect([res.statusCode, res.json().code]).toEqual([426, 'APP_VERSION_UNSUPPORTED']);
+      // RV-03-5: D1's default floor is '1.0.0', which nativeHeaders' x-app-version 1.0.0 meets; raise it.
+      await t.db.db
+        .insert(appConfig)
+        .values({ key: 'minAppVersion.android', value: '1.1.0' })
+        .onConflictDoUpdate({ target: appConfig.key, set: { value: '1.1.0' } });
+      try {
+        const res = await t.app.inject({
+          method: 'GET',
+          url: '/api/v1/app/config',
+          headers: nativeHeaders({ installationId: randomUUID(), platform: 'android' }),
+        });
+        expect([res.statusCode, res.json().code]).toEqual([426, 'APP_VERSION_UNSUPPORTED']);
+      } finally {
+        await t.db.db.delete(appConfig).where(eq(appConfig.key, 'minAppVersion.android'));
+      }
     });
 
     it('web clients are never version-gated', async () => {
@@ -1313,8 +1403,9 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   ```
 
 - [ ] **Step 2: Run it to confirm it fails**
+  PowerShell and Git Bash (the same command; no `--`, BRIEF D8):
   ```
-  pnpm --filter=@sanchay/api test:int -- test/int/host-guard.int.test.ts
+  pnpm --filter=@sanchay/api test:int test/int/host-guard.int.test.ts
   ```
   Expected failure: `bootTestApp()` throws immediately because `parseEnv` rejects the config once `SANCHAY_API_ORIGIN` is required — but `SANCHAY_API_ORIGIN` is added by *this task's* Step 3, so at this Step 2 checkpoint it instead fails because `/api/v1/app/config` is `404 NOT_FOUND` (no such route yet) and the cross-host tests all see identical (host-blind) behaviour.
 
@@ -1544,7 +1635,12 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
     ```ts
       SANCHAY_API_ORIGIN: 'http://localhost:3000',
     ```
-  - the closed-list array: add `'SANCHAY_API_ORIGIN'` (alphabetically, right after `'SANCHAY_APP_ORIGIN'`).
+  - the closed-list array: add `'SANCHAY_API_ORIGIN'` right after `'PORT'` (the test compares a sorted list, and `SANCHAY_API_…` sorts before `SANCHAY_APP_ENV`; RV-03-5).
+
+  Fragment for `apps/api/src/integrations/integrations.module.test.ts` (its `base`) and `apps/api/src/modules/platform/crypto.test.ts` (its `localRaw`), one line each after `SANCHAY_APP_ORIGIN` (RV-03-5; both build their own env, so the now-required variable is missing there):
+  ```ts
+    SANCHAY_API_ORIGIN: 'https://api.sanchay.test',
+  ```
 
   Fragment for `apps/api/test/int/env.ts`:
   ```ts
@@ -1578,6 +1674,11 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
     return new URL(TEST_API_ORIGIN).host;
   }
 
+  /** The app host's `Host` header value: every ordinary (non-infra) route needs it once HostGuard is live (RV-03-5). */
+  export function appHost(): string {
+    return new URL(TEST_APP_ORIGIN).host;
+  }
+
   export function webHeaders(
     opts: { cookies?: Record<string, string>; origin?: string; host?: string } = {},
   ): Record<string, string> {
@@ -1585,7 +1686,7 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
       'x-sanchay-client': 'web',
       origin: opts.origin ?? TEST_APP_ORIGIN,
       'sec-fetch-site': 'same-origin',
-      host: opts.host ?? new URL(TEST_APP_ORIGIN).host,
+      host: opts.host ?? appHost(),
     };
     const cookies = Object.entries(opts.cookies ?? {});
     if (cookies.length > 0) headers.cookie = cookies.map(([k, v]) => `${k}=${v}`).join('; ');
@@ -1603,7 +1704,7 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
       'x-sanchay-client': opts.platform ?? 'android',
       'x-installation-id': opts.installationId,
       'x-app-version': '1.0.0',
-      host: opts.host ?? new URL(TEST_APP_ORIGIN).host,
+      host: opts.host ?? appHost(),
     };
     if (opts.token) headers.authorization = `Bearer ${opts.token}`;
     return headers;
@@ -1616,9 +1717,9 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   }
   ```
 
-  Fragment for `apps/api/test/int/infra-routes.int.test.ts` (from E1's version — add `host` to the two `pg/return` rows only):
+  Fragment for `apps/api/test/int/infra-routes.int.test.ts` (from E1's version — add `host` to the two `pg/return` rows and to the control case):
   ```ts
-  import { apiHost, nativeHeaders, webHeaders } from './http.js';
+  import { apiHost, appHost, nativeHeaders, webHeaders } from './http.js';
 
   const REF = 'r7Qx2mV9pL4sN8wK1cZ5bA';
   const INFRA_ROUTES: Array<[string, 'GET' | 'POST', string, Record<string, string>?]> = [
@@ -1632,7 +1733,7 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
     it.each(INFRA_ROUTES)(
       '%s skips ClientGuard and SessionGuard: no client header, no session, 200',
       async (_name, method, url, headers) => {
-        const res = await t.app.inject({ method, url, headers });
+        const res = await t.app.inject({ method, url, headers: headers ?? {} });
         expect(res.statusCode).toBe(200);
       },
     );
@@ -1652,7 +1753,52 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
       },
     );
   ```
-  (`nativeHeaders` already defaults `host` to the app hostname; `...extraHeaders` overrides it to the api hostname for the two `pg/return` rows, and leaves `health`'s row using the app default, which `APP_AND_API_HOSTS` accepts either way.)
+  (`nativeHeaders` already defaults `host` to the app hostname; `...extraHeaders` overrides it to the api hostname for the two `pg/return` rows, and leaves `health`'s row using the app default, which `APP_AND_API_HOSTS` accepts either way. `headers ?? {}`: `inject` refuses `headers: undefined` under exactOptionalPropertyTypes.)
+
+  and the control case's bare request sends only the app host, so ClientGuard (not HostGuard) answers it (RV-03-5):
+  ```ts
+      const bare = await t.app.inject({ method: 'GET', url: '/api/v1/auth/session', headers: { host: appHost() } });
+  ```
+
+  Fragments for the Plan 01 tests HostGuard would otherwise answer with 404 (RV-03-5; each adds `appHost` or `apiHost` to the file's existing `./http.js` import):
+  - `apps/api/test/int/auth-login.int.test.ts`, "rejects a missing client header":
+    ```ts
+        const res = await post('/auth/otp', { host: appHost() }, { mobile: '9822200012' });
+    ```
+  - `apps/api/test/int/session-endpoint.int.test.ts`, "rejects requests without x-sanchay-client (ORIGIN_REJECTED)":
+    ```ts
+        const res = await t.app.inject({ method: 'GET', url: URL_SESSION, headers: { host: appHost() } });
+    ```
+  - `apps/api/test/int/throttle.int.test.ts`, "never throttles the R-11 infra routes" (replace the loop; the `routes` list is unchanged):
+    ```ts
+        // HostGuard: all four are infra routes on the api host. E1's real webhook answers 200 only for a
+        // parseable envelope (no secret in test, so the NONE signature mode); a repeat is a deduped 200.
+        const envelope = JSON.stringify({
+          event: { id: 'evt_throttle', type: 'mf_purchase.updated' },
+          data: { object: { id: 'mfp_throttle', object: 'mf_purchase' } },
+        });
+        for (const [method, url] of routes) {
+          const webhook = url === '/api/v1/webhooks/fp';
+          for (let i = 0; i < 10; i++) {
+            const res = await t.app.inject({
+              method,
+              url,
+              headers: webhook ? { host: apiHost(), 'content-type': 'application/json' } : { host: apiHost() },
+              ...(webhook ? { payload: envelope } : {}),
+              remoteAddress: '198.51.100.33',
+            });
+            expect(res.statusCode, `${method} ${url} #${i + 1}`).toBe(200);
+          }
+        }
+    ```
+  - `apps/api/test/int/client-roundtrip.int.test.ts`, `beforeAll` (no import change):
+    ```ts
+      // HostGuard: these real HTTP calls carry Host 127.0.0.1:<port>, so 127.0.0.1 is the app host here
+      // (F8 moves these native calls to the api host under H-1).
+      t = await bootTestApp({ env: { SANCHAY_APP_ORIGIN: 'http://127.0.0.1:3000' } });
+    ```
+
+  `packages/contract/src/auth.test.ts`: no edit (RV-03-11). Plan 02 D10 already replaced Plan 01's test "exposes exactly the 9 MVP procedures" with "keeps the 9 MVP procedures (later plans add contract keys and me.get)", whose top-level and `me` key checks are `expect.arrayContaining` (RV-02-30). With `meta` added, `pnpm --filter=@sanchay/contract test` in Step 4 still passes it.
 
   Fragment for `apps/api/src/app.module.ts`:
   ```ts
@@ -1676,25 +1822,31 @@ The Plan 03 drafts were written from the outline before Plan 02's drafts existed
   ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
+  PowerShell and Git Bash (the same commands). The first line rebuilds `packages/contract/dist`, which `apps/api` and the OpenAPI generator read (RV-03-19):
   ```
+  pnpm exec turbo run build --filter=@sanchay/api^...
   pnpm --filter=@sanchay/contract typecheck
   pnpm --filter=@sanchay/contract test
-  pnpm --filter=@sanchay/api test -- src/config/env.test.ts
-  pnpm --filter=@sanchay/api test:int -- test/int/host-guard.int.test.ts test/int/infra-routes.int.test.ts test/int/fp-webhooks.int.test.ts
+  pnpm --filter=@sanchay/api test src/config/env.test.ts src/integrations/integrations.module.test.ts src/modules/platform/crypto.test.ts
+  pnpm --filter=@sanchay/api test:int test/int/host-guard.int.test.ts test/int/infra-routes.int.test.ts test/int/fp-webhooks.int.test.ts test/int/auth-login.int.test.ts test/int/session-endpoint.int.test.ts test/int/throttle.int.test.ts test/int/client-roundtrip.int.test.ts
+  pnpm --filter=@sanchay/api test:int
   pnpm --filter=@sanchay/api openapi
-  git diff --exit-code apps/api/openapi.json
+  pnpm --filter=@sanchay/api test openapi
   pnpm --filter=@sanchay/api typecheck
   ```
-  Expected: all green; `openapi.json` regenerates with `GET /app/config` added and the diff is committed (the B10 drift test stays satisfied); the full existing int suite (session/auth/otp/etc., not touched by this task) still passes because `webHeaders`/`nativeHeaders` now supply a valid `Host` header by default.
+  Expected: all green; `openapi.json` regenerates with `GET /app/config` added, the B10 drift test (`test openapi`) passes against it, and the regenerated file is committed (a bare `git diff --exit-code apps/api/openapi.json` would fail here: the regeneration is a real, unstaged change); the contract's relaxed `auth.test.ts` (Plan 02 D10) passes with `meta` added; the full int suite passes, because `webHeaders`/`nativeHeaders` supply a valid `Host` header by default and the cases that build their own headers now send one (RV-03-5). Test filters go without `--`: under pnpm 11 a literal `--` reaches Vitest and it runs the whole suite.
 
 - [ ] **Step 5: Commit**
   ```
-  pnpm exec biome check --write apps/api/src/modules/platform/host.guard.ts apps/api/src/modules/platform/app-version.guard.ts apps/api/src/modules/platform/app-config.router.ts apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/.env.example apps/api/test/int apps/api/openapi.json packages/contract/src/meta.ts packages/contract/src/index.ts
-  pnpm --filter=@sanchay/api test:int -- test/int/host-guard.int.test.ts test/int/infra-routes.int.test.ts test/int/fp-webhooks.int.test.ts
+  pnpm exec turbo run build --filter=@sanchay/api^...
+  pnpm exec biome check --write apps/api/src/modules/platform/host.guard.ts apps/api/src/modules/platform/app-version.guard.ts apps/api/src/modules/platform/app-config.router.ts apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/integrations/integrations.module.test.ts apps/api/src/modules/platform/crypto.test.ts apps/api/.env.example apps/api/test/int apps/api/openapi.json packages/contract/src/meta.ts packages/contract/src/index.ts
+  pnpm --filter=@sanchay/api test src/config/env.test.ts src/integrations/integrations.module.test.ts src/modules/platform/crypto.test.ts
+  pnpm --filter=@sanchay/api test:int test/int/host-guard.int.test.ts test/int/infra-routes.int.test.ts test/int/fp-webhooks.int.test.ts test/int/auth-login.int.test.ts test/int/session-endpoint.int.test.ts test/int/throttle.int.test.ts test/int/client-roundtrip.int.test.ts
+  pnpm --filter=@sanchay/contract test
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/contract typecheck
   pnpm lint
-  git add apps/api/src/modules/platform/host.guard.ts apps/api/src/modules/platform/app-version.guard.ts apps/api/src/modules/platform/app-config.router.ts apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/.env.example apps/api/test/int/env.ts apps/api/test/int/http.ts apps/api/test/int/host-guard.int.test.ts apps/api/test/int/infra-routes.int.test.ts apps/api/openapi.json packages/contract/src/meta.ts packages/contract/src/index.ts
+  git add apps/api/src/modules/platform/host.guard.ts apps/api/src/modules/platform/app-version.guard.ts apps/api/src/modules/platform/app-config.router.ts apps/api/src/app.module.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/integrations/integrations.module.test.ts apps/api/src/modules/platform/crypto.test.ts apps/api/.env.example apps/api/test/int/env.ts apps/api/test/int/http.ts apps/api/test/int/host-guard.int.test.ts apps/api/test/int/infra-routes.int.test.ts apps/api/test/int/auth-login.int.test.ts apps/api/test/int/session-endpoint.int.test.ts apps/api/test/int/throttle.int.test.ts apps/api/test/int/client-roundtrip.int.test.ts apps/api/openapi.json packages/contract/src/meta.ts packages/contract/src/index.ts
   git commit -m "feat(api): HostGuard, AppVersionGuard and meta.appConfig (R-11)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
 
@@ -2341,6 +2493,12 @@ import { CONSENT_SUBJECT_TYPES, type ConsentSubjectType } from '@sanchay/domain'
 import { SNAPSHOT_VERSION, type ConsentSnapshotV2 } from '@sanchay/domain';
 import type { DbExecutor } from '../../db/client.js';
 
+/**
+ * At `create`, `destinationsMasked` is the resolver's live masks and `fields` is the caller's input.
+ * At `approve` (RV-03-1), both are echoed from the challenge's stored snapshot: `fields` is the
+ * builder's own earlier output. A builder that derives a fact from a subject row must therefore spread
+ * `ctx.fields` FIRST and write the live value over it, so a changed subject row changes the hash.
+ */
 export interface SnapshotBuilderContext {
   investorId: string;
   subjects: Array<{ table: string; id: string }>;
@@ -2358,7 +2516,9 @@ export type SnapshotBuilder = (
 /** A builder that reads no subject-specific rows yet: it renders the fields the caller already resolved
  * (amount, units, scheme, ...) into the standard envelope. Each subject task (E20 orders, F2 plans and
  * mandates, E6/E11 onboarding attest, ...) replaces its own registry entry once its tables exist; until
- * then every CONSENT_SUBJECT_TYPES key uses this shared builder so ConsentEngine (E4) has a total map. */
+ * then every CONSENT_SUBJECT_TYPES key uses this shared builder so ConsentEngine (E4) has a total map.
+ * `legalDocuments` is [] here although `ConsentSnapshotV2Schema` says `.min(1)`: builder output is never
+ * schema-parsed (RV-03-1), and a subject task's own builder lists the documents it binds. */
 function genericBuilder(subjectType: ConsentSubjectType): SnapshotBuilder {
   return async (_exec, ctx) => ({
     version: SNAPSHOT_VERSION,
@@ -3022,17 +3182,24 @@ git commit -m "feat(legal-consent): sanchay.consent.v2 snapshot, JCS hashing and
 
 **Files:**
 - **Create:** `apps/api/src/modules/legal-consent/consent-engine.ts`, `apps/api/src/modules/legal-consent/destination-resolver.ts`, `apps/api/src/modules/legal-consent/consent.router.ts`, `apps/api/src/modules/legal-consent/consent-sweep.job.ts`, `apps/api/src/modules/legal-consent/drafts-abandon.job.ts`, `packages/contract/src/consents.ts`, `apps/api/test/int/consent-first.ts`, `apps/api/test/int/bola.ts`, `apps/api/test/int/consent-engine.int.test.ts`, `apps/api/test/int/consent-guard-trigger.int.test.ts`.
-- **Modify:** `apps/api/src/modules/legal-consent/legal-consent.module.ts` (wire `ConsentEngine`, `ConsentDestinationResolver`, `ConsentRouter`, the two jobs, `SUITABILITY_HOOK`), `apps/api/src/modules/platform/jobs/schedules.ts` (append the two sweep schedules), `apps/api/src/modules/platform/audit.service.ts` (append `AUDIT_ACTIONS.CONSENT_CHALLENGE_CREATED`, `CONSENT_OTP_SENT`, `CONSENT_APPROVED`, `CONSENT_MISMATCH`, `CONSENT_CANCELLED`, `CONSENT_EXPIRED_SWEPT`, `CONSENT_DRAFT_ABANDONED`; append `'subjectType'`, `'subjectIds'` to `AUDIT_DATA_ALLOWLIST`), `packages/contract/src/index.ts` (`consentsContract` import/export, add `consents: consentsContract` to `contract`), `apps/api/openapi.json` (regenerated, B10 drift test).
+- **Modify:** `apps/api/src/modules/legal-consent/legal-consent.module.ts` (wire `ConsentEngine`, `ConsentDestinationResolver`, `ConsentRouter`, the two jobs, `SUITABILITY_HOOK`), `apps/api/src/modules/platform/jobs/schedules.ts` (append the two sweep schedules), `apps/api/src/modules/platform/audit.service.ts` (append `AUDIT_ACTIONS.CONSENT_CHALLENGE_CREATED`, `CONSENT_OTP_SENT`, `CONSENT_APPROVED`, `CONSENT_MISMATCH`, `CONSENT_CANCELLED`, `CONSENT_EXPIRED_SWEPT`, `CONSENT_DRAFT_ABANDONED`, `CONSENT_MARKED_UNUSED`; append `'subjectType'`, `'subjectIds'` to `AUDIT_DATA_ALLOWLIST`), `packages/contract/src/index.ts` (`consentsContract` import/export, add `consents: consentsContract` to `contract`), `apps/api/openapi.json` (regenerated, B10 drift test).
 
 **Interfaces:**
 - Prerequisites: E3 (`legal_documents`, `consent_challenges`, `consent_records`, `consent_subjects`, `LegalDocs`, `SNAPSHOT_BUILDERS`, `canonicalize`, `snapshotSha256`, `requiredFactorsFor`).
-- Consumes (Plan-01 ground truth): `OtpService.issue(input: IssueOtpInput): Promise<IssuedOtp>` and `OtpService.verify(exec, {challengeId, purpose, code}): Promise<VerifiedOtp>` — note `challengeId` here is the **otp_codes row id**, not the consent challenge id (`apps/api/src/modules/identity/otp.service.ts`); `type ConsentSms`, `renderConsentSms`, `SMS_TEMPLATE_IDS` (`apps/api/src/integrations/sms/templates.ts`); `AuditService.record`, `AUDIT_ACTIONS`; `Crypto`; `CLOCK`/`Clock`/`FakeClock`, `MINUTE`/`HOUR`/`DAY`/`SECOND`; `AppError`; `newId`/`asRowId`; `investors`, `investorContacts` (`apps/api/src/modules/identity/identity.schema.ts`); `bootTestApp`; `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`, `ERROR_CATALOGUE` (`@sanchay/contract`); `route`/`oc` contract pattern from `packages/contract/src/auth.ts`.
+- Consumes (Plan-01 ground truth): `OtpService.issue(input: IssueOtpInput): Promise<IssuedOtp>` and `OtpService.verify(exec, {challengeId, purpose, code}): Promise<VerifiedOtp>` — note `challengeId` here is the **otp_codes row id**, not the consent challenge id (`apps/api/src/modules/identity/otp.service.ts`); `type ConsentSms`, `renderConsentSms`, `SMS_TEMPLATE_IDS` (`apps/api/src/integrations/sms/templates.ts`); `AuditService.record`, `AUDIT_ACTIONS`; `Crypto`; `CLOCK`/`Clock`/`FakeClock`, `MINUTE`/`HOUR`/`DAY`/`SECOND`; `AppError`; `newId`/`asRowId`; `investors`, `investorContacts` (`apps/api/src/modules/identity/identity.schema.ts`); `InvestorAccounts.decryptMobile(row)` (`identity/investor-accounts.service.ts`, exported by `IdentityModule`) and `maskMobile` (`identity/masking.ts`); `bootTestApp`; `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`, `ERROR_CATALOGUE` (`@sanchay/contract`); `route`/`oc` contract pattern from `packages/contract/src/auth.ts`.
 - Consumes (Plan 02, as built): `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler`, `type Job<N>`, `type JobName` (`jobs/job-registry.ts`; `consent.expiry.sweep` and `drafts.abandon` are already in `JOB_NAMES`), `registerSchedules` (`jobs/schedules.ts`); `type ConsumedConsent`, `assertConsumed` (D3, `apps/api/src/integrations/fp/consumed-consent.ts`); `CHALLENGE_STATUSES`, `type ChallengeStatus` (D5, `@sanchay/domain`); `bootFpTestApp`, `type FpTestApp`, `FakeFp.calls()` (D4, `apps/api/test/int/fake-fp.ts`; call-log `at` is stamped from the app `Clock`); `AppConfig` (Plan 01).
-- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
+- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void>` (RV-03-1), `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
 - Review fix (Plan 02 as built): `ConsumedConsent`/`assertConsumed` come from D3 and `CHALLENGE_STATUSES` from D5; there are no local copies. `useConsumed` mints the D3 brand (`subjectIds` are the subject row ids) and checks it with `assertConsumed`. It refuses unless `SANCHAY_APP_ROLE === 'worker'` (from `AppConfig`), replacing the draft's `asWorker()` object-copy.
 - Review fix: `ConsentRouter` uses Plan 01's `@Controller` + `@Implement` pattern (the draft's `implement(...).router(...)` object on an `@Injectable` would never have been mounted), checks that every challenge belongs to the signed-in investor (the draft let any investor read, send, approve or cancel any challenge), and applies `requireIdempotency(idem, cls)` to `cancel` (the draft called it with no arguments).
 - Review fix: both sweeps are `@JobHandler` classes whose `handle(job)` calls `run()`, scheduled through `registerSchedules` (`consent.expiry.sweep` `*/5 * * * *`, `drafts.abandon` `0 * * * *`). `LegalConsentModule` injects real tokens (`DB`, `CLOCK`, `Crypto`, `OtpService` from `IdentityModule`, the global `Jobs`), not string tokens and not a no-op `JOBS`. Tests boot the worker app with FakeFp and spy on the injected `Jobs`.
 - Review fix: one shared `consent.approved` queue cannot fan out; pg-boss hands each job to exactly one worker. `approve` therefore enqueues the job registered for the challenge's subject type in `CONSENT_SUBJECT_JOBS`, or nothing when none is registered. The registering file must be loaded in the **api** role too, since `approve` runs in the request.
+- Review fix (RV-03-1):
+  - `approve` decrypts the challenge's `snapshot_enc` (AAD `consent_challenges.snapshot_enc:<challengeId>`). It passes that snapshot's `destinationsMasked` and `fields` into the builder; before, it passed `[]` and only the four `render_*` columns, so the hash never matched.
+  - `markUnused` moves CONSUMED → CONSUMED_UNUSED with a `CONSENT_MARKED_UNUSED` audit row. Only a saga that made no P/M write calls it. `useConsumed` refuses a CONSUMED_UNUSED challenge.
+  - `consent.expiry.sweep` skips any challenge whose `consent_records.first_attempt_at` is set.
+- Review fix (RV-03-2): `ConsentDestinationResolver` returned the base64 ciphertext as `value`, so `sendOtp` sent the OTP to ciphertext and no consent code ever arrived. It is now `@Injectable()`, injects `InvestorAccounts` and `Crypto`, and returns the decrypted mobile (`decryptMobile`, AAD `investors.mobile_enc:<investorId>`) and email (AAD `investor_contacts.value_enc:<contactId>`); `masked` is `maskMobile(mobile)` and the contact's stored `masked`. The test seed encrypts `'9999999999'` under the mobile AAD, and the resolver test takes the resolver from DI.
+- Review fix (RV-03-4): `create` writes `consent_challenges.created_at`/`updated_at` from the app Clock. The column defaulted to the DB's `now()`, while `consumed_at` and FakeFp's call log use the app Clock, so `expectNoPmWritesBeforeConsumed`'s window compared two clocks.
+- Review fix (RV-03-12): `cancel` read the challenge without a lock and then ran `UPDATE … SET status = 'CANCELLED' WHERE id = ?` with no status guard. A cancel racing `approve` could overwrite CONSUMED after approve committed; the subject job then failed in `useConsumed` on every retry, and for plans F2's and F28's guards refused the write. `cancel` is now one `UPDATE … WHERE id = ? AND status = 'PENDING' RETURNING investor_id`. Zero rows re-reads the status: an absent row is NOT_FOUND, a challenge that already ended (CANCELLED, EXPIRED, SUPERSEDED) is left as it is, and anything else is CONSENT_ALREADY_USED. Four new cases cover it, one with approve's row lock held open (the old body overwrote CONSUMED there; reproduced on PostgreSQL 18).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3045,8 +3212,9 @@ import type { FpTestApp } from './fake-fp.js';
 
 /**
  * The canonical consent-first assertion (outline §0.1): "FakeFp has zero P/M writes before CONSUMED".
- * FakeFp stamps its call log from the app Clock, the same clock that writes `consumed_at`. The
- * structural guard (FpTransport requires a ConsumedConsent for P/M) is primary; this checks the flow.
+ * FakeFp stamps its call log from the app Clock, the same clock that writes `created_at` (RV-03-4) and
+ * `consumed_at`. The structural guard (FpTransport requires a ConsumedConsent for P/M) is primary; this
+ * checks the flow.
  */
 export async function expectNoPmWritesBeforeConsumed(app: FpTestApp, challengeId: string): Promise<void> {
   const [challenge] = await app.db.db
@@ -3111,7 +3279,7 @@ export async function expectBola(app: TestApp, procedureKey: string, foreignIdAr
 `apps/api/test/int/consent-engine.int.test.ts` (the full suite; boots the worker app with FakeFp and takes the real `ConsentEngine` from DI; abridged setup shown once, every outline test bullet present):
 ```ts
 import { randomUUID } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { otpCodes } from '../../src/modules/identity/identity.schema.js';
 import { investors, investorContacts } from '../../src/modules/identity/identity.schema.js';
@@ -3122,17 +3290,21 @@ import {
   legalDocuments,
 } from '../../src/modules/legal-consent/legal-consent.schema.js';
 import {
+  CHALLENGE_EXPIRY_MS,
   CONSENT_SUBJECT_JOBS,
   ConsentEngine,
   SUITABILITY_HOOK,
   type SuitabilityHook,
 } from '../../src/modules/legal-consent/consent-engine.js';
 import { ConsentSweepJob } from '../../src/modules/legal-consent/consent-sweep.job.js';
+import { SNAPSHOT_BUILDERS, type SnapshotBuilder } from '../../src/modules/legal-consent/snapshot-builders.js';
+import { Crypto } from '../../src/modules/platform/crypto.js';
+import { auditEvents } from '../../src/modules/platform/platform.schema.js';
 import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
 import type { JobName } from '../../src/modules/platform/jobs/job-registry.js';
 import { ConsentDestinationResolver } from '../../src/modules/legal-consent/destination-resolver.js';
 import { LegalDocs } from '../../src/modules/legal-consent/legal-docs.service.js';
-import { newId } from '../../src/modules/platform/ids.js';
+import { asRowId, newId } from '../../src/modules/platform/ids.js';
 import { bootTestApp } from './app.js';
 import { expectNoPmWritesBeforeConsumed } from './consent-first.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
@@ -3145,14 +3317,15 @@ let investorId: string;
 
 async function seedInvestor(): Promise<string> {
   const id = newId('investors');
-  const crypto = ta.app.get('Crypto' as never);
   await ta.db.db.insert(investors).values({
     id,
     createdBy: 'test',
     updatedBy: 'test',
-    mobileEnc: Buffer.from('x'),
+    // RV-03-2: a real ciphertext under AAD investors.mobile_enc:<id>; the resolver decrypts it, and the
+    // OTP goes to '9999999999', where ta.sms.latestCode finds it.
+    mobileEnc: ta.app.get(Crypto).encrypt('9999999999', { table: 'investors', column: 'mobile_enc', rowId: id }),
     mobileBidx: Buffer.from(randomUUID()),
-    mobileLast4: '2345',
+    mobileLast4: '9999',
     mobileVerifiedAt: ta.clock.now(),
   });
   return id;
@@ -3169,7 +3342,7 @@ async function seedLegalDoc(key: string): Promise<void> {
     sha256: Buffer.alloc(32, 1),
     status: 'PUBLISHED',
     effectiveFrom: ta.clock.now(),
-  });
+  }).onConflictDoNothing(); // legal_documents_key_version_uq: every test's beforeEach seeds the same (key, version)
 }
 
 beforeAll(async () => {
@@ -3177,6 +3350,7 @@ beforeAll(async () => {
   engine = ta.app.get(ConsentEngine);
   vi.spyOn(ta.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id'; // Jobs.enqueue resolves a job id, or null when the queue's policy refused the send (R-32)
   });
 });
 
@@ -3200,6 +3374,21 @@ async function createChallenge() {
     amount: '25000.00',
     fields: { amount: '25000.00', schemeShort: 'Parag Flexi', action: 'invest' },
   });
+}
+
+async function approvedChallenge() {
+  const c = await createChallenge();
+  await engine.sendOtp(c.challengeId, 'SMS');
+  await engine.approve(c.challengeId, { smsCode: ta.sms.latestCode('9999999999') ?? '000000' });
+  return c;
+}
+
+async function challengeStatus(challengeId: string): Promise<string | undefined> {
+  const [row] = await ta.db.db
+    .select({ status: consentChallenges.status })
+    .from(consentChallenges)
+    .where(eq(consentChallenges.id, challengeId));
+  return row?.status;
 }
 
 describe('ConsentEngine.sendOtp', () => {
@@ -3299,6 +3488,92 @@ describe('ConsentEngine.approve', () => {
     expect(enqueued).toHaveLength(0);
   });
 
+  it('rebuilds from the stored snapshot: real destinations and non-render fields still approve (RV-03-1)', async () => {
+    const c = await engine.create(ta.db.db, {
+      investorId,
+      subjectType: 'PURCHASE',
+      subjects: [{ table: 'orders', id: newId('orders' as never) }],
+      templateKey: 'TPL_PURCHASE',
+      folioId: null,
+      amount: '25000.00',
+      fields: {
+        amount: '25000.00',
+        schemeShort: 'Parag Flexi',
+        action: 'invest',
+        schemeIsin: 'INF879O01027',
+        navDateLine: 'NAV of the day of payment',
+      },
+    });
+    const [row] = await ta.db.db
+      .select({ snapshotEnc: consentChallenges.snapshotEnc })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, c.challengeId));
+    if (row === undefined) throw new Error('challenge row missing');
+    const stored = JSON.parse(
+      ta.app.get(Crypto).decrypt(row.snapshotEnc, {
+        table: 'consent_challenges',
+        column: 'snapshot_enc',
+        rowId: asRowId('consent_challenges', c.challengeId),
+      }),
+    ) as { destinationsMasked: string[]; fields: Record<string, string> };
+    expect(stored.destinationsMasked.length).toBeGreaterThan(0);
+    expect(stored.fields.schemeIsin).toBe('INF879O01027');
+    await engine.sendOtp(c.challengeId, 'SMS');
+    const approved = await engine.approve(c.challengeId, { smsCode: ta.sms.latestCode('9999999999') ?? '000000' });
+    expect(approved.challengeId).toBe(c.challengeId);
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED');
+  });
+
+  it('a builder that reads its subject row still catches a changed row: CONSENT_MISMATCH (RV-03-1)', async () => {
+    await ta.db.db.execute(
+      sql`CREATE TABLE IF NOT EXISTS app.consent_builder_scratch (id uuid PRIMARY KEY, amount text NOT NULL)`,
+    );
+    const generic = SNAPSHOT_BUILDERS.PURCHASE;
+    // Shaped like a real subject builder: spread ctx.fields first, then overwrite with the live row.
+    const readsRow: SnapshotBuilder = async (exec, ctx) => {
+      const base = await generic(exec, ctx);
+      const live = await exec.execute<{ amount: string }>(
+        sql`SELECT amount FROM app.consent_builder_scratch WHERE id = ${ctx.subjects[0]?.id ?? null}`,
+      );
+      return { ...base, fields: { ...ctx.fields, amount: live.rows[0]?.amount ?? '' } };
+    };
+    SNAPSHOT_BUILDERS.PURCHASE = readsRow;
+    try {
+      const draft = async () => {
+        const subjectId = randomUUID();
+        await ta.db.db.execute(sql`INSERT INTO app.consent_builder_scratch (id, amount) VALUES (${subjectId}, '25000.00')`);
+        const c = await engine.create(ta.db.db, {
+          investorId,
+          subjectType: 'PURCHASE',
+          subjects: [{ table: 'consent_builder_scratch', id: subjectId }],
+          templateKey: 'TPL_PURCHASE',
+          folioId: null,
+          amount: '25000.00',
+          fields: { amount: '25000.00', schemeShort: 'Parag Flexi', action: 'invest' },
+        });
+        await engine.sendOtp(c.challengeId, 'SMS');
+        return { c, subjectId, code: ta.sms.latestCode('9999999999') ?? '000000' };
+      };
+
+      const unchanged = await draft();
+      await engine.approve(unchanged.c.challengeId, { smsCode: unchanged.code });
+      expect(await challengeStatus(unchanged.c.challengeId)).toBe('CONSUMED');
+
+      const changed = await draft();
+      await ta.db.db.execute(
+        sql`UPDATE app.consent_builder_scratch SET amount = '90000.00' WHERE id = ${changed.subjectId}`,
+      );
+      await expect(engine.approve(changed.c.challengeId, { smsCode: changed.code })).rejects.toMatchObject({
+        code: 'CONSENT_MISMATCH',
+      });
+      expect(await challengeStatus(changed.c.challengeId)).toBe('SUPERSEDED');
+      expect(enqueued).toHaveLength(0);
+    } finally {
+      SNAPSHOT_BUILDERS.PURCHASE = generic;
+      await ta.db.db.execute(sql`DROP TABLE IF EXISTS app.consent_builder_scratch`);
+    }
+  });
+
   it('suitability changed between create and approve: SUITABILITY_CHANGED', async () => {
     const hook = ta.app.get<SuitabilityHook>(SUITABILITY_HOOK);
     const check = vi.spyOn(hook, 'check').mockResolvedValue(false);
@@ -3333,20 +3608,39 @@ describe('ConsentEngine.approve', () => {
     expect(second).toEqual(first);
   });
 
-  it('destinations resolve to CURRENT verified contacts for a new folio', async () => {
+  it('destinations resolve to CURRENT verified contacts for a new folio, decrypted, with masks (RV-03-2)', async () => {
+    const contactId = newId('investor_contacts');
     await ta.db.db.insert(investorContacts).values({
-      id: newId('investor_contacts'),
+      id: contactId,
       investorId,
       kind: 'EMAIL',
-      valueEnc: Buffer.from('x'),
+      valueEnc: ta.app.get(Crypto).encrypt('asha@example.com', {
+        table: 'investor_contacts',
+        column: 'value_enc',
+        rowId: contactId,
+      }),
       valueBidx: Buffer.from(randomUUID()),
-      masked: 'a***@example.com',
+      masked: 'a•••@example.com',
       verifiedAt: ta.clock.now(),
       status: 'CURRENT',
     });
-    const resolver = new ConsentDestinationResolver();
-    const destinations = await resolver.resolve(ta.db.db, investorId, null);
-    expect(destinations.map((d) => d.channel).sort()).toEqual(['EMAIL', 'SMS']);
+    const destinations = await ta.app.get(ConsentDestinationResolver).resolve(ta.db.db, investorId, null);
+    expect(destinations).toEqual([
+      { channel: 'SMS', value: '9999999999', masked: '••••••9999' },
+      { channel: 'EMAIL', value: 'asha@example.com', masked: 'a•••@example.com' },
+    ]);
+  });
+});
+
+describe('ConsentEngine.create', () => {
+  it('stamps created_at from the app clock, the clock consumed_at and FakeFp use (RV-03-4)', async () => {
+    const c = await createChallenge();
+    const [row] = await ta.db.db
+      .select({ createdAt: consentChallenges.createdAt })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, c.challengeId));
+    expect(row?.createdAt.getTime()).toBe(c.expiresAt.getTime() - CHALLENGE_EXPIRY_MS);
+    expect(row?.createdAt.getTime()).toBe(ta.clock.now().getTime());
   });
 });
 
@@ -3386,6 +3680,41 @@ describe('ConsentEngine.useConsumed', () => {
     const [challenge] = await ta.db.db.select().from(consentChallenges).where(eq(consentChallenges.id, c.challengeId));
     expect(challenge?.status).toBe('CONSUMED_UNUSED');
   });
+
+  it('the sweep never touches a saga whose first attempt happened; it runs on to saga_expires_at (RV-03-1)', async () => {
+    const c = await approvedChallenge();
+    await engine.useConsumed(c.challengeId, async () => 'first FP write'); // stamps first_attempt_at
+    ta.clock.advance(10 * 60_000 + 1); // past execute_before, inside saga_expires_at (60 min)
+    await ta.app.get(ConsentSweepJob).handle(jobOf('consent.expiry.sweep', {}));
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED');
+    await expect(engine.useConsumed(c.challengeId, async () => 'resumed')).resolves.toBe('resumed');
+  });
+});
+
+describe('ConsentEngine.markUnused (RV-03-1)', () => {
+  it('moves CONSUMED to CONSUMED_UNUSED with one audit row, is idempotent, and useConsumed refuses afterwards', async () => {
+    const c = await approvedChallenge();
+    // F5's shape: the live pre-check fails inside useConsumed before any FP write.
+    await engine.useConsumed(c.challengeId, async () => {
+      await engine.markUnused(ta.db.db, c.challengeId, 'live_check_failed');
+    });
+    await engine.markUnused(ta.db.db, c.challengeId, 'live_check_failed'); // a job retry
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED_UNUSED');
+    const audits = await ta.db.db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.entityId, c.challengeId), eq(auditEvents.action, 'CONSENT_MARKED_UNUSED')));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.data).toMatchObject({ challengeId: c.challengeId, reason: 'live_check_failed' });
+    await expect(engine.useConsumed(c.challengeId, async () => 'x')).rejects.toMatchObject({ code: 'CONSENT_EXPIRED' });
+    await expectNoPmWritesBeforeConsumed(ta, c.challengeId);
+  });
+
+  it('refuses a challenge that is not CONSUMED', async () => {
+    const c = await createChallenge();
+    await expect(engine.markUnused(ta.db.db, c.challengeId, 'live_check_failed')).rejects.toThrow(/not CONSUMED/);
+    expect(await challengeStatus(c.challengeId)).toBe('PENDING');
+  });
 });
 
 describe('consents.cancel', () => {
@@ -3393,6 +3722,68 @@ describe('consents.cancel', () => {
     const c = await createChallenge();
     const res = await ta.app.inject({ method: 'POST', url: `/api/v1/consents/challenges/${c.challengeId}/cancel` });
     expect(res.statusCode).toBe(428);
+  });
+});
+
+describe('ConsentEngine.cancel (RV-03-12)', () => {
+  /** Resolves once another session in this database waits on a lock (Plan 01's accounts-devices pattern). */
+  async function untilLockWaiter(): Promise<void> {
+    for (let i = 0; i < 200; i++) {
+      const res = await ta.db.db.execute(
+        sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+      );
+      if (Number((res.rows[0] as { n: number }).n) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('no session ever waited on a lock');
+  }
+
+  it('cancels a PENDING challenge with one CONSENT_CANCELLED audit row; a repeat is a no-op', async () => {
+    const c = await createChallenge();
+    await engine.cancel(ta.db.db, c.challengeId);
+    expect(await challengeStatus(c.challengeId)).toBe('CANCELLED');
+    await expect(engine.cancel(ta.db.db, c.challengeId)).resolves.toBeUndefined();
+    const rows = await ta.db.db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.entityId, c.challengeId), eq(auditEvents.action, 'CONSENT_CANCELLED')));
+    expect(rows).toHaveLength(1);
+  });
+
+  it('refuses a consumed challenge and leaves it CONSUMED', async () => {
+    const c = await approvedChallenge();
+    await expect(engine.cancel(ta.db.db, c.challengeId)).rejects.toMatchObject({ code: 'CONSENT_ALREADY_USED' });
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED');
+  });
+
+  it('NOT_FOUND for an unknown challenge', async () => {
+    await expect(engine.cancel(ta.db.db, randomUUID())).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('a cancel that waits on approve row lock matches no row once approve commits CONSUMED', async () => {
+    // approve's critical section: lock the PENDING row FOR UPDATE and consume it. The cancel starts while
+    // that transaction is open; it commits only once the cancel waits on the row lock. E4's earlier
+    // read-then-UPDATE cancel overwrote CONSUMED with CANCELLED here (reproduced).
+    const c = await createChallenge();
+    let outcome: Promise<unknown> = Promise.resolve('not started');
+    await ta.db.db.transaction(async (tx) => {
+      await tx
+        .select({ id: consentChallenges.id })
+        .from(consentChallenges)
+        .where(eq(consentChallenges.id, c.challengeId))
+        .for('update');
+      await tx
+        .update(consentChallenges)
+        .set({ status: 'CONSUMED', consumedAt: ta.clock.now() })
+        .where(eq(consentChallenges.id, c.challengeId));
+      outcome = engine.cancel(ta.db.db, c.challengeId).then(
+        () => 'cancelled',
+        (error: unknown) => error,
+      );
+      await untilLockWaiter();
+    });
+    expect(await outcome).toMatchObject({ code: 'CONSENT_ALREADY_USED' });
+    expect(await challengeStatus(c.challengeId)).toBe('CONSUMED');
   });
 });
 
@@ -3474,8 +3865,9 @@ describe('trg_consent_guard', () => {
 
 - [ ] **Step 2: Run it to confirm it fails**
 
+PowerShell and Git Bash (the same command):
 ```
-pnpm --filter=@sanchay/api test:int -- consent-engine consent-guard-trigger
+pnpm --filter=@sanchay/api test:int consent-engine consent-guard-trigger
 ```
 Expected failure: `Cannot find module '../../src/modules/legal-consent/consent-engine.js'` and, once that stub exists, `relation "app.trg_guard_scratch"`/`function app.trg_consent_guard() does not exist` from the second file — neither the engine nor the trigger function exist yet.
 
@@ -3483,14 +3875,20 @@ Expected failure: `Cannot find module '../../src/modules/legal-consent/consent-e
 
 `apps/api/src/modules/legal-consent/destination-resolver.ts`:
 ```ts
+import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { investorContacts, investors } from '../identity/identity.schema.js';
-import { maskEmail, maskMobile } from '../identity/masking.js';
 import type { DbExecutor } from '../../db/client.js';
+import { investorContacts, investors } from '../identity/identity.schema.js';
+import { InvestorAccounts } from '../identity/investor-accounts.service.js';
+import { maskMobile } from '../identity/masking.js';
+import { Crypto } from '../platform/crypto.js';
+import { asRowId } from '../platform/ids.js';
 
 export interface ConsentDestination {
   channel: 'SMS' | 'EMAIL';
+  /** The plaintext address. Only `sendOtp` reads it, to hand it to `OtpService.issue`; it is never stored, logged or hashed. */
   value: string;
+  /** What the investor sees and what `create` hashes into `destinationsMasked`. */
   masked: string;
 }
 
@@ -3499,8 +3897,18 @@ export interface ConsentDestination {
  * verified contacts — the mobile on `investors` plus any CURRENT EMAIL `investor_contacts` row.
  * `folioId` is accepted for forward compatibility with F-series folio-scoped resolution (a folio's own
  * registered contacts) and is currently unused; it never narrows the MVP destination set.
+ * RV-03-2: `value` is decrypted (the mobile through Plan 01's `InvestorAccounts.decryptMobile`, AAD
+ * `investors.mobile_enc:<investorId>`; the email under AAD `investor_contacts.value_enc:<contactId>`).
+ * Before, it was the base64 ciphertext, so no consent OTP ever reached the investor. `masked` stays a mask:
+ * Plan 01's `maskMobile` (the mask the OTP row and the MOBILE contact carry) and the email row's `masked`.
  */
+@Injectable()
 export class ConsentDestinationResolver {
+  constructor(
+    @Inject(InvestorAccounts) private readonly accounts: InvestorAccounts,
+    @Inject(Crypto) private readonly crypto: Crypto,
+  ) {}
+
   async resolve(
     exec: DbExecutor,
     investorId: string,
@@ -3508,18 +3916,8 @@ export class ConsentDestinationResolver {
   ): Promise<ConsentDestination[]> {
     const [investor] = await exec.select().from(investors).where(eq(investors.id, investorId)).limit(1);
     if (investor === undefined) return [];
-    const destinations: ConsentDestination[] = [
-      {
-        channel: 'SMS',
-        // The mobile itself is not decrypted here: sendOtp resolves the plaintext value through
-        // OtpService.issue's own destination input, which the caller (ConsentEngine) supplies from a
-        // decrypted read. This resolver only proves a CURRENT contact exists and returns its mask.
-        value: investor.mobileEnc.toString('base64'),
-        masked: maskMobile(investor.mobileEnc.toString('base64')).length > 0
-          ? `+91${investor.mobileLast4.padStart(10, 'X')}`
-          : '',
-      },
-    ];
+    const mobile = this.accounts.decryptMobile(investor);
+    const destinations: ConsentDestination[] = [{ channel: 'SMS', value: mobile, masked: maskMobile(mobile) }];
     const [email] = await exec
       .select()
       .from(investorContacts)
@@ -3532,12 +3930,21 @@ export class ConsentDestinationResolver {
       )
       .limit(1);
     if (email !== undefined) {
-      destinations.push({ channel: 'EMAIL', value: email.valueEnc.toString('base64'), masked: email.masked });
+      destinations.push({
+        channel: 'EMAIL',
+        value: this.crypto.decrypt(email.valueEnc, {
+          table: 'investor_contacts',
+          column: 'value_enc',
+          rowId: asRowId('investor_contacts', email.id),
+        }),
+        masked: email.masked,
+      });
     }
     return destinations;
   }
 }
 ```
+(`InvestorAccounts` comes from `IdentityModule`, which `LegalConsentModule` already imports and which exports it; `Crypto` is global.)
 
 `apps/api/src/modules/legal-consent/consent-engine.ts`:
 ```ts
@@ -3546,6 +3953,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { ConsentSubjectType } from '@sanchay/domain';
 import { canonicalize, type JcsValue, requiredFactorsFor, snapshotSha256 } from '@sanchay/domain';
+import { z } from 'zod';
 import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { assertConsumed, type ConsumedConsent } from '../../integrations/fp/consumed-consent.js';
@@ -3577,6 +3985,16 @@ const SMS_COOLDOWN_MS = 30_000;
 const CONSENT_SENDS_PER_HOUR = 10;
 
 export type { ConsumedConsent };
+
+/**
+ * What `approve` echoes from the stored snapshot back into the builder (RV-03-1). Deliberately not
+ * `ConsentSnapshotV2Schema`: builder output is never schema-parsed at `create` (the generic builder's
+ * `legalDocuments` is []), so `approve` must not reject on a rule `create` never applied.
+ */
+const StoredSnapshotEchoSchema = z.object({
+  destinationsMasked: z.array(z.string()),
+  fields: z.record(z.string(), z.string()),
+});
 
 /**
  * Subject type -> the worker job `approve` enqueues in its own transaction. Registered at module load by
@@ -3685,6 +4103,9 @@ export class ConsentEngine {
 
     await exec.insert(consentChallenges).values({
       id,
+      // RV-03-4: the app Clock, like consumed_at and FakeFp's call log (the column default is the DB's now()).
+      createdAt: now,
+      updatedAt: now,
       createdBy: input.investorId,
       updatedBy: input.investorId,
       investorId: asRowId('investors', input.investorId),
@@ -3834,19 +4255,26 @@ export class ConsentEngine {
         .select()
         .from(consentSubjects)
         .where(eq(consentSubjects.challengeId, challengeId));
+      // RV-03-1: rebuild from what `create` hashed. The masks and the caller's fields live only in the
+      // encrypted snapshot. A builder that reads subject rows still overwrites the echoed fields with
+      // live values, so a changed subject still fails the hash below.
+      const stored = StoredSnapshotEchoSchema.parse(
+        JSON.parse(
+          this.crypto.decrypt(row.snapshotEnc, {
+            table: 'consent_challenges',
+            column: 'snapshot_enc',
+            rowId: asRowId('consent_challenges', challengeId),
+          }),
+        ),
+      );
       const builder = SNAPSHOT_BUILDERS[row.subjectType as ConsentSubjectType];
       const snapshot = await builder(tx, {
         investorId: row.investorId,
         subjects: subjects.map((s) => ({ table: s.subjectTable, id: s.subjectId })),
         templateKey: row.templateKey,
         moneyParamsVersion: row.moneyParamsVersion,
-        destinationsMasked: [],
-        fields: {
-          ...(row.renderAction !== null ? { action: row.renderAction } : {}),
-          ...(row.renderAmount !== null ? { amount: row.renderAmount } : {}),
-          ...(row.renderUnits !== null ? { units: row.renderUnits } : {}),
-          ...(row.renderSchemeShort !== null ? { schemeShort: row.renderSchemeShort } : {}),
-        },
+        destinationsMasked: stored.destinationsMasked,
+        fields: stored.fields,
       });
       const recomputedHex = await snapshotSha256(snapshot);
       const recomputed = Buffer.from(recomputedHex, 'hex');
@@ -3936,27 +4364,68 @@ export class ConsentEngine {
     }
   }
 
+  /**
+   * PENDING -> CANCELLED in one guarded UPDATE (RV-03-12). `approve` locks the row and moves it from
+   * PENDING to CONSUMED, so a cancel that races it either commits first (approve then refuses) or matches
+   * no row once approve commits: it can never overwrite CONSUMED. A challenge that already ended without
+   * being consumed (CANCELLED, EXPIRED, SUPERSEDED) stays as it is and the call succeeds without a second
+   * audit row; a consumed one is CONSENT_ALREADY_USED.
+   */
   async cancel(exec: DbExecutor, challengeId: string): Promise<void> {
-    const [row] = await exec
-      .select()
-      .from(consentChallenges)
-      .where(eq(consentChallenges.id, challengeId))
-      .limit(1);
-    if (row === undefined) throw new AppError('NOT_FOUND');
-    if (row.status === 'CONSUMED' || row.status === 'CONSUMED_UNUSED') {
-      throw new AppError('CONSENT_ALREADY_USED');
-    }
-    await exec
+    const [cancelled] = await exec
       .update(consentChallenges)
       .set({ status: 'CANCELLED' as ChallengeStatus })
-      .where(eq(consentChallenges.id, challengeId));
+      .where(and(eq(consentChallenges.id, challengeId), eq(consentChallenges.status, 'PENDING')))
+      .returning({ investorId: consentChallenges.investorId });
+    if (cancelled === undefined) {
+      const [row] = await exec
+        .select({ status: consentChallenges.status })
+        .from(consentChallenges)
+        .where(eq(consentChallenges.id, challengeId))
+        .limit(1);
+      if (row === undefined) throw new AppError('NOT_FOUND');
+      const ended: ReadonlySet<string> = new Set(['CANCELLED', 'EXPIRED', 'SUPERSEDED']);
+      if (ended.has(row.status)) return;
+      throw new AppError('CONSENT_ALREADY_USED');
+    }
     await this.audit.record(exec, {
       action: AUDIT_ACTIONS.CONSENT_CANCELLED,
       actorType: 'INVESTOR',
-      actorId: row.investorId,
+      actorId: cancelled.investorId,
       entityType: 'consent_challenges',
       entityId: challengeId,
       data: { challengeId },
+    });
+  }
+
+  /**
+   * CONSUMED -> CONSUMED_UNUSED for a saga that gives up before any P/M write, for example when a live
+   * pre-check fails inside `useConsumed` before the first FP write (RV-03-1). Only the caller knows
+   * that no write happened, so it must never call this after one. Idempotent for job retries.
+   * `useConsumed` refuses the challenge from then on.
+   */
+  async markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void> {
+    const [row] = await exec
+      .select({ status: consentChallenges.status })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, challengeId))
+      .for('update')
+      .limit(1);
+    if (row === undefined) throw new AppError('NOT_FOUND');
+    if (row.status === 'CONSUMED_UNUSED') return;
+    if (row.status !== 'CONSUMED') {
+      throw new Error(`ConsentEngine.markUnused: challenge ${challengeId} is ${row.status}, not CONSUMED`);
+    }
+    await exec
+      .update(consentChallenges)
+      .set({ status: 'CONSUMED_UNUSED' as ChallengeStatus })
+      .where(and(eq(consentChallenges.id, challengeId), eq(consentChallenges.status, 'CONSUMED')));
+    await this.audit.record(exec, {
+      action: AUDIT_ACTIONS.CONSENT_MARKED_UNUSED,
+      actorType: 'SYSTEM',
+      entityType: 'consent_challenges',
+      entityId: challengeId,
+      data: { challengeId, reason },
     });
   }
 
@@ -3976,6 +4445,12 @@ export class ConsentEngine {
     if (record === undefined || record.kind !== 'CHALLENGE' || record.executeBefore === null) {
       throw new AppError('CONSENT_REQUIRED');
     }
+    const [challenge] = await db
+      .select({ status: consentChallenges.status })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, challengeId))
+      .limit(1);
+    if (challenge?.status === 'CONSUMED_UNUSED') throw new AppError('CONSENT_EXPIRED'); // swept or markUnused
     const deadline = record.firstAttemptAt === null ? record.executeBefore : record.sagaExpiresAt;
     if (deadline === null || now.getTime() > deadline.getTime()) {
       throw new AppError('CONSENT_EXPIRED');
@@ -4051,17 +4526,18 @@ function requiredFactorsFrom(subjectType: ConsentSubjectType, amount: string | n
 `apps/api/src/modules/legal-consent/consent-sweep.job.ts`:
 ```ts
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lt, notExists } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
-import { consentChallenges } from './legal-consent.schema.js';
+import { consentChallenges, consentRecords } from './legal-consent.schema.js';
 
-/** `consent.expiry.sweep` (*/5): a CONSUMED challenge whose `execute_before` has passed with no
- * successful first FP write becomes CONSUMED_UNUSED — no further P/M write is ever allowed against it
- * (`useConsumed` already refuses once `execute_before`/`saga_expires_at` has passed; this job only
- * makes that terminal state visible for support and reporting). */
+/** `consent.expiry.sweep` (*/5): a CONSUMED challenge whose saga never started (its `consent_records`
+ * row has `first_attempt_at IS NULL`) and whose `execute_before` has passed becomes CONSUMED_UNUSED.
+ * `useConsumed` already refuses it; this job makes that terminal state visible for support and
+ * reporting. A saga whose first attempt happened runs on to `saga_expires_at` and is never swept
+ * (RV-03-1); one that gives up before any P/M write calls `ConsentEngine.markUnused` itself. */
 @Injectable()
 @JobHandler('consent.expiry.sweep')
 export class ConsentSweepJob {
@@ -4078,23 +4554,48 @@ export class ConsentSweepJob {
   async run(): Promise<number> {
     const now = this.clock.now();
     const stale = await this.dbh.db
-      .select({ id: consentChallenges.id, investorId: consentChallenges.investorId })
+      .select({ id: consentChallenges.id })
       .from(consentChallenges)
-      .where(and(eq(consentChallenges.status, 'CONSUMED'), lt(consentChallenges.executeBefore, now)));
+      .innerJoin(consentRecords, eq(consentRecords.challengeId, consentChallenges.id))
+      .where(
+        and(
+          eq(consentChallenges.status, 'CONSUMED'),
+          lt(consentRecords.executeBefore, now),
+          isNull(consentRecords.firstAttemptAt),
+        ),
+      );
+    let swept = 0;
     for (const row of stale) {
-      await this.dbh.db
-        .update(consentChallenges)
-        .set({ status: 'CONSUMED_UNUSED' })
-        .where(eq(consentChallenges.id, row.id));
-      await this.audit.record(this.dbh.db, {
-        action: AUDIT_ACTIONS.CONSENT_EXPIRED_SWEPT,
-        actorType: 'SYSTEM',
-        entityType: 'consent_challenges',
-        entityId: row.id,
-        data: { challengeId: row.id },
+      await this.dbh.db.transaction(async (tx) => {
+        // Re-checked in the UPDATE itself: a saga may have stamped first_attempt_at since the SELECT.
+        const updated = await tx
+          .update(consentChallenges)
+          .set({ status: 'CONSUMED_UNUSED' })
+          .where(
+            and(
+              eq(consentChallenges.id, row.id),
+              eq(consentChallenges.status, 'CONSUMED'),
+              notExists(
+                tx
+                  .select({ id: consentRecords.id })
+                  .from(consentRecords)
+                  .where(and(eq(consentRecords.challengeId, row.id), isNotNull(consentRecords.firstAttemptAt))),
+              ),
+            ),
+          )
+          .returning({ id: consentChallenges.id });
+        if (updated.length === 0) return;
+        await this.audit.record(tx, {
+          action: AUDIT_ACTIONS.CONSENT_EXPIRED_SWEPT,
+          actorType: 'SYSTEM',
+          entityType: 'consent_challenges',
+          entityId: row.id,
+          data: { challengeId: row.id },
+        });
+        swept += 1;
       });
     }
-    return stale.length;
+    return swept;
   }
 }
 
@@ -4390,10 +4891,12 @@ Modify `apps/api/src/modules/platform/audit.service.ts` — append to `AUDIT_ACT
   CONSENT_MISMATCH: 'CONSENT_MISMATCH',
   /** An investor cancelled a not-yet-consumed challenge (E4, R-20). */
   CONSENT_CANCELLED: 'CONSENT_CANCELLED',
-  /** consent.expiry.sweep moved a CONSUMED challenge past execute_before to CONSUMED_UNUSED (E4). */
+  /** consent.expiry.sweep moved a CONSUMED challenge past execute_before, whose saga never started, to CONSUMED_UNUSED (E4, RV-03-1). */
   CONSENT_EXPIRED_SWEPT: 'CONSENT_EXPIRED_SWEPT',
   /** drafts.abandon expired a PENDING challenge nobody approved within 24 h (E4). */
   CONSENT_DRAFT_ABANDONED: 'CONSENT_DRAFT_ABANDONED',
+  /** A saga gave up before any P/M write and moved its CONSUMED challenge to CONSUMED_UNUSED; data.reason says why (E4, RV-03-1). */
+  CONSENT_MARKED_UNUSED: 'CONSENT_MARKED_UNUSED',
 ```
 and add `'subjectType'`, `'subjectIds'` to the `AUDIT_DATA_ALLOWLIST` array (both already-primitive-safe: `subjectType` is a string; `subjectIds` is written through `data` only as a count in practice — the allowlist keeps `data` primitive-only, so callers that need the list itself use `entityId`/`entityType`, not `data.subjectIds`; this line documents the reservation without changing `allowListed`'s behaviour, since `subjectIds` is an array and `allowListed` already drops non-primitive values silently).
 
@@ -4433,22 +4936,25 @@ export class LegalConsentModule {}
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
+PowerShell and Git Bash (the same commands). The first line rebuilds `packages/contract/dist` (the new `consents` key), which `apps/api` and the OpenAPI generator read (RV-03-19):
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:check
-pnpm --filter=@sanchay/api test:int -- consent-engine consent-guard-trigger legal-consent
+pnpm --filter=@sanchay/api test:int consent-engine consent-guard-trigger legal-consent
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/contract test -- consents
+pnpm --filter=@sanchay/contract test
 pnpm --filter=@sanchay/contract typecheck
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 ```
-Expected: every test in `consent-engine.int.test.ts`, `consent-guard-trigger.int.test.ts` and the E3 `legal-consent.int.test.ts` passes; `db:check` shows no drizzle/SQL drift for the new `consent_guard` migration; `openapi.json` regenerates with the four `consents.*` paths and then diffs clean (B10) once the file is committed with that regeneration included.
+Expected: every test in `consent-engine.int.test.ts` (including the four RV-03-12 `cancel` cases), `consent-guard-trigger.int.test.ts` and the E3 `legal-consent.int.test.ts` passes; `db:check` shows no drizzle/SQL drift for the new `consent_guard` migration; `openapi.json` regenerates with the four `consents.*` paths and the B10 drift test (`test openapi`) passes against it; Step 5 commits the regenerated file. Plan 01's `audit.int.test.ts` stays green with the eight `CONSENT_*` actions, because Plan 02 D7 relaxed its pins (RV-02-29).
 
 - [ ] **Step 5: Commit**
 
 ```
 pnpm exec biome check --write apps/api/src/modules/legal-consent apps/api/test/int/consent-engine.int.test.ts apps/api/test/int/consent-guard-trigger.int.test.ts apps/api/test/int/consent-first.ts apps/api/test/int/bola.ts apps/api/src/modules/platform/audit.service.ts packages/contract/src/consents.ts packages/contract/src/index.ts
-pnpm --filter=@sanchay/api test:int -- consent-engine consent-guard-trigger legal-consent
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int consent-engine consent-guard-trigger legal-consent
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
 pnpm lint
@@ -5383,7 +5889,7 @@ git commit -m "feat(onboarding): add onboarding.get, deriveOnboardingStage and m
 
 **Files:**
 - **Create:** `apps/api/src/integrations/fp/pre-verification.ts`, `apps/api/src/integrations/fp/pre-verification.test.ts`, `apps/api/src/modules/onboarding/identity.service.ts`, `apps/api/src/modules/onboarding/preverify.job.ts`, `apps/api/src/modules/onboarding/profile.service.ts`, `apps/api/src/modules/onboarding/ref.schema.ts`, `apps/api/src/modules/onboarding/ref.router.ts`, `data/ref-pincodes.csv`, `apps/api/src/cli/ops-ref-seed.ts`, `apps/api/test/int/onboarding-identity.int.test.ts`.
-- **Modify:** `packages/contract/src/onboarding.ts` (append `submitIdentity`/`putProfile`), `packages/contract/src/ref.ts` (new file, exported from `index.ts`; see note below — the outline's `ref.pincode`/`ref.ifsc` share one contract namespace `ref`), `packages/contract/src/index.ts` (`refContract` import/export, add `ref: refContract`), `apps/api/src/modules/onboarding/onboarding.router.ts` (append the two handlers), `apps/api/src/modules/onboarding/onboarding.module.ts` (becomes `OnboardingModule.forRoot(env)`: imports `LegalConsentModule`, registers `IdentityService`, `ProfileService`, `RefRouter`, and `PreverifyJob` in the worker role only), `apps/api/src/app.module.ts` (`OnboardingModule` → `OnboardingModule.forRoot(env)`), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.preverify'` to `JOB_NAMES`), `apps/api/src/modules/platform/ids.ts` (append `'ref_pincodes'`), root `package.json` (script `ops:ref:seed`).
+- **Modify:** `packages/contract/src/onboarding.ts` (append `submitIdentity`/`putProfile`), `packages/contract/src/ref.ts` (new file, exported from `index.ts`; see note below — the outline's `ref.pincode`/`ref.ifsc` share one contract namespace `ref`), `packages/contract/src/index.ts` (`refContract` import/export, add `ref: refContract`), `apps/api/src/modules/onboarding/onboarding.router.ts` (append the two handlers), `apps/api/src/modules/onboarding/onboarding.module.ts` (becomes `OnboardingModule.forRoot(env)`: imports `LegalConsentModule`, registers `IdentityService`, `ProfileService`, `RefRouter`, and `PreverifyJob` in the worker role only), `apps/api/src/app.module.ts` (`OnboardingModule` → `OnboardingModule.forRoot(env)`), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.preverify': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/ids.ts` (append `'ref_pincodes'`), root `package.json` (script `ops:ref:seed`).
 
 **Interfaces:**
 - Prerequisites: **E3** (`LegalDocs.recordAcceptance` for the KYC_CONSENT checkbox — no OTP, per §0.4 item 4), **E5** (`onboardingApplications`, `investorProfiles`, `kycChecks`, `deriveOnboardingStage`, `onboarding.router.ts`/`onboarding.module.ts`, `StageResultSchema`).
@@ -5478,6 +5984,7 @@ beforeAll(async () => {
   job = t.app.get(PreverifyJob);
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data, opts) => {
     enqueued.push({ name, data, opts });
+    return 'job-id';
   });
 });
 beforeEach(() => {
@@ -6329,7 +6836,7 @@ export class OnboardingModule {
 
 `apps/api/src/app.module.ts`: replace `OnboardingModule` in `imports` with `OnboardingModule.forRoot(env)`.
 
-`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.preverify'` to `JOB_NAMES`.
+`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.preverify': 'stately', // key: the kyc_checks id; creates the FP pre-verification once, then re-enqueues itself to poll (E6)` to `JOB_POLICIES`. Stately, not exclusive: the create runs once (its id is stored before the first poll), and `exclusive` would refuse the job's send of its own key while it runs (R-32, RV-03-24).
 
 Modify `apps/api/src/modules/platform/ids.ts` — add `'ref_pincodes'` to the `TableName` union.
 
@@ -6362,7 +6869,7 @@ git commit -m "feat(onboarding): identity/KRA pre-verification, putProfile and r
 
 **Files:**
 - **Create:** `packages/domain/src/rules/name-match.ts`, `packages/domain/test/name-match.test.ts`, `packages/test-fixtures/src/golden/name-match.json`, `apps/api/src/modules/onboarding/bank.schema.ts`, `apps/api/src/modules/onboarding/bank.service.ts`, `apps/api/src/modules/onboarding/bank-verify.job.ts`, `data/ref-ifsc.csv`, `apps/api/test/int/onboarding-bank.int.test.ts`.
-- **Modify:** `packages/domain/tsconfig.json` (add `"resolveJsonModule": true` to `compilerOptions`, if not already present, so `import … with { type: 'json' }` from `packages/test-fixtures/src/golden` typechecks), `packages/domain/src/rules/index.ts` (append `export * from './name-match.js';`), `packages/domain/src/investor.ts` (append `BANK_ACCOUNT_STATUSES`), `packages/contract/src/onboarding.ts` (this task adds nothing here — see Deviation), `packages/contract/src/ref.ts` (append `refContract.ifsc`), `apps/api/src/modules/onboarding/ref.schema.ts` (append `refIfsc`), `apps/api/src/modules/onboarding/ref.router.ts` (append the `ifsc` handler), `apps/api/src/modules/onboarding/onboarding.module.ts` (register `BankService`; `BankVerifyJob` in the worker-only list), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.bank.verify'` to `JOB_NAMES`), `apps/api/src/cli/ops-ref-seed.ts` (also seed `ref-ifsc.csv`), `apps/api/src/modules/platform/ids.ts` (append `'bank_accounts' | 'ref_ifsc'`).
+- **Modify:** `packages/domain/tsconfig.json` (add `"resolveJsonModule": true` to `compilerOptions`, if not already present, so `import … with { type: 'json' }` from `packages/test-fixtures/src/golden` typechecks), `packages/domain/src/rules/index.ts` (append `export * from './name-match.js';`), `packages/domain/src/investor.ts` (append `BANK_ACCOUNT_STATUSES`), `packages/contract/src/onboarding.ts` (this task adds nothing here — see Deviation), `packages/contract/src/ref.ts` (append `refContract.ifsc`), `apps/api/src/modules/onboarding/ref.schema.ts` (append `refIfsc`), `apps/api/src/modules/onboarding/ref.router.ts` (append the `ifsc` handler), `apps/api/src/modules/onboarding/onboarding.module.ts` (register `BankService`; `BankVerifyJob` in the worker-only list), `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.bank.verify': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/cli/ops-ref-seed.ts` (also seed `ref-ifsc.csv`), `apps/api/src/modules/platform/ids.ts` (append `'bank_accounts' | 'ref_ifsc'`).
 
 **Interfaces:**
 - Prerequisites: **E5** (`onboardingApplications`, `deriveOnboardingStage`, `StageResultSchema`, `onboarding.router.ts`/`onboarding.module.ts`), **E6** (`parsePreVerification`, the `OnboardingModule.forRoot(env)` worker-only list, and the same D3 `FpKyc` pre-verification, now with a bank account; `investorProfiles.nameAsPerPan`; `profileStatus` must be `DONE` before a bank account can be added; `refPincodes`/`ref.schema.ts`/`ref.router.ts` to extend).
@@ -6469,7 +6976,7 @@ let job: BankVerifyJob;
 beforeAll(async () => {
   t = await bootFpTestApp();
   job = t.app.get(BankVerifyJob);
-  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue(undefined);
+  vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
 });
 
 /** A completed bank pre-verification, as FP returns it (research fp-api §5.1). */
@@ -7186,7 +7693,7 @@ Modify `apps/api/src/modules/onboarding/onboarding.router.ts` — add two handle
 
 Modify `apps/api/src/modules/onboarding/onboarding.module.ts` — add `BankService` to `providers`, and `BankVerifyJob` to the worker-only list: `const workerOnly = env.SANCHAY_APP_ROLE === 'worker' ? [PreverifyJob, BankVerifyJob] : [];`.
 
-Modify `apps/api/src/modules/platform/jobs/job-registry.ts` — append `'onboarding.bank.verify'` to `JOB_NAMES`.
+Modify `apps/api/src/modules/platform/jobs/job-registry.ts` — append `'onboarding.bank.verify': 'stately', // key: the kyc_checks id; creates the bank pre-verification once, then re-enqueues itself to poll (E7)` to `JOB_POLICIES` (stately for E6's reason, R-32, RV-03-24).
 
 Modify `apps/api/src/modules/platform/ids.ts` — add `'bank_accounts'` and `'ref_ifsc'` to `TableName`.
 
@@ -9444,7 +9951,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/src/integrations/fp/fp-operations.ts` (D3; append seven class-R list operations)
   - `apps/api/src/integrations/fp/fp-provision.ts` (D3; replace the stub bodies, add the lookups)
   - `apps/api/src/integrations/fp/fake/fake-fp.state.ts` and `apps/api/src/integrations/fp/fake/fake-fp.ts` (D4; model the provisioning resources)
-  - `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.provision'` to `JOB_NAMES`)
+  - `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'onboarding.provision': 'exclusive'` to `JOB_POLICIES`, R-32)
   - `packages/contract/src/onboarding.ts` (append `attest`)
   - `apps/api/src/modules/onboarding/onboarding.router.ts` (append the `attest` handler)
   - `apps/api/src/modules/onboarding/onboarding.module.ts` (register `AttestService`; `ProvisionJob` in the worker-only list; import `IdentityModule`; register the attest snapshot builder and subject job)
@@ -9487,6 +9994,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - Its tests used APIs that do not exist (`app.app.request`, factory functions that `test/int/factories.ts` does not export, `app.consentSnapshots`, `clock.plusMonths`); they are rewritten.
   - The trigger now handles an investor with no application row (a NULL would have violated `can_purchase NOT NULL`), and it treats a risk profile as valid only when `status = 'ACTIVE'` and not expired.
   - `attest` is session-scoped (no id argument), so it has no BOLA test.
+- Review fix (RV-03-7): the PHONE step sends `.replace(/\D/g, '').slice(-10)` of the decrypted mobile. `.replace(/^\+?91/, '')` cut a 10-digit mobile that starts with 91 to 8 digits.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -9843,6 +10351,7 @@ beforeAll(async () => {
   t = await bootFpTestApp();
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
 });
 afterAll(async () => {
@@ -10761,7 +11270,7 @@ export class ProvisionJob {
       }
       case 'PHONE': {
         if (investor.fpPhoneId !== null) return;
-        const number = this.accounts.decryptMobile(investor).replace(/^\+?91/, '');
+        const number = this.accounts.decryptMobile(investor).replace(/\D/g, '').slice(-10); // RV-03-7
         const profile = this.need(profileId);
         const found = (await this.fp.listForProfile('phoneNumber.list', profile)).find((r) => str(r.number) === number);
         if (found !== undefined) return this.linkInvestor(investorId, { fpPhoneId: str(found.id) }, 'phone');
@@ -11006,7 +11515,7 @@ CONSENT_SUBJECT_JOBS.ONBOARDING_ATTEST = 'onboarding.provision';
     // providers: [...existing, AttestService, ...workerOnly]
 ```
 
-`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.provision'` to `JOB_NAMES`.
+`apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)` to `JOB_POLICIES` (R-32, RV-03-24).
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
@@ -11040,6 +11549,8 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and `git add` agai
 - Create: `packages/ui/src/{Checkbox.tsx, RadioGroup.tsx, Select.tsx, SegmentedControl.tsx, Chip.tsx, ListRow.tsx, Sheet.tsx, ProgressSteps.tsx, AmountInput.tsx, MoneyText.tsx}`
 - Create: `packages/ui/src/{inputs-batch2.test.tsx, primitives-batch2.test.tsx}`
 - Modify: `packages/ui/src/index.ts` (append the 10 new exports; key-level only)
+- Modify (RV-03-9): `packages/ui/package.json` (`"@sanchay/money": "workspace:*"` in `dependencies`, for `MoneyText`) and `pnpm-lock.yaml`
+- Modify (RV-03-13): `packages/features/package.json` (`"@sanchay/validation": "workspace:*"` in `dependencies`; this task's screens are the first `features` importers of `panSchema`, `pincodeSchema`, `emailSchema` and `otpCodeSchema`) and `pnpm-lock.yaml`
 - Create: `packages/features/src/onboarding/{useOnboarding.ts, OnboardingHubScreen.tsx, OnboardingHubScreen.test.tsx, IdentityScreen.tsx, IdentityScreen.test.tsx, PersonalDetailsScreen.tsx, PersonalDetailsScreen.test.tsx, AddressScreen.tsx, AddressScreen.test.tsx, FatcaScreen.tsx, FatcaScreen.test.tsx, BlockedScreen.tsx}`
 - Create: `packages/features/src/auth/{EmailOtpScreens.tsx, EmailOtpScreens.test.tsx}`
 - Modify: `packages/features/src/index.ts` (append the 8 new screen/hook exports; key-level only)
@@ -11059,6 +11570,15 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and `git add` agai
   - Playwright `onboarding.smoke.spec.ts` (`@smoke`, `SANCHAY_PROVIDER_MODE_FP=fake`).
 - **Deviation from outline:** the outline gives the mobile files as `apps/mobile/app/onboarding/[step].tsx`. The real Plan-01 Expo Router root is `apps/mobile/src/app/` (see `apps/mobile/src/app/login.tsx`, `apps/mobile/package.json` `"main": "expo-router/entry"`), so this task creates `apps/mobile/src/app/onboarding/index.tsx` and `apps/mobile/src/app/onboarding/[step].tsx` instead.
 - **Deviation from outline:** the outline's Consumes list has no procedure for the pre-ONB-00 email gate. E5's `me.get` is not otherwise touched by this task, so the gate reads `investor.emailVerified` off the real, already-implemented `auth.session` procedure (`packages/contract/src/auth.ts`, used identically by `AccountScreen.tsx`) instead of adding a new dependency on `me.get`.
+- **Review fix (RV-03-9):** the props stay as documented (`AmountInput({label, value, onChangeValue, hint?, error?, testID?})`, `MoneyText({value: Money | null, tone?, fractionDigits?, testID?})`, `ListRow({label, value?: string, onPress?, testID?})`, `Sheet({visible, title, onClose, children, testID?})`), and now they compile and test:
+  - `sanitizeAmountInput` destructures `[whole = '', fraction]`; under `noUncheckedIndexedAccess` `whole` was `string | undefined` (TS2322).
+  - `MoneyText` imports `@sanchay/money`, which `packages/ui` did not depend on; no hoisted `@sanchay/*` link resolves it.
+  - The AmountInput test renders a controlled value. It asserted `'12.34'` from an input pinned to `value=""`, which only ever reports the last key.
+  - The Checkbox test reads `textContent`: no jest-dom matcher (`toHaveTextContent`) is installed, as in Plan 01's tests.
+- **Review fix (RV-03-13):**
+  - The IdentityScreen, PersonalDetailsScreen, AddressScreen and FatcaScreen tests used jest-dom matchers (`toBeDisabled`, `toHaveValue`). No package installs or configures `@testing-library/jest-dom`, and it is not in the `catalog:`, which nobody edits. They now read `aria-disabled` and `HTMLInputElement.value`, as Plan 01's tests do. react-native-web renders Plan 01's `Button` as a `div` with `role="button"` and `aria-disabled`, so `toBeDisabled` would fail even with jest-dom installed.
+  - The screens import `@sanchay/validation` (`panSchema`, `pincodeSchema`, `emailSchema`, `otpCodeSchema`), which `packages/features` did not depend on, and no hoisted link resolves it. This task, the first importer, adds the dependency.
+  - Step 2's and Step 4's placeholder lines (`X=v cmd`, `SANCHAY_PLACEHOLDER=1 …`) are replaced with the real commands. Playwright has no project `chromium` (the projects are `desktop-chromium` and `mobile-chromium`), and its config lives in `apps/web`, so the smoke runs through `pnpm --filter=@sanchay/web exec playwright`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -11089,7 +11609,7 @@ describe('Checkbox', () => {
     render(
       <Checkbox label="I agree" checked={false} onChange={vi.fn()} error="You must agree to continue" />,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('You must agree to continue');
+    expect(screen.getByRole('alert').textContent).toBe('You must agree to continue');
   });
 });
 
@@ -11157,7 +11677,21 @@ describe('AmountInput', () => {
   it('keeps digits and a single decimal point, at most two decimal places', async () => {
     const user = setupUser();
     const onChangeValue = vi.fn();
-    render(<AmountInput label="Amount" value="" onChangeValue={onChangeValue} />);
+    // Controlled, as every screen uses it: an input pinned to value="" reports only the last key (RV-03-9).
+    function ControlledAmount() {
+      const [value, setValue] = useState('');
+      return (
+        <AmountInput
+          label="Amount"
+          value={value}
+          onChangeValue={(next) => {
+            setValue(next);
+            onChangeValue(next);
+          }}
+        />
+      );
+    }
+    render(<ControlledAmount />);
     const input = screen.getByLabelText('Amount');
     await user.type(input, '12a.3.456');
     expect(onChangeValue).toHaveBeenLastCalledWith('12.34');
@@ -11337,9 +11871,10 @@ describe('IdentityScreen (ONB-01/02)', () => {
     await user.type(screen.getByLabelText('Full name (as per PAN)'), 'Asha Rao');
     await user.type(screen.getByLabelText('Date of birth'), '1990-05-12');
     const submit = screen.getByRole('button', { name: 'Continue' });
-    expect(submit).toBeDisabled();
+    // RV-03-13: Plan 01's Button reports aria-disabled (no jest-dom matcher is installed).
+    expect(submit.getAttribute('aria-disabled')).toBe('true');
     await user.click(screen.getByRole('checkbox', { name: /verify my KYC/i }));
-    expect(submit).not.toBeDisabled();
+    expect(submit.getAttribute('aria-disabled')).not.toBe('true');
     await user.click(submit);
     await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/onboarding'));
     expect(bodies).toEqual([
@@ -11371,32 +11906,35 @@ async function chooseSelect(user: ReturnType<typeof userEvent.setup>, triggerNam
   await user.click(screen.getByRole('radio', { name: optionName }));
 }
 
+/** RV-03-13: Plan 01's Button reports aria-disabled (no jest-dom matcher is installed). */
+const isDisabled = (el: HTMLElement) => el.getAttribute('aria-disabled') === 'true';
+
 describe('PersonalDetailsScreen (ONB-05)', () => {
   it('keeps Continue disabled until every field is explicitly chosen, with no defaults', async () => {
     const user = userEvent.setup();
     renderWithProviders(<PersonalDetailsScreen />);
     const submit = screen.getByRole('button', { name: 'Continue' });
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
 
     await chooseSelect(user, /^Gender/, 'Female');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await chooseSelect(user, /^Occupation/, 'Salaried');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await chooseSelect(user, /^Annual income/, '₹5,00,000 – ₹10,00,000');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await user.click(screen.getByRole('radio', { name: 'No, I am not' }));
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await chooseSelect(user, /^Source of wealth/, 'Salary');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await chooseSelect(user, /^Country of birth/, 'India');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await chooseSelect(user, /^Nationality/, 'Indian');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await user.type(screen.getByLabelText('Place of birth'), 'Pune');
-    expect(submit).toBeDisabled();
+    expect(isDisabled(submit)).toBe(true);
     await chooseSelect(user, /^Tax status/, 'Resident individual');
 
-    expect(submit).not.toBeDisabled();
+    expect(isDisabled(submit)).toBe(false);
   });
 
   it('shows blocked copy as soon as PEP or a related PEP is selected', async () => {
@@ -11435,8 +11973,10 @@ describe('AddressScreen (ONB-06)', () => {
     const user = userEvent.setup();
     renderWithProviders(<AddressScreen />);
     await user.type(screen.getByLabelText('Pincode'), '411001');
-    await waitFor(() => expect(screen.getByLabelText('City')).toHaveValue('Pune'));
-    expect(screen.getByLabelText('State')).toHaveValue('Maharashtra');
+    // RV-03-13: read the input's value (no jest-dom matcher is installed), as Plan 01's tests do.
+    const valueOf = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).value;
+    await waitFor(() => expect(valueOf('City')).toBe('Pune'));
+    expect(valueOf('State')).toBe('Maharashtra');
   });
 });
 ```
@@ -11460,7 +12000,8 @@ describe('FatcaScreen (ONB-07)', () => {
     expect(
       await screen.findByText(/unable to onboard US persons or investors tax-resident outside India/i),
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    // RV-03-13: Plan 01's Button reports aria-disabled (no jest-dom matcher is installed).
+    expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('aria-disabled')).toBe('true');
   });
 });
 ```
@@ -11597,13 +12138,11 @@ test('onboarding: identity through profile reaches the bank stage', async ({ pag
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
+PowerShell and Git Bash (the same commands):
 ```
 pnpm --filter=@sanchay/ui test
 pnpm --filter=@sanchay/features test
-```
-```
-X=v cmd
-SANCHAY_PLACEHOLDER=1 pnpm --filter=@sanchay/mobile test -- onboarding
+pnpm --filter=@sanchay/mobile test onboarding
 ```
 Expected failure: every new spec file fails at the `import ... from './index'` / `from './OnboardingHubScreen'` etc. line with `Cannot find module` (Vitest `ERR_MODULE_NOT_FOUND` / TS2307), because none of the `Step 3` files exist yet. `pnpm exec playwright test onboarding.smoke` fails the same way (module/route not found) before any assertion runs.
 
@@ -12125,7 +12664,7 @@ export function sanitizeAmountInput(raw: string): string {
   const firstDot = cleaned.indexOf('.');
   const withOneDot =
     firstDot === -1 ? cleaned : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
-  const [whole, fraction] = withOneDot.split('.');
+  const [whole = '', fraction] = withOneDot.split('.'); // RV-03-9: noUncheckedIndexedAccess
   return fraction === undefined ? whole : `${whole}.${fraction.slice(0, 2)}`;
 }
 
@@ -12195,6 +12734,10 @@ export { Select, type SelectOption, type SelectProps } from './Select';
 export { Sheet, type SheetProps } from './Sheet';
 export { TextField, type TextFieldProps } from './TextField';
 ```
+
+`packages/ui/package.json` (RV-03-9; key-level): add `"@sanchay/money": "workspace:*"` to `dependencies`, before `"@sanchay/tokens"`, then run `pnpm install` (it links the workspace package and adds the importer entry to `pnpm-lock.yaml`). `MoneyText` and `primitives-batch2.test.tsx` import it.
+
+`packages/features/package.json` (RV-03-13; key-level): add `"@sanchay/validation": "workspace:*"` to `dependencies`, after `"@sanchay/ui"`, then run `pnpm install`. It only links the workspace package and adds one importer entry to `pnpm-lock.yaml` (checked: the lockfile gains `link:../validation` under `packages/features` and nothing else). `IdentityScreen`, `AddressScreen` and `EmailOtpScreens` import it; E23 and Plan 04 reuse it.
 
 `packages/features/src/onboarding/useOnboarding.ts`:
 ```ts
@@ -13224,34 +13767,47 @@ export default function OnboardingStepRoute() {
 ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
+PowerShell and Git Bash (the same commands). The build line refreshes the `dist` of the packages `features` reads (`contract`, `api-client`, `validation`, `money`; RV-03-19):
 ```
+pnpm install
+pnpm exec turbo run build --filter=@sanchay/features^...
+pnpm --filter=@sanchay/ui typecheck
 pnpm --filter=@sanchay/ui test
+pnpm --filter=@sanchay/features typecheck
 pnpm --filter=@sanchay/features test
 pnpm --filter=@sanchay/web typecheck
-pnpm --filter=@sanchay/mobile test -- onboarding
-pnpm exec playwright test onboarding.smoke --project=chromium
+pnpm --filter=@sanchay/mobile test onboarding
 ```
+Then the Playwright smoke against `FakeFp` (`playwright.config.ts` passes the shell's environment to the API it starts).
+
+PowerShell:
 ```
-X=v cmd
-SANCHAY_PROVIDER_MODE_FP=fake pnpm exec playwright test onboarding.smoke --project=chromium
+$env:SANCHAY_PROVIDER_MODE_FP='fake'; pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
 ```
-Expected: all Vitest suites green (`packages/ui`: 2 new files, `~13` tests; `packages/features`: 6 new files, `~13` tests); `@sanchay/web` and `@sanchay/mobile` typecheck clean; the mobile `usePreventScreenCapture` test passes; Playwright's `onboarding.smoke` reaches the "Bank" stage label against `FakeFp`.
+Git Bash:
+```
+SANCHAY_PROVIDER_MODE_FP=fake pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
+```
+Expected: all Vitest suites green (`packages/ui`: 2 new files, `~13` tests; `packages/features`: 6 new files, `~13` tests); `@sanchay/features`, `@sanchay/web` and `@sanchay/mobile` typecheck clean; the mobile `usePreventScreenCapture` test passes; Playwright's `onboarding.smoke` reaches the "Bank" stage label against `FakeFp`.
 
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write packages/ui/src packages/features/src apps/web/src apps/web/e2e apps/mobile/src
 ```
 ```
+pnpm exec turbo run build --filter=@sanchay/features^...
+pnpm --filter=@sanchay/ui typecheck
 pnpm --filter=@sanchay/ui test
+pnpm --filter=@sanchay/features typecheck
 pnpm --filter=@sanchay/features test
 pnpm --filter=@sanchay/web typecheck
-pnpm --filter=@sanchay/mobile test -- onboarding
+pnpm --filter=@sanchay/mobile test onboarding
 ```
 ```
 pnpm lint
 ```
 ```
-git add packages/ui/src packages/features/src apps/web/src/app/\(app\)/onboarding apps/web/src/client/routes.tsx apps/mobile/src/app/onboarding apps/web/e2e/onboarding.smoke.spec.ts
+git add packages/ui/src packages/ui/package.json packages/features/package.json pnpm-lock.yaml packages/features/src "apps/web/src/app/(app)/onboarding" apps/web/src/client/routes.tsx apps/mobile/src/app/onboarding apps/web/e2e/onboarding.smoke.spec.ts
 ```
 ```
 git commit -m "feat(onboarding): identity, profile, address, FATCA screens and ui batch 2 (E12)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -13272,9 +13828,11 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage befor
   `packages/features/src/onboarding/ProvisioningStatusScreen.tsx`, `ProvisioningStatusScreen.test.tsx` (ONB-17/20)
   `packages/features/src/consent/ConsentOtpSheet.tsx`, `ConsentOtpSheet.test.tsx` (CNF-01)
   `packages/features/src/consent/useConsentChallenge.ts`
+  `packages/features/src/consent/consentsApi.ts` (RV-03-9: the `consents` facade over E4's wire)
   `packages/features/src/legal/LegalPendingBanner.tsx`, `LegalPendingBanner.test.tsx` (R-18)
   `packages/features/src/legal/ReacceptSheet.tsx`
 - **Modify:**
+  `packages/features/src/api/ApiContext.tsx` (RV-03-9: `ApiContextValue` gains `consents: ConsentApi`, built in `ApiProvider`)
   `packages/features/src/index.ts` (append the new exports)
   `packages/features/src/home/AppShell.tsx` (render `<LegalPendingBanner />` above `children`)
   `packages/contract/src/legal.ts` (append `acceptPending`), `packages/contract/src/index.ts` (no new router key — `legal` already exists from E10), `apps/api/openapi.json` (regenerated, B10 drift test)
@@ -13288,12 +13846,19 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage befor
 - **Consumes (exact names, Plan-01/Plan-02/Plan-03 code):** `useApi` (`packages/features/src/api/ApiContext.tsx`, → `utils.<router>.<proc>.queryOptions()/.mutationOptions()`, oRPC + TanStack Query per `packages/api-client/src/utils.ts`), `messageForError`/`toApiError` (`@sanchay/app-core`/`@sanchay/api-client`), `Screen`/`Card`/`Banner`/`Button`/`AppText`/`TextField` (`@sanchay/ui`, Plan-01), `Sheet`/`Checkbox`/`RadioGroup`/`Select`/`ListRow`/`ProgressSteps` (`@sanchay/ui`, E12 — this task assumes the props `Sheet({visible, title, onClose, children})`, `Checkbox({checked, onChange, label})`, `RadioGroup({options, value, onChange, label})`; if E12 lands with different prop names, the implementer of E12 or this task's reviewer adjusts the call sites listed under Step 3, not the test assertions), `NOMINEE_ID_TYPES`/`MAX_NOMINEES` (`@sanchay/domain`, A11), `equalSplit` (`packages/domain/src/rules/nominee-split.ts`, E8), `formatCountdown` (`@sanchay/app-core`, Plan-01).
 - **Produces:**
   - Screens `BankScreen`, `NomineesScreen`, `RiskQuestionnaireScreen`, `DeclarationsScreen`, `ReviewAttestScreen`, `ProvisioningStatusScreen` (all exported from `@sanchay/features`).
-  - `ConsentOtpSheet` (props `{challengeId, onApproved, onClose}`) and `useConsentChallenge({api, challengeId})` — a reusable CNF-01 hook/sheet pair consumed by `ReviewAttestScreen` for `ONBOARDING_ATTEST` and reusable by Plan 04's lumpsum/SIP/redemption/mandate screens.
+  - `ConsentOtpSheet` (props `{challengeId, onApproved, onClose}`; labels "SMS code", "Email code", "Confirm", and the Sheet's "Close"; it sends each required factor's OTP when it opens) and `useConsentChallenge({api, challengeId})` — a reusable CNF-01 hook/sheet pair consumed by `ReviewAttestScreen` for `ONBOARDING_ATTEST` and reusable by Plan 04's lumpsum/SIP/redemption/mandate screens.
+  - `ApiContextValue.consents: ConsentApi`, built by `consentsApiFrom(client)` (`consent/consentsApi.ts`) over E4's `consents.getChallenge/sendOtp/approve` (RV-03-9).
   - `LegalPendingBanner`, `ReacceptSheet` (R-18).
   - Contract: `legal.acceptPending` POST `/legal/pending/accept` [K] (new — see deviation below).
   - Web step slugs `bank`, `nominees`, `risk`, `declarations`, `review`, `provisioning` under `/onboarding/[step]`; mobile the same slugs under `/onboarding/[step]`.
   - **Deviation from outline:** the outline's file path is `apps/mobile/app/onboarding/[step].tsx`, but every Plan-01 Expo Router screen lives under `apps/mobile/src/app/**` (verified: `apps/mobile/src/app/login.tsx`, `signup.tsx`, `welcome.tsx`, `(tabs)/*`; there is no `apps/mobile/app/` directory). This task edits `apps/mobile/src/app/onboarding/[step].tsx`. It also follows Plan-01's real FLAG_SECURE pattern (`apps/mobile/src/app/login.tsx`/`signup.tsx` call `usePreventScreenCapture` once per *route*, not inside the shared `@sanchay/features` screen, since `expo-screen-capture` is a native-only import and `@sanchay/features` is also consumed by `apps/web`). E12's single dynamic `[step].tsx` route therefore already calls `usePreventScreenCapture(step)` unconditionally for every step (its own test covers `step='identity'`); this task does not add a second call site, it only extends that route's existing test with two more cases (`bank`, `review`) instead of adding new native-only screens under `packages/features`.
   - **Deviation from outline:** E10's outline text gives `legal.pending` (read) and `onboarding.stageDeclarations` (onboarding-scoped accept, sealed at attest) but no signed-in, outside-onboarding acceptance mutation, which the R-18 re-accept sheet needs to actually record a new document-version acceptance for an already-onboarded investor. This task adds the minimal missing piece, `legal.acceptPending`, to E10's own files (`legal.ts`, `legal.router.ts`), calling E3's existing `LegalDocs.recordAcceptance(tx, {investorId, key, channel:'APP', ip, userAgent, sessionId})` once per accepted key — no new table, no new service.
+  - **Review fix (RV-03-9):**
+    - `ConsentOtpSheet` read `useApi().consents`, which no task created; Plan 01's `ApiContextValue` is `{client, utils, auth}`. This task adds `consents`, built once per client in `ApiProvider` by `consentsApiFrom(client)`. E4's wire differs from `ConsentApi`: `getChallenge` returns `challengeId` (mapped to `id`) and no masks (`destinationsMasked` is `{}`; the sheet does not show them), and `sendOtp` returns `{ok: true}` (the facade supplies E4's 30 s cooldown as `resendAfterSeconds`). E4 guards only `consents.cancel` with an Idempotency-Key and the sheet never cancels, so the facade sends no key; a bare `newIdempotencyKey()` can throw on Hermes.
+    - `approve` takes `smsCode?: string | undefined` (and the same for email): the sheet passes `codes.SMS`, which is `string | undefined`, and exactOptionalPropertyTypes rejected it (TS2379). The facade drops undefined codes.
+    - The resend countdown starts when each send lands and refreshes `clock` then; it was measured against the mount time, so the sheet showed 0:31 and the 30 s test failed.
+    - `ConsentOtpSheet.test.tsx` answers with E4's wire shapes, checks `aria-disabled` (no jest-dom matcher is installed), and gains an approve case that asserts the posted codes and `onApproved`.
+  - **Review fix (RV-03-13):** `LegalPendingBanner.test.tsx` used `toBeDisabled`/`toBeEnabled`, which need jest-dom; it reads `aria-disabled` like the sheet test. The commands drop the literal `--` (BRIEF D8), the smoke runs through `e2e:web` (there is no `e2e` script), and the OpenAPI check is the B10 drift test after a build (RV-03-19).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -13408,7 +13973,7 @@ describe('RiskQuestionnaireScreen', () => {
 
 `packages/features/src/consent/ConsentOtpSheet.test.tsx`:
 ```tsx
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
@@ -13417,11 +13982,11 @@ import { renderWithProviders, TEST_API } from '../test-utils';
 import { ConsentOtpSheet } from './ConsentOtpSheet';
 
 const CHALLENGE_ID = '0190c0de-0000-7000-8000-0000000000e1';
+/** E4's wire shape (`consents.getChallenge`); the ApiContext `consents` facade maps it (RV-03-9). */
 const challenge = {
-  id: CHALLENGE_ID,
+  challengeId: CHALLENGE_ID,
   status: 'PENDING',
   requiredFactors: ['SMS', 'EMAIL'],
-  destinationsMasked: { sms: '••••••3210', email: 'a***@gmail.com' },
   expiresAt: '2026-10-12T05:10:00.000Z',
 };
 const server = setupServer();
@@ -13434,7 +13999,7 @@ describe('ConsentOtpSheet (CNF-01)', () => {
     server.use(
       http.get(`${TEST_API}/consents/challenges/${CHALLENGE_ID}`, () => HttpResponse.json(challenge)),
       http.post(`${TEST_API}/consents/challenges/${CHALLENGE_ID}/otp`, () =>
-        HttpResponse.json({ resendAfterSeconds: 30 }),
+        HttpResponse.json({ ok: true }),
       ),
     );
     const user = userEvent.setup();
@@ -13445,18 +14010,18 @@ describe('ConsentOtpSheet (CNF-01)', () => {
     expect(await screen.findByLabelText('SMS code')).toBeTruthy();
     expect(screen.getByLabelText('Email code')).toBeTruthy();
     const confirm = screen.getByRole('button', { name: 'Confirm' });
-    expect(confirm).toBeDisabled();
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
     await user.type(screen.getByLabelText('SMS code'), '123456');
-    expect(confirm).toBeDisabled();
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
     await user.type(screen.getByLabelText('Email code'), '654321');
-    expect(confirm).toBeEnabled();
+    expect(confirm.getAttribute('aria-disabled')).not.toBe('true');
   });
 
   it('shows a 30 s resend countdown per factor after the OTP is sent', async () => {
     server.use(
       http.get(`${TEST_API}/consents/challenges/${CHALLENGE_ID}`, () => HttpResponse.json(challenge)),
       http.post(`${TEST_API}/consents/challenges/${CHALLENGE_ID}/otp`, () =>
-        HttpResponse.json({ resendAfterSeconds: 30 }),
+        HttpResponse.json({ ok: true }),
       ),
     );
     renderWithProviders(
@@ -13464,6 +14029,32 @@ describe('ConsentOtpSheet (CNF-01)', () => {
     );
     expect(await screen.findByText('Resend SMS code in 0:30')).toBeTruthy();
     expect(await screen.findByText('Resend email code in 0:30')).toBeTruthy();
+  });
+
+  it('approves through the consents facade and calls onApproved (RV-03-9)', async () => {
+    let approved: unknown;
+    server.use(
+      http.get(`${TEST_API}/consents/challenges/${CHALLENGE_ID}`, () => HttpResponse.json(challenge)),
+      http.post(`${TEST_API}/consents/challenges/${CHALLENGE_ID}/otp`, () => HttpResponse.json({ ok: true })),
+      http.post(`${TEST_API}/consents/challenges/${CHALLENGE_ID}/approve`, async ({ request }) => {
+        approved = await request.json();
+        return HttpResponse.json({
+          challengeId: CHALLENGE_ID,
+          executeBefore: '2026-10-12T05:20:00.000Z',
+          sagaExpiresAt: '2026-10-12T06:10:00.000Z',
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const onApproved = vi.fn();
+    renderWithProviders(
+      <ConsentOtpSheet challengeId={CHALLENGE_ID} onApproved={onApproved} onClose={() => {}} />,
+    );
+    await user.type(await screen.findByLabelText('SMS code'), '123456');
+    await user.type(screen.getByLabelText('Email code'), '654321');
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(onApproved).toHaveBeenCalledTimes(1));
+    expect(approved).toEqual({ smsCode: '123456', emailCode: '654321' });
   });
 });
 ```
@@ -13500,9 +14091,10 @@ describe('LegalPendingBanner (R-18)', () => {
     await user.click(screen.getByRole('button', { name: 'Review now' }));
     const checkbox = screen.getByLabelText('I have read and accept the updated Terms and Conditions');
     const submit = screen.getByRole('button', { name: 'Accept and continue' });
-    expect(submit).toBeDisabled();
+    // RV-03-13: Plan 01's Button reports aria-disabled (no jest-dom matcher is installed).
+    expect(submit.getAttribute('aria-disabled')).toBe('true');
     await user.click(checkbox);
-    expect(submit).toBeEnabled();
+    expect(submit.getAttribute('aria-disabled')).not.toBe('true');
     await user.click(submit);
     expect(accepted).toEqual({ keys: ['TNC'] });
     expect(screen.queryByText('Updated terms are available.')).toBeNull();
@@ -13561,7 +14153,7 @@ describe('LegalPendingBanner (R-18)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
   PowerShell and Git Bash (same command):
   ```
-  pnpm --filter=@sanchay/features test -- NomineesScreen RiskQuestionnaireScreen ConsentOtpSheet LegalPendingBanner
+  pnpm --filter=@sanchay/features test NomineesScreen RiskQuestionnaireScreen ConsentOtpSheet LegalPendingBanner
   ```
   Expected failure: `Cannot find module './NomineesScreen'` (and the same for the other three modules) — none of the five component/hook files exist yet.
 
@@ -13627,7 +14219,11 @@ export interface ConsentChallenge {
 export interface ConsentApi {
   getChallenge(input: { id: string }): Promise<ConsentChallenge>;
   sendOtp(input: { id: string; channel: ConsentFactor }): Promise<{ resendAfterSeconds: number }>;
-  approve(input: { id: string; smsCode?: string; emailCode?: string }): Promise<{ status: string }>;
+  approve(input: {
+    id: string;
+    smsCode?: string | undefined;
+    emailCode?: string | undefined;
+  }): Promise<{ status: string }>;
 }
 
 export interface UseConsentChallengeOptions {
@@ -13656,12 +14252,14 @@ export function useConsentChallenge({
     api.getChallenge({ id: challengeId }).then((c) => {
       if (cancelled) return;
       setChallenge(c);
-      const t = now();
-      const initial: Partial<Record<ConsentFactor, number>> = {};
       for (const factor of c.requiredFactors) {
         void api.sendOtp({ id: challengeId, channel: factor }).then((sent) => {
-          initial[factor] = t + sent.resendAfterSeconds * 1000;
-          setResendAt((prev) => ({ ...prev, [factor]: initial[factor] }));
+          if (cancelled) return;
+          // Count down from when the send landed and refresh `clock` with it; measured against the mount
+          // time, the first render showed 0:31 (RV-03-9).
+          const sentAt = now();
+          setClock(sentAt);
+          setResendAt((prev) => ({ ...prev, [factor]: sentAt + sent.resendAfterSeconds * 1000 }));
         });
       }
     });
@@ -13677,16 +14275,17 @@ export function useConsentChallenge({
 
   const resend = useCallback(
     async (channel: ConsentFactor) => {
-      const t = now();
-      if ((resendAt[channel] ?? 0) > t) return;
+      if ((resendAt[channel] ?? 0) > now()) return;
       const sent = await api.sendOtp({ id: challengeId, channel });
-      setResendAt((prev) => ({ ...prev, [channel]: t + sent.resendAfterSeconds * 1000 }));
+      const sentAt = now();
+      setClock(sentAt);
+      setResendAt((prev) => ({ ...prev, [channel]: sentAt + sent.resendAfterSeconds * 1000 }));
     },
     [api, challengeId, resendAt, now],
   );
 
   const approve = useCallback(
-    async (codes: { smsCode?: string; emailCode?: string }) => {
+    async (codes: { smsCode?: string | undefined; emailCode?: string | undefined }) => {
       setPending(true);
       setError(null);
       try {
@@ -13792,6 +14391,86 @@ export function ConsentOtpSheet({ challengeId, onApproved, onClose }: ConsentOtp
 }
 
 const styles = StyleSheet.create({ stack: { gap: space(3) } });
+```
+
+`packages/features/src/consent/consentsApi.ts` (RV-03-9):
+```ts
+import type { ApiClient } from '@sanchay/api-client';
+import type { ConsentApi } from './useConsentChallenge';
+
+/** E4 sends no resend timer; its per-challenge SMS cooldown is 30 s (`SMS_COOLDOWN_MS`), as is Plan 01's OTP_POLICY. */
+export const CONSENT_RESEND_SECONDS = 30;
+
+/**
+ * `ConsentApi` over E4's `consents.*` wire (RV-03-9). E4 names the id `challengeId` and returns no masks,
+ * and `sendOtp` answers `{ok: true}`, so this adapter maps the id, leaves `destinationsMasked` empty and
+ * supplies the 30 s resend timer. E4 guards only `consents.cancel` with an Idempotency-Key and the sheet
+ * never cancels, so no key is sent (a bare `newIdempotencyKey()` can throw on Hermes).
+ */
+export function consentsApiFrom(client: ApiClient): ConsentApi {
+  return {
+    async getChallenge({ id }) {
+      const challenge = await client.consents.getChallenge({ id });
+      return {
+        id: challenge.challengeId,
+        status: challenge.status,
+        requiredFactors: challenge.requiredFactors,
+        destinationsMasked: {},
+        expiresAt: challenge.expiresAt,
+      };
+    },
+    async sendOtp({ id, channel }) {
+      await client.consents.sendOtp({ id, channel });
+      return { resendAfterSeconds: CONSENT_RESEND_SECONDS };
+    },
+    async approve({ id, smsCode, emailCode }) {
+      await client.consents.approve({
+        id,
+        ...(smsCode === undefined ? {} : { smsCode }),
+        ...(emailCode === undefined ? {} : { emailCode }),
+      });
+      return { status: 'CONSUMED' };
+    },
+  };
+}
+```
+
+`packages/features/src/api/ApiContext.tsx` (RV-03-9; Plan 01's file with `consents` added; built once per client, so `useConsentChallenge`'s effect does not re-run):
+```tsx
+import { type ApiClient, type ApiUtils, createApiUtils } from '@sanchay/api-client';
+import { type AuthApi, authApiFrom } from '@sanchay/app-core';
+import { createContext, type ReactNode, useContext, useMemo } from 'react';
+import { consentsApiFrom } from '../consent/consentsApi';
+import type { ConsentApi } from '../consent/useConsentChallenge';
+
+export interface ApiContextValue {
+  client: ApiClient;
+  utils: ApiUtils;
+  auth: AuthApi;
+  /** E13 CNF-01 facade over E4's `consents.*` (RV-03-9); ConsentOtpSheet reads it. */
+  consents: ConsentApi;
+}
+
+const ApiContext = createContext<ApiContextValue | null>(null);
+
+export function ApiProvider({ client, children }: { client: ApiClient; children: ReactNode }) {
+  const value = useMemo(
+    () => ({
+      client,
+      utils: createApiUtils(client),
+      auth: authApiFrom(client),
+      consents: consentsApiFrom(client),
+    }),
+    [client],
+  );
+  return <ApiContext.Provider value={value}>{children}</ApiContext.Provider>;
+}
+
+export function useApi(): ApiContextValue {
+  const api = useContext(ApiContext);
+  if (!api) throw new Error('useApi must be used inside <ApiProvider>');
+  return api;
+}
 ```
 
 `packages/features/src/onboarding/BankScreen.tsx`:
@@ -14403,31 +15082,42 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 `apps/mobile/src/app/onboarding/[step].tsx` (modify: the same six cases in the mobile step switch; `usePreventScreenCapture(step)` already runs unconditionally at the top of this route from E12).
 
 - [ ] **Step 4: Run tests to confirm they pass**
-  PowerShell and Git Bash (same commands):
+  PowerShell and Git Bash (same commands). The two build lines refresh the `dist` that `apps/api` and `features` read (the new `legal.acceptPending`; RV-03-19):
   ```
+  pnpm exec turbo run build --filter=@sanchay/api^...
+  pnpm exec turbo run build --filter=@sanchay/features^...
   pnpm --filter=@sanchay/contract test
   pnpm --filter=@sanchay/features test
-  pnpm --filter=@sanchay/api test -- legal
-  pnpm --filter=@sanchay/mobile test -- onboarding/[step]
+  pnpm --filter=@sanchay/features typecheck
+  pnpm --filter=@sanchay/api test legal
+  pnpm --filter=@sanchay/mobile test onboarding/[step]
   pnpm --filter=@sanchay/api openapi
-  git diff --exit-code apps/api/openapi.json
+  pnpm --filter=@sanchay/api test openapi
   ```
-  Expected: every suite green (`NomineesScreen` 3/3, `RiskQuestionnaireScreen` 1/1, `ConsentOtpSheet` 2/2, `LegalPendingBanner` 1/1, `[step].test.tsx` gains 2 passing cases, `legal.router` gains 1 passing case for `acceptPending`); `openapi.json` shows no drift after regeneration (B10). Then, with `SANCHAY_PROVIDER_MODE_FP=fake` and the API/worker up:
+  Expected: every suite green (`NomineesScreen` 3/3, `RiskQuestionnaireScreen` 1/1, `ConsentOtpSheet` 3/3, `LegalPendingBanner` 1/1, `[step].test.tsx` gains 2 passing cases, `legal.router` gains 1 passing case for `acceptPending`); `features` typechecks with `consents` on `ApiContextValue`; the B10 drift test passes against the regenerated `openapi.json`, which Step 5 commits. Then, with the API and a worker up and `FakeFp`:
+
+  PowerShell:
   ```
-  pnpm --filter=@sanchay/web e2e -- onboarding.smoke
+  $env:SANCHAY_PROVIDER_MODE_FP='fake'; pnpm --filter=@sanchay/web e2e:web onboarding.smoke
+  ```
+  Git Bash:
+  ```
+  SANCHAY_PROVIDER_MODE_FP=fake pnpm --filter=@sanchay/web e2e:web onboarding.smoke
   ```
   Expected: the smoke spec now reaches "Your account is ready" via FakeFp's `autoAdvance` (D4) within the 15 s timeout.
 
 - [ ] **Step 5: Commit**
   ```
+  pnpm exec turbo run build --filter=@sanchay/api^...
+  pnpm exec turbo run build --filter=@sanchay/features^...
   pnpm exec biome check --write packages/features/src packages/contract/src apps/api/src/modules/legal-consent apps/web/src/app apps/web/e2e apps/mobile/src/app/onboarding
   pnpm --filter=@sanchay/contract test
   pnpm --filter=@sanchay/features test
-  pnpm --filter=@sanchay/api test -- legal
+  pnpm --filter=@sanchay/api test legal
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/features typecheck
   pnpm lint
-  git add packages/features/src/onboarding packages/features/src/consent packages/features/src/legal packages/features/src/index.ts packages/features/src/home/AppShell.tsx packages/contract/src/legal.ts apps/api/src/modules/legal-consent/legal.router.ts apps/api/openapi.json apps/web/src/app/(app)/onboarding apps/web/e2e/onboarding.smoke.spec.ts apps/mobile/src/app/onboarding
+  git add packages/features/src/onboarding packages/features/src/consent packages/features/src/legal packages/features/src/api/ApiContext.tsx packages/features/src/index.ts packages/features/src/home/AppShell.tsx packages/contract/src/legal.ts apps/api/src/modules/legal-consent/legal.router.ts apps/api/openapi.json "apps/web/src/app/(app)/onboarding" apps/web/e2e/onboarding.smoke.spec.ts apps/mobile/src/app/onboarding
   git commit -m "feat(onboarding): batch-2 screens, CNF-01 consent sheet and legal.pending re-accept UI" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   If lefthook reports `stage_fixed`, re-run the Step 4 test/typecheck commands before re-committing.
@@ -14452,11 +15142,12 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 - Consumes (real Plan-01 test infra, verified against `apps/api/test/int/{app.ts,flows.ts,http.ts}` — **not** the speculative `signIn`/`httpGet` helper D10's own draft assumed before this code existed): `bootTestApp`, `type TestApp` (`./app.js`); `signInWeb` (`./flows.js`); `webHeaders`, `cookiesFrom` (`./http.js`).
 - Produces:
   - `packages/contract/src/catalogue.ts` (extended):
-    - `SchemeThresholdsWireSchema = z.object({ purchaseMin, purchaseMax: nullable, purchaseMultiple, sipMin, sipMax: nullable, sipMultiple })` using `moneyWireSchema`/`nullableMoneyWireSchema`.
+    - `SchemeThresholdsWireSchema = z.object({ purchaseMin, purchaseMax: nullable, purchaseMultiple, sipMin: nullable, sipMax: nullable, sipMultiple: nullable })` using `moneyWireSchema`/`nullableMoneyWireSchema`. The three SIP fields are null when FP lists no monthly SIP row (Plan 02 D10, RV-03-22).
     - `SchemeReturnsWireSchema = z.object({ asOf: z.string().nullable(), cagr1y, cagr3y, cagr5y, abs6m: all z.string().nullable() })`.
     - `CommissionLineSchema = z.object({ kind: z.enum(['EXACT','RANGE']), trailMinBps: z.number().int(), trailMaxBps: z.number().int() }).nullable()`.
     - `AmcSummarySchema = z.object({ id, name, slug })`.
-    - `SchemeDetailSchema` (isin, name, slug, amcId, amcName, categoryCode, categoryName, planType, option, status, curated, lockInMonths, thresholds: nullable, riskometer, riskometerAsOf, benchmarkName, benchmarkRiskometer, expenseRatioPct, exitLoadText, sidUrl, kimUrl — all nullable except the identity/status fields —, returns: `SchemeReturnsWireSchema`, commissionLine: `CommissionLineSchema`, `regularPlanNoticeKey: z.literal('REGULAR_PLAN_NOTICE')`).
+    - `SchemeDetailSchema` (id, isin, name, slug, amcId, amcName, categoryCode, categoryName, planType, option, status, curated, lockInMonths, sipAllowed (a boolean: Plan 02 D10's fail-closed SIP flag, which FUND-01's "Start SIP" reads, RV-03-22), thresholds: nullable, riskometer, riskometerAsOf, benchmarkName, benchmarkRiskometer, expenseRatioPct, exitLoadText, sidUrl, kimUrl — all nullable except the identity/status fields —, returns: `SchemeReturnsWireSchema`, commissionLine: `CommissionLineSchema`, `regularPlanNoticeKey: z.literal('REGULAR_PLAN_NOTICE')`).
+    - `SchemeSummarySchema` and `SchemeDetailSchema` carry `id: z.uuid()`, the scheme uuid that `orders.*` and `plans.*` take (RV-03-8).
     - `ListSchemesInputSchema` gains `sort: z.enum(['name']).optional()` (the enum has one member today; E18 [T2], if funded, adds `'RETURN_1Y' | 'RETURN_3Y' | 'RETURN_5Y'`).
     - `catalogueContract.getScheme`: GET `/catalogue/schemes/{slug}`, `.errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'NOT_FOUND'))`, `.input(z.object({ slug: z.string() }))`, `.output(SchemeDetailSchema)`.
     - `catalogueContract.amcs`: GET `/catalogue/amcs`, `.errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))`, `.input(z.strictObject({}))`, `.output(z.array(AmcSummarySchema))`.
@@ -14467,6 +15158,7 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 - Deviation/assumption: the outline's fund-page row lists "commission line" as part of `getScheme`'s output but does not name a resolver. E10 (Plan 03) already defined a `CommissionRatesSource` interface for the *listing* procedure `legal.commissionRates`, bound to an empty `InMemoryCommissionRatesSource` until Plan 02 lands (`apps/api/src/modules/legal-consent/legal.router.ts`). Rewiring that binding is out of this task's Files list (it would touch `legal.module.ts`), so `getScheme`'s commission line is resolved by a private helper local to `catalogue.queries.ts`, `resolveCommissionLine`, reading `commissionDisclosures` directly: it prefers a scheme-scoped row (`schemeId = scheme.id`) over an AMC-scoped row (`amcId = scheme.amcId`), and within the same scope prefers `kind = 'EXACT'` over `'RANGE'` (E10's own test name, "commission rates resolve EXACT before RANGE," is honoured here for the fund page even though `legal.commissionRates`'s own listing still returns `[]` until a later task rewires it) — both ties broken by `effectiveFrom DESC`, and only rows with `effectiveFrom <= today` are eligible.
 - Deviation: "returns null CAGR when `display_eligible=false`" (outline test) is read as: when the most recent `scheme_returns` row for a scheme has `display_eligible = false`, or no row exists at all, `getScheme` reports `cagr1y`/`cagr3y`/`cagr5y`/`abs6m` and `asOf` all as `null` — never the raw (possibly stale-looking) stored numbers. E16 is the task that populates `scheme_returns`; until it lands, every scheme reports an all-null `returns` object, which is the correct empty state for a fund with no NAV history yet.
 - Deviation: "money fields wire-format" (outline test) exercises `thresholds` (already wire-string JSON from D10's `fp-sync.job.ts`) and `expenseRatioPct` (a Postgres `numeric(5,2)`, read back as a decimal string by Drizzle's default numeric mode) — the test asserts both come back as plain decimal strings (`"5000.00"`, `"1.75"`), never JavaScript numbers, matching `@sanchay/money`'s "never a JS number" rule even though this task does not construct `Money`/`Nav` instances itself (the values only pass through, unparsed, from Postgres to the wire).
+- Review fix (RV-03-8): the wire had no scheme uuid (`listSchemes` dropped `id` and `getSchemeDetail` never returned it), while `orders.quotePurchase`/`createPurchase` (E22/E20) and Plan 04's `plans.*` take `schemeId: z.uuid()`. Both schemas gain `id: z.uuid()`, `listSchemes` keeps `id` in its items, and `getSchemeDetail` returns `id: scheme.id`. E17's "Invest" link and Plan 04's "Start SIP" use it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -14569,7 +15261,7 @@ describe('catalogue.getScheme', () => {
   });
 
   it('returns null CAGR when display_eligible=false, and money fields as wire strings', async () => {
-    const { scheme } = await seedScheme('PUBLISHED');
+    const { scheme } = await seedScheme('PUBLISHED', { sipAllowed: true, sipDates: [5, 20] });
     await t.db.db.insert(fundFacts).values({
       schemeId: scheme.id,
       expenseRatioPct: '1.75',
@@ -14591,6 +15283,8 @@ describe('catalogue.getScheme', () => {
     const res = await get(`/catalogue/schemes/${scheme.slug}`, investor.cookies);
     expect(res.statusCode).toBe(200);
     const body = res.json();
+    expect(body.id).toBe(scheme.id); // RV-03-8
+    expect(body.sipAllowed).toBe(true); // RV-03-22
     expect(body.returns).toEqual({ asOf: null, cagr1y: null, cagr3y: null, cagr5y: null, abs6m: null });
     expect(body.expenseRatioPct).toBe('1.75');
     expect(typeof body.expenseRatioPct).toBe('string');
@@ -14603,6 +15297,15 @@ describe('catalogue.getScheme', () => {
       sipMultiple: '1.00',
     });
     expect(body.regularPlanNoticeKey).toBe('REGULAR_PLAN_NOTICE');
+  });
+
+  it('a scheme without a monthly SIP row has null SIP limits and sipAllowed false (RV-03-22)', async () => {
+    const lumpsumOnly = { purchaseMin: '500.00', purchaseMax: null, purchaseMultiple: '1.00', sipMin: null, sipMax: null, sipMultiple: null };
+    const { scheme } = await seedScheme('PUBLISHED', { thresholds: lumpsumOnly });
+    const investor = await signInWeb(t, '9844400309');
+    const res = await get(`/catalogue/schemes/${scheme.slug}`, investor.cookies);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ sipAllowed: false, thresholds: lumpsumOnly });
   });
 
   it('surfaces a real return set when display_eligible=true', async () => {
@@ -14677,6 +15380,16 @@ describe('catalogue.getScheme', () => {
   });
 });
 
+describe('catalogue.listSchemes', () => {
+  it('lists the scheme uuid as id, the id orders and plans take (RV-03-8)', async () => {
+    const { scheme, category } = await seedScheme('PUBLISHED');
+    const investor = await signInWeb(t, '9844400308');
+    const res = await get(`/catalogue/schemes?category=${encodeURIComponent(category.code)}`, investor.cookies);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toEqual([expect.objectContaining({ id: scheme.id, slug: scheme.slug })]);
+  });
+});
+
 describe('catalogue.amcs', () => {
   it('lists AMCs ordered by name', async () => {
     await seedAmc({ name: 'Zenith Mutual Fund', slug: `zenith-${Date.now()}` });
@@ -14698,9 +15411,8 @@ describe('catalogue.amcs', () => {
 ```typescript
   it('sorts by name ascending by default, with a stable compound cursor', async () => {
     await seedOneScheme('PUBLISHED', true); // 'Parag Parikh Flexi Cap Fund - Regular - Growth' (see the shared factory)
-    const investor = await insertInvestor(app.db.db);
-    const session = await signIn(app, investor);
-    const page1 = JSON.parse((await httpGet(app, '/api/v1/catalogue/schemes', session)).body) as {
+    // D10's file-level `get` and `cookies` (Plan 01's signInWeb); `signIn`/`httpGet` never existed (RV-03-23).
+    const page1 = JSON.parse((await get('/catalogue/schemes', cookies)).body) as {
       items: { name: string }[];
     };
     const names = page1.items.map((i) => i.name);
@@ -14739,6 +15451,8 @@ export const SebiCategorySchema = z.object({
 export type SebiCategory = z.infer<typeof SebiCategorySchema>;
 
 export const SchemeSummarySchema = z.object({
+  /** The scheme uuid: the id `orders.*` and `plans.*` take (RV-03-8). */
+  id: z.uuid(),
   isin: z.string(),
   name: z.string(),
   slug: z.string(),
@@ -14768,9 +15482,10 @@ export const SchemeThresholdsWireSchema = z.object({
   purchaseMin: moneyWireSchema,
   purchaseMax: nullableMoneyWireSchema,
   purchaseMultiple: moneyWireSchema,
-  sipMin: moneyWireSchema,
+  // Null without FP's monthly SIP row (Plan 02 D10, RV-03-22), never the lumpsum limits.
+  sipMin: nullableMoneyWireSchema,
   sipMax: nullableMoneyWireSchema,
-  sipMultiple: moneyWireSchema,
+  sipMultiple: nullableMoneyWireSchema,
 });
 export type SchemeThresholdsWire = z.infer<typeof SchemeThresholdsWireSchema>;
 
@@ -14789,6 +15504,8 @@ export const CommissionLineSchema = z
 export type CommissionLine = z.infer<typeof CommissionLineSchema>;
 
 export const SchemeDetailSchema = z.object({
+  /** The scheme uuid; FUND-01's Invest link opens `/invest/{id}/lumpsum` (RV-03-8). */
+  id: z.uuid(),
   isin: z.string(),
   name: z.string(),
   slug: z.string(),
@@ -14801,6 +15518,8 @@ export const SchemeDetailSchema = z.object({
   status: z.string(),
   curated: z.boolean(),
   lockInMonths: z.number().int().nullable(),
+  /** Plan 02 D10: FP allows SIP and lists a monthly SIP row with dates (fail closed). FUND-01's "Start SIP" reads it (RV-03-22). */
+  sipAllowed: z.boolean(),
   thresholds: SchemeThresholdsWireSchema.nullable(),
   riskometer: z.string().nullable(),
   riskometerAsOf: z.string().nullable(),
@@ -14907,7 +15626,7 @@ export async function listSchemes(db: Database, input: { q?: string; category?: 
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map(({ id: _id, ...rest }) => rest),
+    items: page, // RV-03-8: `id` stays on the wire
     nextCursor: hasMore && last ? encodeCursor({ name: last.name, id: last.id }) : null,
   };
 }
@@ -14962,6 +15681,7 @@ export async function getSchemeDetail(db: Database, slug: string) {
       status: schemes.status,
       curated: schemes.curated,
       lockInMonths: schemes.lockInMonths,
+      sipAllowed: schemes.sipAllowed,
       thresholds: schemes.thresholds,
     })
     .from(schemes)
@@ -15003,6 +15723,7 @@ export async function getSchemeDetail(db: Database, slug: string) {
       : { asOf: null, cagr1y: null, cagr3y: null, cagr5y: null, abs6m: null };
 
   return {
+    id: scheme.id, // RV-03-8
     isin: scheme.isin,
     name: scheme.name,
     slug: scheme.slug,
@@ -15015,6 +15736,7 @@ export async function getSchemeDetail(db: Database, slug: string) {
     status: scheme.status,
     curated: scheme.curated,
     lockInMonths: scheme.lockInMonths,
+    sipAllowed: scheme.sipAllowed, // RV-03-22
     thresholds: scheme.thresholds,
     riskometer: facts?.riskometer ?? null,
     riskometerAsOf: facts?.riskometerAsOf ?? null,
@@ -15631,7 +16353,7 @@ git commit -m "feat(catalogue): add FundFactsProvider, publish-gate rules R1-R7 
   - `apps/api/src/modules/catalogue/catalogue.module.ts` (add `ReturnsComputeJob` to the `providers` list, every role)
 
 **Interfaces:**
-- Prerequisites: Plan 02 **D8** (`schemes`, `navHistory`, `schemeReturns` tables). Plan 02 **D9** (`runNavSync` already enqueues `catalogue.returns.compute` after every successful sync; the `packages/test-fixtures` shell). Plan 02 **D2** (class-level `@JobHandler`, `type Job<N>`; `'catalogue.returns.compute'` is already in `JOB_NAMES`). Plan 02 **D10** (`CatalogueModule.forRoot(env)`).
+- Prerequisites: Plan 02 **D8** (`schemes`, `navHistory`, `schemeReturns` tables). Plan 02 **D9** (`runNavSync` already enqueues `catalogue.returns.compute` after every successful sync and appends that sync's accepted NAVs to `nav_history`, which D9's backfill fills with five years of history before GO-1, R-33; the `packages/test-fixtures` shell). Plan 02 **D2** (class-level `@JobHandler`, `type Job<N>`; `'catalogue.returns.compute'` is already in `JOB_NAMES`). Plan 02 **D10** (`CatalogueModule.forRoot(env)`).
 - Consumes (Plan-01, verified): `Dec`, `Rounding` (`@sanchay/money`, `packages/money/src/decimal.ts` — `Dec` is the shared `decimal.js` clone at 64-digit precision, whose `.pow()` accepts a fractional exponent); `isIsoDate`, `toIsoDate`, `type IsoDate` (`@sanchay/domain`, `packages/domain/src/ids.ts`). Consumes (D8, verified against the D8 draft): `schemes`, `navHistory`, `schemeReturns` (`apps/api/src/modules/catalogue/catalogue.schema.ts`).
 - Produces:
   - `packages/domain/src/rules/returns.ts`:
@@ -16171,6 +16893,7 @@ git commit -m "feat(catalogue): compute 1Y/3Y/5Y CAGR and 6M absolute return int
   - `packages/features/src/index.ts` (append the new screen exports)
   - `apps/web/src/client/routes.tsx` (append `ExploreRoute`, `ExploreSearchRoute`, `ExploreCategoryRoute`, `FundRoute`)
   - `apps/web/src/app/(app)/explore/page.tsx` (replace the `ComingSoonRoute` placeholder)
+  - `packages/features/package.json` (RV-03-9: `"@sanchay/money": "workspace:*"`; this task is the first `features` importer) and `pnpm-lock.yaml`
 
 **Interfaces:**
 - Prerequisites: **E14** (`catalogue.getScheme`, `catalogue.categories`, `catalogue.listSchemes`, `catalogue.amcs` procedures and their wire types). **E15**/**E16** (a scheme's `returns`/facts populate over time; the screens render whatever `getScheme` returns today, including the all-null state). Plan 01 (`ApiProvider`/`useApi`, `NavProvider`/`useNav`, `AppShellRoute`, `packages/ui`'s `AppText`/`Banner`/`Button`/`Card`/`Chip`/`ListRow`/`Screen`/`TextField` — `Chip`/`ListRow` are Plan 03 **E12** additions to `packages/ui`, read as ground truth for this DAG position — `messageForError`, `toApiError`, `DASH`/`formatPct` from `@sanchay/money`, `REGULAR_PLAN_NOTICE`/`MARKET_RISK_WARNING`/`dsc02`/`LEGAL_ENTITY_NAME` from `@sanchay/app-core/copy`).
@@ -16179,7 +16902,7 @@ git commit -m "feat(catalogue): compute 1Y/3Y/5Y CAGR and 6M absolute return int
   - `packages/features/src/explore/Disclosures.tsx`: `<Disclosures />` — always renders `MARKET_RISK_WARNING` (DSC-01) and `REGULAR_PLAN_NOTICE` (DSC-03); `<ReturnCaveat />` — renders "Past performance may or may not be sustained in future." (DSC-04) next to a return figure; `<RiskometerBadge level={string|null} benchmarkLevel?={string|null} />` (DSC-05).
   - `packages/features/src/explore/ExploreScreen.tsx`: `<ExploreScreen category?={string} />` (EXP-01 curated list, EXP-03 category tiles when `category` is omitted, a search entry point for EXP-02/04/05 via `useNav().push('/explore/search')`).
   - `packages/features/src/explore/SearchScreen.tsx`: `<SearchScreen />` (EXP-04/05: a debounced text query against `catalogue.listSchemes({ q })`).
-  - `packages/features/src/explore/FundScreen.tsx`: `<FundScreen schemeSlug={string} />` (FUND-01/03: returns table with `formatPct`/`DASH`, minimums, exit load, lock-in, riskometer + benchmark, TER, SID/KIM links, the commission line, `<Disclosures />`).
+  - `packages/features/src/explore/FundScreen.tsx`: `<FundScreen schemeSlug={string} />` (FUND-01/03: returns table with `formatPct`/`DASH`, minimums, exit load, lock-in, riskometer + benchmark, TER, SID/KIM links, the commission line, `<Disclosures />`, and an "Invest" link (`role="link"`) that pushes `/invest/${scheme.id}/lumpsum`, E23's INV-01 route (RV-03-8)).
   - Web routes: `apps/web/src/app/(app)/explore/page.tsx` (`<ExploreRoute />`), `.../explore/category/[slug]/page.tsx` (`<ExploreCategoryRoute slug={params.slug} />`), `.../explore/search/page.tsx` (`<ExploreSearchRoute />`), `.../funds/[schemeSlug]/page.tsx` (`<FundRoute schemeSlug={params.schemeSlug} />`).
   - www pages (static server components, no client JS): `/site/legal/{key}` (renders a `legal.getDocument` body), `/site/commission-disclosure` (renders `legal.commissionRates`), `/site/grievance` (AMFI/SEBI grievance-redressal contact info, DSC-21), `/site/account/delete` (a public account-deletion request page, the Play-Store-required data-deletion disclosure).
   - `apps/web/src/lib/legal-api.ts`: `fetchLegalDocument(key)`, `fetchCommissionRates()` — plain server-side `fetch` against `${SANCHAY_API_ORIGIN}/api/v1/legal/...` (no `ApiProvider`/React Query, since these pages ship no client JS).
@@ -16189,6 +16912,8 @@ git commit -m "feat(catalogue): compute 1Y/3Y/5Y CAGR and 6M absolute return int
 - Deviation: `apps/web/src/lib/legal-api.ts` is not in the outline's Files list. The outline's own DoD line — "www pages static (no client JS on `/site/legal/*`)" — is only achievable by fetching `legal.getDocument`/`legal.commissionRates` from a React Server Component with plain `fetch`, not through the `ApiProvider`/React-Query client stack every authenticated screen uses (that stack is client-side by construction). A tiny server-only fetch helper, mirroring `site-config.ts`'s existing small-lib-file convention, is the minimum addition that makes this possible.
 - Deviation: `/site/account/delete` is not named by any spec row this task's outline cites, but Google Play requires a public, unauthenticated account-and-data-deletion disclosure page for any app account flow (Play Console's Data Safety policy) once `apps/mobile` ships to the Play Store (E25/F-series), and PRF-12 in `docs/superpowers/specs/product/journeys.md` is the closest journeys hook for it. This task adds it now, as a static page, so the link exists before the Play Store submission checklist needs it; it names no API (account deletion itself is out of MVP scope) and instead gives the grievance/support email to request deletion, consistent with `LEGAL_COPY_STATUS = 'COUNSEL_PLACEHOLDER'`'s existing placeholder posture.
 - Deviation: `T1 applied` (the outline's own heading annotation) means the wwwmarketing site stays to the four pages above plus the existing Plan-01 `/site` landing — no additional marketing pages, blog, or SEO content, per spec §6's T1 trim (2 h).
+- Review fix (RV-03-8): FUND-01 had no way into the lumpsum flow. `FundScreen` renders an "Invest" link to `/invest/${scheme.id}/lumpsum`, using the scheme uuid E14 now puts on the wire; the test fixture carries `id`, and a new case asserts the push.
+- Review fix (RV-03-9): `FundScreen` imports `@sanchay/money`, which `packages/features` did not depend on, and this is the first `features` importer, so this task adds `"@sanchay/money": "workspace:*"` and runs `pnpm install`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -16332,6 +17057,7 @@ describe('SearchScreen', () => {
 
 ```tsx
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -16339,6 +17065,7 @@ import { renderWithProviders, TEST_API } from '../test-utils';
 import { FundScreen } from './FundScreen';
 
 const schemeDetail = (overrides: Record<string, unknown> = {}) => ({
+  id: '0190c0de-0000-7000-8000-0000000000b1',
   isin: 'INF000P05055',
   name: 'Parag Parikh Flexi Cap Fund - Regular - Growth',
   slug: 'parag-parikh-flexi-cap',
@@ -16351,6 +17078,7 @@ const schemeDetail = (overrides: Record<string, unknown> = {}) => ({
   status: 'PUBLISHED',
   curated: true,
   lockInMonths: null,
+  sipAllowed: true,
   thresholds: { purchaseMin: '500.00', purchaseMax: null, purchaseMultiple: '1.00', sipMin: '500.00', sipMax: null, sipMultiple: '1.00' },
   riskometer: 'VERY_HIGH',
   riskometerAsOf: '2026-09-01',
@@ -16397,6 +17125,14 @@ describe('FundScreen', () => {
     );
     renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
     expect(await screen.findByText('12.34%')).toBeTruthy();
+  });
+
+  it('Invest opens the lumpsum amount screen for the scheme uuid (RV-03-8)', async () => {
+    server.use(http.get(`${TEST_API}/catalogue/schemes/parag-parikh-flexi-cap`, () => HttpResponse.json(schemeDetail())));
+    const user = userEvent.setup();
+    const { nav } = renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
+    await user.click(await screen.findByRole('link', { name: 'Invest' }));
+    expect(nav.push).toHaveBeenCalledWith('/invest/0190c0de-0000-7000-8000-0000000000b1/lumpsum');
   });
 });
 ```
@@ -16602,8 +17338,9 @@ import { messageForError } from '@sanchay/app-core';
 import { DASH, formatInr, formatPct, Money } from '@sanchay/money';
 import { AppText, Banner, Button, Card, ListRow, Screen } from '@sanchay/ui';
 import { useQuery } from '@tanstack/react-query';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { useApi } from '../api/ApiContext';
+import { useNav } from '../nav/NavContext';
 import { Disclosures, ReturnCaveat, RiskometerBadge } from './Disclosures';
 
 export interface FundScreenProps {
@@ -16613,6 +17350,7 @@ export interface FundScreenProps {
 /** FUND-01 (facts, minimums, exit load, lock-in, riskometer, TER, SID/KIM) and FUND-03 (returns). */
 export function FundScreen({ schemeSlug }: FundScreenProps) {
   const { utils } = useApi();
+  const nav = useNav();
   const detail = useQuery(utils.catalogue.getScheme.queryOptions({ input: { slug: schemeSlug } }));
 
   if (detail.isPending) {
@@ -16643,6 +17381,15 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
     <Screen testID="fund-screen">
       <AppText variant="title">{scheme.name}</AppText>
       <AppText tone="muted">{`${scheme.amcName} · ${scheme.categoryName}`}</AppText>
+      {/* RV-03-8: E23's INV-01 takes the scheme uuid; a link, like Plan 01's in-app navigation. */}
+      <Pressable
+        role="link"
+        aria-label="Invest"
+        testID="fund-invest"
+        onPress={() => nav.push(`/invest/${scheme.id}/lumpsum`)}
+      >
+        <AppText tone="primary">Invest</AppText>
+      </Pressable>
 
       <Card>
         <AppText variant="heading">Returns</AppText>
@@ -16664,7 +17411,7 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
       <Card>
         <AppText variant="heading">Minimums</AppText>
         <ListRow label="Minimum lumpsum" value={t ? formatInr(Money.parse(t.purchaseMin)) : DASH} />
-        <ListRow label="Minimum SIP" value={t ? formatInr(Money.parse(t.sipMin)) : DASH} />
+        <ListRow label="Minimum SIP" value={scheme.sipAllowed && t?.sipMin ? formatInr(Money.parse(t.sipMin)) : DASH} />
         <ListRow label="Exit load" value={scheme.exitLoadText ?? DASH} />
         <ListRow label="Lock-in" value={scheme.lockInMonths ? `${scheme.lockInMonths} months` : 'None'} />
         <ListRow label="Total expense ratio" value={scheme.expenseRatioPct ? formatPct(scheme.expenseRatioPct) : DASH} />
@@ -16692,6 +17439,8 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
   );
 }
 ```
+
+`packages/features/package.json` (RV-03-9; key-level): add `"@sanchay/money": "workspace:*"` to `dependencies`, after `"@sanchay/app-core"`, then run `pnpm install` (it links the workspace package and adds the importer entry to `pnpm-lock.yaml`). `FundScreen` is the first `features` file that imports it; E23, E24 and Plan 04 reuse the dependency.
 
 `packages/features/src/index.ts` (modify — append):
 
@@ -16968,22 +17717,25 @@ export default function FundRoute() {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/features test -- explore
+pnpm install
+pnpm --filter=@sanchay/features test explore
+pnpm --filter=@sanchay/features typecheck
 pnpm --filter=@sanchay/web typecheck
 pnpm --filter=@sanchay/web exec playwright test explore.smoke --project=chromium
 ```
 
-Expected: every `Disclosures`/`ExploreScreen`/`SearchScreen`/`FundScreen` RTL case passes; `typecheck` is clean across `apps/web` and `packages/features`; the Playwright smoke spec passes end to end against `SANCHAY_PROVIDER_MODE_FP=fake`.
+Expected: every `Disclosures`/`ExploreScreen`/`SearchScreen`/`FundScreen` RTL case passes, including the Invest link (RV-03-8); `typecheck` is clean across `apps/web` and `packages/features`; the Playwright smoke spec passes end to end against `SANCHAY_PROVIDER_MODE_FP=fake`.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write packages/features/src/explore packages/features/src/index.ts apps/web/src/client/routes.tsx apps/web/src/app/(app)/explore apps/web/src/app/(app)/funds apps/web/src/app/site apps/web/src/lib/legal-api.ts apps/web/e2e/explore.smoke.spec.ts apps/mobile/app/(tabs)/explore.tsx apps/mobile/app/funds
-pnpm --filter=@sanchay/features test -- explore
+pnpm exec biome check --write packages/features/src/explore packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/explore" "apps/web/src/app/(app)/funds" apps/web/src/app/site apps/web/src/lib/legal-api.ts apps/web/e2e/explore.smoke.spec.ts "apps/mobile/app/(tabs)/explore.tsx" apps/mobile/app/funds
+pnpm --filter=@sanchay/features test explore
+pnpm --filter=@sanchay/features typecheck
 pnpm --filter=@sanchay/web typecheck
 pnpm --filter=@sanchay/web exec playwright test explore.smoke --project=chromium
 pnpm lint
-git add packages/features/src/explore packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/explore" "apps/web/src/app/(app)/funds" apps/web/src/app/site apps/web/src/lib/legal-api.ts apps/web/e2e/explore.smoke.spec.ts "apps/mobile/app/(tabs)/explore.tsx" apps/mobile/app/funds
+git add packages/features/src/explore packages/features/src/index.ts packages/features/package.json pnpm-lock.yaml apps/web/src/client/routes.tsx "apps/web/src/app/(app)/explore" "apps/web/src/app/(app)/funds" apps/web/src/app/site apps/web/src/lib/legal-api.ts apps/web/e2e/explore.smoke.spec.ts "apps/mobile/app/(tabs)/explore.tsx" apps/mobile/app/funds
 git commit -m "feat(explore): add Explore, Search and Fund screens plus commission/grievance/account-deletion www pages" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -17000,12 +17752,15 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
 - **Create:** `apps/api/test/int/orders-seed.ts`, `apps/api/test/int/orders.int.test.ts`
 - **Create (migrations):** `orders_folios` (generated) and `orders_guard` (custom: attaches E4's `trg_consent_guard`, revokes UPDATE/DELETE on `order_events`)
 - **Modify:** `apps/api/src/integrations/fp/fp-transact.ts` (D3; real bodies for `createPurchase`/`updatePurchase`), `apps/api/src/integrations/fp/fp-read.ts` (D3; `purchases` gains `sourceRefId`), `apps/api/src/integrations/fp/fake/fake-fp.ts` (D4; `purchasePayload` also returns `consent: p.consent`, as FP's GET does)
-- **Create:** `apps/api/src/modules/orders/order-transitions.ts`
-- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'orders.purchase.submit'`, `'orders.purchase.advance'`, `'fp.reconcile.nonfinal'`), `apps/api/src/modules/platform/jobs/schedules.ts` (`fp.reconcile.nonfinal` every 5 minutes)
+- **Create:** `apps/api/src/modules/orders/order-transitions.ts`, `apps/api/src/modules/orders/order-transitions.test.ts` (RV-03-16: `isCancellable`, `orderNextStep`)
+- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'orders.purchase.submit': 'exclusive'`, `'orders.purchase.advance': 'stately'`, `'fp.reconcile.nonfinal': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (`fp.reconcile.nonfinal` every 5 minutes)
 - **Modify:** `apps/api/src/modules/platform/ids.ts` (append `'orders' | 'order_events' | 'folios'`)
-- **Modify:** `apps/api/src/config/env.ts`, `apps/api/src/config/env.test.ts`, `apps/api/test/int/env.ts`, `apps/api/.env.example` (`SANCHAY_PLATFORM_ARN`)
+- **Modify:** `apps/api/src/config/env.ts`, `apps/api/src/config/env.test.ts` (`base` and the closed-list pin), `apps/api/test/int/env.ts`, `apps/api/.env.example` (`SANCHAY_PLATFORM_ARN`)
+- **Modify (RV-03-15):** `apps/api/src/integrations/integrations.module.test.ts` (its `base`) and `apps/api/src/modules/platform/crypto.test.ts` (its `localRaw`): Plan 01 tests that build their own env gain `SANCHAY_PLATFORM_ARN`
 - **Modify:** `packages/contract/src/errors.ts` (append `ORDERS_DISABLED: 403`, `PROVIDER_OBJECT_ABSENT: 502`), `packages/app-core/src/errors/messages.ts` (copy for both, H-10), `packages/contract/src/index.ts` (`orders` key), `apps/api/openapi.json`
+- **Modify (RV-03-14):** `packages/contract/src/errors.test.ts` (Plan 01's exact count and per-status pins become "keeps Plan 01's 66 codes with their statuses", so no later task edits it)
 - **Modify:** `apps/api/src/app.module.ts` (`OrdersModule.forRoot(env)`)
+- **Not modified (RV-03-6):** `apps/api/package.json` and `pnpm-lock.yaml`. Plan 02 D3 already adds `"@sanchay/money": "workspace:*"` to `apps/api` (RV-02-28), so RV-03-6's conditional add has nothing to do.
 
 **Interfaces:**
 - **Prerequisites:** E1, E3, E4, E11 (a provisioned investor has `investors.fp_mf_investment_account_id` and `can_purchase`), Plan 02 D8 (`schemes`).
@@ -17013,10 +17768,12 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
 - **Consumes (this plan):** `ConsentEngine.create(exec, {…})` → `{challengeId, expiresAt}`, `useConsumed(challengeId, fn)`, `CONSENT_SUBJECT_JOBS`, `ConsentApprovedJobData` (E4); `expectNoPmWritesBeforeConsumed(app, challengeId)`, `expectBola(app, key, args)` (E4); `jobOf` (E1); `seedReadyInvestor` (E11).
 - **Produces:**
   - Tables `orders`, `order_events` (append-only), minimal `folios` (F4 extends it).
-  - `PurchaseService.createPurchase(input) → {orderId, challengeId, expiresAt}`, `.get`, `.list`, `.cancel`.
+  - `PurchaseService.createPurchase(input) → {orderId, challengeId, expiresAt}`, `.get` and `.list` (each row joined with its fund's name: `type OrderWithScheme = typeof orders.$inferSelect & { schemeName: string }`, RV-03-16), `.cancel`.
   - `orders.createPurchase` POST `/orders/purchases` [K]; `orders.list` GET `/orders`; `orders.get` GET `/orders/{id}`; `orders.cancel` POST `/orders/{id}/cancel` [K].
+  - `OrderSchema` (the `orders.get`/`orders.list` wire): `{id, type, status, schemeId, schemeName, amount, paymentMethod, failureCode, cancellable, next, createdAt}`. `cancellable` is gap-rulings GAP-01(b)'s server flag and `next` (`'PAYMENT' | 'DONE' | null`) is GAP-01 step 4's CNF-02 handoff (RV-03-16).
+  - `isCancellable(order: {status, submitAttempts})` and `orderNextStep(status)` in `order-transitions.ts`; `orders.cancel` and `toWire` share `isCancellable`.
   - `CONSENT_SUBJECT_JOBS.PURCHASE = 'orders.purchase.submit'` (registered at `orders.module.ts` load).
-  - Jobs (worker only): `orders.purchase.submit` (`ConsentApprovedJobData`), `orders.purchase.advance` (`{orderId, challengeId}`), `fp.reconcile.nonfinal` (every 5 min).
+  - Jobs (worker only): `orders.purchase.submit` (`ConsentApprovedJobData`), `orders.purchase.advance` (`{orderId, challengeId}`), `fp.reconcile.nonfinal` (every 5 min; a purchase its LOOKUP-ADOPT adopts gets `orders.purchase.advance` in the adopting transaction, RV-03-27).
   - `PurchaseAdvanceJob.checkout(consent, order, purchase)`: the H-2 step run at FP `pending`. In E20 it PATCHes the consent and returns `false` (order stays `CONFIRMING`). E21 extends it to create the payment and PATCH `confirmed`.
   - `toFpPurchaseView(raw)` in `fp-purchase.ts`.
 - **H-2 custom checkout** (research fp-api §3.2):
@@ -17033,6 +17790,12 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
   - Its tests used helpers that do not exist; they are rewritten.
   - E22 now sets `expected_nav_date`/`cutoff_class` through its own edit to `purchase.service.ts`.
   - D5 gains `UNDER_REVIEW → REJECTED` (`fp_review_failed`), since FP can fail an order straight out of review (Plan 02 errata RV-02-13).
+- Review fix (RV-03-6): `RUNTIME_CONFIG_DEFAULTS['orders.enabled']` is `false`, so every `createPurchase` in the suite threw ORDERS_DISABLED. `beforeAll` upserts `orders.enabled = true`, and the kill-switch case restores `true` rather than deleting the row (a delete falls back to the `false` default for every later case). This task is the first in Plan 03 to import `@sanchay/money` in `apps/api`; it adds the workspace dependency, which no hoisted link provides.
+- Review fix (RV-03-7): the consent PATCH normalises the mobile with `.replace(/\D/g, '').slice(-10)`. `.replace(/^\+?91/, '')` cut a 10-digit mobile starting with 91 (about one seeded mobile in ten) to 8 digits, so the PATCH test now asserts the exact mobile.
+- Review fix (RV-03-14): Plan 01's `packages/contract/src/errors.test.ts` pinned the catalogue exactly (`toHaveLength(66)` and a per-status count table), so this task's two codes turned CI's contract tests red, and Plan 04's F2 and F11 would have had to edit the pins again. This task, the first to append a code (no Plan 02 task appends one), replaces that test with "keeps the 66 Plan 01 codes with their HTTP statuses": a `toMatchObject` against Plan 01's code-to-status map, plus a 4xx/5xx range check on every code. A removed, renamed or re-statused Plan 01 code still fails it; an appended code needs no edit. Checked: Plan 01's test fails on these two codes (68 against 66), the new one passes with them and with F2's two more, and it fails when a Plan 01 status changes.
+- Review fix (RV-03-15): `SANCHAY_PLATFORM_ARN` is required, but Plan 01's `integrations.module.test.ts` (`base`) and `crypto.test.ts` (`localRaw`) build their own env objects, so `parseEnv` threw `EnvError` there from this task on (reproduced), the same gap RV-03-5 closed for `SANCHAY_API_ORIGIN`. Both gain `SANCHAY_PLATFORM_ARN: 'ARN-000000'`, the closed-list pin in `env.test.ts` gains the key, and Step 4 runs the three files.
+- Review fix (RV-03-16): E23's CNF-02 and E24's ORD-01/ORD-02 read `state`, `next`, `schemeName` and `cancellable`, and `OrderSchema` had none of them (the field is `status`). The wire gains the three that need the server: `schemeName` (joined from `schemes`, as F12 does for plans), `cancellable` (gap-rulings GAP-01(b) names it a server flag; `orders.cancel` and `toWire` share `isCancellable`) and `next` (GAP-01 step 4: PAYMENT at `AWAITING_PAYMENT`, DONE once the order is past payment or has ended, `null` while FP still places it). E23 and E24 read `status`.
+- Review fix (RV-03-27): a purchase `fp.reconcile.nonfinal` adopted went to UNDER_REVIEW with nothing queued to move it on (the submit job enqueues `orders.purchase.advance` only after a clean POST, and E21's `mf_purchase` handler starts at PROCESSING), so its H-2 checkout never ran. The adoption now enqueues `orders.purchase.advance` (`singletonKey` = order id) in the same transaction, and a new `orders.int.test.ts` case pins it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -17061,6 +17824,53 @@ describe('toFpPurchaseView', () => {
 
   it('nulls absent allotment fields', () => {
     expect(toFpPurchaseView({ id: 'mfp_2', old_id: 1, state: 'under_review' })).toMatchObject({ allottedUnits: null, folioNumber: null });
+  });
+});
+```
+
+`apps/api/src/modules/orders/order-transitions.test.ts` (RV-03-16; every D5 ORDER status appears once):
+```ts
+import { describe, expect, it } from 'vitest';
+import { isCancellable, orderNextStep } from './order-transitions.js';
+
+describe('orderNextStep (CNF-02 handoff, gap-rulings GAP-01 step 4)', () => {
+  it('waits while FP places the order, opens PAY-01 at AWAITING_PAYMENT, and the result after', () => {
+    for (const status of [
+      'CONSENT_PENDING',
+      'CONSENTED',
+      'SUBMITTING',
+      'UNDER_REVIEW',
+      'CONFIRMING',
+      'RECONCILING',
+    ]) {
+      expect([status, orderNextStep(status)]).toEqual([status, null]);
+    }
+    expect(orderNextStep('AWAITING_PAYMENT')).toBe('PAYMENT');
+    for (const status of [
+      'PAYMENT_PENDING',
+      'PROCESSING',
+      'UNITS_PENDING',
+      'SETTLED',
+      'FAILED',
+      'EXPIRED',
+      'REJECTED',
+      'REVERSED',
+      'CANCELLED',
+      'CONSENT_EXPIRED',
+      'SKIPPED',
+    ]) {
+      expect([status, orderNextStep(status)]).toEqual([status, 'DONE']);
+    }
+  });
+});
+
+describe('isCancellable (gap-rulings GAP-01(b))', () => {
+  it('is true only before the first submit attempt', () => {
+    expect(isCancellable({ status: 'CONSENT_PENDING', submitAttempts: 0 })).toBe(true);
+    expect(isCancellable({ status: 'CONSENTED', submitAttempts: 0 })).toBe(true);
+    expect(isCancellable({ status: 'CONSENTED', submitAttempts: 1 })).toBe(false);
+    expect(isCancellable({ status: 'UNDER_REVIEW', submitAttempts: 1 })).toBe(false);
+    expect(isCancellable({ status: 'CANCELLED', submitAttempts: 0 })).toBe(false);
   });
 });
 ```
@@ -17149,16 +17959,27 @@ import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
 import { expectBola } from './bola.js';
 import { expectNoPmWritesBeforeConsumed } from './consent-first.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
+import { webHeaders } from './http.js';
 import { jobOf } from './jobs.js';
 import { seedInvestableInvestor, seedScheme } from './orders-seed.js';
 
 let t: FpTestApp;
 const enqueued: Array<{ name: string; data: unknown }> = [];
 
+/** RV-03-6: orders are off by default (RUNTIME_CONFIG_DEFAULTS); the suite turns them on. */
+async function setOrdersEnabled(value: boolean): Promise<void> {
+  await t.db.db
+    .insert(appConfig)
+    .values({ key: 'orders.enabled', value })
+    .onConflictDoUpdate({ target: appConfig.key, set: { value } });
+}
+
 beforeAll(async () => {
   t = await bootFpTestApp();
+  await setOrdersEnabled(true);
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
 });
 afterAll(async () => {
@@ -17216,11 +18037,11 @@ describe('orders.createPurchase', () => {
   });
 
   it('kill switch: orders.enabled=false -> ORDERS_DISABLED', async () => {
-    await t.db.db.insert(appConfig).values({ key: 'orders.enabled', value: false }).onConflictDoUpdate({ target: appConfig.key, set: { value: false } });
+    await setOrdersEnabled(false);
     try {
       await expect(draftOrder()).rejects.toMatchObject({ code: 'ORDERS_DISABLED' });
     } finally {
-      await t.db.db.delete(appConfig).where(eq(appConfig.key, 'orders.enabled'));
+      await setOrdersEnabled(true); // RV-03-6: deleting the row would fall back to the false default
     }
   });
 
@@ -17254,7 +18075,8 @@ describe('orders.purchase.submit / advance (H-2)', () => {
     await advance(draft.orderId, data.challengeId);
     expect((await orderOf(draft.orderId))?.status).toBe('CONFIRMING');
     const fp = t.fakeFp.state.purchases.get(row?.fpOrderId as string);
-    expect(fp?.consent).toEqual({ isd_code: '91', mobile: expect.stringMatching(/^\d{10}$/), email: draft.investor.email });
+    // RV-03-7: the exact 10-digit mobile, also when it starts with 91.
+    expect(fp?.consent).toEqual({ isd_code: '91', mobile: draft.investor.mobile, email: draft.investor.email });
   });
 
   it('review failed -> REJECTED; the challenge is not reused', async () => {
@@ -17278,6 +18100,26 @@ describe('orders.purchase.submit / advance (H-2)', () => {
     expect(row?.fpOrderId).toMatch(/^mfp_/);
     expect(row?.status).toBe('UNDER_REVIEW');
     expect(t.fakeFp.calls({ op: 'purchase.create' })).toHaveLength(createsBefore + 1);
+  });
+
+  it('the adopted purchase rejoins the H-2 saga: orders.purchase.advance, keyed by the order id (RV-03-27)', async () => {
+    const draft = await draftOrder();
+    const data = await approve(draft);
+    t.fakeFp.script('purchase.create', 'timeout');
+    await submit(data);
+    expect(enqueued.map((j) => j.name)).not.toContain('orders.purchase.advance');
+    await t.app.get(ReconcileNonfinalJob).handle(jobOf('fp.reconcile.nonfinal', {}));
+    expect(t.app.get(Jobs).enqueue).toHaveBeenCalledWith(
+      expect.anything(),
+      'orders.purchase.advance',
+      { orderId: draft.orderId, challengeId: data.challengeId },
+      { singletonKey: draft.orderId },
+    );
+    // That job takes the adopted purchase through the H-2 checkout: at FP pending it PATCHes the consent.
+    const fpOrderId = (await orderOf(draft.orderId))?.fpOrderId as string;
+    t.fakeFp.advance(fpOrderId, 'pending');
+    await advance(draft.orderId, data.challengeId);
+    expect(t.fakeFp.state.purchases.get(fpOrderId)?.consent).toEqual({ isd_code: '91', mobile: draft.investor.mobile, email: draft.investor.email });
   });
 
   it('absent at FP twice, 10 minutes apart -> FAILED with PROVIDER_OBJECT_ABSENT', async () => {
@@ -17355,15 +18197,47 @@ describe('guards', () => {
     await expectBola(t, 'orders.cancel', { id: draft.orderId });
   });
 });
+
+describe('orders.get wire for CNF-02 and ORD-02 (RV-03-16)', () => {
+  async function wireOf(draft: Awaited<ReturnType<typeof draftOrder>>) {
+    const res = await t.app.inject({
+      method: 'GET',
+      url: `/api/v1/orders/${draft.orderId}`,
+      headers: webHeaders({ cookies: draft.investor.cookies }),
+    });
+    expect(res.statusCode).toBe(200);
+    return res.json();
+  }
+
+  it('names the fund, offers the cancel before submission and gives CNF-02 no next step yet', async () => {
+    const draft = await draftOrder();
+    expect(await wireOf(draft)).toMatchObject({
+      id: draft.orderId,
+      status: 'CONSENT_PENDING',
+      schemeName: 'Test Flexi Cap Fund - Regular Growth',
+      cancellable: true,
+      next: null,
+    });
+    await submit(await approve(draft));
+    expect(await wireOf(draft)).toMatchObject({ status: 'UNDER_REVIEW', cancellable: false, next: null });
+  });
+
+  it('a cancelled order is DONE for CNF-02 and no longer cancellable', async () => {
+    const draft = await draftOrder();
+    await t.app.get(PurchaseService).cancel(draft.investor.investorId, draft.orderId);
+    expect(await wireOf(draft)).toMatchObject({ status: 'CANCELLED', cancellable: false, next: 'DONE' });
+  });
+});
 ```
 
 - [ ] **Step 2: Run them to confirm they fail**
 
+PowerShell and Git Bash (the same commands):
 ```
-pnpm --filter=@sanchay/api test -- fp-purchase
-pnpm --filter=@sanchay/api test:int -- orders
+pnpm --filter=@sanchay/api test fp-purchase order-transitions
+pnpm --filter=@sanchay/api test:int orders
 ```
-Expected: `Cannot find module './fp-purchase.js'` and `.../orders/orders.schema.js`.
+Expected: `Cannot find module './fp-purchase.js'`, `'./order-transitions.js'` and `.../orders/orders.schema.js`.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -17596,6 +18470,37 @@ export async function moveOrder(
   await exec.update(orders).set({ ...values, status: to }).where(eq(orders.id, order.id));
   await exec.insert(orderEvents).values({ orderId: order.id, fromStatus: order.status, toStatus: to, trigger });
 }
+
+/**
+ * gap-rulings GAP-01(b): an order is cancellable while no FP object can exist, before the first submit
+ * attempt. `PurchaseService.cancel` enforces it and `orders.get` reports it as `cancellable` (RV-03-16).
+ */
+export function isCancellable(order: { status: string; submitAttempts: number }): boolean {
+  return (
+    order.status === 'CONSENT_PENDING' ||
+    (order.status === 'CONSENTED' && order.submitAttempts === 0)
+  );
+}
+
+/** The statuses in which FP is still placing the order: CNF-02 keeps polling (GAP-01 step 4). */
+const STILL_PLACING: ReadonlySet<string> = new Set([
+  'CONSENT_PENDING',
+  'CONSENTED',
+  'SUBMITTING',
+  'UNDER_REVIEW',
+  'CONFIRMING',
+  'RECONCILING',
+]);
+
+/**
+ * CNF-02's handoff, `orders.get`'s `next` (GAP-01 step 4; RV-03-16): PAY-01 once FP accepted the
+ * purchase (`AWAITING_PAYMENT`), the result once the order is past payment or has ended, and `null`
+ * while FP is still placing it. MANDATE belongs to plans (Plan 04), never to an order.
+ */
+export function orderNextStep(status: string): 'PAYMENT' | 'DONE' | null {
+  if (status === 'AWAITING_PAYMENT') return 'PAYMENT';
+  return STILL_PLACING.has(status) ? null : 'DONE';
+}
 ```
 (Add `apps/api/src/modules/orders/order-transitions.ts` to this task's Create list.)
 
@@ -17616,8 +18521,11 @@ import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
 import { newId } from '../platform/ids.js';
 import { RuntimeConfig } from '../platform/runtime-config.js';
-import { moveOrder } from './order-transitions.js';
+import { isCancellable, moveOrder } from './order-transitions.js';
 import { type InitiatedVia, ORDER_AUDIT_ACTIONS, type OrderPaymentMethod, orderEvents, orders } from './orders.schema.js';
+
+/** An order row with its fund's display name, for ORD-01/ORD-02 (RV-03-16). */
+export type OrderWithScheme = typeof orders.$inferSelect & { schemeName: string };
 
 export interface CreatePurchaseInput {
   investorId: string;
@@ -17727,20 +18635,28 @@ export class PurchaseService {
     });
   }
 
-  async get(investorId: string, orderId: string) {
-    const [row] = await this.dbh.db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.investorId, investorId)));
+  async get(investorId: string, orderId: string): Promise<OrderWithScheme> {
+    const [row] = await this.dbh.db
+      .select({ order: orders, schemeName: schemes.name })
+      .from(orders)
+      .innerJoin(schemes, eq(schemes.id, orders.schemeId))
+      .where(and(eq(orders.id, orderId), eq(orders.investorId, investorId)));
     if (row === undefined) throw new AppError('NOT_FOUND');
-    return row;
+    return { ...row.order, schemeName: row.schemeName };
   }
 
-  async list(investorId: string) {
-    return this.dbh.db.select().from(orders).where(eq(orders.investorId, investorId));
+  async list(investorId: string): Promise<OrderWithScheme[]> {
+    const rows = await this.dbh.db
+      .select({ order: orders, schemeName: schemes.name })
+      .from(orders)
+      .innerJoin(schemes, eq(schemes.id, orders.schemeId))
+      .where(eq(orders.investorId, investorId));
+    return rows.map((r) => ({ ...r.order, schemeName: r.schemeName }));
   }
 
   async cancel(investorId: string, orderId: string): Promise<{ ok: true }> {
     const row = await this.get(investorId, orderId);
-    const cancellable = row.status === 'CONSENT_PENDING' || (row.status === 'CONSENTED' && row.submitAttempts === 0);
-    if (!cancellable) throw new AppError('ORDER_STATE_INVALID');
+    if (!isCancellable(row)) throw new AppError('ORDER_STATE_INVALID');
     await this.dbh.db.transaction(async (tx) => {
       await moveOrder(tx, row, 'CANCELLED', 'local_cancel', { finalAt: this.clock.now() });
       await this.audit.record(tx, {
@@ -17941,7 +18857,7 @@ export class PurchaseAdvanceJob {
   protected async checkout(consent: ConsumedConsent, order: OrderRow, purchase: FpPurchaseView): Promise<boolean> {
     const [investor] = await this.dbh.db.select().from(investors).where(eq(investors.id, order.investorId));
     if (investor === undefined) throw new AppError('NOT_FOUND');
-    const mobile = this.accounts.decryptMobile(investor).replace(/^\+?91/, '');
+    const mobile = this.accounts.decryptMobile(investor).replace(/\D/g, '').slice(-10); // RV-03-7
     const email = this.accounts.decryptEmail(investor);
     if (!purchase.hasConsent) {
       await this.fp.updatePurchase({ id: purchase.id, consent: { isd_code: '91', mobile, ...(email === null ? {} : { email }) } }, consent);
@@ -17959,6 +18875,7 @@ import { DB, type DbHandle } from '../../db/client.js';
 import { FpRead } from '../../integrations/fp/fp-read.js';
 import { CLOCK, type Clock, MINUTE } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
+import { Jobs } from '../platform/jobs/jobs.service.js';
 import { toFpPurchaseView } from './fp-purchase.js';
 import { moveOrder } from './order-transitions.js';
 import { orderEvents, orders } from './orders.schema.js';
@@ -17968,6 +18885,9 @@ const MISS_TRIGGER = 'fp.reconcile.nonfinal.miss';
 /**
  * Worker only, every 5 minutes. LOOKUP-ADOPT for RECONCILING orders: list by source_ref_id (= order id) and
  * adopt the one FP object; absent at two checks at least 10 minutes apart -> FAILED(PROVIDER_OBJECT_ABSENT).
+ * The adopted order goes back to UNDER_REVIEW and, in the same transaction, to orders.purchase.advance, which
+ * runs the H-2 checkout from there; nothing else would, since the submit job enqueues it only after a clean
+ * POST (RV-03-27).
  */
 @Injectable()
 @JobHandler('fp.reconcile.nonfinal')
@@ -17976,6 +18896,7 @@ export class ReconcileNonfinalJob {
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(FpRead) private readonly fpRead: FpRead,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(Jobs) private readonly jobs: Jobs,
   ) {}
 
   async handle(_job: Job<'fp.reconcile.nonfinal'>): Promise<void> {
@@ -17986,7 +18907,13 @@ export class ReconcileNonfinalJob {
       const found = items[0];
       if (found !== undefined) {
         const purchase = toFpPurchaseView(found);
-        await moveOrder(db, order, 'UNDER_REVIEW', 'lookup_adopt_mapped', { fpOrderId: purchase.id, fpOldId: purchase.oldId, fpState: purchase.state });
+        await db.transaction(async (tx) => {
+          await moveOrder(tx, order, 'UNDER_REVIEW', 'lookup_adopt_mapped', { fpOrderId: purchase.id, fpOldId: purchase.oldId, fpState: purchase.state });
+          // stately, keyed by the order id (R-32): a null return means an advance job is already queued for it.
+          if (order.consentChallengeId !== null) {
+            await this.jobs.enqueue(tx, 'orders.purchase.advance', { orderId: order.id, challengeId: order.consentChallengeId }, { singletonKey: order.id });
+          }
+        });
         continue;
       }
       const [lastMiss] = await db
@@ -18001,13 +18928,19 @@ export class ReconcileNonfinalJob {
         continue;
       }
       if (lastMiss === undefined) {
-        await db.insert(orderEvents).values({ orderId: order.id, fromStatus: order.status, toStatus: order.status, trigger: MISS_TRIGGER, occurredAt: now });
+        await db.insert(orderEvents).values({
+          orderId: order.id,
+          fromStatus: order.status,
+          toStatus: order.status,
+          trigger: MISS_TRIGGER,
+          occurredAt: now,
+        });
       }
     }
   }
 }
 ```
-(The adopted order re-enters `UNDER_REVIEW`; the E21 `mf_purchase` event handler and the next `orders.purchase.advance` take it from there. `RECONCILING → UNDER_REVIEW` is one of D5's `RECONCILING_EXITS`; if D5's list lacks it, add it there — Plan 02 errata RV-02-13.)
+(The adopted order re-enters `UNDER_REVIEW`, and the adopting transaction enqueues `orders.purchase.advance`, which takes it through the H-2 checkout; E21's `mf_purchase` event handler acts only from `PROCESSING` on (RV-03-27). `RECONCILING → UNDER_REVIEW` is one of D5's `RECONCILING_EXITS`; if D5's list lacks it, add it there — Plan 02 errata RV-02-13.)
 
 `packages/contract/src/orders.ts`:
 ```ts
@@ -18036,9 +18969,15 @@ export const OrderSchema = z.object({
   type: z.string(),
   status: z.string(),
   schemeId: z.uuid(),
+  /** The fund's display name (ORD-01/ORD-02), joined from schemes (RV-03-16). */
+  schemeName: z.string(),
   amount: moneyWireSchema.nullable(),
   paymentMethod: z.string().nullable(),
   failureCode: z.string().nullable(),
+  /** ORD-02 may offer "Cancel order": the rule `orders.cancel` applies (gap-rulings GAP-01(b)). */
+  cancellable: z.boolean(),
+  /** CNF-02's handoff (GAP-01 step 4): PAYMENT at AWAITING_PAYMENT, DONE once past payment or ended. */
+  next: z.enum(['PAYMENT', 'DONE']).nullable(),
   createdAt: z.iso.datetime(),
 });
 
@@ -18071,16 +19010,32 @@ import { requireAuth } from '../identity/request-auth.js';
 import { requireIdempotency } from '../platform/idempotency.middleware.js';
 import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
+import { isCancellable, orderNextStep } from './order-transitions.js';
 import { PurchaseService } from './purchase.service.js';
 
-const toWire = (row: { id: string; type: string; status: string; schemeId: string; amount: string | null; paymentMethod: string | null; failureCode: string | null; createdAt: Date }) => ({
+/** `schemeName`, `cancellable` and `next` serve CNF-02 and ORD-01/ORD-02 (RV-03-16). */
+const toWire = (row: {
+  id: string;
+  type: string;
+  status: string;
+  schemeId: string;
+  schemeName: string;
+  amount: string | null;
+  paymentMethod: string | null;
+  failureCode: string | null;
+  submitAttempts: number;
+  createdAt: Date;
+}) => ({
   id: row.id,
   type: row.type,
   status: row.status,
   schemeId: row.schemeId,
+  schemeName: row.schemeName,
   amount: row.amount,
   paymentMethod: row.paymentMethod,
   failureCode: row.failureCode,
+  cancellable: isCancellable(row),
+  next: orderNextStep(row.status),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -18157,36 +19112,137 @@ export class OrdersModule {
 ```
 
 Key-level edits:
-- `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'orders.purchase.submit'`, `'orders.purchase.advance'`, `'fp.reconcile.nonfinal'`.
+- `apps/api/src/modules/platform/jobs/job-registry.ts`: append to `JOB_POLICIES` (R-32, RV-03-24):
+```ts
+  'orders.purchase.submit': 'exclusive', // key: the challenge id (approve); POSTs the purchase (E20)
+  'orders.purchase.advance': 'stately', // key: the order id; polls FP and re-enqueues itself (E20)
+  'fp.reconcile.nonfinal': 'stately', // every 5 minutes, keyless: one sweep queued and one running (E20, F7)
+```
 - `apps/api/src/modules/platform/jobs/schedules.ts` (inside `registerSchedules`): `await boss.schedule('fp.reconcile.nonfinal', '*/5 * * * *', {}, { tz, key: 'fp-reconcile-nonfinal' });`
 - `apps/api/src/modules/platform/ids.ts`: append `'orders' | 'order_events' | 'folios'`.
-- `apps/api/src/config/env.ts`: `SANCHAY_PLATFORM_ARN: z.string().regex(/^ARN-\d+$/)` (required); `apps/api/test/int/env.ts` and `env.test.ts`'s `base`: `SANCHAY_PLATFORM_ARN: 'ARN-000000'`; `.env.example`: `SANCHAY_PLATFORM_ARN=ARN-000000`.
+- `apps/api/src/config/env.ts`: `SANCHAY_PLATFORM_ARN: z.string().regex(/^ARN-\d+$/)` (required); `apps/api/test/int/env.ts` and `env.test.ts`'s `base`: `SANCHAY_PLATFORM_ARN: 'ARN-000000'`; `env.test.ts`'s closed-list pin: `'SANCHAY_PLATFORM_ARN'` in sorted position, right after `'SANCHAY_PILOT_INVITE_ONLY'` (D7; RV-03-15); `.env.example`: `SANCHAY_PLATFORM_ARN=ARN-000000`.
+- `apps/api/src/integrations/integrations.module.test.ts` (its `base`) and `apps/api/src/modules/platform/crypto.test.ts` (its `localRaw`), RV-03-15: one line each, right after E2's `SANCHAY_API_ORIGIN` line. Both build their own env, so without it `parseEnv` throws `EnvError` there:
+  ```ts
+    SANCHAY_PLATFORM_ARN: 'ARN-000000',
+  ```
 - `packages/contract/src/errors.ts`: append `ORDERS_DISABLED: 403` and `PROVIDER_OBJECT_ABSENT: 502`; `packages/app-core/src/errors/messages.ts`: `['ORDERS_DISABLED', 'New investments are paused right now. Please try again later.']`, `['PROVIDER_OBJECT_ABSENT', 'We could not confirm this order with the fund house. No money has moved.']` (the C6 all-codes test stays green).
+- `packages/contract/src/errors.test.ts` (RV-03-14): add this constant above the `describe`, and replace Plan 01's first test, "has exactly the 66 MVP codes, bucketed by HTTP status", with the test after it. The other five tests stay.
+  ```ts
+  /** Plan 01's 66 codes and their HTTP statuses (design §D.4, H-10). ERROR_CATALOGUE is append-only. */
+  const PLAN_01_CODES = {
+    VALIDATION_FAILED: 400,
+    AUTH_REQUIRED: 401,
+    SESSION_EXPIRED: 401,
+    OTP_INVALID: 401,
+    OTP_EXPIRED: 401,
+    OTP_LOCKED: 401,
+    STEP_UP_REQUIRED: 401,
+    FORBIDDEN: 403,
+    ORIGIN_REJECTED: 403,
+    FEATURE_DISABLED: 403,
+    PILOT_INVITE_REQUIRED: 403,
+    NOT_FOUND: 404,
+    CONFLICT_VERSION: 409,
+    IDEMPOTENCY_IN_PROGRESS: 409,
+    ORDER_STATE_INVALID: 409,
+    SCHEME_NOT_ORDERABLE: 409,
+    ONBOARDING_INCOMPLETE: 409,
+    PURCHASE_BLOCKED: 409,
+    EXIT_BLOCKED: 409,
+    KYC_NOT_VALIDATED: 409,
+    BANK_NOT_VERIFIED: 409,
+    MANDATE_REQUIRED: 409,
+    MANDATE_NOT_APPROVED: 409,
+    CONSENT_REQUIRED: 409,
+    CONSENT_EXPIRED: 409,
+    CONSENT_MISMATCH: 409,
+    CONSENT_ALREADY_USED: 409,
+    CONSENT_DESTINATION_UNAVAILABLE: 409,
+    SECOND_FACTOR_REQUIRED: 409,
+    PAYMENT_ATTEMPT_LIVE: 409,
+    PAYMENT_ALREADY_SUCCEEDED: 409,
+    REDEMPTION_CONFLICT_PENDING: 409,
+    PLAN_ACTIVE_ON_HOLDING: 409,
+    FOLIO_RECONCILIATION_REQUIRED: 409,
+    COOLING_OFF_ACTIVE: 409,
+    SERVICE_REQUEST_OPEN: 409,
+    DECLARATION_OUTDATED: 409,
+    PLAN_NOT_MODIFIABLE: 409,
+    SUITABILITY_CHANGED: 409,
+    RISK_PROFILE_EXPIRED: 409,
+    RISK_PROFILE_STALE: 409,
+    IDEMPOTENCY_KEY_REUSED: 422,
+    AMOUNT_BELOW_MIN: 422,
+    AMOUNT_ABOVE_MAX: 422,
+    AMOUNT_NOT_MULTIPLE: 422,
+    UNITS_PRECISION: 422,
+    INSUFFICIENT_REDEEMABLE: 422,
+    ELSS_LOCKED: 422,
+    NAV_UNAVAILABLE: 422,
+    MANDATE_LIMIT_EXCEEDED: 422,
+    UPI_LIMIT_EXCEEDED: 422,
+    SIP_DAY_INVALID: 422,
+    NOMINATION_INVALID: 422,
+    ELIGIBILITY_BLOCKED: 422,
+    CLIENT_IP_UNSUPPORTED: 422,
+    CAS_PASSWORD_INVALID: 422,
+    CAS_PAN_MISMATCH: 422,
+    CAS_UNSUPPORTED: 422,
+    APP_VERSION_UNSUPPORTED: 426,
+    IDEMPOTENCY_KEY_REQUIRED: 428,
+    RATE_LIMITED: 429,
+    OTP_COOLDOWN: 429,
+    INTERNAL: 500,
+    PROVIDER_REJECTED: 502,
+    PROVIDER_UNAVAILABLE: 503,
+    SMS_UNAVAILABLE: 503,
+  } as const;
+  ```
+  ```ts
+    it('keeps the 66 Plan 01 codes with their HTTP statuses; later plans only append (RV-03-14)', () => {
+      // Append-only (errors.ts): no Plan 01 code may be removed, renamed or re-statused. Codes that later
+      // tasks append (E20, F2, ...) need no edit here.
+      expect(ERROR_CATALOGUE).toMatchObject(PLAN_01_CODES);
+      for (const [code, status] of Object.entries(ERROR_CATALOGUE)) {
+        expect([code, status >= 400 && status <= 599]).toEqual([code, true]);
+      }
+    });
+  ```
 - `packages/contract/src/index.ts`: add `orders: ordersContract`; regenerate `apps/api/openapi.json`.
 - `apps/api/src/app.module.ts`: `OrdersModule.forRoot(env)`.
+- `apps/api/package.json`: nothing to do. Plan 02 D3 already adds `"@sanchay/money": "workspace:*"` (RV-02-28), which RV-03-6's conditional step checked for.
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
+PowerShell and Git Bash (the same commands). The first line rebuilds the `dist` of `contract` (the `orders` key, the two codes) and `domain`, which `apps/api`, `db:generate` and the OpenAPI generator read (RV-03-19):
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=orders_folios
 pnpm --filter=@sanchay/api db:generate --custom --name=orders_guard
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- fp-purchase
-pnpm --filter=@sanchay/api test:int -- orders
+pnpm --filter=@sanchay/contract test
+pnpm --filter=@sanchay/api test fp-purchase order-transitions
+pnpm --filter=@sanchay/api test src/config/env.test.ts src/integrations/integrations.module.test.ts src/modules/platform/crypto.test.ts
+pnpm --filter=@sanchay/api test:int orders
 pnpm --filter=@sanchay/app-core test
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 ```
-Expected: 2/2 unit tests; `orders.int.test.ts` 16/16; the app-core all-codes test green; `openapi.json` clean after regeneration.
+Expected: `fp-purchase` 2/2 and `order-transitions` 2/2; the three env files green, with `SANCHAY_PLATFORM_ARN` in every fixture and in the closed-list pin (RV-03-15); the contract suite green with the relaxed `errors.test.ts` (RV-03-14); `orders.int.test.ts` 19/19 (the two RV-03-16 wire cases and the RV-03-27 adoption case included); the app-core all-codes test green; the B10 drift test passes against the regenerated `openapi.json`, which Step 5 commits.
 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fp-read.ts apps/api/src/modules/platform apps/api/src/config apps/api/src/app.module.ts apps/api/test/int packages/contract/src packages/app-core/src/errors/messages.ts
+pnpm exec biome check --write apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fp-read.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/integrations/integrations.module.test.ts apps/api/src/modules/platform apps/api/src/config apps/api/src/app.module.ts apps/api/test/int packages/contract/src packages/app-core/src/errors/messages.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- orders
+pnpm --filter=@sanchay/contract test
+pnpm --filter=@sanchay/api test fp-purchase order-transitions
+pnpm --filter=@sanchay/api test src/config/env.test.ts src/integrations/integrations.module.test.ts src/modules/platform/crypto.test.ts
+pnpm --filter=@sanchay/api test:int orders
+pnpm --filter=@sanchay/api test openapi
 pnpm lint
-git add apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fp-read.ts apps/api/src/modules/platform/jobs apps/api/src/modules/platform/ids.ts apps/api/src/config apps/api/src/app.module.ts apps/api/.env.example apps/api/drizzle apps/api/openapi.json apps/api/test/int/env.ts apps/api/test/int/orders-seed.ts apps/api/test/int/orders.int.test.ts packages/contract/src packages/app-core/src/errors/messages.ts
+git add apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fp-read.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/integrations/integrations.module.test.ts apps/api/src/modules/platform/jobs apps/api/src/modules/platform/ids.ts apps/api/src/modules/platform/crypto.test.ts apps/api/src/config apps/api/src/app.module.ts apps/api/.env.example apps/api/drizzle apps/api/openapi.json apps/api/test/int/env.ts apps/api/test/int/orders-seed.ts apps/api/test/int/orders.int.test.ts packages/contract/src packages/app-core/src/errors/messages.ts
 git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkout to consent PATCH, LOOKUP-ADOPT reconcile (E20)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -18199,7 +19255,7 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
 - **Create (migration, generated):** `payment_attempts`
 - **Modify:** `apps/api/src/integrations/fp/fp-transact.ts` (D3; real `createPayment` body), `apps/api/src/integrations/fp/fake/fake-fp.ts` (D4; `payment.get`)
 - **Modify:** `apps/api/src/modules/orders/purchase-advance.job.ts` (E20; `checkout` creates the payment and PATCHes `confirmed`), `apps/api/src/modules/orders/orders.module.ts` (import `PaymentsModule`)
-- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'payments.poll'`), `apps/api/src/modules/platform/ids.ts` (append `'payment_attempts'`), `apps/api/src/modules/platform/audit.service.ts` (append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED`)
+- **Modify:** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'payments.poll': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/ids.ts` (append `'payment_attempts'`), `apps/api/src/modules/platform/audit.service.ts` (append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED`)
 - **Modify:** `packages/contract/src/index.ts` (`payments` key), `apps/api/openapi.json`, `apps/api/src/app.module.ts` (`PaymentsModule.forRoot(env)`), `apps/api/test/int/infra-routes.ts` + `infra-routes.int.test.ts` (drop the `pg/return` stand-in; the real route replaces it)
 
 **Interfaces:**
@@ -18210,11 +19266,12 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
   - `PaymentsService.createAttempt(consent, order) → {attemptId, returnRef}` (inside `useConsumed` only), `resolveReturn(ref) → redirect path`, `get(investorId, attemptId)`.
   - `PurchaseAdvanceJob.checkout` (E20's extension point): PATCH consent → `createAttempt` → PATCH `state: 'confirmed'` → returns `true` (order → `AWAITING_PAYMENT`).
   - Raw route `GET|POST /api/v1/pg/return/{ref}` (`@InfraRoute('API_HOST')`): single-use, 30-minute ref (hash stored, never the ref); marks the attempt `PENDING`, the order `PAYMENT_PENDING`, enqueues `payments.poll`, and returns 303 to `/app/r/payment?ref=<attemptId>` (APP) or `https://app.sanchay.in/r/payment?ref=<attemptId>` (WEB). The postback body is never read (research fp-api §4.1: never trust a postback).
-  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, 2 m, 5 m, 15 m while pending.
+  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, 2 m, 5 m, 15 m while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends, at most 15 minutes later.
   - FP event handlers `payment` and `mf_purchase` registered in E1's `FP_EVENT_HANDLERS` at `payments.module.ts` load (they re-fetch and apply the same transitions; idempotent).
   - `payments.get` GET `/payments/{attemptId}`.
   - Emails via `Notify.enqueue`: `ORDER_PLACED` when an attempt succeeds, `ORDER_FAILED` on FP `failed`, `REFUND_IN_PROGRESS` when a payment fails after success (late auth reversal).
 - Review fix: the draft wrote a second FP client (`fp-pay.ts`) over an invented `FpGateway`, used `@JobHandler(…, {retryBackoffSeconds})`, a `fakeConsumedConsent()` test helper and FakeFp scripts that do not exist, and several tests asserted nothing. This version fills D3's `createPayment` and follows the custom-checkout order (payment created before `confirmed`). Its tests drive the real saga end to end on FakeFp.
+- Review fix (RV-03-6, RV-03-7): the suite's `beforeAll` upserts `app_config` `orders.enabled = true` (the default is `false`, so `checkedOut()` failed with ORDERS_DISABLED), and `checkout` normalises the consent mobile with `.replace(/\D/g, '').slice(-10)`, as E20 does.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -18233,6 +19290,7 @@ import { paymentAttempts } from '../../src/modules/payments/payments.schema.js';
 import { LAST_RETURN_REF_FOR_TESTS } from '../../src/modules/payments/payments.service.js';
 import { handleMfPurchaseEvent } from '../../src/modules/payments/fp-events.js';
 import { FpRead } from '../../src/integrations/fp/fp-read.js';
+import { appConfig } from '../../src/modules/platform/kernel.schema.js';
 import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
 import { expectBola } from './bola.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
@@ -18244,8 +19302,14 @@ const enqueued: Array<{ name: string; data: unknown }> = [];
 
 beforeAll(async () => {
   t = await bootFpTestApp();
+  // RV-03-6: orders are off by default (RUNTIME_CONFIG_DEFAULTS), and checkedOut() drafts a purchase.
+  await t.db.db
+    .insert(appConfig)
+    .values({ key: 'orders.enabled', value: true })
+    .onConflictDoUpdate({ target: appConfig.key, set: { value: true } });
   vi.spyOn(t.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
+    return 'job-id';
   });
 });
 afterAll(async () => {
@@ -18888,7 +19952,7 @@ export class PaymentsModule implements OnModuleInit {
   protected async checkout(consent: ConsumedConsent, order: OrderRow, purchase: FpPurchaseView): Promise<boolean> {
     const [investor] = await this.dbh.db.select().from(investors).where(eq(investors.id, order.investorId));
     if (investor === undefined) throw new AppError('NOT_FOUND');
-    const mobile = this.accounts.decryptMobile(investor).replace(/^\+?91/, '');
+    const mobile = this.accounts.decryptMobile(investor).replace(/\D/g, '').slice(-10); // RV-03-7
     const email = this.accounts.decryptEmail(investor);
     if (!purchase.hasConsent) {
       await this.fp.updatePurchase({ id: purchase.id, consent: { isd_code: '91', mobile, ...(email === null ? {} : { email }) } }, consent);
@@ -18900,7 +19964,7 @@ export class PaymentsModule implements OnModuleInit {
 ```
 (Add `@Inject(PaymentsService) private readonly payments: PaymentsService` to the constructor; `orders.module.ts` imports `PaymentsModule.forRoot(env)`.)
 
-Key-level edits: `job-registry.ts` append `'payments.poll'`; `ids.ts` append `'payment_attempts'`; `audit.service.ts` append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED` to `AUDIT_ACTIONS`; `packages/contract/src/index.ts` add `payments: paymentsContract`; `app.module.ts` add `PaymentsModule.forRoot(env)`; `test/int/infra-routes.ts` removes its `pg/return` stand-in handlers and `infra-routes.int.test.ts` drops those rows (the real controller replaces them).
+Key-level edits: `job-registry.ts` append `'payments.poll': 'stately', // key: the payment attempt id; polls FP and re-enqueues itself (E21)` to `JOB_POLICIES` (R-32); `ids.ts` append `'payment_attempts'`; `audit.service.ts` append `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_SUCCEEDED`, `REFUND_STATUS_CHANGED` to `AUDIT_ACTIONS`; `packages/contract/src/index.ts` add `payments: paymentsContract`; `app.module.ts` add `PaymentsModule.forRoot(env)`; `test/int/infra-routes.ts` removes its `pg/return` stand-in handlers and `infra-routes.int.test.ts` drops those rows (the real controller replaces them).
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
@@ -18911,7 +19975,7 @@ pnpm --filter=@sanchay/api test:int -- payments orders infra-routes fp-webhooks
 pnpm --filter=@sanchay/api openapi
 git diff --exit-code apps/api/openapi.json
 ```
-Expected: `payments.int.test.ts` 9/9; E20's `orders.int.test.ts` still 16/16 (its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
+Expected: `payments.int.test.ts` 9/9; E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
 
 - [ ] **Step 5: Commit**
 
@@ -18938,19 +20002,20 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `packages/test-fixtures/src/golden/stamp-duty.json`
   - `apps/api/src/modules/orders/quote.service.ts`
   - `apps/api/src/modules/orders/quote.service.test.ts`
+  - `apps/api/src/modules/orders/quote.adapters.ts` (RV-03-3: the seven port adapters and `schemeCutoffClass`)
 - Modify:
   - `packages/domain/src/index.ts` (2 appended `export * from` lines)
   - `packages/domain/package.json` (add the `@sanchay/test-fixtures` devDependency if E16 has not)
   - `packages/test-fixtures/src/index.ts` (append `CUTOFF_MATRIX`/`STAMP_DUTY_VECTORS`; keep E16's `RETURNS_VECTORS`) and `packages/test-fixtures/test/golden.test.ts` (append this task's `describe` blocks to E16's file)
-  - `apps/api/src/modules/orders/purchase.service.ts` (E20; `createPurchase` calls `QuoteService.quotePurchase` before its transaction and stores `expectedNavDate`/`cutoffClass` on the order)
-  - `packages/contract/src/orders.ts` (append the `quotePurchase` procedure; created by E20 — see Interfaces)
-  - `apps/api/src/modules/orders/orders.router.ts` (append the `quotePurchase` handler; created by E20)
+  - `apps/api/src/modules/orders/purchase.service.ts` (E20; `createPurchase` stamps `cutoffClass` and `expectedNavDate` from `QuoteService.navDateFor` after E20's own checks; RV-03-3)
+  - `packages/contract/src/orders.ts` (append the `quotePurchase` procedure; created by E20 — see Interfaces) and `apps/api/openapi.json` (regenerated, B10; RV-03-19)
+  - `apps/api/src/modules/orders/orders.router.ts` (append the `quotePurchase` handler and its three injections; created by E20)
   - `apps/api/src/modules/orders/orders.module.ts` (register `QuoteService` and its port providers; created by E20)
 - Test:
   - `apps/api/test/int/orders-quote.int.test.ts`
 
 **Interfaces:**
-- Prerequisites: **E20** (creates `apps/api/src/modules/orders/{orders.module.ts, orders.router.ts}` and `packages/contract/src/orders.ts`, into which this task appends `quotePurchase`; E20's own `orders.createPurchase` in turn calls `QuoteService.quotePurchase` internally — see the deviation note below). **E2** (`meta.appConfig`, NAV-age grading policy). Plan 02 **D8–D10** (catalogue schemes, `plan_txn_rules`, `NavService.latest`). **E9** (`Suitability.check`). Plan 01 **B9** (`bootTestApp`, `TestApp`), **B7** (grants).
+- Prerequisites: **E20** (creates `apps/api/src/modules/orders/{orders.module.ts, orders.router.ts}` and `packages/contract/src/orders.ts`, into which this task appends `quotePurchase`; E20's own `orders.createPurchase` takes its NAV date from `QuoteService.navDateFor` — see the review fix below). **E2** (`meta.appConfig`, NAV-age grading policy). Plan 02 **D8–D10** (`schemes`, `sebiCategories`, `fundFacts`, `schemeNavs`, `marketHolidays`, `type SchemeThresholds` in `catalogue/catalogue.schema.ts`; `NavService` in `catalogue/nav/nav.service.ts`), **D1** (`RuntimeConfig`, key `pilot.caps.perOrder`). **E7** (`bankAccounts`), **E9** (`riskProfiles`, `compareRiskometer`, `type Riskometer`), **E11** (the readiness trigger behind `investors.can_purchase`). Plan 01 **B9** (`bootTestApp`, `TestApp`), **B7** (grants).
 - Consumes:
   - `Money`, `Rounding` (`@sanchay/money`).
   - `CUTOFF_CLASSES`, `type CutoffClass`, `NAV_GRADES`, `type NavGrade`, `PAYMENT_METHODS`, `type PaymentMethod` (`@sanchay/domain`, Plan 01 ground truth).
@@ -18970,13 +20035,21 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `packages/test-fixtures` (new workspace package `@sanchay/test-fixtures`, private, `type: module`):
     - `CUTOFF_MATRIX: readonly CutoffVector[]` and `STAMP_DUTY_VECTORS: readonly StampDutyVector[]`, loaded from `src/golden/*.json`.
   - `apps/api/src/modules/orders/quote.service.ts`:
-    - Read-only collaborator ports (interfaces only; this task defines them, the owning table's task supplies the adapter — see the deviation note): `QuoteThresholdsPort.lumpsumThresholds(schemeId)`, `QuoteNavGradePort.latestGrade(schemeId)`, `QuoteSuitabilityPort.check(investorId, schemeId)`, `QuoteReadinessPort.canPurchase(investorId)`, `QuoteBankPort.eligibleBanks(investorId)`, `QuotePilotCapsPort.perOrderMax()`, plus injection tokens `QUOTE_THRESHOLDS_PORT`, `QUOTE_NAV_GRADE_PORT`, `QUOTE_SUITABILITY_PORT`, `QUOTE_READINESS_PORT`, `QUOTE_BANK_PORT`, `QUOTE_PILOT_CAPS_PORT`, `QUOTE_HOLIDAYS_PORT`.
-    - `@Injectable() class QuoteService { quotePurchase(input: QuotePurchaseInput): Promise<QuotePurchaseResult> }`, where `QuotePurchaseInput = { investorId: string; schemeId: string; cutoffClass: CutoffClass; amount: Money; at: Date }` and `QuotePurchaseResult = { navDate: string; displayCutoff: '13:00'|'14:30'; stampDuty: Money; navGrade: NavGrade; suitability: { level: string; maxRiskometer: string; schemeRiskometer: string; outcome: 'MATCH'|'MISMATCH'; ackRequired: boolean }; eligibleBanks: ReadonlyArray<{ bankAccountId: string; last4: string; bankName: string }>; paymentMethods: readonly PaymentMethod[] }`. Never calls a write method — the ports it depends on expose no write method, so the "quote never writes" property is a compile-time guarantee, not just a runtime assertion.
+    - Read-only collaborator ports: `QuoteThresholdsPort.lumpsumThresholds(schemeId)`, `QuoteNavGradePort.latestGrade(schemeId)`, `QuoteSuitabilityPort.check(investorId, schemeId)`, `QuoteReadinessPort.canPurchase(investorId)`, `QuoteBankPort.eligibleBanks(investorId)`, `QuotePilotCapsPort.perOrderMax()`, `QuoteHolidaysPort.load(): Promise<CutoffHolidays>`, plus injection tokens `QUOTE_THRESHOLDS_PORT`, `QUOTE_NAV_GRADE_PORT`, `QUOTE_SUITABILITY_PORT`, `QUOTE_READINESS_PORT`, `QUOTE_BANK_PORT`, `QUOTE_PILOT_CAPS_PORT`, `QUOTE_HOLIDAYS_PORT`; `type QuotePaymentMethod = Exclude<PaymentMethod, 'UPI_COLLECT'>`.
+    - `@Injectable() class QuoteService { quotePurchase(input: QuotePurchaseInput): Promise<QuotePurchaseResult>; navDateFor(cutoffClass, at): Promise<{navDate, displayCutoff}> }`, where `QuotePurchaseInput = { investorId: string; schemeId: string; cutoffClass: 'STANDARD' | 'LIQUID' | 'OVERNIGHT'; amount: Money; at: Date }` and `QuotePurchaseResult = { navDate: string; displayCutoff: '13:00'|'14:30'; stampDuty: Money; navGrade: NavGrade; suitability: { level: string; maxRiskometer: string; schemeRiskometer: string; outcome: 'MATCH'|'MISMATCH'; ackRequired: boolean }; eligibleBanks: ReadonlyArray<{ bankAccountId: string; last4: string; bankName: string }>; paymentMethods: readonly QuotePaymentMethod[] }`. Never calls a write method — the ports it depends on expose no write method, so the "quote never writes" property is a compile-time guarantee, not just a runtime assertion.
+  - `apps/api/src/modules/orders/quote.adapters.ts` (RV-03-3): `DrizzleQuoteThresholdsAdapter` (D8/D10: a PUBLISHED, `purchase_allowed` scheme whose category's cut-off class is STANDARD, LIQUID or OVERNIGHT; limits from `schemes.thresholds`; no thresholds is not orderable), `DrizzleQuoteNavGradeAdapter` (D9's `NavService.latest` on the scheme's ISIN; no NAV row is `UNAVAILABLE`), `DrizzleQuoteSuitabilityAdapter` (E9's rule without its write: the latest `risk_profiles` row and `fund_facts.riskometer` through `compareRiskometer`, with E9's errors; no riskometer is `SCHEME_NOT_ORDERABLE`), `DrizzleQuoteReadinessAdapter` (`investors.can_purchase`/`purchase_block_reason`), `DrizzleQuoteBankAdapter` (E7's accounts, primary first; `VERIFIED` is TPV-verified; a missing `bank_name` shows the IFSC's bank code), `RuntimeConfigPilotCapsAdapter` (`pilot.caps.perOrder`), `MarketHolidaysAdapter` (`market_holidays`, every kind a non-business day, read per quote), and `schemeCutoffClass(exec, schemeId): Promise<'STANDARD' | 'LIQUID' | 'OVERNIGHT' | null>`.
   - `orders.quotePurchase` POST `/orders/purchases/quote` (IP; `errors(COMMON_ERRORS, SESSION_ERRORS, 'AMOUNT_BELOW_MIN', 'AMOUNT_ABOVE_MAX', 'AMOUNT_NOT_MULTIPLE', 'SCHEME_NOT_ORDERABLE', 'PURCHASE_BLOCKED', 'NAV_UNAVAILABLE', 'BANK_NOT_VERIFIED')`), wired in `orders.router.ts` by calling `QuoteService.quotePurchase`.
   - **Deviation from outline:** the outline lists only `quote.service.ts` under Files (create) for E22, with no router/contract file, while E20's own Files (create) list already owns `apps/api/src/modules/orders/orders.router.ts` and `packages/contract/src/orders.ts`. This task therefore appends to those two files (Prerequisite: E20) instead of creating them, and the router handler is a thin wrapper that constructs the ports from Plan 02/E9/E11 providers and calls `QuoteService.quotePurchase`.
   - **Deviation from outline:** the Plan-01 ground-truth `NAV_GRADES` enum (`packages/domain/src/catalogue.ts`) is `OK | STALE | UNAVAILABLE`, not the outline's "AGED" wording; this task treats `STALE` (as well as `UNAVAILABLE`) as the grade that blocks a new-purchase quote (R-12).
   - **Deviation from outline:** `CUTOFF_CLASSES` in the same ground-truth file also has a 4th value, `INTERNATIONAL`, reserved and unused by any MVP scheme (gap-rulings GAP-05 #1c lists only 3 cut-off profiles); `expectedNavDate`'s `cutoffClass` parameter is typed as the narrower `'STANDARD' | 'LIQUID' | 'OVERNIGHT'` union, not the full domain `CutoffClass`.
-  - Review fix: `packages/test-fixtures` is Plan 02 D9's package shell, and E16 already added the barrel and `test/golden.test.ts`. This task appends its exports and tests and never rewrites the shell files; their listings below are reference only. E20 no longer calls `QuoteService` (E22 runs after E20), so this task adds the call to `purchase.service.ts`: `const quote = await this.quote.quotePurchase({ investorId, schemeId, cutoffClass: category.cutoffClass, amount, at: this.clock.now() })`, then `expectedNavDate: quote.navDate, cutoffClass: category.cutoffClass` in the order insert; `QuoteService` is injected into `PurchaseService`.
+  - Review fix: `packages/test-fixtures` is Plan 02 D9's package shell, and E16 already added the barrel and `test/golden.test.ts`. This task appends its exports and tests and never rewrites the shell files; their listings below are reference only. E20 no longer calls `QuoteService` (E22 runs after E20), so this task adds the call to `purchase.service.ts` (see RV-03-3 below for what it calls).
+  - **Review fix (RV-03-3):**
+    - The module registered seven adapter classes "supplied by Plan 02 D8–D10, E9, E11 and E2", but no task defined any of them, so `OrdersModule` stopped compiling at this task, and with it every later task that boots the API (E23 onward, Plan 04's F5–F7). This task defines them in `quote.adapters.ts`, against the ports above.
+    - `CutoffHolidays.has` is synchronous and cannot query `market_holidays`, so the holidays port is `QuoteHolidaysPort.load()`, read once per quote (an ops edit applies at once; F2 and F5 read the table the same way).
+    - E9's `SuitabilityService.check` inserts a `suitability_checks` row, and a quote never writes, so the suitability adapter recomputes E9's rule read-only.
+    - The router fragment did not compile: it assigned `requireAuth`'s `AuthContext` to `investorId`, called an undefined `this.schemeCutoffClass.classFor`, and injected neither `QuoteService`, `CLOCK` nor `DB`. It now destructures `{ investorId }`, resolves the cut-off class with `schemeCutoffClass`, and adds the three injections. The contract fragment used an undefined `MoneyWireSchema` (E20's file imports `moneyWireSchema`), and `paymentMethods` was typed `PaymentMethod[]`, which includes UPI collect and does not fit the output enum.
+    - `createPurchase` takes only the NAV date from the quote service (`navDateFor`), after E20's own cap, threshold and bank checks. It does not re-run `quotePurchase`: its NAV-age, riskometer and TPV checks would refuse E20's, E21's and Plan 04's seeded schemes, which have no NAV row, and Plan 04's F11 needs `seedScheme` without one. The quote stays INV-02's read (R-12 refuses the quote). `orders.expected_nav_date` is a `timestamptz`; it stores 00:00 IST of the NAV date.
+    - The pilot-cap unit case used `100000.01`, which fails the ₹1 multiple before the cap; it uses `100001.00`. The unit test imported an unused, misspelt `QutePilotCapsPortAlias` (Biome's `noUnusedImports` has no safe fix, so `pnpm lint` failed); the alias and the import are gone.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -19176,7 +20249,6 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   import {
     type QuoteBankPort,
     type QuoteNavGradePort,
-    type QutePilotCapsPortAlias,
     type QuoteReadinessPort,
     type QuoteSuitabilityPort,
     type QuoteThresholdsPort,
@@ -19229,7 +20301,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       ),
     };
     const pilotCaps = { perOrderMax: vi.fn(async () => Money.parse('100000.00')) };
-    const holidays = { has: () => false };
+    const holidays = { load: async () => ({ has: () => false }) };
     const service = new QuoteService(thresholds, navGrade, suitability, readiness, banks, pilotCaps, holidays);
     return { service, thresholds, navGrade, suitability, readiness, banks, pilotCaps };
   }
@@ -19301,7 +20373,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
           investorId,
           schemeId,
           cutoffClass: 'STANDARD',
-          amount: Money.parse('100000.01'),
+          amount: Money.parse('100001.00'), // a ₹1 multiple, so the pilot cap (not the multiple) refuses it
           at: AT,
         });
         expect.unreachable('expected AMOUNT_ABOVE_MAX');
@@ -19332,9 +20404,11 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   `apps/api/test/int/orders-quote.int.test.ts`
   ```ts
   import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+  import { fundFacts, schemeNavs } from '../../src/modules/catalogue/catalogue.schema.js';
   import { bootTestApp, type TestApp } from './app.js';
   import { FLOW_IP, signInWeb } from './flows.js';
   import { webHeaders } from './http.js';
+  import { seedInvestableInvestor, seedScheme } from './orders-seed.js';
 
   let t: TestApp;
 
@@ -19370,6 +20444,32 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       expect(res.statusCode).toBe(409);
       expect(res.json()).toMatchObject({ code: 'PURCHASE_BLOCKED' });
     });
+
+    it('quotes a ready investor through the seven real adapters (RV-03-3)', async () => {
+      const investor = await seedInvestableInvestor(t);
+      const scheme = await seedScheme(t);
+      // A quote needs a fresh NAV (D9 grades it) and the scheme riskometer (suitability); E20's seed has neither.
+      await t.db.db.insert(fundFacts).values({ schemeId: scheme.id, riskometer: 'MODERATELY_HIGH' });
+      await t.db.db.insert(schemeNavs).values({ isin: scheme.isin, nav: '100.000000', navDate: '2026-10-11' });
+      const res = await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/orders/purchases/quote',
+        headers: webHeaders({ cookies: investor.cookies }),
+        payload: { schemeId: scheme.id, amount: '5000.00' },
+        remoteAddress: FLOW_IP,
+      });
+      expect(res.statusCode).toBe(200);
+      // FakeClock starts at Mon 2026-10-12 10:00 IST, before the 15:00 STANDARD cut-off.
+      expect(res.json()).toMatchObject({
+        navDate: '2026-10-12',
+        displayCutoff: '14:30',
+        stampDuty: '0.25',
+        navGrade: 'OK',
+        suitability: { outcome: 'MATCH', ackRequired: false },
+        eligibleBanks: [{ bankAccountId: investor.bankId, bankName: 'HDFC' }],
+        paymentMethods: ['UPI_INTENT', 'UPI_QR', 'NETBANKING'],
+      });
+    });
   });
   ```
 
@@ -19397,7 +20497,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   ```
   pnpm --filter=@sanchay/api test:int
   ```
-  Expected: `orders-quote.int.test.ts` — both cases fail with 404 `NOT_FOUND` (no such route registered yet).
+  Expected: `orders-quote.int.test.ts` — all three cases fail with 404 `NOT_FOUND` (no such route registered yet).
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -19557,7 +20657,12 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   export interface QuotePilotCapsPort {
     perOrderMax(): Promise<Money>;
   }
-  export type QutePilotCapsPortAlias = QuotePilotCapsPort;
+  /** The market-holiday calendar, read per quote: a synchronous `CutoffHolidays` cannot query the DB (RV-03-3). */
+  export interface QuoteHolidaysPort {
+    load(): Promise<CutoffHolidays>;
+  }
+  /** UPI collect needs a VPA the MVP never collects (E20's `ORDER_PAYMENT_METHODS`). */
+  export type QuotePaymentMethod = Exclude<PaymentMethod, 'UPI_COLLECT'>;
 
   export const QUOTE_THRESHOLDS_PORT = Symbol('QUOTE_THRESHOLDS_PORT');
   export const QUOTE_NAV_GRADE_PORT = Symbol('QUOTE_NAV_GRADE_PORT');
@@ -19581,7 +20686,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     navGrade: NavGrade;
     suitability: QuoteSuitabilityResult & { ackRequired: boolean };
     eligibleBanks: ReadonlyArray<{ bankAccountId: string; last4: string; bankName: string }>;
-    paymentMethods: readonly PaymentMethod[];
+    paymentMethods: readonly QuotePaymentMethod[];
   }
 
   const BLOCKING_NAV_GRADES: ReadonlySet<NavGrade> = new Set(['STALE', 'UNAVAILABLE']);
@@ -19598,7 +20703,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       @Inject(QUOTE_READINESS_PORT) private readonly readiness: QuoteReadinessPort,
       @Inject(QUOTE_BANK_PORT) private readonly banks: QuoteBankPort,
       @Inject(QUOTE_PILOT_CAPS_PORT) private readonly pilotCaps: QuotePilotCapsPort,
-      @Inject(QUOTE_HOLIDAYS_PORT) private readonly holidays: CutoffHolidays,
+      @Inject(QUOTE_HOLIDAYS_PORT) private readonly holidays: QuoteHolidaysPort,
     ) {}
 
     async quotePurchase(input: QuotePurchaseInput): Promise<QuotePurchaseResult> {
@@ -19642,11 +20747,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
         throw new AppError('BANK_NOT_VERIFIED');
       }
       const suit = await this.suitability.check(input.investorId, input.schemeId);
-      const { navDate, displayCutoff } = expectedNavDate({
-        cutoffClass: input.cutoffClass,
-        at: input.at,
-        holidays: this.holidays,
-      });
+      const { navDate, displayCutoff } = await this.navDateFor(input.cutoffClass, input.at);
       return {
         navDate,
         displayCutoff,
@@ -19658,7 +20759,15 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       };
     }
 
-    private paymentMethodsFor(amount: Money): readonly PaymentMethod[] {
+    /** The expected NAV date for an order placed at `at`; `createPurchase` stamps it on the order (RV-03-3). */
+    async navDateFor(
+      cutoffClass: QuotePurchaseInput['cutoffClass'],
+      at: Date,
+    ): Promise<{ navDate: string; displayCutoff: '13:00' | '14:30' }> {
+      return expectedNavDate({ cutoffClass, at, holidays: await this.holidays.load() });
+    }
+
+    private paymentMethodsFor(amount: Money): readonly QuotePaymentMethod[] {
       if (amount.gt(UPI_HIDDEN_ABOVE)) return ['NETBANKING'];
       if (amount.gt(UPI_DEFAULT_CEILING)) return ['NETBANKING', 'UPI_INTENT', 'UPI_QR'];
       return ['UPI_INTENT', 'UPI_QR', 'NETBANKING'];
@@ -19666,7 +20775,202 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
   ```
 
-  Append to `packages/contract/src/orders.ts` (assumed created by E20 with an `ordersContract` object and a `MoneyWireSchema`; if E20 has not yet landed, create the file with exactly this shape so E20's later edit is additive):
+  `apps/api/src/modules/orders/quote.adapters.ts` (RV-03-3; the adapters the module registers):
+  ```ts
+  import { Inject, Injectable } from '@nestjs/common';
+  import { type CutoffHolidays, compareRiskometer, type NavGrade, type Riskometer, toIsin } from '@sanchay/domain';
+  import { Money } from '@sanchay/money';
+  import { desc, eq } from 'drizzle-orm';
+  import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
+  import { fundFacts, marketHolidays, schemes, sebiCategories } from '../catalogue/catalogue.schema.js';
+  import { NavService } from '../catalogue/nav/nav.service.js';
+  import { investors } from '../identity/identity.schema.js';
+  import { bankAccounts } from '../onboarding/bank.schema.js';
+  import { riskProfiles } from '../onboarding/risk-profile.schema.js';
+  import { CLOCK, type Clock } from '../platform/clock.js';
+  import { AppError } from '../platform/errors.js';
+  import { RuntimeConfig } from '../platform/runtime-config.js';
+  import type {
+    QuoteBankPort,
+    QuoteEligibleBank,
+    QuoteHolidaysPort,
+    QuoteNavGradePort,
+    QuotePilotCapsPort,
+    QuotePurchaseInput,
+    QuoteReadinessPort,
+    QuoteSchemeThresholds,
+    QuoteSuitabilityPort,
+    QuoteSuitabilityResult,
+    QuoteThresholdsPort,
+  } from './quote.service.js';
+
+  export type QuoteCutoffClass = QuotePurchaseInput['cutoffClass'];
+
+  function isQuoteCutoffClass(value: string): value is QuoteCutoffClass {
+    return value === 'STANDARD' || value === 'LIQUID' || value === 'OVERNIGHT';
+  }
+
+  /** The scheme category's SEBI cut-off profile; null for an unknown scheme or INTERNATIONAL (no MVP scheme). */
+  export async function schemeCutoffClass(exec: DbExecutor, schemeId: string): Promise<QuoteCutoffClass | null> {
+    const [row] = await exec
+      .select({ cutoffClass: sebiCategories.cutoffClass })
+      .from(schemes)
+      .innerJoin(sebiCategories, eq(sebiCategories.code, schemes.categoryCode))
+      .where(eq(schemes.id, schemeId))
+      .limit(1);
+    return row !== undefined && isQuoteCutoffClass(row.cutoffClass) ? row.cutoffClass : null;
+  }
+
+  /** D8/D10: a PUBLISHED, purchase-allowed scheme with a quotable cut-off class; limits from `schemes.thresholds`. */
+  @Injectable()
+  export class DrizzleQuoteThresholdsAdapter implements QuoteThresholdsPort {
+    constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+
+    async lumpsumThresholds(schemeId: string): Promise<QuoteSchemeThresholds | null> {
+      const [row] = await this.dbh.db
+        .select({
+          status: schemes.status,
+          purchaseAllowed: schemes.purchaseAllowed,
+          thresholds: schemes.thresholds,
+          cutoffClass: sebiCategories.cutoffClass,
+        })
+        .from(schemes)
+        .innerJoin(sebiCategories, eq(sebiCategories.code, schemes.categoryCode))
+        .where(eq(schemes.id, schemeId))
+        .limit(1);
+      if (row === undefined || row.thresholds === null) return null;
+      const t = row.thresholds;
+      return {
+        purchaseAllowed: row.status === 'PUBLISHED' && row.purchaseAllowed && isQuoteCutoffClass(row.cutoffClass),
+        minAmount: Money.parse(t.purchaseMin),
+        maxAmount: t.purchaseMax === null ? null : Money.parse(t.purchaseMax),
+        multiple: Money.parse(t.purchaseMultiple),
+      };
+    }
+  }
+
+  /** D9: `NavService.latest` on the scheme's ISIN (a plain class, built here); no NAV row grades UNAVAILABLE. */
+  @Injectable()
+  export class DrizzleQuoteNavGradeAdapter implements QuoteNavGradePort {
+    private readonly navs: NavService;
+
+    constructor(
+      @Inject(DB) private readonly dbh: DbHandle,
+      @Inject(CLOCK) clock: Clock,
+    ) {
+      this.navs = new NavService(clock);
+    }
+
+    async latestGrade(schemeId: string): Promise<NavGrade> {
+      const [scheme] = await this.dbh.db.select({ isin: schemes.isin }).from(schemes).where(eq(schemes.id, schemeId)).limit(1);
+      if (scheme === undefined) return 'UNAVAILABLE';
+      return (await this.navs.latest(this.dbh.db, toIsin(scheme.isin)))?.grade ?? 'UNAVAILABLE';
+    }
+  }
+
+  /**
+   * E9's rule without E9's write: `SuitabilityService.check` inserts a `suitability_checks` row and a quote
+   * never writes, so this reads the latest risk profile and `fund_facts.riskometer` and calls
+   * `compareRiskometer`, with E9's errors. A scheme with no riskometer cannot be checked, so it is not orderable.
+   */
+  @Injectable()
+  export class DrizzleQuoteSuitabilityAdapter implements QuoteSuitabilityPort {
+    constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+
+    async check(investorId: string, schemeId: string): Promise<QuoteSuitabilityResult> {
+      const [profile] = await this.dbh.db
+        .select({ level: riskProfiles.level, maxRiskometer: riskProfiles.maxRiskometer, status: riskProfiles.status })
+        .from(riskProfiles)
+        .where(eq(riskProfiles.investorId, investorId))
+        .orderBy(desc(riskProfiles.completedAt))
+        .limit(1);
+      if (profile === undefined) throw new AppError('ONBOARDING_INCOMPLETE');
+      if (profile.status === 'EXPIRED') throw new AppError('RISK_PROFILE_EXPIRED');
+      if (profile.status === 'STALE') throw new AppError('RISK_PROFILE_STALE');
+      if (profile.status !== 'ACTIVE') throw new AppError('ONBOARDING_INCOMPLETE');
+      const [facts] = await this.dbh.db
+        .select({ riskometer: fundFacts.riskometer })
+        .from(fundFacts)
+        .where(eq(fundFacts.schemeId, schemeId))
+        .limit(1);
+      const schemeRiskometer = facts?.riskometer ?? null;
+      if (schemeRiskometer === null) throw new AppError('SCHEME_NOT_ORDERABLE');
+      const maxRiskometer: Riskometer = profile.maxRiskometer;
+      return {
+        level: profile.level,
+        maxRiskometer,
+        schemeRiskometer,
+        outcome: compareRiskometer(maxRiskometer, schemeRiskometer),
+      };
+    }
+  }
+
+  /** E11's readiness trigger keeps `investors.can_purchase` and `purchase_block_reason` current. */
+  @Injectable()
+  export class DrizzleQuoteReadinessAdapter implements QuoteReadinessPort {
+    constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+
+    async canPurchase(investorId: string): Promise<{ allowed: boolean; blockReason: string | null }> {
+      const [row] = await this.dbh.db
+        .select({ canPurchase: investors.canPurchase, blockReason: investors.purchaseBlockReason })
+        .from(investors)
+        .where(eq(investors.id, investorId))
+        .limit(1);
+      if (row === undefined) return { allowed: false, blockReason: 'ONBOARDING_INCOMPLETE' };
+      return { allowed: row.canPurchase, blockReason: row.blockReason };
+    }
+  }
+
+  /** E7: the investor's bank accounts, primary first; VERIFIED (penny drop plus name match) is the TPV bank. */
+  @Injectable()
+  export class DrizzleQuoteBankAdapter implements QuoteBankPort {
+    constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+
+    async eligibleBanks(investorId: string): Promise<readonly QuoteEligibleBank[]> {
+      const rows = await this.dbh.db
+        .select({
+          id: bankAccounts.id,
+          last4: bankAccounts.accountLast4,
+          bankName: bankAccounts.bankName,
+          ifsc: bankAccounts.ifsc,
+          status: bankAccounts.status,
+        })
+        .from(bankAccounts)
+        .where(eq(bankAccounts.investorId, investorId))
+        .orderBy(desc(bankAccounts.isPrimary), desc(bankAccounts.createdAt));
+      return rows.map((r) => ({
+        bankAccountId: r.id,
+        last4: r.last4,
+        bankName: r.bankName ?? r.ifsc.slice(0, 4), // bank_name is optional (E7); the IFSC's bank code labels it
+        tpvVerified: r.status === 'VERIFIED',
+      }));
+    }
+  }
+
+  /** D1: `pilot.caps.perOrder`, a money-wire string (default '100000.00'). */
+  @Injectable()
+  export class RuntimeConfigPilotCapsAdapter implements QuotePilotCapsPort {
+    constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+
+    async perOrderMax(): Promise<Money> {
+      return Money.parse(await RuntimeConfig.get(this.dbh.db, 'pilot.caps.perOrder'));
+    }
+  }
+
+  /** D8 `market_holidays`: every kind is a non-business day. Read per quote, so an ops edit applies at once. */
+  @Injectable()
+  export class MarketHolidaysAdapter implements QuoteHolidaysPort {
+    constructor(@Inject(DB) private readonly dbh: DbHandle) {}
+
+    async load(): Promise<CutoffHolidays> {
+      const rows = await this.dbh.db.select({ date: marketHolidays.holidayDate }).from(marketHolidays);
+      const dates = new Set(rows.map((r) => r.date));
+      return { has: (isoDate) => dates.has(isoDate) };
+    }
+  }
+  ```
+
+  Append to `packages/contract/src/orders.ts` (created by E20 with an `ordersContract` object, a local `route` helper and `moneyWireSchema` from `@sanchay/validation`; RV-03-3: the draft named a `MoneyWireSchema` that does not exist):
   ```ts
   quotePurchase: route('POST', '/orders/purchases/quote', 'Quote a lumpsum purchase before consent')
     .errors(
@@ -19685,14 +20989,14 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     .input(
       z.strictObject({
         schemeId: z.uuid(),
-        amount: MoneyWireSchema,
+        amount: moneyWireSchema,
       }),
     )
     .output(
       z.object({
         navDate: z.iso.date(),
         displayCutoff: z.enum(['13:00', '14:30']),
-        stampDuty: MoneyWireSchema,
+        stampDuty: moneyWireSchema,
         navGrade: z.enum(['OK', 'STALE', 'UNAVAILABLE']),
         suitability: z.object({
           level: z.string(),
@@ -19709,16 +21013,33 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     ),
   ```
 
-  Append to `apps/api/src/modules/orders/orders.router.ts` (inside the `OrdersRouter` class E20 created):
+  `apps/api/src/modules/orders/orders.router.ts` (E20's `OrdersRouter`; key-level edits, RV-03-3). Add the imports
+  ```ts
+  import { Money } from '@sanchay/money';
+  import { DB, type DbHandle } from '../../db/client.js';
+  import { CLOCK, type Clock } from '../platform/clock.js';
+  import { schemeCutoffClass } from './quote.adapters.js';
+  import { QuoteService } from './quote.service.js';
+  ```
+  these constructor parameters after E20's three
+  ```ts
+      @Inject(QuoteService) private readonly quote: QuoteService,
+      @Inject(CLOCK) private readonly clock: Clock,
+      @Inject(DB) private readonly dbh: DbHandle,
+  ```
+  and this method inside the class:
   ```ts
   @Implement(contract.orders.quotePurchase)
   quotePurchase() {
     return implement(contract.orders.quotePurchase).handler(async ({ input }) => {
-      const investorId = requireAuth(this.cls);
+      const { investorId } = requireAuth(this.cls);
+      // An unknown or INTERNATIONAL scheme has no quotable cut-off; the thresholds port refuses it
+      // (after the readiness check) before the cut-off is ever used.
+      const cutoffClass = (await schemeCutoffClass(this.dbh.db, input.schemeId)) ?? 'STANDARD';
       const result = await this.quote.quotePurchase({
         investorId,
         schemeId: input.schemeId,
-        cutoffClass: await this.schemeCutoffClass.classFor(input.schemeId),
+        cutoffClass,
         amount: Money.parse(input.amount),
         at: this.clock.now(),
       });
@@ -19732,8 +21053,28 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
   ```
 
-  Append to `apps/api/src/modules/orders/orders.module.ts` `providers`:
+  Append to `apps/api/src/modules/orders/orders.module.ts` `providers` (every role; the adapters only read the DB), with the imports:
   ```ts
+  import {
+    DrizzleQuoteBankAdapter,
+    DrizzleQuoteNavGradeAdapter,
+    DrizzleQuoteReadinessAdapter,
+    DrizzleQuoteSuitabilityAdapter,
+    DrizzleQuoteThresholdsAdapter,
+    MarketHolidaysAdapter,
+    RuntimeConfigPilotCapsAdapter,
+  } from './quote.adapters.js';
+  import {
+    QUOTE_BANK_PORT,
+    QUOTE_HOLIDAYS_PORT,
+    QUOTE_NAV_GRADE_PORT,
+    QUOTE_PILOT_CAPS_PORT,
+    QUOTE_READINESS_PORT,
+    QUOTE_SUITABILITY_PORT,
+    QUOTE_THRESHOLDS_PORT,
+    QuoteService,
+  } from './quote.service.js';
+  // ...
   QuoteService,
   { provide: QUOTE_THRESHOLDS_PORT, useClass: DrizzleQuoteThresholdsAdapter },
   { provide: QUOTE_NAV_GRADE_PORT, useClass: DrizzleQuoteNavGradeAdapter },
@@ -19743,18 +21084,34 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   { provide: QUOTE_PILOT_CAPS_PORT, useClass: RuntimeConfigPilotCapsAdapter },
   { provide: QUOTE_HOLIDAYS_PORT, useClass: MarketHolidaysAdapter },
   ```
-  (The six `Drizzle*Adapter`/`RuntimeConfigPilotCapsAdapter`/`MarketHolidaysAdapter` classes are supplied by Plan 02 D8–D10, E9, E11 and E2 respectively, against the exact port interfaces this task defines; a scheme not yet covered by one of those tasks fails the module's `onModuleInit` provider check, not silently.)
+  (RV-03-3: the seven classes are this task's `quote.adapters.ts`; no other task supplies them.)
+
+  `apps/api/src/modules/orders/purchase.service.ts` (E20's `PurchaseService`; key-level edits, RV-03-3). Add `import { schemeCutoffClass } from './quote.adapters.js';` and `import { QuoteService } from './quote.service.js';`, the constructor parameter `@Inject(QuoteService) private readonly quote: QuoteService,`, these lines in `createPurchase` between E20's bank check (`if (bank === undefined) throw new AppError('BANK_NOT_VERIFIED');`) and `return db.transaction(…)`:
+  ```ts
+      // E22: the order carries its cut-off profile and expected NAV date. The full quote (R-12's NAV-age
+      // refusal, suitability, the TPV bank) is INV-02's read and is not repeated here (RV-03-3).
+      const cutoffClass = await schemeCutoffClass(db, input.schemeId);
+      if (cutoffClass === null) throw new AppError('SCHEME_NOT_ORDERABLE');
+      const { navDate } = await this.quote.navDateFor(cutoffClass, this.clock.now());
+  ```
+  and two values in the `orders` insert:
+  ```ts
+          expectedNavDate: new Date(`${navDate}T00:00:00+05:30`), // a timestamptz column: 00:00 IST of the NAV date
+          cutoffClass,
+  ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
-  Command:
+  PowerShell and Git Bash (the same commands). The first line rebuilds the `dist` of `domain` (the cut-off and stamp-duty rules) and `contract` (`quotePurchase`), which `apps/api` and the OpenAPI generator read; the regenerated `openapi.json` gains `POST /orders/purchases/quote`, so the unit suite's B10 drift test passes (RV-03-19):
   ```
+  pnpm exec turbo run build --filter=@sanchay/api^...
   pnpm --filter=@sanchay/test-fixtures test
   pnpm --filter=@sanchay/domain test
+  pnpm --filter=@sanchay/api openapi
   pnpm --filter=@sanchay/api test
   pnpm --filter=@sanchay/api test:int
   ```
-  Expected: `Test Files  1 passed` for test-fixtures; `cutoff.test.ts` reports 16 passed and `stamp-duty.test.ts` 6 passed for domain; `quote.service.test.ts` reports 8 passed for the API unit suite; `orders-quote.int.test.ts` reports 2 passed for the API integration suite.
+  Expected: `Test Files  1 passed` for test-fixtures; `cutoff.test.ts` reports 16 passed and `stamp-duty.test.ts` 6 passed for domain (unfiltered, so the package's coverage gate holds); `quote.service.test.ts` reports 8 passed and the `openapi` drift test 2 passed for the API unit suite; `orders-quote.int.test.ts` reports 3 passed for the API integration suite, and `orders.int.test.ts` (E20) and `payments.int.test.ts` (E21) stay green with the NAV-date stamp in `createPurchase`.
 
   Then:
   ```
@@ -19766,24 +21123,30 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
 - [ ] **Step 5: Commit**
 
+  One script per line (RV-03-19): `pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, finds no test file and exits 1.
   ```
-  pnpm exec biome check --write packages/domain packages/test-fixtures apps/api/src/modules/orders apps/api/test/int/orders-quote.int.test.ts
+  pnpm exec turbo run build --filter=@sanchay/api^...
+  pnpm exec biome check --write packages/domain packages/test-fixtures apps/api/src/modules/orders apps/api/test/int/orders-quote.int.test.ts packages/contract/src/orders.ts apps/api/openapi.json
   pnpm --filter=@sanchay/test-fixtures test
-  pnpm --filter=@sanchay/domain test typecheck
-  pnpm --filter=@sanchay/api test test:int typecheck
+  pnpm --filter=@sanchay/domain test
+  pnpm --filter=@sanchay/domain typecheck
+  pnpm --filter=@sanchay/api test
+  pnpm --filter=@sanchay/api test:int
+  pnpm --filter=@sanchay/api typecheck
   pnpm lint
-  git add packages/domain packages/test-fixtures apps/api/src/modules/orders apps/api/test/int/orders-quote.int.test.ts packages/contract/src/orders.ts
+  git add packages/domain packages/test-fixtures apps/api/src/modules/orders apps/api/test/int/orders-quote.int.test.ts packages/contract/src/orders.ts apps/api/openapi.json
   git commit -m "feat(orders): add cut-off engine, stamp duty and quotePurchase (E22)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
-  Expected: all four test/typecheck commands exit 0 and `pnpm lint` exits 0. If lefthook re-stages files, re-run the Step 4 commands before committing again.
+  Expected: all six test and typecheck commands exit 0 and `pnpm lint` exits 0. If lefthook re-stages files, re-run the Step 4 commands before committing again.
 
 ---
 
-### Task E23: INV-01/02 and CNF-02/03 screens (Dev B, 8 h)
+### Task E23: INV-01/02, CNF-01 for the purchase, CNF-02/03 screens (Dev B, 8 h)
 
 **Files:**
 - Create:
   - `packages/features/src/invest/useLumpsumDraft.ts`
+  - `packages/features/src/invest/useSchemeFacts.ts` (RV-03-17)
   - `packages/features/src/invest/LumpsumAmountScreen.tsx`
   - `packages/features/src/invest/LumpsumAmountScreen.test.tsx`
   - `packages/features/src/invest/LumpsumReviewScreen.tsx`
@@ -19798,75 +21161,149 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/mobile/src/app/invest/[schemeId]/review.tsx`
   - `apps/mobile/src/app/confirm/[challengeId].tsx`
 - Modify:
-  - `packages/features/src/api/ApiContext.tsx` (add `orders: OrdersApi` and `consents: ConsentsApi` keys; created by E20/E4, appended here if not already present)
-  - `packages/features/src/index.ts` (append 5 exports)
+  - `packages/features/src/index.ts` (append 6 exports)
+  - `apps/web/src/client/routes.tsx` (RV-03-17: append `LumpsumAmountRoute`, `LumpsumReviewRoute` and `ConsentStatusRoute`; key-level only)
+- Not modified (RV-03-9): `packages/features/src/api/ApiContext.tsx`. E13 already added `consents`, and these screens call `client.orders.*` through `useApi().client`, so no `orders` key is needed.
 
 **Interfaces:**
-- Prerequisites: **E12** (`AmountInput`, `MoneyText`, `Sheet`, `Checkbox`, `RadioGroup`, `SegmentedControl`, `ListRow`, `ProgressSteps` in `@sanchay/ui`; `useOnboarding`-style hook conventions). **E13** (`ConsentOtpSheet` (CNF-01), `useConsentChallenge`). **E20** (`orders.createPurchase`, `orders.get`). **E22** (`orders.quotePurchase`). **E9** (suitability copy `SUITABILITY_WARNING`).
+- Prerequisites: **E12** (`AmountInput`, `MoneyText`, `Checkbox`, `SegmentedControl`, `ListRow` in `@sanchay/ui`; `@sanchay/validation` in `packages/features`, RV-03-13). **E13** (`ConsentOtpSheet` (CNF-01) with its labels "SMS code", "Email code" and "Confirm"). **E14** (`SchemeDetailSchema.id`, the scheme uuid, RV-03-8) and **E17** (FUND-01 loads `catalogue.getScheme` through `utils.catalogue.getScheme.queryOptions({ input: { slug } })` and its "Invest" link opens `/invest/${scheme.id}/lumpsum`; `@sanchay/money` in `packages/features`). **E20** (`orders.createPurchase` [K], `orders.get` with `status`, `next`, RV-03-16). **E22** (`orders.quotePurchase`). **E9** (suitability copy `SUITABILITY_WARNING`).
 - Consumes:
-  - `AppText`, `Banner`, `Button`, `Screen`, `TextField` (`@sanchay/ui`, Plan 01) plus `AmountInput`, `MoneyText`, `Sheet`, `Checkbox`, `SegmentedControl`, `ListRow` (`@sanchay/ui`, E12).
-  - `useApi`, `ApiContextValue` (`packages/features/src/api/ApiContext.tsx`, Plan 01).
+  - `AppText`, `Banner`, `Button`, `Card`, `Screen` (`@sanchay/ui`, Plan 01) plus `AmountInput`, `MoneyText`, `Checkbox`, `SegmentedControl`, `ListRow` (`@sanchay/ui`, E12).
+  - `useApi`, `ApiContextValue` (`packages/features/src/api/ApiContext.tsx`, Plan 01; `utils.catalogue.getScheme.key()` for the cache read).
   - `useNav`, `type NavAdapter` (`packages/features/src/nav/NavContext.tsx`, Plan 01).
-  - `messageForError` (`@sanchay/app-core`, Plan 01).
-  - `ConsentOtpSheet`, `useConsentChallenge` (`packages/features/src/consent/*`, E13).
+  - `messageForError` (`@sanchay/app-core`, Plan 01); `newIdempotencyKey`, `toApiError`, `type ApiClient` (`@sanchay/api-client`, Plan 01); `amountSchema` (`@sanchay/validation`, Plan 01); `Money`, `formatInr`, `formatIsoDate` (`@sanchay/money`).
+  - `ConsentOtpSheet({challengeId, onApproved, onClose})` (`packages/features/src/consent/ConsentOtpSheet.tsx`, E13).
   - `renderWithProviders`, `TEST_API`, `makeNav`, `makePlatform` (`packages/features/src/test-utils.tsx`, Plan 01).
 - Produces:
   - `useLumpsumDraft(schemeId: string): { read(): { amount: string } | null; save(draft: { amount: string }): void; clear(): void }` — an in-memory (React Query cache, key `['lumpsumDraft', schemeId]`) hand-off between INV-01 and INV-02, so the amount never enters the URL (mirrors the LoginScreen rule that "every step stays in memory").
-  - `LumpsumAmountScreen({ schemeId, schemeName, minAmount, maxAmount, multiple }: LumpsumAmountScreenProps)` (INV-01): an `AmountInput` bound to `react-hook-form` + `zod`, saves the draft and calls `nav.push('/invest/{schemeId}/review')` on submit.
-  - `LumpsumReviewScreen({ schemeId }: LumpsumReviewScreenProps)` (INV-02): reads the draft (redirects back to INV-01 via `nav.replace` if there is none), fetches `client.orders.quotePurchase({ schemeId, amount })`, shows a `SegmentedControl` of `quote.paymentMethods` (required before Continue), the NAV-date/cut-off line, `MoneyText` stamp duty and the TPV bank `ListRow`; when `quote.suitability.ackRequired` it renders `SuitabilityWarning` (CNF-03) and disables Continue until its checkbox is ticked; Continue calls `client.orders.createPurchase(...)` and `nav.push('/confirm/{challengeId}')`.
-  - `SuitabilityWarning({ level, maxRiskometer, schemeRiskometer, onAcknowledge }: SuitabilityWarningProps)` (CNF-03): server-rendered-copy sheet naming the fund's and the investor's level, with an unticked `Checkbox` ("execution only notwithstanding…") that must be ticked before `onAcknowledge` fires.
-  - `ConsentStatusScreen({ challengeId, orderId }: ConsentStatusScreenProps)` (CNF-02): polls `client.orders.get({ id: orderId })` every 2 s (`refetchInterval: 2000`) and renders `CNF02_COPY[order.state]`; navigates on `order.next === 'PAYMENT'` to `/pay/{orderId}` (E24) and on `'DONE'` to `/result/{orderId}` (E24).
-  - `CNF02_COPY: Record<'CONSENTED' | 'SUBMITTING' | 'UNDER_REVIEW' | 'CONFIRMING', string>`, with `UNDER_REVIEW: 'With the fund house for review'` (gap-rulings GAP-01 step 4).
+  - `useSchemeFacts(schemeId): SchemeDetailView | null` and `type SchemeDetailView` (RV-03-17): FUND-01's `catalogue.getScheme` detail for that uuid, read from the query cache; `null` on a cold open.
+  - `LumpsumAmountScreen({ schemeId }: LumpsumAmountScreenProps)` (INV-01): the fund's name and lumpsum limits come from `useSchemeFacts`; the amount is checked as `Money` by `amountSchema({min, max, multipleOf})`, saved to the draft in wire form, and Continue calls `nav.push('/invest/{schemeId}/review')`. A cold open shows "Open this fund from Explore to invest in it." with a "Go to Explore" button.
+  - `LumpsumReviewScreen({ schemeId }: LumpsumReviewScreenProps)` (INV-02 → CNF-01, RV-03-17): reads the draft (redirects back to INV-01 via `nav.replace` if there is none), fetches `client.orders.quotePurchase({ schemeId, amount })` (a refusal shows its copy and "Change amount"), shows a `SegmentedControl` of `quote.paymentMethods` (required before Continue), the NAV-date/cut-off line, `MoneyText` amount, the stamp duty and the TPV bank `ListRow`s; when `quote.suitability.ackRequired` it renders `SuitabilityWarning` (CNF-03) and disables Continue until its checkbox is ticked. Continue calls `client.orders.createPurchase(...)` with one `Idempotency-Key` per intent (kept after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS`, replaced after any other 4xx; F28's rule), then opens `ConsentOtpSheet` for the returned PURCHASE challenge. Only `onApproved` goes on: it clears the draft and calls `nav.push('/confirm/{challengeId}?orderId={orderId}')`. Closing the sheet keeps the drafted order, and Continue reopens the sheet for the same challenge.
+  - `SuitabilityWarning({ level, maxRiskometer, schemeRiskometer, onAcknowledge }: SuitabilityWarningProps)` (CNF-03): an inline `Card` with the server-rendered copy naming the fund's and the investor's level and an unticked `Checkbox` ("execution only notwithstanding…") that must be ticked before `onAcknowledge` fires.
+  - `ConsentStatusScreen({ challengeId, orderId }: ConsentStatusScreenProps)` (CNF-02): polls `client.orders.get({ id: orderId })` every 2 s until E20's `next` is set, renders `CNF02_COPY[order.status]`, and navigates on `next === 'PAYMENT'` to `/pay/{orderId}` (E24) and on `'DONE'` to `/result/{orderId}` (E24).
+  - `CNF02_COPY: Record<string, string>` for `CONSENTED`, `SUBMITTING`, `UNDER_REVIEW` and `CONFIRMING`, with `UNDER_REVIEW: 'With the fund house for review'` (gap-rulings GAP-01 step 4).
+  - Web: `LumpsumAmountRoute`, `LumpsumReviewRoute`, `ConsentStatusRoute` in `apps/web/src/client/routes.tsx` (`'use client'`); the three server pages render them, as Plan 01's pages do.
   - **Deviation from outline:** the real mobile app router lives at `apps/mobile/src/app/**` (Expo Router, `"main": "expo-router/entry"`), not `apps/mobile/app/**` as the outline's Files list says; every mobile route in this task and in E24 is written under `apps/mobile/src/app/**`.
-  - **Assumption, flagged for E20:** `orders.get` is assumed to return a `next: 'PAYMENT' | 'MANDATE' | 'DONE' | null` field alongside `state`, per gap-rulings GAP-01's CNF-02 row ("polls every 2 s … until `next` = PAYMENT, MANDATE or DONE"); E20's outline Produces list does not name this field explicitly, so `ConsentStatusScreen` isolates the assumption behind `CNF02_COPY` and the two `nav.push` branches above so a field-name change in E20 is a one-line fix.
+  - **Resolved (RV-03-16):** `orders.get` now returns `status` (the field E23 read as `state`) and `next: 'PAYMENT' | 'DONE' | null` (gap-rulings GAP-01 step 4; MANDATE belongs to plans), so CNF-02 no longer rests on an assumption about E20.
+  - **Review fix (RV-03-9):** the screens now use E12's props. `AmountInput` reports through `onChangeValue` (there is no `onChangeText` prop). `MoneyText` takes `value: Money | null` (there is no `amount` or `label` prop), so the review screen parses the draft amount, and the stamp duty is a `ListRow` whose `value` is a string. `ApiContext.tsx` is not touched (see Files).
+  - **Review fix (RV-03-17):**
+    - Continue went straight from `createPurchase` to `/confirm/{challengeId}`, CNF-02's polling, so nothing ever approved the PURCHASE challenge and the lumpsum could not complete in the UI. It also left out the `orderId` CNF-02 reads, and sent no `Idempotency-Key` to the [K] `createPurchase`. INV-02 now opens CNF-01 (`ConsentOtpSheet`) for the returned challenge, and only its `onApproved` goes to `/confirm/{challengeId}?orderId={orderId}`. The key follows F28's rule.
+    - INV-01 could not load its facts: the web page called an undefined `fetchSchemeThresholds`, and the mobile route passed an empty name and fixed limits. FUND-01's "Invest" link carries only the scheme uuid (BRIEF D4), `catalogue.getScheme` reads by slug, and a by-id read would be a new procedure. So INV-01 takes FUND-01's cached detail (`useSchemeFacts`) and, on a cold open, sends the investor back to Explore. The amount is validated as `Money` by `amountSchema` instead of `Number()` (AGENTS.md money rule).
+    - The web pages imported `@sanchay/features` into server components, which `next build` refuses (React context and hooks), so the e2e job could not build. They now render client wrappers from `apps/web/src/client/routes.tsx`, as Plan 01's pages do.
+    - `SuitabilityWarning` rendered E12's `Sheet` without its required `visible`, `title` and `onClose` (TS2739). It is an inline `Card` now, and the mismatch test finds its title as a heading, because `/above your risk profile/i` matched two nodes.
+    - The INV-02 tests read `aria-disabled` instead of jest-dom's `toBeDisabled` (RV-03-13).
 
 - [ ] **Step 1: Write the failing tests**
 
   `packages/features/src/invest/LumpsumAmountScreen.test.tsx`
   ```tsx
+  import { useQueryClient } from '@tanstack/react-query';
   import { screen } from '@testing-library/react';
   import userEvent from '@testing-library/user-event';
   import { describe, expect, it } from 'vitest';
+  import { useApi } from '../api/ApiContext';
   import { renderWithProviders } from '../test-utils';
   import { LumpsumAmountScreen } from './LumpsumAmountScreen';
+  import type { SchemeDetailView } from './useSchemeFacts';
 
-  const props = {
-    schemeId: '0190c0de-0000-7000-8000-0000000000b1',
-    schemeName: 'Sanchay Flexicap Fund',
-    minAmount: '1000.00',
-    maxAmount: '1000000.00',
-    multiple: '1.00',
+  const schemeId = '0190c0de-0000-7000-8000-0000000000b1';
+  const slug = 'test-flexi-cap-fund';
+
+  /** FUND-01's `catalogue.getScheme` reply (E14), as the query cache holds it. */
+  const detail: SchemeDetailView = {
+    id: schemeId,
+    isin: 'INF000P01010',
+    name: 'Test Flexi Cap Fund - Regular Growth',
+    slug,
+    amcId: 'amc-1',
+    amcName: 'Test AMC',
+    categoryCode: 'FLEXI',
+    categoryName: 'Flexi Cap',
+    planType: 'REGULAR',
+    option: 'GROWTH',
+    status: 'PUBLISHED',
+    curated: true,
+    lockInMonths: null,
+    sipAllowed: true,
+    thresholds: {
+      purchaseMin: '1000.00',
+      purchaseMax: '1000000.00',
+      purchaseMultiple: '1.00',
+      sipMin: '500.00',
+      sipMax: null,
+      sipMultiple: '1.00',
+    },
+    riskometer: 'VERY_HIGH',
+    riskometerAsOf: '2026-09-30',
+    benchmarkName: null,
+    benchmarkRiskometer: null,
+    expenseRatioPct: null,
+    exitLoadText: null,
+    sidUrl: null,
+    kimUrl: null,
+    returns: { asOf: null, cagr1y: null, cagr3y: null, cagr5y: null, abs6m: null },
+    commissionLine: null,
+    regularPlanNoticeKey: 'REGULAR_PLAN_NOTICE',
   };
 
+  /** INV-01 opened from FUND-01's Invest link: the fund's detail is already in the query cache. */
+  function FromFundPage() {
+    const { utils } = useApi();
+    useQueryClient().setQueryData(utils.catalogue.getScheme.queryKey({ input: { slug } }), detail);
+    return <LumpsumAmountScreen schemeId={schemeId} />;
+  }
+
   describe('LumpsumAmountScreen (INV-01)', () => {
-    it('disables Continue below the scheme minimum and enables it once corrected', async () => {
+    it('refuses an amount below the scheme minimum and continues once it is corrected', async () => {
       const user = userEvent.setup();
-      const { nav } = renderWithProviders(<LumpsumAmountScreen {...props} />);
+      const { nav, queryClient } = renderWithProviders(<FromFundPage />);
+      expect(screen.getByText(detail.name)).toBeTruthy();
       const amount = screen.getByLabelText('Amount');
       await user.type(amount, '500');
       await user.click(screen.getByRole('button', { name: 'Continue' }));
-      expect(await screen.findByText('Enter at least ₹1,000.00')).toBeTruthy();
+      expect(await screen.findByText('Minimum amount is ₹1,000.00.')).toBeTruthy();
       expect(nav.push).not.toHaveBeenCalled();
       await user.clear(amount);
       await user.type(amount, '5000');
       await user.click(screen.getByRole('button', { name: 'Continue' }));
-      expect(nav.push).toHaveBeenCalledWith(`/invest/${props.schemeId}/review`);
+      expect(nav.push).toHaveBeenCalledWith(`/invest/${schemeId}/review`);
+      expect(queryClient.getQueryData(['lumpsumDraft', schemeId])).toEqual({ amount: '5000.00' });
+    });
+
+    it('sends the investor back to Explore on a cold open (the fund page was not loaded first)', async () => {
+      const user = userEvent.setup();
+      const { nav } = renderWithProviders(<LumpsumAmountScreen schemeId={schemeId} />);
+      expect(screen.getByText('Open this fund from Explore to invest in it.')).toBeTruthy();
+      await user.click(screen.getByRole('button', { name: 'Go to Explore' }));
+      expect(nav.replace).toHaveBeenCalledWith('/explore');
     });
   });
   ```
 
   `packages/features/src/invest/LumpsumReviewScreen.test.tsx`
   ```tsx
+  import { messageForError } from '@sanchay/app-core';
   import { screen } from '@testing-library/react';
   import userEvent from '@testing-library/user-event';
   import { HttpResponse, http } from 'msw';
   import { setupServer } from 'msw/node';
-  import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+  import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
   import { renderWithProviders, TEST_API } from '../test-utils';
-  import { useLumpsumDraft } from './useLumpsumDraft';
   import { LumpsumReviewScreen } from './LumpsumReviewScreen';
+  import { useLumpsumDraft } from './useLumpsumDraft';
+
+  // CNF-01 is E13's sheet, tested there; here it stands in as a button that approves its challenge.
+  vi.mock('../consent/ConsentOtpSheet', () => ({
+    ConsentOtpSheet: ({ challengeId, onApproved }: { challengeId: string; onApproved(): void }) => (
+      <button type="button" onClick={onApproved}>{`Approve ${challengeId}`}</button>
+    ),
+  }));
 
   const schemeId = '0190c0de-0000-7000-8000-0000000000b1';
+  const bankAccountId = '0190c0de-0000-7000-8000-0000000000a1';
+  const orderId = '0190c0de-0000-7000-8000-0000000000c9';
+  const challengeId = '0190c0de-0000-7000-8000-0000000000d1';
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
   function quoteReply(overrides: Record<string, unknown> = {}) {
     return HttpResponse.json({
@@ -19881,16 +21318,25 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
         outcome: 'MATCH',
         ackRequired: false,
       },
-      eligibleBanks: [{ bankAccountId: 'bank-1', last4: '1234', bankName: 'HDFC' }],
+      eligibleBanks: [{ bankAccountId, last4: '1234', bankName: 'HDFC' }],
       paymentMethods: ['UPI_INTENT', 'UPI_QR', 'NETBANKING'],
       ...overrides,
     });
+  }
+
+  function errorReply(code: string, status: number) {
+    return HttpResponse.json(
+      { defined: true, code, status, message: code, data: { retryable: false, requestId: 'r-1' } },
+      { status },
+    );
   }
 
   function DraftHarness() {
     useLumpsumDraft(schemeId).save({ amount: '5000.00' });
     return <LumpsumReviewScreen schemeId={schemeId} />;
   }
+
+  const isDisabled = (el: HTMLElement) => el.getAttribute('aria-disabled') === 'true';
 
   const server = setupServer();
   beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -19903,9 +21349,9 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       const user = userEvent.setup();
       renderWithProviders(<DraftHarness />);
       const continueButton = await screen.findByRole('button', { name: 'Continue' });
-      expect(continueButton).toBeDisabled();
+      expect(isDisabled(continueButton)).toBe(true);
       await user.click(screen.getByRole('radio', { name: 'UPI' }));
-      expect(continueButton).not.toBeDisabled();
+      expect(isDisabled(continueButton)).toBe(false);
     });
 
     it('requires the mismatch checkbox before Continue', async () => {
@@ -19926,17 +21372,64 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       renderWithProviders(<DraftHarness />);
       await user.click(await screen.findByRole('radio', { name: 'UPI' }));
       const continueButton = screen.getByRole('button', { name: 'Continue' });
-      expect(continueButton).toBeDisabled();
-      expect(screen.getByText(/above your risk profile/i)).toBeTruthy();
+      expect(isDisabled(continueButton)).toBe(true);
+      expect(screen.getByRole('heading', { name: 'Above your risk profile' })).toBeTruthy();
       await user.click(screen.getByRole('checkbox'));
-      expect(continueButton).not.toBeDisabled();
+      expect(isDisabled(continueButton)).toBe(false);
+    });
+
+    it('drafts the purchase, opens CNF-01 for its challenge and goes to CNF-02 only once approved', async () => {
+      const posted: Array<{ key: string | null; body: unknown }> = [];
+      server.use(
+        http.post(`${TEST_API}/orders/purchases/quote`, () => quoteReply()),
+        http.post(`${TEST_API}/orders/purchases`, async ({ request }) => {
+          posted.push({ key: request.headers.get('idempotency-key'), body: await request.json() });
+          return HttpResponse.json({ orderId, challengeId, expiresAt: '2026-10-12T05:10:00.000Z' });
+        }),
+      );
+      const user = userEvent.setup();
+      const { nav } = renderWithProviders(<DraftHarness />);
+      await user.click(await screen.findByRole('radio', { name: 'UPI' }));
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      const approve = await screen.findByRole('button', { name: `Approve ${challengeId}` });
+      expect(nav.push).not.toHaveBeenCalled();
+      expect(posted).toEqual([
+        {
+          key: expect.stringMatching(UUID),
+          body: { schemeId, amount: '5000.00', paymentMethod: 'UPI_INTENT', bankAccountId },
+        },
+      ]);
+      await user.click(approve);
+      expect(nav.push).toHaveBeenCalledWith(`/confirm/${challengeId}?orderId=${orderId}`);
+    });
+
+    it('shows a refusal and sends a new Idempotency-Key with the next Continue', async () => {
+      const keys: Array<string | null> = [];
+      server.use(
+        http.post(`${TEST_API}/orders/purchases/quote`, () => quoteReply()),
+        http.post(`${TEST_API}/orders/purchases`, ({ request }) => {
+          keys.push(request.headers.get('idempotency-key'));
+          return keys.length === 1
+            ? errorReply('PURCHASE_BLOCKED', 409)
+            : HttpResponse.json({ orderId, challengeId, expiresAt: '2026-10-12T05:10:00.000Z' });
+        }),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<DraftHarness />);
+      await user.click(await screen.findByRole('radio', { name: 'UPI' }));
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      expect(await screen.findByText(messageForError('PURCHASE_BLOCKED'))).toBeTruthy();
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      expect(await screen.findByRole('button', { name: `Approve ${challengeId}` })).toBeTruthy();
+      expect(keys).toHaveLength(2);
+      expect(keys[1]).not.toBe(keys[0]);
     });
   });
   ```
 
   `packages/features/src/consent/ConsentStatusScreen.test.tsx`
   ```tsx
-  import { screen } from '@testing-library/react';
+  import { screen, waitFor } from '@testing-library/react';
   import { HttpResponse, http } from 'msw';
   import { setupServer } from 'msw/node';
   import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -19944,6 +21437,25 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   import { ConsentStatusScreen } from './ConsentStatusScreen';
 
   const orderId = '0190c0de-0000-7000-8000-0000000000c9';
+  const challengeId = '0190c0de-0000-7000-8000-0000000000d1';
+
+  /** E20's `orders.get` wire (RV-03-16: `schemeName`, `cancellable` and `next`). */
+  function orderReply(status: string, next: 'PAYMENT' | 'DONE' | null) {
+    return HttpResponse.json({
+      id: orderId,
+      type: 'PURCHASE',
+      status,
+      schemeId: '0190c0de-0000-7000-8000-0000000000b1',
+      schemeName: 'Test Flexi Cap Fund - Regular Growth',
+      amount: '5000.00',
+      paymentMethod: 'UPI_INTENT',
+      failureCode: null,
+      createdAt: '2026-10-12T05:00:00.000Z',
+      cancellable: false,
+      next,
+    });
+  }
+
   const server = setupServer();
   beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
   afterEach(() => server.resetHandlers());
@@ -19951,26 +21463,33 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
   describe('ConsentStatusScreen (CNF-02)', () => {
     it('shows the UNDER_REVIEW copy "With the fund house for review"', async () => {
-      server.use(
-        http.get(`${TEST_API}/orders/${orderId}`, () =>
-          HttpResponse.json({ id: orderId, state: 'UNDER_REVIEW', next: null }),
-        ),
-      );
-      renderWithProviders(
-        <ConsentStatusScreen challengeId="0190c0de-0000-7000-8000-0000000000d1" orderId={orderId} />,
+      server.use(http.get(`${TEST_API}/orders/${orderId}`, () => orderReply('UNDER_REVIEW', null)));
+      const { nav } = renderWithProviders(
+        <ConsentStatusScreen challengeId={challengeId} orderId={orderId} />,
       );
       expect(await screen.findByText('With the fund house for review')).toBeTruthy();
+      expect(nav.push).not.toHaveBeenCalled();
+    });
+
+    it('opens PAY-01 once the order awaits payment (next = PAYMENT)', async () => {
+      server.use(
+        http.get(`${TEST_API}/orders/${orderId}`, () => orderReply('AWAITING_PAYMENT', 'PAYMENT')),
+      );
+      const { nav } = renderWithProviders(
+        <ConsentStatusScreen challengeId={challengeId} orderId={orderId} />,
+      );
+      await waitFor(() => expect(nav.push).toHaveBeenCalledWith(`/pay/${orderId}`));
     });
   });
   ```
 
 - [ ] **Step 2: Run it and confirm it fails**
 
-  Command:
+  PowerShell and Git Bash (the same command):
   ```
   pnpm --filter=@sanchay/features test
   ```
-  Expected: 3 test files fail to collect — `Cannot find module './LumpsumAmountScreen'`, `'./LumpsumReviewScreen'`/`'./useLumpsumDraft'`, and `'./ConsentStatusScreen'`.
+  Expected: 3 test files fail to collect — `Cannot find module './LumpsumAmountScreen'` (and `'./useSchemeFacts'`), `'./LumpsumReviewScreen'`/`'./useLumpsumDraft'`, and `'./ConsentStatusScreen'`.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -19997,78 +21516,104 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
   ```
 
+  `packages/features/src/invest/useSchemeFacts.ts` (RV-03-17)
+  ```ts
+  import type { ApiClient } from '@sanchay/api-client';
+  import { useQueryClient } from '@tanstack/react-query';
+  import { useApi } from '../api/ApiContext';
+
+  /** E14's `catalogue.getScheme` output; it carries the scheme uuid (RV-03-8). */
+  export type SchemeDetailView = Awaited<ReturnType<ApiClient['catalogue']['getScheme']>>;
+
+  /**
+   * INV-01's fund facts (name and lumpsum limits). The route carries only the scheme uuid (BRIEF D4) and
+   * `catalogue.getScheme` reads by slug, so INV-01 takes the detail FUND-01 already loaded from the query
+   * cache. A cold open (a refresh or a deep link) finds nothing, and INV-01 then sends the investor back
+   * to Explore rather than guess the limits (RV-03-17).
+   */
+  export function useSchemeFacts(schemeId: string): SchemeDetailView | null {
+    const { utils } = useApi();
+    const queryClient = useQueryClient();
+    const cached = queryClient.getQueriesData<SchemeDetailView>({
+      queryKey: utils.catalogue.getScheme.key(),
+    });
+    for (const [, detail] of cached) {
+      if (detail?.id === schemeId) return detail;
+    }
+    return null;
+  }
+  ```
+
   `packages/features/src/invest/LumpsumAmountScreen.tsx`
   ```tsx
-  import { zodResolver } from '@hookform/resolvers/zod';
+  import { Money } from '@sanchay/money';
   import { space } from '@sanchay/tokens';
   import { AmountInput, AppText, Button, Screen } from '@sanchay/ui';
-  import { Controller, useForm } from 'react-hook-form';
+  import { amountSchema } from '@sanchay/validation';
+  import { useState } from 'react';
   import { StyleSheet, View } from 'react-native';
-  import { z } from 'zod';
   import { useNav } from '../nav/NavContext';
   import { useLumpsumDraft } from './useLumpsumDraft';
+  import { useSchemeFacts } from './useSchemeFacts';
 
   export interface LumpsumAmountScreenProps {
     schemeId: string;
-    schemeName: string;
-    minAmount: string;
-    maxAmount: string;
-    multiple: string;
   }
 
-  const DECIMAL = /^\d+(\.\d{1,2})?$/;
-
-  export function LumpsumAmountScreen({
-    schemeId,
-    schemeName,
-    minAmount,
-    maxAmount,
-    multiple,
-  }: LumpsumAmountScreenProps) {
+  /**
+   * INV-01. The fund's name and lumpsum limits are FUND-01's detail (`useSchemeFacts`); the amount is
+   * checked as Money by `amountSchema` (AGENTS.md money rule), and the draft keeps its wire form.
+   */
+  export function LumpsumAmountScreen({ schemeId }: LumpsumAmountScreenProps) {
     const nav = useNav();
     const draft = useLumpsumDraft(schemeId);
-    const schema = z.object({
-      amount: z
-        .string()
-        .regex(DECIMAL, 'Enter a valid amount')
-        .refine((v) => Number(v) >= Number(minAmount), `Enter at least ₹${Number(minAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)
-        .refine((v) => Number(v) <= Number(maxAmount), `Enter at most ₹${Number(maxAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)
-        .refine((v) => Math.round(Number(v) * 100) % Math.round(Number(multiple) * 100) === 0, `Amount must be a multiple of ₹${multiple}`),
-    });
-    const {
-      control,
-      handleSubmit,
-      formState: { errors },
-    } = useForm({ resolver: zodResolver(schema), defaultValues: { amount: draft.read()?.amount ?? '' } });
-    const submit = handleSubmit(({ amount }) => {
-      draft.save({ amount: Number(amount).toFixed(2) });
+    const scheme = useSchemeFacts(schemeId);
+    const [amount, setAmount] = useState(draft.read()?.amount ?? '');
+    const [submitted, setSubmitted] = useState(false);
+
+    if (scheme === null || scheme.thresholds === null) {
+      return (
+        <Screen testID="lumpsum-amount-unavailable">
+          <View style={styles.stack}>
+            <AppText tone="muted">
+              {scheme === null
+                ? 'Open this fund from Explore to invest in it.'
+                : 'This fund is not open for new investments right now.'}
+            </AppText>
+            <Button label="Go to Explore" onPress={() => nav.replace('/explore')} />
+          </View>
+        </Screen>
+      );
+    }
+
+    const limits = scheme.thresholds;
+    const parsed = amountSchema({
+      min: Money.parse(limits.purchaseMin),
+      ...(limits.purchaseMax === null ? {} : { max: Money.parse(limits.purchaseMax) }),
+      multipleOf: Money.parse(limits.purchaseMultiple),
+    }).safeParse(amount);
+    const error = submitted && !parsed.success ? parsed.error.issues[0]?.message : undefined;
+
+    const submit = () => {
+      setSubmitted(true);
+      if (!parsed.success) return;
+      draft.save({ amount: parsed.data.toWire() });
       nav.push(`/invest/${schemeId}/review`);
-    });
+    };
+
     return (
       <Screen testID="lumpsum-amount-screen">
         <View style={styles.stack}>
-          <AppText variant="title">{schemeName}</AppText>
+          <AppText variant="title">{scheme.name}</AppText>
           <AppText tone="muted">Lumpsum investment</AppText>
-          <Controller
-            control={control}
-            name="amount"
-            render={({ field }) => (
-              <AmountInput
-                label="Amount"
-                value={field.value}
-                onChangeText={field.onChange}
-                onBlur={field.onBlur}
-                testID="lumpsum-amount-input"
-                error={errors.amount?.message}
-              />
-            )}
+          <AmountInput
+            label="Amount"
+            value={amount}
+            onChangeValue={setAmount}
+            error={error}
+            testID="lumpsum-amount-input"
           />
-          <Button
-            label="Continue"
-            onPress={() => {
-              void submit();
-            }}
-          />
+          <Button label="Continue" onPress={submit} />
         </View>
       </Screen>
     );
@@ -20080,7 +21625,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   `packages/features/src/invest/SuitabilityWarning.tsx`
   ```tsx
   import { space } from '@sanchay/tokens';
-  import { AppText, Checkbox, Sheet } from '@sanchay/ui';
+  import { AppText, Card, Checkbox } from '@sanchay/ui';
   import { useState } from 'react';
   import { StyleSheet, View } from 'react-native';
 
@@ -20091,7 +21636,10 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     onAcknowledge: (acknowledged: boolean) => void;
   }
 
-  /** CNF-03: gap-rulings GAP-03 §4, the server-rendered SUITABILITY_WARNING copy. */
+  /**
+   * CNF-03: gap-rulings GAP-03 §4, the server-rendered SUITABILITY_WARNING copy. An inline card on
+   * INV-02 (RV-03-17: E12's Sheet needs `visible`, `title` and `onClose`, and this warning never closes).
+   */
   export function SuitabilityWarning({
     level,
     maxRiskometer,
@@ -20100,7 +21648,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }: SuitabilityWarningProps) {
     const [checked, setChecked] = useState(false);
     return (
-      <Sheet testID="suitability-warning-sheet">
+      <Card testID="suitability-warning">
         <View style={styles.stack}>
           <AppText variant="title">Above your risk profile</AppText>
           <AppText tone="muted">
@@ -20115,7 +21663,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
             }}
           />
         </View>
-      </Sheet>
+      </Card>
     );
   }
 
@@ -20124,13 +21672,16 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
   `packages/features/src/invest/LumpsumReviewScreen.tsx`
   ```tsx
-  import { formatIsoDate } from '@sanchay/money';
+  import { newIdempotencyKey, toApiError } from '@sanchay/api-client';
+  import { messageForError } from '@sanchay/app-core';
+  import { formatInr, formatIsoDate, Money } from '@sanchay/money';
   import { space } from '@sanchay/tokens';
   import { AppText, Banner, Button, ListRow, MoneyText, Screen, SegmentedControl } from '@sanchay/ui';
   import { useQuery } from '@tanstack/react-query';
-  import { useEffect, useState } from 'react';
+  import { useEffect, useRef, useState } from 'react';
   import { StyleSheet, View } from 'react-native';
   import { useApi } from '../api/ApiContext';
+  import { ConsentOtpSheet } from '../consent/ConsentOtpSheet';
   import { useNav } from '../nav/NavContext';
   import { SuitabilityWarning } from './SuitabilityWarning';
   import { useLumpsumDraft } from './useLumpsumDraft';
@@ -20145,6 +21696,23 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     NETBANKING: 'Netbanking',
   };
 
+  /**
+   * A final answer from the API (F28's rule): a 4xx ends the intent (D1 releases its key), so the next
+   * tap is a new intent with a new key. A network error, a 5xx or IDEMPOTENCY_IN_PROGRESS keeps it.
+   */
+  function isFinalRefusal(error: { status: number; code: string }): boolean {
+    return error.status >= 400 && error.status < 500 && error.code !== 'IDEMPOTENCY_IN_PROGRESS';
+  }
+
+  interface DraftedPurchase {
+    orderId: string;
+    challengeId: string;
+  }
+
+  /**
+   * INV-02 → CNF-01 → CNF-02 (RV-03-17). Continue drafts the purchase (`orders.createPurchase` [K]),
+   * then CNF-01 approves its PURCHASE challenge; only an approved challenge goes on to CNF-02.
+   */
   export function LumpsumReviewScreen({ schemeId }: LumpsumReviewScreenProps) {
     const { client } = useApi();
     const nav = useNav();
@@ -20154,10 +21722,16 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     const [acknowledged, setAcknowledged] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // One Idempotency-Key per intent (createPurchase is [K], E20).
+    const idempotencyKey = useRef<string | null>(null);
+    // The drafted order and its challenge. Closing CNF-01 keeps them: Continue reopens the sheet for the
+    // same challenge instead of drafting a second order.
+    const [drafted, setDrafted] = useState<DraftedPurchase | null>(null);
+    const [sheetOpen, setSheetOpen] = useState(false);
 
     useEffect(() => {
-      if (amount === null) nav.replace(`/invest/${schemeId}/lumpsum`);
-    }, [amount, schemeId, nav]);
+      if (amount === null && drafted === null) nav.replace(`/invest/${schemeId}/lumpsum`);
+    }, [amount, drafted, schemeId, nav]);
 
     const quote = useQuery({
       queryKey: ['lumpsumQuote', schemeId, amount],
@@ -20165,57 +21739,88 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       enabled: amount !== null,
     });
 
-    if (amount === null || !quote.data) {
-      return <Screen testID="lumpsum-review-screen">{quote.isLoading ? <AppText>Loading…</AppText> : null}</Screen>;
+    if (amount === null) return <Screen testID="lumpsum-review-screen">{null}</Screen>;
+    if (quote.isError) {
+      return (
+        <Screen testID="lumpsum-review-screen">
+          <View style={styles.stack}>
+            <Banner tone="error" message={messageForError(toApiError(quote.error).code)} />
+            <Button
+              label="Change amount"
+              onPress={() => nav.replace(`/invest/${schemeId}/lumpsum`)}
+            />
+          </View>
+        </Screen>
+      );
+    }
+    if (!quote.data) {
+      return (
+        <Screen testID="lumpsum-review-screen">
+          <AppText>Loading…</AppText>
+        </Screen>
+      );
     }
 
-    const uniqueMethods = [...new Set(quote.data.paymentMethods.map((m) => METHOD_LABELS[m] ?? m))];
-    const canContinue = method !== null && (!quote.data.suitability.ackRequired || acknowledged);
+    const q = quote.data;
+    const bank = q.eligibleBanks[0];
+    const uniqueMethods = [...new Set(q.paymentMethods.map((m) => METHOD_LABELS[m] ?? m))];
+    const canContinue = method !== null && (!q.suitability.ackRequired || acknowledged);
 
     const submit = async () => {
-      if (!canContinue || method === null) return;
+      if (!canContinue || method === null || bank === undefined) return;
+      if (drafted !== null) {
+        setSheetOpen(true);
+        return;
+      }
       setSubmitting(true);
       setError(null);
+      idempotencyKey.current ??= newIdempotencyKey();
       try {
-        const bank = quote.data.eligibleBanks[0];
-        if (!bank) throw new Error('no eligible bank');
-        const created = await client.orders.createPurchase({
-          schemeId,
-          amount,
-          paymentMethod: method === 'UPI' ? 'UPI_INTENT' : 'NETBANKING',
-          bankAccountId: bank.bankAccountId,
-        });
-        draft.clear();
-        nav.push(`/confirm/${created.challengeId}`);
-      } catch {
-        setError('Something went wrong. Please try again.');
+        const created = await client.orders.createPurchase(
+          {
+            schemeId,
+            amount,
+            paymentMethod: method === 'UPI' ? 'UPI_INTENT' : 'NETBANKING',
+            bankAccountId: bank.bankAccountId,
+          },
+          { context: { idempotencyKey: idempotencyKey.current } },
+        );
+        setDrafted({ orderId: created.orderId, challengeId: created.challengeId });
+        setSheetOpen(true);
+      } catch (err) {
+        const apiError = toApiError(err);
+        if (isFinalRefusal(apiError)) idempotencyKey.current = null;
+        setError(messageForError(apiError.code));
       } finally {
         setSubmitting(false);
       }
+    };
+
+    const approved = () => {
+      if (drafted === null) return;
+      draft.clear();
+      nav.push(`/confirm/${drafted.challengeId}?orderId=${drafted.orderId}`);
     };
 
     return (
       <Screen testID="lumpsum-review-screen">
         <View style={styles.stack}>
           {error ? <Banner tone="error" message={error} /> : null}
-          <MoneyText amount={amount} />
-          <AppText tone="muted">{`NAV date ${formatIsoDate(quote.data.navDate)} · Pay before ${quote.data.displayCutoff}`}</AppText>
-          <ListRow
-            label="Bank"
-            value={`${quote.data.eligibleBanks[0]?.bankName ?? ''} ••${quote.data.eligibleBanks[0]?.last4 ?? ''}`}
-          />
-          <MoneyText label="Stamp duty" amount={quote.data.stampDuty} />
+          <MoneyText value={Money.parse(amount)} />
+          <AppText tone="muted">{`NAV date ${formatIsoDate(q.navDate)} · Pay before ${q.displayCutoff}`}</AppText>
+          <ListRow label="Bank" value={`${bank?.bankName ?? ''} ••${bank?.last4 ?? ''}`} />
+          <ListRow label="Stamp duty" value={formatInr(Money.parse(q.stampDuty))} />
           <SegmentedControl
             label="Pay with"
             options={uniqueMethods.map((m) => ({ label: m, value: m }))}
             value={method}
             onChange={setMethod}
           />
-          {quote.data.suitability.ackRequired ? (
+          {q.suitability.ackRequired ? (
             <SuitabilityWarning
-              level={quote.data.suitability.level}
-              maxRiskometer={quote.data.suitability.maxRiskometer}
-              schemeRiskometer={quote.data.suitability.schemeRiskometer}
+              level={q.suitability.level}
+              maxRiskometer={q.suitability.maxRiskometer}
+              schemeRiskometer={q.suitability.schemeRiskometer}
               onAcknowledge={setAcknowledged}
             />
           ) : null}
@@ -20228,6 +21833,13 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
             }}
           />
         </View>
+        {drafted !== null && sheetOpen ? (
+          <ConsentOtpSheet
+            challengeId={drafted.challengeId}
+            onApproved={approved}
+            onClose={() => setSheetOpen(false)}
+          />
+        ) : null}
       </Screen>
     );
   }
@@ -20250,7 +21862,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     orderId: string;
   }
 
-  /** CNF-02 copy, keyed by orders.get's `state` (gap-rulings GAP-01 step 4). */
+  /** CNF-02 copy, keyed by `orders.get`'s `status` (gap-rulings GAP-01 step 4). */
   export const CNF02_COPY: Record<string, string> = {
     CONSENTED: 'Getting your payment ready',
     SUBMITTING: 'Getting your payment ready',
@@ -20258,24 +21870,28 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     CONFIRMING: 'Confirming your payment method',
   };
 
+  /** CNF-02: polls `orders.get` every 2 s until E20's `next` says PAYMENT (PAY-01) or DONE (result). */
   export function ConsentStatusScreen({ orderId }: ConsentStatusScreenProps) {
     const { client } = useApi();
     const nav = useNav();
     const order = useQuery({
       queryKey: ['orderStatus', orderId],
       queryFn: () => client.orders.get({ id: orderId }),
-      refetchInterval: 2000,
+      refetchInterval: (query) => ((query.state.data?.next ?? null) === null ? 2000 : false),
     });
+    const next = order.data?.next ?? null;
 
     useEffect(() => {
-      if (order.data?.next === 'PAYMENT') nav.push(`/pay/${orderId}`);
-      if (order.data?.next === 'DONE') nav.push(`/result/${orderId}`);
-    }, [order.data?.next, orderId, nav]);
+      if (next === 'PAYMENT') nav.push(`/pay/${orderId}`);
+      if (next === 'DONE') nav.push(`/result/${orderId}`);
+    }, [next, orderId, nav]);
 
     return (
       <Screen testID="consent-status-screen">
         <View style={styles.stack}>
-          <AppText variant="title">{CNF02_COPY[order.data?.state ?? ''] ?? 'Getting your payment ready'}</AppText>
+          <AppText variant="title">
+            {CNF02_COPY[order.data?.status ?? ''] ?? 'Getting your payment ready'}
+          </AppText>
         </View>
       </Screen>
     );
@@ -20290,42 +21906,59 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   export * from './invest/LumpsumReviewScreen.js';
   export * from './invest/SuitabilityWarning.js';
   export * from './invest/useLumpsumDraft.js';
+  export * from './invest/useSchemeFacts.js';
   export * from './consent/ConsentStatusScreen.js';
+  ```
+
+  `apps/web/src/client/routes.tsx` (Plan 01's `'use client'` file; key-level, RV-03-17). Add `ConsentStatusScreen`, `LumpsumAmountScreen` and `LumpsumReviewScreen` to its `@sanchay/features` import, then append:
+  ```tsx
+  export function LumpsumAmountRoute({ schemeId }: { schemeId: string }) {
+    return <LumpsumAmountScreen schemeId={schemeId} />;
+  }
+
+  export function LumpsumReviewRoute({ schemeId }: { schemeId: string }) {
+    return <LumpsumReviewScreen schemeId={schemeId} />;
+  }
+
+  export function ConsentStatusRoute({
+    challengeId,
+    orderId,
+  }: {
+    challengeId: string;
+    orderId: string;
+  }) {
+    return <ConsentStatusScreen challengeId={challengeId} orderId={orderId} />;
+  }
   ```
 
   `apps/web/src/app/(app)/invest/[schemeId]/lumpsum/page.tsx`
   ```tsx
-  import { LumpsumAmountScreen } from '@sanchay/features';
+  import { LumpsumAmountRoute } from '../../../../../client/routes';
 
-  export default async function LumpsumAmountPage({ params }: PageProps<'/invest/[schemeId]/lumpsum'>) {
+  /** INV-01. A server page renders the client wrapper, as Plan 01's pages do (RV-03-17). */
+  export default async function LumpsumAmountPage({
+    params,
+  }: PageProps<'/invest/[schemeId]/lumpsum'>) {
     const { schemeId } = await params;
-    // Scheme facts (name, thresholds) come from catalogue.getScheme (E14); fetched server-side and passed down.
-    const scheme = await fetchSchemeThresholds(schemeId);
-    return (
-      <LumpsumAmountScreen
-        schemeId={schemeId}
-        schemeName={scheme.name}
-        minAmount={scheme.minAmount}
-        maxAmount={scheme.maxAmount}
-        multiple={scheme.multiple}
-      />
-    );
+    return <LumpsumAmountRoute schemeId={schemeId} />;
   }
   ```
 
   `apps/web/src/app/(app)/invest/[schemeId]/review/page.tsx`
   ```tsx
-  import { LumpsumReviewScreen } from '@sanchay/features';
+  import { LumpsumReviewRoute } from '../../../../../client/routes';
 
-  export default async function LumpsumReviewPage({ params }: PageProps<'/invest/[schemeId]/review'>) {
+  export default async function LumpsumReviewPage({
+    params,
+  }: PageProps<'/invest/[schemeId]/review'>) {
     const { schemeId } = await params;
-    return <LumpsumReviewScreen schemeId={schemeId} />;
+    return <LumpsumReviewRoute schemeId={schemeId} />;
   }
   ```
 
   `apps/web/src/app/(app)/confirm/[challengeId]/page.tsx`
   ```tsx
-  import { ConsentStatusScreen } from '@sanchay/features';
+  import { ConsentStatusRoute } from '../../../../client/routes';
 
   export default async function ConfirmPage({
     params,
@@ -20333,11 +21966,16 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }: PageProps<'/confirm/[challengeId]'>) {
     const { challengeId } = await params;
     const { orderId } = await searchParams;
-    return <ConsentStatusScreen challengeId={challengeId} orderId={typeof orderId === 'string' ? orderId : ''} />;
+    return (
+      <ConsentStatusRoute
+        challengeId={challengeId}
+        orderId={typeof orderId === 'string' ? orderId : ''}
+      />
+    );
   }
   ```
 
-  `apps/mobile/src/app/invest/[schemeId]/lumpsum.tsx`
+  `apps/mobile/src/app/invest/[schemeId]/lumpsum.tsx` (RV-03-17: the facts come from `useSchemeFacts`, so the route passes only the uuid)
   ```tsx
   import { LumpsumAmountScreen } from '@sanchay/features';
   import { useLocalSearchParams } from 'expo-router';
@@ -20347,13 +21985,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     const { schemeId } = useLocalSearchParams<{ schemeId: string }>();
     return (
       <NativeScreen>
-        <LumpsumAmountScreen
-          schemeId={schemeId}
-          schemeName=""
-          minAmount="500.00"
-          maxAmount="2500000.00"
-          multiple="1.00"
-        />
+        <LumpsumAmountScreen schemeId={schemeId} />
       </NativeScreen>
     );
   }
@@ -20393,11 +22025,12 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
-  Command:
+  PowerShell and Git Bash (the same commands). The build line refreshes the `dist` that `features` reads (`contract` with E20's and E22's `orders`, `api-client`; RV-03-19):
   ```
+  pnpm exec turbo run build --filter=@sanchay/features^...
   pnpm --filter=@sanchay/features test
   ```
-  Expected: `LumpsumAmountScreen.test.tsx` 1 passed, `LumpsumReviewScreen.test.tsx` 2 passed, `ConsentStatusScreen.test.tsx` 1 passed.
+  Expected: `LumpsumAmountScreen.test.tsx` 2 passed, `LumpsumReviewScreen.test.tsx` 4 passed, `ConsentStatusScreen.test.tsx` 2 passed.
 
   Then:
   ```
@@ -20405,20 +22038,23 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   pnpm --filter=@sanchay/web typecheck
   pnpm --filter=@sanchay/mobile typecheck
   ```
-  Expected: exit 0 for each.
+  Expected: exit 0 for each (`web typecheck` runs `next typegen`, which types the three new pages).
 
 - [ ] **Step 5: Commit**
 
+  One script per line (RV-03-19): `pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, finds no test file and exits 1.
   ```
-  pnpm exec biome check --write packages/features/src/invest packages/features/src/consent apps/web/src/app/\(app\)/invest apps/web/src/app/\(app\)/confirm apps/mobile/src/app/invest apps/mobile/src/app/confirm
-  pnpm --filter=@sanchay/features test typecheck
+  pnpm exec turbo run build --filter=@sanchay/features^...
+  pnpm exec biome check --write packages/features/src/invest packages/features/src/consent packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/invest" "apps/web/src/app/(app)/confirm" apps/mobile/src/app/invest apps/mobile/src/app/confirm
+  pnpm --filter=@sanchay/features test
+  pnpm --filter=@sanchay/features typecheck
   pnpm --filter=@sanchay/web typecheck
   pnpm --filter=@sanchay/mobile typecheck
   pnpm lint
-  git add packages/features/src/invest packages/features/src/consent packages/features/src/index.ts packages/features/src/api/ApiContext.tsx "apps/web/src/app/(app)/invest" "apps/web/src/app/(app)/confirm" apps/mobile/src/app/invest apps/mobile/src/app/confirm
-  git commit -m "feat(invest): add INV-01/02 lumpsum screens and CNF-02/03 (E23)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+  git add packages/features/src/invest packages/features/src/consent packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/invest" "apps/web/src/app/(app)/confirm" apps/mobile/src/app/invest apps/mobile/src/app/confirm
+  git commit -m "feat(invest): add INV-01/02 lumpsum screens, CNF-01 for the purchase and CNF-02/03 (E23)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
-  Expected: both test/typecheck commands exit 0 and `pnpm lint` exits 0.
+  Expected: every test and typecheck command exits 0 and `pnpm lint` exits 0.
 
 ---
 
@@ -20455,30 +22091,39 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `packages/features/src/index.ts` (append 5 exports)
   - `apps/web/src/lib/routing.ts` (no functional change; `safeNext` already rejects `//evil` — see the deviation note)
   - `apps/web/src/lib/routing.test.ts` (append 1 regression case)
+  - `apps/web/src/client/routes.tsx` (RV-03-17: append `PayRoute`, `ResultRoute`, `OrdersListRoute`, `OrderDetailRoute`; key-level only)
+  - `apps/web/e2e/support/otp.ts` (RV-03-18: append `smsInbox`, `newestMessageId` and `readNextOtp`; Plan 01's `readLatestOtp` stays unchanged)
 
 **Interfaces:**
-- Prerequisites: **E21** (`payments.get`, the raw `GET|POST /api/v1/pg/return/{ref}` route, `PAY_ATTEMPT` states). **E20** (`orders.get`, `orders.list`, `orders.cancel`). **E23** (`ConsentStatusScreen` pushes here on `next: 'PAYMENT' | 'DONE'`). Plan 01 **B18/C10** (`@InfraRoute`, HostGuard) for context only — this task adds no server route.
+- Prerequisites: **E21** (`payments.get`, the raw `GET|POST /api/v1/pg/return/{ref}` route, `PAY_ATTEMPT` states). **E20** (`orders.get`, `orders.list`, `orders.cancel` [K]; the wire's `status`, `schemeName`, `cancellable` and `next`, RV-03-16). **E23** (`ConsentStatusScreen` pushes here on `next: 'PAYMENT' | 'DONE'`; INV-02 opens CNF-01 and goes to `/confirm/{challengeId}?orderId={orderId}`). **E17** (FUND-01's "Invest" link, RV-03-8) for the smoke. Plan 01 **B18/C10** (`@InfraRoute`, HostGuard) for context only — this task adds no server route.
 - Consumes:
   - `safeNext`, `isPublicAppPath` (`apps/web/src/lib/routing.ts`, Plan 01 ground truth — **already rejects `//evil`**, see below).
   - `NavAdapter`, `useNav` (Plan 01). `usePlatform`, `PlatformAdapters` (Plan 01, extended here).
   - `messageForError`, `ERROR_CATALOGUE` (`@sanchay/app-core`, `@sanchay/contract`, Plan 01) for the `APP_VERSION_UNSUPPORTED` (426) copy.
-  - `createWebApiClient`, `createNativeApiClient`, `toApiError`, `isSessionError` (`@sanchay/api-client`, Plan 01).
+  - `createWebApiClient`, `createNativeApiClient`, `toApiError`, `isSessionError`, `newIdempotencyKey` (`@sanchay/api-client`, Plan 01).
   - `PAYMENT_METHODS`, `type PaymentMethod` (`@sanchay/domain`, Plan 01).
 - Produces:
   - `packages/api-client/src/errors.ts`: `VERSION_ERROR_CODES = new Set(['APP_VERSION_UNSUPPORTED'])`; `isVersionUnsupportedError(error): boolean`.
   - `packages/api-client/src/client.ts`: `BuildOptions.onVersionUnsupported: () => void`; both `WebApiClientOptions` and `NativeApiClientOptions` gain the same field; the `interceptors` array gains `onError((error) => { if (isVersionUnsupportedError(error)) options.onVersionUnsupported(); })`.
   - `PlatformAdapters.androidStoreUrl: string` (the Play Store listing URL SYS-01 links to).
-  - `PayScreen({ orderId }: { orderId: string })` (PAY-01): shows the TPV line ("Pay only from A/c ••1234 (HDFC)…, shows as Cybrilla") and, per platform, redirects same-tab on web (mobile-web gets a UPI intent link, desktop a QR) or opens `WebBrowser.openAuthSessionAsync` on Android with `Linking.openURL(upiUri)` as the UPI fallback, polling `payments.get` on `AppState` resume.
-  - `ResultScreen({ orderId }: { orderId: string })`: polls `orders.get` until a terminal state and renders SETTLED/REJECTED/PROCESSING copy.
-  - `OrdersListScreen()` (ORD-01) and `OrderDetailScreen({ orderId })` (ORD-02): list/detail over `orders.list`/`orders.get`, with a cancel action gated by the ORD-02 table in gap-rulings GAP-01(b).
+  - `PayScreen({ orderId }: { orderId: string })` (PAY-01): the target is the TPV line ("Pay only from A/c ••1234 (HDFC)…, shows as Cybrilla") and, per platform, a same-tab redirect on web (mobile-web gets a UPI intent link, desktop a QR) or `WebBrowser.openAuthSessionAsync` on Android with `Linking.openURL(upiUri)` as the UPI fallback, polling `payments.get` on `AppState` resume. **Open item (RV-03-16):** no procedure returns the attempt's payment link (E21 stores `token_url` and `upi_uri` encrypted and exposes neither) or the TPV bank's last 4 digits, so this task's PAY-01 shows the order and the TPV copy, follows `orders.get`'s `next` to the result, and offers no pay action until the owner adds that read.
+  - `ResultScreen({ orderId }: { orderId: string })`: polls `orders.get` until its `status` has result copy and renders SETTLED/REJECTED/PROCESSING copy.
+  - `OrdersListScreen()` (ORD-01) and `OrderDetailScreen({ orderId })` (ORD-02): list/detail over `orders.list`/`orders.get`, showing E20's `schemeName`; ORD-02 shows "Cancel order" when E20's `cancellable` is true (the server's GAP-01(b) flag) and sends `orders.cancel` with one `Idempotency-Key` per intent (F28's reuse rule), showing a refusal's copy.
   - `UpdateRequiredScreen()` (SYS-01, R-18): full-screen "Update Sanchay" card with a button linking to `platform.androidStoreUrl`; wired by `onVersionUnsupported` in the app's root API-client construction so **any** 426 from any call navigates here.
   - `apps/web/src/app/(app)/r/[kind]/page.tsx` + `OpenSanchayFallback.tsx`: the "Open Sanchay" web fallback for a payment return; reuses `safeNext(searchParams.next)` to sanitise the continue link (falls back to `/portfolio/orders` when `safeNext` returns `null`).
   - `apps/mobile/src/native-intent.tsx`: Expo Router's native-intent redirect resolver. A `zod` allowlist (`z.enum(['pay', 'result', 'r'])` for the first path segment) drops every query param that is not `orderId`, `ref` or `kind`, and strips a leading `/app` segment (mirrors `apps/web/src/lib/routing.ts`'s `isAppLinkPath`).
   - `apps/mobile/src/app/r/[kind].tsx`, `apps/mobile/src/app/pay/[orderId].tsx`, `apps/mobile/src/app/result/[orderId].tsx`: thin Expo Router wrappers.
-  - `apps/web/e2e/lumpsum.smoke.spec.ts` (Playwright `@smoke`): explore → fund → quote → consent (Mailpit OTP) → FakeFp payment → result SETTLED.
+  - `apps/web/e2e/lumpsum.smoke.spec.ts` (Playwright `@smoke`, RV-03-18): skipped unless `SANCHAY_E2E_LUMPSUM_MOBILE` and `SANCHAY_E2E_LUMPSUM_SCHEME_SLUG` are set (CI sets neither); signs in, then FUND-01 → "Invest" → INV-01 → INV-02 → CNF-01 (codes read from Mailpit with `readNextOtp`) → CNF-02, and waits until the worker has taken the order past CONSENT_PENDING.
+  - `apps/web/e2e/support/otp.ts` helpers (RV-03-18): `smsInbox(mobile)`, `newestMessageId(request, address)`, `readNextOtp(request, address, baselineId)`. Plan 04's F12 consumes them (it no longer appends them).
+  - Web: `PayRoute`, `ResultRoute`, `OrdersListRoute`, `OrderDetailRoute` in `apps/web/src/client/routes.tsx`; the four server pages render them, as Plan 01's pages do (RV-03-17).
   - `apps/mobile/.maestro/lumpsum-return.yaml`: local Maestro flow for the Android payment-return deep link.
   - **Deviation from outline:** `apps/web/src/lib/routing.ts`'s `safeNext` (Plan 01 ground truth) already rejects `//evil` — `SAFE_NEXT = /^\/(?!\/)[A-Za-z0-9/_-]*$/` has a negative lookahead against a second leading slash — and `isPublicAppPath` already recognises `/r` and `/r/*`. This task does not change `safeNext`'s regex; "Files (modify)" on `routing.ts` is a no-op kept only so Step 5's `git add` is explicit, and the new coverage is a regression test in `routing.test.ts` plus the `OpenSanchayFallback` integration test below, not a new sanitiser.
   - **Deviation from outline:** mobile routes live under `apps/mobile/src/app/**`, not `apps/mobile/app/**` (see E23's identical note); `+native-intent.tsx` is likewise `apps/mobile/src/native-intent.tsx` (Expo Router's native-intent file is a sibling of `src/app`, not inside it).
+  - **Review fix (RV-03-9):** E12's props: `MoneyText` takes `value: Money | null` (no `amount` prop), and `ListRow.value` is a string, so ORD-01 formats the row amount with `formatInr` and ORD-02 passes a parsed `Money`. E13's sheet labels its button "Confirm" and sends the OTPs when it opens, so the lumpsum smoke and the Maestro flow tap "Confirm" and no longer tap a "Send code" button that does not exist.
+  - **Review fix (RV-03-16):** ORD-01, ORD-02 and the result screen read `schemeName`, `state` and `cancellable` (and CNF-02 `next`), which E20's `OrderSchema` lacked (its field is `status`), so `features` failed typecheck. E20 now puts `schemeName`, `cancellable` and `next` on the wire, and these screens read `status`. ORD-02's cancel sent no `Idempotency-Key` to the [K] `orders.cancel` (a 428 every time); it sends one per intent with F28's reuse rule and shows a refusal's copy. PAY-01 read `tpvBankLast4`, `tpvBankName` and `paymentUrl`, which no wire carries: see the open item under Produces.
+  - **Review fix (RV-03-17):** the four web pages imported `@sanchay/features` into server components, which `next build` refuses (React context and hooks); they render client wrappers from `apps/web/src/client/routes.tsx`, as Plan 01's pages do.
+  - **Review fix (RV-03-18):** the lumpsum smoke ran in CI's e2e job unconditionally, never signed in, clicked a fund name no seed has, read Mailpit's newest message unfiltered and filled only the SMS code, and E23's old INV-02 never opened CNF-01, so the e2e job was red from this task on. The spec is skipped unless `SANCHAY_E2E_LUMPSUM_MOBILE` and `SANCHAY_E2E_LUMPSUM_SCHEME_SLUG` are set. It signs in as Plan 01's tests do, opens `/funds/<slug>`, clicks "Invest", reads each CNF-01 code with `readNextOtp` (a message newer than the one before the click; `readLatestOtp`'s clock window would return the login code) and clicks `{ name: 'Confirm', exact: true }`. It stops once the worker has taken the order past CONSENT_PENDING: ONDC purchases can stay `submitted` for a long time in the sandbox, and FakeFp never advances on its own (BRIEF D7). `readNextOtp` and its two helpers move here from Plan 04's F12, which runs later.
+  - **Review fix (RV-03-19):** Step 5 chained scripts (`pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, which finds no test file and exits 1). There is one script per line now, after a build of the packages `features` reads.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -20770,37 +22415,55 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
   ```
 
-  `packages/features/src/pay/PayScreen.tsx`
+  `packages/features/src/pay/PayScreen.tsx` (RV-03-16: PAY-01 reads only what `orders.get` carries; see the open item under Produces)
   ```tsx
+  import { Money } from '@sanchay/money';
   import { space } from '@sanchay/tokens';
-  import { AppText, Banner, Button, Screen } from '@sanchay/ui';
+  import { AppText, Banner, MoneyText, Screen } from '@sanchay/ui';
   import { useQuery } from '@tanstack/react-query';
+  import { useEffect } from 'react';
   import { StyleSheet, View } from 'react-native';
   import { useApi } from '../api/ApiContext';
+  import { useNav } from '../nav/NavContext';
 
   export interface PayScreenProps {
     orderId: string;
   }
 
-  /** PAY-01: TPV line and "shows as Cybrilla" copy (D-MONEY money-flow §4.2 AWAITING_PAYMENT row). */
+  /**
+   * PAY-01: the TPV line and "shows as Cybrilla" copy (D-MONEY money-flow §4.2 AWAITING_PAYMENT row).
+   * Open item (RV-03-16): no procedure returns the attempt's payment link (E21 stores `token_url` and
+   * `upi_uri` encrypted and exposes neither) or the TPV bank's last 4 digits, so this screen cannot start
+   * the payment. Until the owner adds that read it shows the order and follows `orders.get`'s `next`.
+   */
   export function PayScreen({ orderId }: PayScreenProps) {
     const { client } = useApi();
-    const order = useQuery({ queryKey: ['orderStatus', orderId], queryFn: () => client.orders.get({ id: orderId }) });
-    if (!order.data) return <Screen testID="pay-screen">{order.isLoading ? <AppText>Loading…</AppText> : null}</Screen>;
+    const nav = useNav();
+    const order = useQuery({
+      queryKey: ['orderStatus', orderId],
+      queryFn: () => client.orders.get({ id: orderId }),
+      refetchInterval: (query) => (query.state.data?.next === 'DONE' ? false : 5000),
+    });
+    const next = order.data?.next ?? null;
+
+    useEffect(() => {
+      if (next === 'DONE') nav.replace(`/result/${orderId}`);
+    }, [next, orderId, nav]);
+
+    if (!order.data) {
+      return (
+        <Screen testID="pay-screen">{order.isLoading ? <AppText>Loading…</AppText> : null}</Screen>
+      );
+    }
     return (
       <Screen testID="pay-screen">
         <View style={styles.stack}>
           <Banner
             tone="info"
-            message={`Pay only from A/c ••${order.data.tpvBankLast4} (${order.data.tpvBankName}). On your statement this shows as Cybrilla.`}
+            message="Pay only from your registered bank account. On your statement this shows as Cybrilla."
           />
-          <AppText tone="muted">Redirecting you to pay…</AppText>
-          <Button
-            label="Pay now"
-            onPress={() => {
-              if (order.data.paymentUrl) globalThis.location.assign(order.data.paymentUrl);
-            }}
-          />
+          <AppText variant="title">{order.data.schemeName}</AppText>
+          <MoneyText value={order.data.amount === null ? null : Money.parse(order.data.amount)} />
         </View>
       </Screen>
     );
@@ -20828,14 +22491,18 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   };
   const TERMINAL_STATES = new Set(Object.keys(TERMINAL_COPY));
 
+  /** Polls `orders.get` until its `status` has result copy (RV-03-16: the wire field is `status`). */
   export function ResultScreen({ orderId }: ResultScreenProps) {
     const { client } = useApi();
     const order = useQuery({
       queryKey: ['orderStatus', orderId],
       queryFn: () => client.orders.get({ id: orderId }),
-      refetchInterval: (query) => (TERMINAL_STATES.has(query.state.data?.state ?? '') ? false : 2000),
+      refetchInterval: (query) =>
+        TERMINAL_STATES.has(query.state.data?.status ?? '') ? false : 2000,
     });
-    const copy = order.data ? (TERMINAL_COPY[order.data.state] ?? 'Confirming your investment…') : 'Loading…';
+    const copy = order.data
+      ? (TERMINAL_COPY[order.data.status] ?? 'Confirming your investment…')
+      : 'Loading…';
     return (
       <Screen testID="result-screen">
         <View style={styles.stack}>
@@ -20850,8 +22517,9 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
   `packages/features/src/orders/OrdersListScreen.tsx`
   ```tsx
+  import { formatInr, Money } from '@sanchay/money';
   import { space } from '@sanchay/tokens';
-  import { AppText, ListRow, MoneyText, Screen } from '@sanchay/ui';
+  import { AppText, ListRow, Screen } from '@sanchay/ui';
   import { useQuery } from '@tanstack/react-query';
   import { StyleSheet, View } from 'react-native';
   import { useApi } from '../api/ApiContext';
@@ -20870,7 +22538,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
             <ListRow
               key={order.id}
               label={order.schemeName}
-              value={<MoneyText amount={order.amount} />}
+              value={formatInr(order.amount === null ? null : Money.parse(order.amount))}
               onPress={() => nav.push(`/portfolio/orders/${order.id}`)}
             />
           ))}
@@ -20884,9 +22552,13 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
   `packages/features/src/orders/OrderDetailScreen.tsx`
   ```tsx
+  import { newIdempotencyKey, toApiError } from '@sanchay/api-client';
+  import { messageForError } from '@sanchay/app-core';
+  import { Money } from '@sanchay/money';
   import { space } from '@sanchay/tokens';
-  import { AppText, Button, ListRow, MoneyText, Screen } from '@sanchay/ui';
+  import { AppText, Banner, Button, ListRow, MoneyText, Screen } from '@sanchay/ui';
   import { useQuery, useQueryClient } from '@tanstack/react-query';
+  import { useRef, useState } from 'react';
   import { StyleSheet, View } from 'react-native';
   import { useApi } from '../api/ApiContext';
 
@@ -20894,26 +22566,68 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     orderId: string;
   }
 
-  /** ORD-02; the cancellable rule (gap-rulings GAP-01(b)) is enforced server-side by orders.cancel. */
+  /**
+   * ORD-02. `cancellable` comes from `orders.get`: E20's rule, the same one `orders.cancel` enforces
+   * (gap-rulings GAP-01(b); RV-03-16). The cancel is [K]: one key per intent, kept after a network error,
+   * a 5xx or IDEMPOTENCY_IN_PROGRESS and replaced after any other 4xx (F28's rule).
+   */
   export function OrderDetailScreen({ orderId }: OrderDetailScreenProps) {
     const { client } = useApi();
     const queryClient = useQueryClient();
-    const order = useQuery({ queryKey: ['orderStatus', orderId], queryFn: () => client.orders.get({ id: orderId }) });
-    if (!order.data) return <Screen testID="order-detail-screen">{order.isLoading ? <AppText>Loading…</AppText> : null}</Screen>;
+    const order = useQuery({
+      queryKey: ['orderStatus', orderId],
+      queryFn: () => client.orders.get({ id: orderId }),
+    });
+    const [cancelling, setCancelling] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const idempotencyKey = useRef<string | null>(null);
+
+    if (!order.data) {
+      return (
+        <Screen testID="order-detail-screen">
+          {order.isLoading ? <AppText>Loading…</AppText> : null}
+        </Screen>
+      );
+    }
+
+    const cancel = async () => {
+      setCancelling(true);
+      setError(null);
+      idempotencyKey.current ??= newIdempotencyKey();
+      try {
+        await client.orders.cancel(
+          { id: orderId },
+          { context: { idempotencyKey: idempotencyKey.current } },
+        );
+        idempotencyKey.current = null;
+        await queryClient.invalidateQueries({ queryKey: ['orderStatus', orderId] });
+      } catch (err) {
+        const apiError = toApiError(err);
+        const finalRefusal =
+          apiError.status >= 400 &&
+          apiError.status < 500 &&
+          apiError.code !== 'IDEMPOTENCY_IN_PROGRESS';
+        if (finalRefusal) idempotencyKey.current = null;
+        setError(messageForError(apiError.code));
+      } finally {
+        setCancelling(false);
+      }
+    };
+
     return (
       <Screen testID="order-detail-screen">
         <View style={styles.stack}>
+          {error ? <Banner tone="error" message={error} /> : null}
           <AppText variant="title">{order.data.schemeName}</AppText>
-          <MoneyText amount={order.data.amount} />
-          <ListRow label="Status" value={order.data.state} />
+          <MoneyText value={order.data.amount === null ? null : Money.parse(order.data.amount)} />
+          <ListRow label="Status" value={order.data.status} />
           {order.data.cancellable ? (
             <Button
               label="Cancel order"
               variant="secondary"
+              loading={cancelling}
               onPress={() => {
-                void client.orders
-                  .cancel({ id: orderId })
-                  .then(() => queryClient.invalidateQueries({ queryKey: ['orderStatus', orderId] }));
+                void cancel();
               }}
             />
           ) : null}
@@ -20934,42 +22648,63 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   export * from './system/UpdateRequiredScreen.js';
   ```
 
+  `apps/web/src/client/routes.tsx` (Plan 01's `'use client'` file; key-level, RV-03-17). Add `OrderDetailScreen`, `OrdersListScreen`, `PayScreen` and `ResultScreen` to its `@sanchay/features` import, then append:
+  ```tsx
+  export function PayRoute({ orderId }: { orderId: string }) {
+    return <PayScreen orderId={orderId} />;
+  }
+
+  export function ResultRoute({ orderId }: { orderId: string }) {
+    return <ResultScreen orderId={orderId} />;
+  }
+
+  export function OrdersListRoute() {
+    return <OrdersListScreen />;
+  }
+
+  export function OrderDetailRoute({ orderId }: { orderId: string }) {
+    return <OrderDetailScreen orderId={orderId} />;
+  }
+  ```
+
   `apps/web/src/app/(app)/pay/[orderId]/page.tsx`
   ```tsx
-  import { PayScreen } from '@sanchay/features';
+  import { PayRoute } from '../../../../client/routes';
 
   export default async function PayPage({ params }: PageProps<'/pay/[orderId]'>) {
     const { orderId } = await params;
-    return <PayScreen orderId={orderId} />;
+    return <PayRoute orderId={orderId} />;
   }
   ```
 
   `apps/web/src/app/(app)/result/[orderId]/page.tsx`
   ```tsx
-  import { ResultScreen } from '@sanchay/features';
+  import { ResultRoute } from '../../../../client/routes';
 
   export default async function ResultPage({ params }: PageProps<'/result/[orderId]'>) {
     const { orderId } = await params;
-    return <ResultScreen orderId={orderId} />;
+    return <ResultRoute orderId={orderId} />;
   }
   ```
 
   `apps/web/src/app/(app)/portfolio/orders/page.tsx`
   ```tsx
-  import { OrdersListScreen } from '@sanchay/features';
+  import { OrdersListRoute } from '../../../../client/routes';
 
   export default function OrdersPage() {
-    return <OrdersListScreen />;
+    return <OrdersListRoute />;
   }
   ```
 
   `apps/web/src/app/(app)/portfolio/orders/[orderId]/page.tsx`
   ```tsx
-  import { OrderDetailScreen } from '@sanchay/features';
+  import { OrderDetailRoute } from '../../../../../client/routes';
 
-  export default async function OrderDetailPage({ params }: PageProps<'/portfolio/orders/[orderId]'>) {
+  export default async function OrderDetailPage({
+    params,
+  }: PageProps<'/portfolio/orders/[orderId]'>) {
     const { orderId } = await params;
-    return <OrderDetailScreen orderId={orderId} />;
+    return <OrderDetailRoute orderId={orderId} />;
   }
   ```
 
@@ -20989,32 +22724,148 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
   ```
 
-  `apps/web/e2e/lumpsum.smoke.spec.ts`
+  `apps/web/e2e/support/otp.ts` (Plan 01's file; RV-03-18: append below `readLatestOtp`, which stays unchanged; `MailpitSearch`, `MailpitMessage`, `MAILPIT_URL` and the `APIRequestContext`/`expect` imports are already in the file). These are Plan 04 F12's helpers, moved here because this smoke runs first:
   ```ts
-  import { expect, test } from '@playwright/test';
+  /** The Mailpit inbox that MailpitSmsSender writes a mobile's SMS to. */
+  export function smsInbox(mobile: string): string {
+    return `sms-${mobile}@sanchay.local`;
+  }
+
+  /**
+   * The id of the newest message Mailpit holds for `address` (an SMS inbox or an email address), or
+   * null when there is none. Take it just before the action that sends a code and pass it to readNextOtp.
+   */
+  export async function newestMessageId(
+    request: APIRequestContext,
+    address: string,
+  ): Promise<string | null> {
+    const search = await request.get(`${MAILPIT_URL}/api/v1/search`, {
+      params: { query: `to:"${address}"`, limit: '1' },
+    });
+    expect(search.ok(), `Mailpit search for ${address}`).toBe(true);
+    const { messages } = (await search.json()) as MailpitSearch;
+    return messages[0]?.ID ?? null;
+  }
+
+  /**
+   * Waits for a message to `address` newer than `baselineId` and returns its 6-digit code. It compares
+   * Mailpit ids, not clocks, so it never returns a code sent to the same inbox seconds earlier (a login
+   * OTP right before a consent OTP falls inside readLatestOtp's skew window). Every SMS and email OTP text
+   * starts with its code, so the first 6-digit run is the code.
+   */
+  export async function readNextOtp(
+    request: APIRequestContext,
+    address: string,
+    baselineId: string | null,
+  ): Promise<string> {
+    let code = '';
+    await expect
+      .poll(
+        async () => {
+          const search = await request.get(`${MAILPIT_URL}/api/v1/search`, {
+            params: { query: `to:"${address}"`, limit: '1' },
+          });
+          if (!search.ok()) return '';
+          const { messages } = (await search.json()) as MailpitSearch;
+          const latest = messages[0];
+          if (!latest || latest.ID === baselineId) return '';
+          const message = await request.get(`${MAILPIT_URL}/api/v1/message/${latest.ID}`);
+          if (!message.ok()) return '';
+          const { Text } = (await message.json()) as MailpitMessage;
+          code = /\b(\d{6})\b/.exec(Text)?.[1] ?? '';
+          return code;
+        },
+        { timeout: 15_000, message: `Mailpit never received a new code for ${address}` },
+      )
+      .toMatch(/^\d{6}$/);
+    return code;
+  }
+  ```
+
+  `apps/web/e2e/lumpsum.smoke.spec.ts` (RV-03-18; skipped unless both variables are set, as F12's `sip.smoke` is)
+  ```ts
+  import { expect, test } from './support/fixtures';
+  import { newestMessageId, readLatestOtp, readNextOtp, smsInbox } from './support/otp';
+
+  /**
+   * @smoke lumpsum (E24, RV-03-18): FUND-01 → INV-01 → INV-02 → CNF-01 → CNF-02. Preconditions (a prepared
+   * local stack, never CI, where the variables are unset and the test is skipped):
+   * - an API and a worker (SANCHAY_APP_ROLE=worker) on the same database, so the approval starts the
+   *   purchase saga; app_config `orders.enabled` is true;
+   * - SANCHAY_E2E_LUMPSUM_MOBILE is an onboarded, investable investor's mobile (CNF-01's SMS code reaches
+   *   Mailpit), such as the investor onboarding.smoke creates;
+   * - SANCHAY_E2E_LUMPSUM_SCHEME_SLUG is a PUBLISHED scheme with a NAV row and a riskometer (E22's quote
+   *   refuses one without) whose lumpsum minimum is at most ₹5,000;
+   * - SANCHAY_E2E_LUMPSUM_EMAIL (optional) is that investor's email. A ₹5,000 purchase needs only the SMS
+   *   code (H-21); the email code is read only if CNF-01 asks for it.
+   * The test stops once the saga has taken the order past CONSENT_PENDING. ONDC purchases can stay
+   * `submitted` for a long time in the sandbox and FakeFp never advances on its own (BRIEF D7), so payment
+   * and allotment are covered by E20's and E21's integration tests, not here.
+   */
+  const MOBILE = process.env.SANCHAY_E2E_LUMPSUM_MOBILE ?? '';
+  const SCHEME_SLUG = process.env.SANCHAY_E2E_LUMPSUM_SCHEME_SLUG ?? '';
+  const EMAIL = process.env.SANCHAY_E2E_LUMPSUM_EMAIL ?? '';
+  const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  /** The order statuses that follow an approved purchase while its saga runs (D5). */
+  const PLACED =
+    /^(CONSENTED|SUBMITTING|UNDER_REVIEW|CONFIRMING|AWAITING_PAYMENT|PAYMENT_PENDING|PROCESSING|UNITS_PENDING|SETTLED|RECONCILING)$/;
 
   test.describe('@smoke lumpsum', () => {
-    test('explore -> fund -> quote -> consent -> FakeFp payment -> result SETTLED', async ({ page }) => {
-      await page.goto('/explore');
-      await page.getByRole('link', { name: /Sanchay Flexicap Fund/ }).click();
+    test.skip(
+      MOBILE === '' || SCHEME_SLUG === '',
+      'needs SANCHAY_E2E_LUMPSUM_MOBILE and SANCHAY_E2E_LUMPSUM_SCHEME_SLUG',
+    );
+
+    test.beforeEach(async ({ page, request }) => {
+      await page.goto('/login');
+      await page.getByLabel('Mobile number').fill(MOBILE);
+      const since = Date.now();
+      await page.getByRole('button', { name: 'Get OTP' }).click();
+      await page.getByLabel('One-time code').fill(await readLatestOtp(request, MOBILE, since));
+      await expect(page).toHaveURL(/:3001\/$/);
+    });
+
+    test('FUND-01 → INV-01 → INV-02 → CNF-01 approves the purchase, and CNF-02 follows the order', async ({
+      page,
+      request,
+    }) => {
+      test.setTimeout(120_000);
+      await page.goto(`/funds/${encodeURIComponent(SCHEME_SLUG)}`);
       await page.getByRole('link', { name: 'Invest' }).click();
+      await expect(page).toHaveURL(new RegExp(`/invest/${UUID}/lumpsum$`));
       await page.getByLabel('Amount').fill('5000');
       await page.getByRole('button', { name: 'Continue' }).click();
+      await expect(page).toHaveURL(new RegExp(`/invest/${UUID}/review$`));
       await page.getByRole('radio', { name: 'UPI' }).click();
+
+      // The login SMS reached the same inbox seconds ago: wait for a newer message, not a newer clock.
+      const smsBaseline = await newestMessageId(request, smsInbox(MOBILE));
+      const emailBaseline = EMAIL === '' ? null : await newestMessageId(request, EMAIL);
       await page.getByRole('button', { name: 'Continue' }).click();
-      await page.getByRole('button', { name: 'Send code' }).click();
-      const code = await page.evaluate(async () => {
-        const res = await fetch('http://localhost:8025/api/v1/messages?limit=1');
-        const body = await res.json();
-        const match = /(\d{6})/.exec(body.messages[0].Text);
-        return match?.[1] ?? '';
-      });
-      await page.getByLabel('SMS code').fill(code);
-      await page.getByRole('button', { name: 'Approve' }).click();
-      await expect(page.getByText('With the fund house for review')).toBeVisible();
-      await expect(page).toHaveURL(/\/pay\//, { timeout: 30_000 });
-      await page.getByRole('button', { name: 'Pay now' }).click();
-      await expect(page.getByText('Your investment is confirmed.')).toBeVisible({ timeout: 30_000 });
+      await page
+        .getByLabel('SMS code')
+        .fill(await readNextOtp(request, smsInbox(MOBILE), smsBaseline));
+      const emailCode = page.getByLabel('Email code');
+      if (await emailCode.isVisible()) {
+        expect(EMAIL, 'CNF-01 asks for the email code: set SANCHAY_E2E_LUMPSUM_EMAIL').not.toBe('');
+        await emailCode.fill(await readNextOtp(request, EMAIL, emailBaseline));
+      }
+      await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+
+      await expect(page).toHaveURL(new RegExp(`/confirm/${UUID}\\?orderId=${UUID}$`));
+      const orderId = new URL(page.url()).searchParams.get('orderId') ?? '';
+      await expect
+        .poll(
+          () =>
+            page.evaluate(async (id) => {
+              const res = await fetch(`/api/v1/orders/${id}`, {
+                headers: { 'x-sanchay-client': 'web' },
+              });
+              return ((await res.json()) as { status?: string }).status ?? `HTTP ${res.status}`;
+            }, orderId),
+          { timeout: 60_000, message: 'the worker takes the approved order past CONSENT_PENDING' },
+        )
+        .toMatch(PLACED);
     });
   });
   ```
@@ -21037,9 +22888,9 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - tapOn: 'Continue'
   - tapOn: 'UPI'
   - tapOn: 'Continue'
-  - tapOn: 'Send code'
+  - tapOn: 'SMS code'
   - inputText: '123456'
-  - tapOn: 'Approve'
+  - tapOn: 'Confirm'
   - assertVisible: 'With the fund house for review'
   - openLink: 'sanchay://app/r/payment?ref=maestro-local-ref'
   - assertVisible:
@@ -21049,8 +22900,9 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
-  Command:
+  PowerShell and Git Bash (the same commands). The build line refreshes the `dist` of `api-client` (this task's interceptor) and `contract` (E20's wire), which `features`, `web` and `mobile` read (RV-03-19):
   ```
+  pnpm exec turbo run build --filter=@sanchay/web^... --filter=@sanchay/mobile^...
   pnpm --filter=@sanchay/web test
   pnpm --filter=@sanchay/mobile test
   pnpm --filter=@sanchay/features test
@@ -21064,21 +22916,38 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   pnpm --filter=@sanchay/mobile typecheck
   pnpm --filter=@sanchay/features typecheck
   pnpm --filter=@sanchay/api-client typecheck
+  pnpm --filter=@sanchay/web exec playwright test --list lumpsum.smoke
   ```
-  Expected: exit 0 for each.
+  Expected: exit 0 for each (`web typecheck` covers `e2e/**`, so the smoke and the `otp.ts` helpers are typechecked); Playwright lists 1 test, `[desktop-chromium] › lumpsum.smoke.spec.ts › @smoke lumpsum › FUND-01 → INV-01 → INV-02 → CNF-01 approves the purchase, and CNF-02 follows the order`. CI sets neither variable, so its e2e job skips the test.
 
-  Playwright and Maestro are not run in this step (they need the sandbox/dev stack); Step 5 does not depend on them, per convention (§0.1: "Maestro stays local only").
+  The smoke itself runs only on the prepared local stack its header describes (an API and a worker, Mailpit, `orders.enabled` true, an onboarded investable investor and a PUBLISHED scheme with a NAV row and a riskometer). Replace the two example values with that investor's mobile and the scheme's slug (the last segment of its `/funds/{slug}` page). The values are quoted, so each line works as written in its shell.
+
+  PowerShell:
+  ```
+  $env:SANCHAY_E2E_LUMPSUM_MOBILE='9876543210'; $env:SANCHAY_E2E_LUMPSUM_SCHEME_SLUG='parag-parikh-flexi-cap'; pnpm --filter=@sanchay/web e2e:web lumpsum.smoke
+  ```
+  Git Bash:
+  ```
+  SANCHAY_E2E_LUMPSUM_MOBILE='9876543210' SANCHAY_E2E_LUMPSUM_SCHEME_SLUG='parag-parikh-flexi-cap' pnpm --filter=@sanchay/web e2e:web lumpsum.smoke
+  ```
+  Expected: 1 passed. Maestro is not run in this step (§0.1: "Maestro stays local only"); Step 5 does not depend on either.
 
 - [ ] **Step 5: Commit**
 
+  One script per line (RV-03-19): `pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, finds no test file and exits 1. The `(app)` and `(tabs)` paths are quoted, so the lines work in PowerShell 5.1 and Git Bash alike.
   ```
-  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform apps/web/src/app/\(app\)/pay apps/web/src/app/\(app\)/result apps/web/src/app/\(app\)/r apps/web/src/app/\(app\)/portfolio/orders apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/mobile/src
-  pnpm --filter=@sanchay/web test typecheck
-  pnpm --filter=@sanchay/mobile test typecheck
-  pnpm --filter=@sanchay/features test typecheck
-  pnpm --filter=@sanchay/api-client test typecheck
+  pnpm exec turbo run build --filter=@sanchay/web^... --filter=@sanchay/mobile^...
+  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src
+  pnpm --filter=@sanchay/web test
+  pnpm --filter=@sanchay/web typecheck
+  pnpm --filter=@sanchay/mobile test
+  pnpm --filter=@sanchay/mobile typecheck
+  pnpm --filter=@sanchay/features test
+  pnpm --filter=@sanchay/features typecheck
+  pnpm --filter=@sanchay/api-client test
+  pnpm --filter=@sanchay/api-client typecheck
   pnpm lint
-  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r apps/mobile/src/app/\(tabs\)/portfolio apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml
+  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml
   git commit -m "feat(pay): add PAY-01, result, ORD-01/02 and SYS-01 with 426 interceptor (E24, R-18)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
-  Expected: all four test/typecheck commands exit 0 and `pnpm lint` exits 0. If a gitleaks false positive fires on the Maestro fixture ref, add a narrow regex to `.gitleaks.toml` in this same commit (never a path wildcard); none is expected here since `maestro-local-ref` matches no secret pattern.
+  Expected: all eight test and typecheck commands exit 0 and `pnpm lint` exits 0. If a gitleaks false positive fires on the Maestro fixture ref, add a narrow regex to `.gitleaks.toml` in this same commit (never a path wildcard); none is expected here since `maestro-local-ref` matches no secret pattern.
