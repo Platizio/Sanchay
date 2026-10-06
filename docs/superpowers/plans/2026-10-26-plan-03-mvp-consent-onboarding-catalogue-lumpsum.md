@@ -203,6 +203,7 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-53: E20 ends a purchase FP expires before it is confirmed (E20; Plan 04 backlog, ADOPT follow-up; major).** E20's advance job rejected only FP `failed` and `review_failed`; an `expired` purchase in UNDER_REVIEW or CONFIRMING was re-enqueued for good. It now rejects `expired` too, as Plan 04 F5's `REVIEW_TERMINAL` does for redemptions. A CONFIRMING purchase whose saga window closed before `confirmed` was sent now returns instead of rethrowing `CONSENT_EXPIRED` on every retry; FP then expires it and the next re-fetch rejects it (Plan 04 F7's backstop re-enqueues the job, RV-04-F7-6). Not run.
 - **RV-03-54: `legal.pending` lists titled versions and reads both acceptance sources (E10, E13; owner decision 2026-10-06; major).** `legal.pending` now returns `Array<{key, version, title}>`, with titles from a new `LEGAL_DOCUMENT_TITLES` in `@sanchay/domain`. A key counts as accepted when its current PUBLISHED version is in `declaration_stagings` or in a `consent_records` DOCUMENT_ACCEPTANCE row, read as the version in force at its `consumed_at`, so the R-18 banner clears after E13's `legal.acceptPending`. `DeclarationsScreen` stages `{accept: [{key, version}]}` for the declaration keys it shows, and `stageDeclarations` lets a key be left out when it is already held at its current version, so a return visit after a new version stages only what is pending. Found on the way and fixed: E10's `pending` called a `LegalDocs.hasAcceptedCurrent` that E3 never defines, its tests sent PUT to a POST route, and `seedDocs` omitted the actor columns and dated documents by the wall clock, which the FakeClock never reaches. Not run.
 - **RV-03-55: PAY-01 gets its data from `payments.forOrder` (E21, E24; owner decision 2026-10-06; blocker).** No procedure returned the payment link or the TPV bank, so PAY-01 could not start a payment and no lumpsum could complete. E21 adds `payments.forOrder` GET `/orders/{orderId}/payment`: the order's latest attempt with FP's `token_url` and UPI intent decrypted (null unless the attempt can still be paid), the return link's expiry and the order's bank (`account_last4`, `bank_name`), NOT_FOUND for another investor's order, with a value case and an `expectBola` case. E24's PayScreen names the bank in the TPV line and opens the link with `Linking.openURL`; Android's in-app auth session still waits for Plan 04's `openAuthSession`. Not run.
+- **RV-03-56: E24's Maestro flow signs in and confirms with real codes (E24; backlog round 2; minor).** The local flow typed a fixed OTP (`123456`, which Plan 01 never accepts), tapped "Sanchay Flexicap Fund", which no seed has, tapped a 'Log in' button that is 'I already have an account', used the `.dev` app id (every variant is `in.sanchay.app`, C14) and asserted only part of a text. It now takes the investor and the scheme as `-e MOBILE` and `-e SCHEME_NAME`, reads each code from Mailpit by id with two new scripts (Plan 01's `read-otp.js` returns the newest code, which for a reused investor can be the previous one), waits with `extendedWaitUntil`, and sits in `.maestro/local/`, so `pnpm e2e:android` never runs it without a prepared stack. The scripts ran in Node against a fake Mailpit and the Maestro globals (3/3; Plan 01's reader returned the stale code in the same case), the YAML parses and `biome check` is clean; Maestro itself was not run (no emulator).
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -22546,7 +22547,8 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/mobile/src/app/(tabs)/portfolio/orders/index.tsx`
   - `apps/mobile/src/app/(tabs)/portfolio/orders/[orderId].tsx`
   - `apps/web/e2e/lumpsum.smoke.spec.ts`
-  - `apps/mobile/.maestro/lumpsum-return.yaml`
+  - `apps/mobile/.maestro/local/lumpsum-return.yaml` (RV-03-56: local only, so `maestro test .maestro` never runs it)
+  - `apps/mobile/.maestro/scripts/newest-sms-id.js`, `apps/mobile/.maestro/scripts/read-next-otp.js` (RV-03-56)
 - Modify:
   - `packages/api-client/src/errors.ts` (append `isVersionUnsupportedError`)
   - `packages/api-client/src/client.ts` (thread `onVersionUnsupported` through `BuildOptions`/`WebApiClientOptions`/`NativeApiClientOptions` and add it to the `interceptors` array)
@@ -22581,7 +22583,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/web/e2e/lumpsum.smoke.spec.ts` (Playwright `@smoke`, RV-03-18): skipped unless `SANCHAY_E2E_LUMPSUM_MOBILE` and `SANCHAY_E2E_LUMPSUM_SCHEME_SLUG` are set (CI sets neither); signs in, then FUND-01 → "Invest" → INV-01 → INV-02 → CNF-01 (codes read from Mailpit with `readNextOtp`) → CNF-02, and waits until the worker has taken the order past CONSENT_PENDING.
   - `apps/web/e2e/support/otp.ts` helpers (RV-03-18): `smsInbox(mobile)`, `newestMessageId(request, address)`, `readNextOtp(request, address, baselineId)`. Plan 04's F12 consumes them (it no longer appends them).
   - Web: `PayRoute`, `ResultRoute`, `OrdersListRoute`, `OrderDetailRoute` in `apps/web/src/client/routes.tsx`; the four server pages render them, as Plan 01's pages do (RV-03-17).
-  - `apps/mobile/.maestro/lumpsum-return.yaml`: local Maestro flow for the Android payment-return deep link.
+  - `apps/mobile/.maestro/local/lumpsum-return.yaml`: local Maestro flow for the Android payment-return deep link. An onboarded investor (`-e MOBILE`) signs in, places a ₹5,000 UPI lumpsum in a PUBLISHED scheme from Explore (`-e SCHEME_NAME`) with the codes read from Mailpit, and the `sanchay://app/r/payment` link opens the in-app payment return screen. `newest-sms-id.js` and `read-next-otp.js` read each code by Mailpit id, as the web smoke's `readNextOtp` does (RV-03-56).
   - **Deviation from outline:** `apps/web/src/lib/routing.ts`'s `safeNext` (Plan 01 ground truth) already rejects `//evil` — `SAFE_NEXT = /^\/(?!\/)[A-Za-z0-9/_-]*$/` has a negative lookahead against a second leading slash — and `isPublicAppPath` already recognises `/r` and `/r/*`. This task does not change `safeNext`'s regex; "Files (modify)" on `routing.ts` is a no-op kept only so Step 5's `git add` is explicit, and the new coverage is a regression test in `routing.test.ts` plus the `OpenSanchayFallback` integration test below, not a new sanitiser.
   - **Deviation from outline:** mobile routes live under `apps/mobile/src/app/**`, not `apps/mobile/app/**` (see E23's identical note); `+native-intent.tsx` is likewise `apps/mobile/src/native-intent.tsx` (Expo Router's native-intent file is a sibling of `src/app`, not inside it).
   - **Review fix (RV-03-9):** E12's props: `MoneyText` takes `value: Money | null` (no `amount` prop), and `ListRow.value` is a string, so ORD-01 formats the row amount with `formatInr` and ORD-02 passes a parsed `Money`. E13's sheet labels its button "Confirm" and sends the OTPs when it opens, so the lumpsum smoke and the Maestro flow tap "Confirm" and no longer tap a "Send code" button that does not exist.
@@ -23391,32 +23393,129 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   });
   ```
 
-  `apps/mobile/.maestro/lumpsum-return.yaml`
+  `apps/mobile/.maestro/local/lumpsum-return.yaml` (RV-03-56)
   ```yaml
-  appId: in.sanchay.app.dev
+  appId: in.sanchay.app
+  name: An onboarded investor places a lumpsum, then the payment-return link opens the in-app return (E24)
+  # Local only (§0.1), against a prepared local stack, like E24's lumpsum.smoke: an API and a worker on one
+  # database with app_config orders.enabled = true, Mailpit as the SMS sink, and a dev build (the sanchay://
+  # scheme is dev-only, H-1). It sits in a subfolder, so `pnpm e2e:android` (`maestro test .maestro`, which
+  # runs top-level flows only) never runs it without them. Pass an onboarded, investable investor's mobile and
+  # the name of a PUBLISHED scheme on Explore whose lumpsum minimum is at most ₹5,000 (Maestro reads the name
+  # as a regex, so escape any regex characters; a ₹5,000 purchase needs only the SMS code, H-21):
+  #   maestro test -e MOBILE=<mobile> -e SCHEME_NAME="<scheme name>" .maestro/local/lumpsum-return.yaml
   ---
   - launchApp:
       clearState: true
-  - tapOn: 'Log in'
-  - inputText: '9876543210'
+  - tapOn: 'I already have an account'
+  - tapOn:
+      id: 'mobile-input'
+  - inputText: ${MOBILE}
+  - hideKeyboard
+  # The investor is reused, so wait for an SMS newer than the newest one now, never the newest one.
+  - runScript:
+      file: ../scripts/newest-sms-id.js
+      env:
+        MOBILE: ${MOBILE}
   - tapOn: 'Get OTP'
+  - runScript:
+      file: ../scripts/read-next-otp.js
+      env:
+        MOBILE: ${MOBILE}
+        AFTER_ID: ${output.smsId}
   - tapOn:
       id: 'otp-input'
-  - inputText: '123456'
-  - tapOn: 'Sanchay Flexicap Fund'
-  - tapOn: 'Invest'
+  - inputText: ${output.otp}
+  - extendedWaitUntil:
+      visible: 'Explore'
+      timeout: 15000
+  - tapOn: 'Explore'
+  - scrollUntilVisible:
+      element: ${SCHEME_NAME}
+      timeout: 20000
+  - tapOn: ${SCHEME_NAME}
+  - tapOn:
+      id: 'fund-invest'
+  - tapOn:
+      id: 'lumpsum-amount-input'
   - inputText: '5000'
+  - hideKeyboard
   - tapOn: 'Continue'
   - tapOn: 'UPI'
+  - runScript:
+      file: ../scripts/newest-sms-id.js
+      env:
+        MOBILE: ${MOBILE}
   - tapOn: 'Continue'
-  - tapOn: 'SMS code'
-  - inputText: '123456'
+  - runScript:
+      file: ../scripts/read-next-otp.js
+      env:
+        MOBILE: ${MOBILE}
+        AFTER_ID: ${output.smsId}
+  - tapOn:
+      id: 'consent-otp-sms'
+  - inputText: ${output.otp}
   - tapOn: 'Confirm'
-  - assertVisible: 'With the fund house for review'
+  # CNF-02 shows the saga's copy, then PAY-01 once the order awaits payment; either proves the approval.
+  - extendedWaitUntil:
+      visible: '(Getting your payment ready|With the fund house for review|Confirming your payment method|Pay only from .*)'
+      timeout: 60000
   - openLink: 'sanchay://app/r/payment?ref=maestro-local-ref'
-  - assertVisible:
-      text: 'Confirming your payment'
+  - extendedWaitUntil:
+      visible: 'Confirming your payment.*'
       timeout: 15000
+  ```
+
+  `apps/mobile/.maestro/scripts/newest-sms-id.js` (RV-03-56)
+  ```js
+  // The id of the newest SMS Mailpit holds for MOBILE, or '' when there is none (E24, RV-03-56). Take it just
+  // before the step that sends a code, then pass it to read-next-otp.js as AFTER_ID.
+  (() => {
+    const mailpit = typeof MAILPIT_URL !== 'undefined' ? MAILPIT_URL : 'http://localhost:8025';
+    const query = encodeURIComponent(`to:"sms-${MOBILE}@sanchay.local"`);
+    const search = http.get(`${mailpit}/api/v1/search?query=${query}&limit=1`);
+    if (search.status !== 200) {
+      throw new Error(`Mailpit search for ${MOBILE} failed with HTTP ${search.status}`);
+    }
+    const latest = (json(search.body).messages || [])[0];
+    output.smsId = latest ? latest.ID : '';
+  })();
+  ```
+
+  `apps/mobile/.maestro/scripts/read-next-otp.js` (RV-03-56; Plan 01's `read-otp.js` returns the newest code, which for a reused investor can be the previous one)
+  ```js
+  // Waits for an SMS to MOBILE newer than AFTER_ID (from newest-sms-id.js) and returns its 6-digit code (E24,
+  // RV-03-56). It compares Mailpit ids, not clocks, so a reused investor's earlier codes never match. Every
+  // OTP SMS starts with its code, so the first 6-digit run is the code (as apps/web/e2e/support/otp.ts's
+  // readNextOtp reads it). Maestro runs scripts on the host, so localhost reaches Mailpit.
+  (() => {
+    const mailpit = typeof MAILPIT_URL !== 'undefined' ? MAILPIT_URL : 'http://localhost:8025';
+    const after = typeof AFTER_ID !== 'undefined' ? AFTER_ID : '';
+    const query = encodeURIComponent(`to:"sms-${MOBILE}@sanchay.local"`);
+    const deadline = Date.now() + 15000;
+    let code = null;
+    let spins = 0;
+    while (code === null && Date.now() < deadline) {
+      const search = http.get(`${mailpit}/api/v1/search?query=${query}&limit=1`);
+      const latest = search.status === 200 ? (json(search.body).messages || [])[0] : undefined;
+      if (latest && latest.ID !== after) {
+        const message = http.get(`${mailpit}/api/v1/message/${latest.ID}`);
+        const match = message.status === 200 ? /\b(\d{6})\b/.exec(json(message.body).Text) : null;
+        if (match) code = match[1];
+      }
+      if (code === null) {
+        // Maestro's script runtime has no sleep(); busy-wait 500 ms between polls.
+        const pauseUntil = Date.now() + 500;
+        while (Date.now() < pauseUntil) {
+          spins += 1;
+        }
+      }
+    }
+    if (code === null) {
+      throw new Error(`No new code SMS for ${MOBILE} reached Mailpit within 15 s (${spins} spins)`);
+    }
+    output.otp = code;
+  })();
   ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
@@ -23458,7 +23557,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   One script per line (RV-03-19): `pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, finds no test file and exits 1. The `(app)` and `(tabs)` paths are quoted, so the lines work in PowerShell 5.1 and Git Bash alike.
   ```
   pnpm exec turbo run build --filter=@sanchay/web^... --filter=@sanchay/mobile^...
-  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
+  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx apps/mobile/.maestro/scripts/newest-sms-id.js apps/mobile/.maestro/scripts/read-next-otp.js
   pnpm --filter=@sanchay/web test
   pnpm --filter=@sanchay/web typecheck
   pnpm --filter=@sanchay/mobile test
@@ -23468,7 +23567,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   pnpm --filter=@sanchay/api-client test
   pnpm --filter=@sanchay/api-client typecheck
   pnpm lint
-  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
+  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/local apps/mobile/.maestro/scripts/newest-sms-id.js apps/mobile/.maestro/scripts/read-next-otp.js packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
   git commit -m "feat(pay): add PAY-01, result, ORD-01/02 and SYS-01 with 426 interceptor (E24, R-18)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   Expected: all eight test and typecheck commands exit 0 and `pnpm lint` exits 0. If a gitleaks false positive fires on the Maestro fixture ref, add a narrow regex to `.gitleaks.toml` in this same commit (never a path wildcard); none is expected here since `maestro-local-ref` matches no secret pattern.

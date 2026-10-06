@@ -544,6 +544,6 @@ Observed only, not changed:
 - **Still open:**
   - **Wiring D4's sandbox chains up to their sandbox limit.** R-37 needs it, and no task does it. This is the one open backlog item (needs-owner: who and when).
   - Cybrilla's written answers: the email is drafted in `docs/business/cybrilla-payment-url-unused-email.md`, and the owner sends it.
-  - E24's local Maestro flow still types fixed codes (Claude, next round).
+  - ~~E24's local Maestro flow still types fixed codes~~ **Fixed** in a later follow-up (RV-03-56; RV-04-F18-2 drops F18's old edit of it).
 - **Resume here:** assign the chain wiring, send the Cybrilla email, then Sprint 2 from Mon 10-12 on `feat/plan-02-mvp-kernel` (Task D0 first).
 
