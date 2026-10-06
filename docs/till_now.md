@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-06. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only. The latest session is §10 (branch `claude/sanchay-plan-02-03-backlog-huz9ym`, not yet merged)._
+_Last updated: 2026-10-06. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only. The latest sessions are §10 and §11 (branch `claude/sanchay-plan-02-03-backlog-huz9ym`, not yet merged)._
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -196,7 +196,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | The Plan 02/03 backlog round is done (§10): R-35 in D9, E25 retention, D5's unpaid-order end and Plan 03 RV-03-28 to RV-03-50 are on branch `claude/sanchay-plan-02-03-backlog-huz9ym` (no PR yet). Next: the owner decisions listed in §10, open a PR for that branch when ready, then the Plan 04 backlog (80 open) before S4. | Owner + Claude |
+| 1 | The plan backlog is worked for Plans 02, 03 and 04 (§10, §11) on branch `claude/sanchay-plan-02-03-backlog-huz9ym` (no PR yet); owner decisions 1 and 2 are written in (R-36). Next: the remaining owner decisions in §11, then a PR for that branch when ready. | Owner + Claude |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
 | 4 | ~~Create the GitHub repo~~ **Done:** `Platizio/Sanchay`. Push local `main` when ready: it contains PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1) (F4) plus the merge, so the PR then shows as merged. | Owner |
@@ -474,3 +474,41 @@ Observed only, not changed:
   6. Ask Cybrilla to confirm in writing that no money is taken on an `fp_payment_url_unused` order, and decide on a backstop if its webhook is missed.
   7. E24's local Maestro flow still types fixed codes.
 - **Resume here:** the Plan 04 backlog (`docs/delivery/plan-errata-backlog.md`, "## Plan 04", 80 open), then the owner decisions above. Sprint 2 starts Mon 10-12 on `feat/plan-02-mvp-kernel` with Task D0. This branch needs a PR to `main` when the owner wants it merged.
+
+## 11. Session 2026-10-06 (continued): owner decisions 1 and 2, Plan 04 backlog worked
+
+- **Branch:** still `claude/sanchay-plan-02-03-backlog-huz9ym`. One commit per group, each pushed; no PR.
+- **Owner decisions (accepted 2026-10-06):**
+  1. **Consent-first test helper (RV-03-51, RV-04-F2-6, RV-04-F5-2).** The helper fails when a consumed challenge's window is empty and a P/M call sits on its edge. The approve helpers in E11, F2 and F5 move the FakeClock 1 ms after approve. Their create helpers also move it 1 ms before the create: a file shares one FakeFp log and one clock, so without that step the previous test's writes would land inside the next window. That step was added to the accepted proposal.
+  2. **Risk questionnaire (R-36, RV-03-52, RV-04-F1-14).** The JSON carries `approvedBy: null` until compliance names themself in a docs-only commit. The seed loads it as DRAFT until then, publishes the DRAFT row on the next run, and never changes a PUBLISHED one. F1's `seedReferenceData` runs it on every deploy.
+- **Plan 04 backlog, four groups (80 items):**
+  - **H1, F1 and infra:**
+    - E25's ECS Exec had `cloudWatchEncryptionEnabled: true` with no KMS key, so every session would be refused (RV-02-79). Proven test-first with aws-cdk-lib 2.216.0.
+    - F1 now says where the G-E5 results go (RV-04-F1-15).
+  - **H2, F2–F6, F10, F11:**
+    - A CONFIRMING redemption whose window closed no longer fails on every retry (RV-04-F5-3).
+    - F6 builds before its api checks (RV-04-F6-1).
+    - Step 5's prose now matches its commands (RV-04-HDR-2).
+  - **H3, F7 and F20–F27:**
+    - The units and payout jobs close their own SLA breaks, so the money-invariant alarm clears without a two-founder resolve (RV-04-F4-5, RV-04-F5-4).
+    - The backstop restarts stalled purchases (RV-04-F7-6).
+    - E20 rejects a purchase FP expires before it is confirmed (RV-03-53).
+  - **H4, F8–F19 and F28:**
+    - A paused withdrawal now has its own copy (RV-04-F16-1).
+    - F19's seed check sits before F1's reference step (RV-04-F19-5).
+    - The header's Step 5 build rule is written down (RV-04-HDR-3).
+    - F2's last `!` assertion is gone (RV-04-F2-7).
+  - Most of the other items were already fixed by the 10-01 and 10-05 rounds; each was checked against the current text.
+  - Sweeps across Plan 04: no `--` test filters, `git diff` OpenAPI commands, chained scripts, non-null assertions, swallowed `23505`, enqueue spies without a job id, or missing build lines left.
+- **Not run:** RV-03-51/52/53, the F4/F5/F7 job changes, F16's copy and the F2/F5 helper edits were checked by reading the code. Only RV-02-79 ran (aws-cdk-lib 2.216.0).
+- **Still open, for the owner (proposals in the backlog):**
+  - **Plan 03:** the `legal.pending` shape; G-E4 for chains the sandbox cannot settle (2 items); PAY-01's data source (2 items).
+  - **Plan 04:**
+    - Whether a full ("ALL") redemption works on ONDC (a probe before GO-1).
+    - Android back-navigation after a redemption (`dismissTo`, check on F25's device build).
+    - A read-only refunds view.
+    - The three missing ops commands.
+    - INV-01 on a cold open.
+    - R-34's "every log line" wording.
+  - **From §10:** Cybrilla's written confirmation on `fp_payment_url_unused`, a backstop for a missed `mf_purchase` webhook, and E24's Maestro flow.
+- **Resume here:** the open owner decisions above, then a PR for this branch when the owner wants it merged. Sprint 2 starts Mon 10-12 on `feat/plan-02-mvp-kernel`, Task D0 first.
