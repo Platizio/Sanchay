@@ -38,7 +38,7 @@ F1 → F2 → F3 → F4 → F5 → F7 → F10 → F11 → F8 → F9 → F12 → 
 ## Owner decisions before executing
 
 These are open; each blocks or changes a task. Owners and dates are in `docs/till_now.md` and `docs/business/pilot-actions-checklist.md`.
-1. **G-E4 sandbox smoke (GO-1).** D4's sandbox chains still have SKIPPED placeholders for onboarding, lumpsum, SIP and redemption, and no task wires them. P-07 also shows that sandbox ONDC purchases may never settle. Without a ruling, F23's G-E4 line reads "owner ruling required". Either fund the chain wiring, or rule how G-E4 is evidenced.
+1. **G-E4 sandbox smoke (GO-1).** D4's sandbox chains still have SKIPPED placeholders for onboarding, lumpsum, SIP and redemption, and no task wires them. P-07 also shows that sandbox ONDC purchases may never settle. Without a ruling, F23's G-E4 line reads "owner ruling required". Either fund the chain wiring, or rule how G-E4 is evidenced. **Settled 2026-10-06 by R-37 (option A; RV-04-F23-2):** G-E4 is met per chain by sandbox runs up to the chain's sandbox limit plus the founders' canary leg for the steps past it, and GO-1 needs the onboarding, lumpsum and redemption chains. Still open: no task wires D4's chains up to their sandbox limit (`docs/delivery/plan-errata-backlog.md`).
 2. **EUIN (P-04 FAIL).** FP fills a tenant-default EUIN on every order. Cybrilla's answer to Q12 and a compliance view on execution-only orders are needed. Tasks never send `euin`; F20/F23 record what FP returns.
 3. **T3 funding.** F15 runs only if T3 is funded; R-08 funds F28 from T3 + T5.
 4. **AWS and MSG91 accounts, the domain and its hosted zone.** E25 deploys the prod stack in S2 week 2 (R-31), so the prod account, the registered `sanchay.in` and its Route 53 hosted zone in that account must exist before E25 deploys (owner action). F1 (hardening, SES, alarms) and real SMS (DLT) need them too. They were due on 10-09 (PB-45, PB-30/31, PB-41).
@@ -195,6 +195,13 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F16-1: a paused withdrawal says so (backlog round 2, F16 UX; minor).** RED-02 showed E20's ORDERS_DISABLED copy, "New investments are paused right now", on a withdrawal. `RedeemReviewScreen` now shows "Withdrawals are paused right now. Please try again later." for that code, and its refusal case expects it. F16's Prerequisites also credit E13, not E23, with `ApiContextValue.consents` (Plan 03 RV-03-9). Not run.
 - **RV-04-F19-5: F19's seed check sits before F1's reference step (backlog round 2; minor).** F1 moved D8's first four CSV loops into `seedCatalogueReference`, which `seedCatalogue` calls first, so F19's "before the `amcs.csv` loop" anchor now names that call; the validation stays first, so an invalid list writes nothing.
 - **RV-04-F2-7: F2's FakeFp case passes `biome ci` (sweep; minor).** `this.state.purchasePlans.get(params.id!)` was the one non-null assertion left in Plan 04's code; it is `params.id ?? ''`, as Plan 02 RV-02-47 wrote D4's (an unknown id finds no plan either way).
+- **RV-04-F1-16: F1's open question 5 is settled (R-38; minor).** The owner narrowed R-34's `service` field to the lines the api, worker, migrate and ops containers write through the app logger. The web container's Next.js output and the ops CLIs' result lines stay plain text, because no metric filter or alarm reads them. No code changes.
+- **RV-04-F4-6: F4 keeps E21's unpaid-purchase failure (F4; found while writing RV-04-F7-7; major).** F4's `mfPurchaseEventHandler` replaced E21's handler but acted only from PROCESSING, and its replacement of E21's `mf_purchase events` describe dropped RV-03-43's case, so after F4 an unpaid purchase FP failed (`fp_payment_url_unused`) stayed AWAITING_PAYMENT. F4's `fp-events.ts` now exports `endUnpaidPurchase` (AWAITING_PAYMENT or PAYMENT_PENDING with FP `failed` or `expired` ends FAILED or EXPIRED with FP's failure code), the handler calls it before the PROCESSING check, and the describe keeps RV-03-43's case (E21's file stays 12/12). Not run.
+- **RV-04-F7-7: a lost `mf_purchase` event no longer leaves an unpaid purchase open (F7; owner decision 2026-10-06; major).** Only FP's event ended an unpaid purchase (RV-03-43). `fp.reconcile.nonfinal` now re-reads each AWAITING_PAYMENT or PAYMENT_PENDING purchase once its sweep time has passed (`unpaidPurchaseSweepAt`: 23:30 IST on its IST order day, or the next day when it was created after 23:00 IST; P-07) and applies RV-04-F4-6's `endUnpaidPurchase`. Three `recon-rules` vectors and two `recon-fp` cases cover it. The sweep-time arithmetic ran in Node (6/6, including a 22:59 IST case); the job itself was not run.
+- **RV-04-F7-8: the team can see refunds in progress (F7, F24; owner decision 2026-10-06; minor).** F7's `ops_views` migration adds `v_refunds_pending(order_id, attempt_id, refund_status, updated_at)` over the attempts `ops:refund-utr` acts on (`IN_PROGRESS`, `REFUND_PENDING`), granted to `sanchay_readonly`, and the views test lists it. F24's `refund.md` detects refunds with it, and every "six views" line now reads seven. The view ran on PostgreSQL 18.6: it listed the two in-progress refunds among four rows, and `sanchay_readonly` was refused on `payment_attempts` (42501).
+- **RV-04-F16-2: F16 no longer calls ALL FULL on ONDC an open question (F16; backlog; minor).** P-09's addendum (2026-10-01) already redeemed a whole ONDC holding with neither amount nor units in 10 s. The owner's 2026-10-06 decision to probe it is therefore met, and F5's ALL FULL path stands with no amount fallback. Text only.
+- **RV-04-F16-3: leaving CNF-02 no longer stacks the tabs again on Android (F16, Plan 01 C9/C13; owner decision 2026-10-06; major).** Plan 01's `NavAdapter` gains `dismissTo(href)` (web `router.replace`, mobile Expo Router's `router.dismissTo`), `makeNav` gains it, and "View order" and "Go to portfolio" use it; F16's residual-flow test asserts both calls and no push. On Plan 01's code in a scratch worktree, `@sanchay/features`, `@sanchay/web` and `@sanchay/mobile` typecheck clean and the features suite passes 22/22, and leaving out the mobile line fails with TS2741. Back on the device stays F25's check.
+- **RV-04-F23-2: G-E4 is evaluated as R-37's split proof (F23; R-37; major).** A run may leave the steps past its chain's sandbox limit SKIPPED with a `sandbox limit: …` detail; it then counts for the sandbox days, and the chain is MET only once its canary legs (lumpsum `A_UPI`, `A_NETBANKING`; SIP `B_SIP`) read PASS in F20's generated legs table. GO-1's G-E4 covers onboarding, lumpsum and redemption; SIP is GO-2 evidence. The headline reads `NOT MET: chains not wired` or `NOT MET: waiting on the canary` instead of "owner ruling required". Extracted and run as plain Node 24: the new cases failed against the old script (missing export), then 26/26 passed, `biome check` is clean, and `gate-evidence g-e4` exited 1 without a canary report and 0 once both lumpsum legs read PASS.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit); where a task needs the workspace build, that line comes first, before biome, because the re-run reads `dist` (RV-04-HDR-3). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -4304,7 +4311,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. The fak
 2. **Owner:** SNS SMS to Indian numbers needs the account out of the SNS SMS sandbox (or both numbers verified in it) and a sender ID with DLT registration for SNS; without them the SMS half of the alarms does not arrive (G-E5 drill, step 6).
 3. **Assembler:** until F1 is deployed, prod gets no reference data: E25's migrate task only migrates. Every demo before F1 that needs published legal documents or catalogue data (Plan 03's 11-06 lumpsum demo) runs locally (R-31: there is no dev stack to seed).
 4. **Lead (R-33, Plan 02 D9):** D9's backfill now has a deployed run form (`db-access.md`, "After the migrate task"), but as written five years of history take about 260 weekly runs: its AMFI client gives up after 10 s while AMFI's history report needs roughly 0.6 to 1 s per day of range before its first byte, and it inserts one row per statement (on a local PostgreSQL 18.6, 1,000-row inserts loaded a 277,439-row month in 16 s; D9's loop took 178 s for a 253,150-row one). Nothing appends the daily NAV to `nav_history` either (`nav.sync.daily` writes `scheme_navs` only), so after the backfill E16's returns are computed against a frozen last history date. Proposed for D9: a history timeout of a few minutes, month-sized chunks inside one run, multi-row inserts that report the rows actually inserted, and a `nav_history` insert in the daily sync. E15's `ops:facts:import` is still local-only. **Resolved 2026-10-05 (Plan 02 RV-02-73 and RV-02-74; RV-04-F1-10):** D9 now waits up to 5 minutes for AMFI and retries transient failures, walks month by month inside one run with 1,000-row inserts, counts inserted rows, and appends each daily sync to `nav_history`; the runbook gives six yearly runs.
-5. **Owner (R-34):** R-34 says every log line carries `service`. Every line the api image writes through pino does (api, worker, migrate; ops once F7 adds the role), but three kinds of line stay plain text without it: the web container's Next.js output, the results the ops CLIs print with `console.log` (F7's runner, F19's seed, D9's backfill), and Node's own crash output before a logger exists. No metric filter or alarm reads them, and their stream prefix (`prod/web/`, `prod/ops/`) names the container; giving them `service` needs a JSON logger in `apps/web` and in those CLIs, which this task does not add.
+5. **Owner (R-34):** R-34 says every log line carries `service`. Every line the api image writes through pino does (api, worker, migrate; ops once F7 adds the role), but three kinds of line stay plain text without it: the web container's Next.js output, the results the ops CLIs print with `console.log` (F7's runner, F19's seed, D9's backfill), and Node's own crash output before a logger exists. No metric filter or alarm reads them, and their stream prefix (`prod/web/`, `prod/ops/`) names the container; giving them `service` needs a JSON logger in `apps/web` and in those CLIs, which this task does not add. **Resolved 2026-10-06 (R-38; RV-04-F1-16):** the owner narrowed R-34 to the lines the api, worker, migrate and ops containers write through the app logger, so these three kinds of line stay plain text.
 6. **Lead (Plan 02 D0):** the app logs through pino-http's logger (nestjs-pino), and pino-http wraps the `err` serializer, so D0's `serializeErr` receives the already-serialised object (`err instanceof Error` is false) and returns it unredacted: a `DrizzleQueryError` logged through `pinoHttp(buildPinoHttpOptions(env)).logger` keeps its bound mobile number in `err.message` and `err.stack`, with `"type":"Object"` (reproduced in the scratch clone; D0's test passes because it uses a bare `pino`). F1's fixture shows that `"type":"Object"`. The masking policy now hides such a number at every CloudWatch egress, but D0 should also redact the serialised form (or pass pino-http `wrapSerializers: false`), and its test should log through `pinoHttp`. **Resolved 2026-10-05 (Plan 02 RV-02-75):** D0's `serializeErr` now also takes pino's serialised form and redacts through its `raw` Error, and D0's test logs through pino-http, so the fixture's `err` lines keep their real `type` and no bound value.
 
 ---
@@ -8515,6 +8522,22 @@ describe('mf_purchase events', () => {
     expect((await orderOf(orderId))?.status).toBe('SETTLED');
     expect(await t.db.db.select().from(lots).where(eq(lots.sourceOrderId, orderId))).toHaveLength(1);
   });
+
+  it('FP fails an unpaid purchase with fp_payment_url_unused: FAILED and final, the attempt untouched (RV-03-43, RV-04-F4-6)', async () => {
+    const { orderId, attemptId } = await checkedOut();
+    const fpOrderId = (await orderOf(orderId))?.fpOrderId as string;
+    t.fakeFp.advance(fpOrderId, 'failed');
+    const fpRead = t.app.get(FpRead);
+    const raw = await fpRead.purchase(fpOrderId); // FakeFp has no failure_code; the spy adds FP's
+    vi.spyOn(fpRead, 'purchase').mockResolvedValueOnce({ ...raw, failure_code: 'fp_payment_url_unused' });
+    await FP_EVENT_HANDLERS.mf_purchase?.({
+      db: t.db.db,
+      fpRead,
+      event: { objectType: 'mf_purchase', objectId: fpOrderId } as never,
+    });
+    expect(await orderOf(orderId)).toMatchObject({ status: 'FAILED', failureCode: 'fp_payment_url_unused' });
+    expect((await attemptOf(attemptId))?.status).toBe('REDIRECTED');
+  });
 });
 ```
 
@@ -10078,21 +10101,45 @@ export class PortfolioModule {
 
 `apps/api/src/modules/payments/fp-events.ts` (E21's file; full content: `handleMfPurchaseEvent` becomes `mfPurchaseEventHandler`):
 ```ts
+import type { OrderStatus } from '@sanchay/domain';
 import { eq } from 'drizzle-orm';
+import type { DbExecutor } from '../../db/client.js';
 import type {
   FpEventHandler,
   FpEventHandlerContext,
 } from '../../integrations/fp/webhooks/fp-event-handlers.js';
-import { toFpPurchaseView } from '../orders/fp-purchase.js';
+import { type FpPurchaseView, toFpPurchaseView } from '../orders/fp-purchase.js';
+import { moveOrder } from '../orders/order-transitions.js';
 import { orders } from '../orders/orders.schema.js';
 import type { PurchaseSettlement } from '../portfolio/purchase-settlement.js';
 
 const SETTLING = ['PROCESSING', 'UNITS_PENDING', 'SETTLED'];
+const UNPAID = ['AWAITING_PAYMENT', 'PAYMENT_PENDING'];
+
+/**
+ * E21's RV-03-43, kept by F4 (RV-04-F4-6): FP fails or expires an unpaid purchase (P-07:
+ * `fp_payment_url_unused` at 23:00 IST on the order day; nothing was paid), so the order ends FAILED or
+ * EXPIRED with FP's failure code and no refund. Any other FP state is left to payments.poll and the saga
+ * jobs. Shared by the `mf_purchase` handler and F7's fp.reconcile.nonfinal backstop (RV-04-F7-7).
+ */
+export async function endUnpaidPurchase(
+  db: DbExecutor,
+  order: { id: string; status: OrderStatus },
+  purchase: FpPurchaseView,
+): Promise<void> {
+  if (!UNPAID.includes(order.status)) return;
+  if (purchase.state !== 'failed' && purchase.state !== 'expired') return;
+  const failed = purchase.state === 'failed';
+  await moveOrder(db, order, failed ? 'FAILED' : 'EXPIRED', failed ? 'fp_failed' : 'fp_expired', {
+    fpState: purchase.state,
+    failureCode: purchase.failureCode,
+  });
+}
 
 /**
  * E1 handler for `mf_purchase.*` (F4): re-fetches the purchase (never trusts the payload) and hands it
- * to PurchaseSettlement, which applies it and writes the ledger in one transaction. Orders before
- * PROCESSING belong to the saga jobs and are left alone.
+ * to PurchaseSettlement, which applies it and writes the ledger in one transaction. An unpaid purchase
+ * goes to `endUnpaidPurchase`; other orders before PROCESSING belong to the saga jobs and are left alone.
  */
 export function mfPurchaseEventHandler(settlement: PurchaseSettlement): FpEventHandler {
   return async ({ db, event, fpRead }: FpEventHandlerContext): Promise<void> => {
@@ -10101,7 +10148,12 @@ export function mfPurchaseEventHandler(settlement: PurchaseSettlement): FpEventH
       .select({ id: orders.id, status: orders.status })
       .from(orders)
       .where(eq(orders.fpOrderId, event.objectId));
-    if (order === undefined || !SETTLING.includes(order.status)) return;
+    if (order === undefined) return;
+    if (UNPAID.includes(order.status)) {
+      await endUnpaidPurchase(db, order, toFpPurchaseView(await fpRead.purchase(event.objectId)));
+      return;
+    }
+    if (!SETTLING.includes(order.status)) return;
     await settlement.apply(order.id, toFpPurchaseView(await fpRead.purchase(event.objectId)));
   };
 }
@@ -10375,7 +10427,7 @@ Expected:
 - The generated `ledger` migration creates the four tables with their checks, partial indexes and foreign keys, and adds the `folios` and `orders` columns, `folios_amc_number_uq` and the two new checks. No other table changes.
 - Domain tests: `fifo` 12/12, `elss-lock` 10/10, `business-days` 5/5 and the new `states` case pass. The rules keep the package's 95% coverage gate (they are fully covered).
 - API unit tests: `fp-holdings` 8/8 and `purchase-settlement` 3/3.
-- Integration tests: `ledger.int.test.ts` 15/15 (including the RV-04-F4-2 module-identity case) and `folio-sync.int.test.ts` 9/9. E21's `payments.int.test.ts` stays 9/9, now with a SETTLED order and a lot. E20's `orders.int.test.ts` and E1's `fp-webhooks` stay green. F2's `sip-mandate.int.test.ts` gains one passing instalment test; its other tests stay green.
+- Integration tests: `ledger.int.test.ts` 15/15 (including the RV-04-F4-2 module-identity case) and `folio-sync.int.test.ts` 9/9. E21's `payments.int.test.ts` stays 12/12 (Plan 03 RV-03-55's two cases included), now with a SETTLED order and a lot, and with RV-03-43's unpaid-failure case kept (RV-04-F4-6). E20's `orders.int.test.ts` and E1's `fp-webhooks` stay green. F2's `sip-mandate.int.test.ts` gains one passing instalment test; its other tests stay green.
 - `docs/specs/states.md` shows the new edge.
 
 - [ ] **Step 5: Commit**
@@ -16567,7 +16619,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
 - **Create (recon):** `apps/api/src/modules/platform/recon/{recon-rules.ts, recon-rules.test.ts, invariant-checks.ts, integrity-invariants.job.ts, recon-fp-daily.job.ts, recon.module.ts}`
 - **Create (tests):** `apps/api/test/int/{recon-seed.ts, integrity-invariants.int.test.ts, recon-fp.int.test.ts, ops-cli.int.test.ts, ops-views.int.test.ts}`
 - **Create (docs):** `docs/runbooks/ops-cli.md`
-- **Create (migrations):** `0032_ops_refund_ref` (generated: two `payment_attempts` columns and one check) and `0033_ops_views` (custom: six views and their `sanchay_readonly` grant)
+- **Create (migrations):** `0032_ops_refund_ref` (generated: two `payment_attempts` columns and one check) and `0033_ops_views` (custom: seven views and their `sanchay_readonly` grant; the seventh, `v_refunds_pending`, is RV-04-F7-8)
 - **Modify (Plan 01):** `apps/api/src/config/env.ts` (`SANCHAY_APP_ROLE` gains `ops`), `apps/api/src/config/env.test.ts` (one case), `apps/api/src/main.ts` (the `ops` branch), `apps/api/src/modules/platform/audit.service.ts` (`AUDIT_DATA_ALLOWLIST` gains `approver2`, `refundRef`, `payoutRef`; Plan 01's `audit.int.test.ts` needs no edit, because Plan 02 D7, the first task that appends, relaxed its pins to `expect.arrayContaining`, FR-10), `apps/api/package.json` and root `package.json` (six `ops:*` scripts added; D7's `ops:invite` and D9's `ops:nav-release` repointed at the runner)
 - **Modify (D2):** `apps/api/src/modules/platform/jobs/job-registry.ts` (append `'integrity.invariants': 'stately'`, `'recon.fp.daily': 'stately'` to `JOB_POLICIES`, R-32), `apps/api/src/modules/platform/jobs/schedules.ts` (two schedules), `apps/api/src/app.module.ts` (`ReconModule.forRoot(env)`)
 - **Modify (D4, as F2/F4/F5 left it):** `apps/api/src/integrations/fp/fake/fake-fp.ts` (`purchase.list` filters on `mf_investment_account`, as FP does)
@@ -16604,7 +16656,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
   - `fp.reconcile.nonfinal` extended, in this order: (1) the redemption saga backstop: UNDER_REVIEW/CONFIRMING redemptions get `orders.redemption.advance` again; approved redemptions (CONSENT_PENDING or CONSENTED with a CONSUMED or CONSUMED_UNUSED challenge) get `orders.redemption.submit` again with approve's `ConsentApprovedJobData` while their consent is usable, or end CONSENT_EXPIRED (`execute_before_missed`) with `releaseReservation(…, 'consent_expired')` when it is not; (2) RECONCILING purchases (E20) and redemptions are adopted (to the mapped state) or failed with `releaseReservation(…, 'provider_object_absent')`, and an adopted purchase gets E20's `orders.purchase.advance` in the adopting transaction (RV-04-F7-4); (3) plans in review, confirmation or RECONCILING get `plans.sip.advance` re-enqueued; (4) RECONCILING mandates keep `MANDATE_CREATE_AMBIGUOUS` open. It emits no metric.
   - Recon break kinds: `INVARIANT_M1_PROVIDER_ID_WITHOUT_CONSENT`, `INVARIANT_M2_LOT_CONSERVATION`, `INVARIANT_M3_DUPLICATE_PAYMENT_SUCCESS`, `INVARIANT_M4_SETTLED_PURCHASE_LOT`, `INVARIANT_RESERVATIONS_OVER_HELD`, `RECON_FP_OBJECT_UNKNOWN`, `RECON_ORDER_OUTCOME_DIFFERS` (CRITICAL); `FP_PLAN_STATE_UNEXPECTED`, `RECON_FOLIO_UNKNOWN`, `RECON_FP_DAILY_FAILED` (WARNING); F4's `FP_ORDER_STATE_UNEXPECTED` and F2's `MANDATE_CREATE_AMBIGUOUS` reused.
   - Columns `payment_attempts.refund_ref`, `payment_attempts.refund_recorded_at`; check `payment_attempts_refund_ref_pair_ck`.
-  - Views `app.v_reconciling_orders`, `app.v_units_pending`, `app.v_recon_breaks_open`, `app.v_payouts_due`, `app.v_ops_audit(action, actor_type, actor_id, entity_type, entity_id, reason, occurred_at)`, `app.v_pilot_invites_count(status, invites)`, and `GRANT SELECT … TO sanchay_readonly` on exactly these six.
+  - Views `app.v_reconciling_orders`, `app.v_units_pending`, `app.v_recon_breaks_open`, `app.v_payouts_due`, `app.v_ops_audit(action, actor_type, actor_id, entity_type, entity_id, reason, occurred_at)`, `app.v_pilot_invites_count(status, invites)`, `app.v_refunds_pending(order_id, attempt_id, refund_status, updated_at)` (the refunds in progress, RV-04-F7-8), and `GRANT SELECT … TO sanchay_readonly` on exactly these seven.
   - Test helpers (`recon-seed.ts`): `consumedConsentFor(t, ConsumedConsentInput) → {challengeId, recordId}`, `ConsumedConsentInput`, `seedPlanRows`, `openBreaksOn`.
   - Scripts (root and `apps/api`): `ops:sync`, `ops:kill-switch`, `ops:sip-switch`, `ops:refund-utr`, `ops:payout-ref`, `ops:resolve-break` (new), `ops:invite`, `ops:nav-release` (repointed at the runner); runbook `docs/runbooks/ops-cli.md`.
 - **Rules pinned here** (spec §1 recon row, §2 DB roles, §4.1, §4.4, §4.6, §5; D-MONEY-040, D-MONEY-053, D-MONEY-066, D-MONEY-071; R-16, R-17, R-20; BRIEF D1, D5, D6):
@@ -16618,7 +16670,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
   - **recon.fp.daily (02:00, read-only):** per investor with an FP account, FP's purchases, plans, redemptions and folios are listed (outside any transaction) and compared with our rows. An FP object is ours when its id is on one of our rows, its `source_ref_id` is one of our row ids (LOOKUP-ADOPT pending), or it is an instalment of one of our plans; anything else is a CRITICAL `RECON_FP_OBJECT_UNKNOWN`. Lag the sweeps close on their own is quiet; an outcome disagreement (money in at FP, failed with us, or the reverse, or a reversal of a SETTLED order) is CRITICAL `RECON_ORDER_OUTCOME_DIFFERS`; other odd pairs are F4's WARNING `FP_ORDER_STATE_UNEXPECTED`. Units are not compared: F4's `folio.sync` (05:00) owns that, so this job adds only "FP holds a folio we have no row for" (`RECON_FOLIO_UNKNOWN`). A failing FP read opens `RECON_FP_DAILY_FAILED` for that investor and the sweep moves on.
   - **Redemption saga backstop (every 5 minutes).** F5's jobs re-enqueue themselves, but D2's `Jobs.enqueue` retries a failed job 3 times with no delay, so a holdings read that fails a little longer, or a lost `orders.redemption.advance` chain, would leave the redemption (and its ACTIVE reservation) where it stopped; RV-03-1's sweep touches only the challenge. The backstop re-enqueues F5's own jobs with their own singleton keys (the advance job for UNDER_REVIEW/CONFIRMING; the submit job with approve's data for an approved redemption), so a job still queued dedupes it. For an approved redemption it applies `useConsumed`'s deadline (`execute_before` until the first attempt is stamped, `saga_expires_at` after it): inside it, resubmit once approve is 2 minutes old; within 2 minutes after it, wait (an attempt that passed the check may still reach SUBMITTING); later, or with a CONSUMED_UNUSED challenge, F5's own CONSENT_EXPIRED path under a row lock. It never calls FP and never touches a submitted order: PROCESSING and UNITS_PENDING belong to F4's `orders.units.reconcile`.
   - **Ops CLIs (spec §4.6, D-MONEY-066):** run as `SANCHAY_APP_ROLE=ops`; the session role is pinned to `sanchay_app` with the libpq startup option `-c role=sanchay_app` and the process refuses to start if that role could run DDL (superuser, `rds_superuser`, or CREATE on the database, `app` or `public`). They never call FP and never write an order, plan or mandate status (a unit test scans every registered command's source). `ops:sync` writes a re-fetch request and enqueues the webhook job (`fp.event.process`), or `fp.reconcile.nonfinal` for a RECONCILING order. A freeze (`ops:kill-switch --off`, `ops:sip-switch --off`) is one actor and never waits for a second person; anything that turns money flow back on or records money evidence (`--on`, `ops:refund-utr`, `ops:payout-ref`, `ops:nav-release`, `ops:resolve-break`) needs two different founders; `ops:invite` is one founder (D7). Every command writes one `audit_events` row (R-20), and `ops:invite` writes one per invited mobile (D7's `PilotInvites.add`); operator ids are handles, never names or emails; a mobile is printed only as its last 4 digits and never passed on a command line (FR-21): a RunTask's `containerOverrides.command` stays in CloudTrail and on the stopped task, so a deployed `ops:invite` reads an SSM SecureString under `/sanchay/{env}/invites/` that the operator deletes after the run, and a local one reads a file.
-  - **Ops views:** every column is listed by name; none is `*_enc`, `*_bidx`, an IP, a user agent, a contact, a bank field or a bank reference, and `sanchay_readonly` gets SELECT on these six views and on no base table. `v_reconciling_orders.reconciling_since` is F1's gauge rule: the latest move into RECONCILING whose `from_status` differs, so the `fp.reconcile.nonfinal.miss` self-events never reset it.
+  - **Ops views:** every column is listed by name; none is `*_enc`, `*_bidx`, an IP, a user agent, a contact, a bank field or a bank reference, and `sanchay_readonly` gets SELECT on these seven views and on no base table. `v_reconciling_orders.reconciling_since` is F1's gauge rule: the latest move into RECONCILING whose `from_status` differs, so the `fp.reconcile.nonfinal.miss` self-events never reset it.
   - **Alarms:** F1's `ops.gauges.emit` reads `recon_breaks` (`criticalBreaksOpen`, alarm `sanchay-prod-money-invariant-breach`) and `order_events` (`reconcilingOverSla`, alarm `sanchay-prod-reconciling-sla`) directly; F7 emits no metric. `ops:resolve-break` is how a handled non-invariant CRITICAL break leaves the open count, so the alarm returns to OK and pages on the next one.
 - **Deviations from the outline:**
   1. **M-numbering.** The outline calls "ledger units = Σ lots" M3 and "reservations ≤ available" M4; D-MONEY-071 (which the spec's "M1, M3, M4" refers to) makes M3 "≤ 1 SUCCESS payment per order" and M4 "exactly one lot per SETTLED purchase". All five checks run; the kinds carry the register's numbers and the reservation check has its own name. See the open question for the owner.
@@ -17135,6 +17187,7 @@ import {
   type RedemptionResumeInput,
   redemptionAdoptTarget,
   redemptionResumeAction,
+  unpaidPurchaseSweepAt,
 } from './recon-rules.js';
 
 describe('fpObjectRef', () => {
@@ -17281,6 +17334,16 @@ describe('redemptionResumeAction (an approved redemption F5’s submit job has n
   ];
   it.each(cases)('%s -> %s', (_label, expected, change) => {
     expect(redemptionResumeAction({ ...approved, ...change })).toBe(expected);
+  });
+});
+
+describe('unpaidPurchaseSweepAt (RV-04-F7-7)', () => {
+  it.each([
+    ['10:00 IST: 23:30 IST that day', '2026-10-12T04:30:00.000Z', '2026-10-12T18:00:00.000Z'],
+    ['23:59 IST, after the sweep: 23:30 IST the next day', '2026-10-12T18:29:00.000Z', '2026-10-13T18:00:00.000Z'],
+    ['00:30 IST on the next IST day: 23:30 IST that day', '2026-10-12T19:00:00.000Z', '2026-10-13T18:00:00.000Z'],
+  ])('an order created at %s', (_label, createdAt, sweepAt) => {
+    expect(unpaidPurchaseSweepAt(new Date(createdAt)).toISOString()).toBe(sweepAt);
   });
 });
 ```
@@ -18254,6 +18317,28 @@ describe('fp.reconcile.nonfinal, extended to redemptions, plans and mandates (F7
     ]);
   });
 });
+
+describe("fp.reconcile.nonfinal: unpaid purchases after FP's 23:00 IST sweep (RV-04-F7-7)", () => {
+  /** A purchase FP has failed whose `mf_purchase` event never arrived. */
+  const unpaidFailed = async (createdAt: Date) => {
+    const { orderId, fpOrderId } = await seedProcessingPurchase(t, investor, scheme);
+    await t.db.db.update(orders).set({ status: 'AWAITING_PAYMENT', createdAt }).where(eq(orders.id, orderId));
+    t.fakeFp.advance(fpOrderId, 'failed');
+    return orderId;
+  };
+
+  it('ends one from an earlier day FAILED without the webhook', async () => {
+    const orderId = await unpaidFailed(new Date(t.clock.now().getTime() - 48 * HOUR));
+    await nonfinal();
+    expect((await orderOf(orderId)).status).toBe('FAILED');
+  });
+
+  it("leaves today's alone until 23:30 IST", async () => {
+    const orderId = await unpaidFailed(t.clock.now());
+    await nonfinal();
+    expect((await orderOf(orderId)).status).toBe('AWAITING_PAYMENT');
+  });
+});
 ```
 
 `apps/api/test/int/ops-cli.int.test.ts`:
@@ -19025,6 +19110,7 @@ const OPS_VIEWS = [
   'v_pilot_invites_count',
   'v_recon_breaks_open',
   'v_reconciling_orders',
+  'v_refunds_pending',
   'v_units_pending',
 ];
 
@@ -19105,6 +19191,7 @@ describe('ops views (spec §2 DB roles: sanchay_readonly sees views without *_en
         'reconciling_since',
         'updated_at',
       ],
+      v_refunds_pending: ['order_id', 'attempt_id', 'refund_status', 'updated_at'],
       v_units_pending: [
         'id',
         'investor_id',
@@ -19128,7 +19215,7 @@ describe('ops views (spec §2 DB roles: sanchay_readonly sees views without *_en
     }
   });
 
-  it('sanchay_readonly can SELECT the six views and no other relation in schema app', async () => {
+  it('sanchay_readonly can SELECT the seven views and no other relation in schema app', async () => {
     const { rows } = await t.pool.query<{ relname: string }>(
       `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'app' AND c.relkind IN ('r', 'v', 'm', 'p')
@@ -20518,7 +20605,7 @@ Existing rows have both columns null and satisfy the check.
 ```sql
 -- F7 (spec §2 DB roles, §4.6; R-16): read-only investigation views for sanchay_readonly over SSM.
 -- Every column is named: no *_enc, *_bidx, user_ip, ip, user agent, contact or bank column is exposed.
--- sanchay_readonly gets SELECT on these six views and on nothing else in schema app.
+-- sanchay_readonly gets SELECT on these seven views and on nothing else in schema app.
 -- reconciling_since is F1's ops.gauges rule: the latest real move into RECONCILING (from <> to), so the
 -- fp.reconcile.nonfinal.miss self-events never reset it.
 CREATE VIEW "app"."v_reconciling_orders" AS
@@ -20582,7 +20669,14 @@ CREATE VIEW "app"."v_pilot_invites_count" AS
                  FROM app.pilot_invites p) i ON i.state = s.status
    GROUP BY s.status;
 --> statement-breakpoint
-GRANT SELECT ON "app"."v_reconciling_orders", "app"."v_units_pending", "app"."v_recon_breaks_open", "app"."v_payouts_due", "app"."v_ops_audit", "app"."v_pilot_invites_count" TO "sanchay_readonly";
+-- RV-04-F7-8 (owner decision 2026-10-06): the refunds in progress, which only FP and the investor showed before.
+-- The same set ops:refund-utr acts on (REFUND_IN_PROGRESS); no amount, bank or refund reference column.
+CREATE VIEW "app"."v_refunds_pending" AS
+  SELECT pa.order_id, pa.id AS attempt_id, pa.refund_status, pa.updated_at
+    FROM app.payment_attempts pa
+   WHERE pa.refund_status IN ('IN_PROGRESS', 'REFUND_PENDING');
+--> statement-breakpoint
+GRANT SELECT ON "app"."v_reconciling_orders", "app"."v_units_pending", "app"."v_recon_breaks_open", "app"."v_payouts_due", "app"."v_ops_audit", "app"."v_pilot_invites_count", "app"."v_refunds_pending" TO "sanchay_readonly";
 ```
 
 `apps/api/src/modules/platform/recon/recon-rules.ts`:
@@ -20708,6 +20802,19 @@ export function redemptionAdoptTarget(fpState: string): OrderStatus | null {
  * attempt (pg-boss retries it at once, up to 3 times) before fp.reconcile.nonfinal acts on it.
  */
 export const SUBMIT_GRACE_MS = 2 * MINUTE;
+
+/**
+ * When fp.reconcile.nonfinal first re-reads an unpaid purchase (RV-04-F7-7): FP's end-of-day sweep fails
+ * an ONDC purchase whose payment link went unused at 23:00 IST on its order day (P-07), so look at 23:30
+ * IST (18:00 UTC) on the IST day the order was created, or on the next day for an order created after
+ * that day's 23:00 IST sweep.
+ */
+export function unpaidPurchaseSweepAt(createdAt: Date): Date {
+  const ist = new Date(createdAt.getTime() + 330 * MINUTE);
+  const day = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
+  const sweep = day + 18 * 60 * MINUTE;
+  return new Date(createdAt.getTime() < day + (17 * 60 + 30) * MINUTE ? sweep : sweep + 24 * 60 * MINUTE);
+}
 
 export type RedemptionResumeAction = 'RESUBMIT' | 'WAIT' | 'EXPIRE';
 
@@ -21143,6 +21250,7 @@ import { FpRead } from '../../integrations/fp/fp-read.js';
 import { investors } from '../identity/identity.schema.js';
 import type { ConsentApprovedJobData } from '../legal-consent/consent-engine.js';
 import { consentChallenges, consentRecords } from '../legal-consent/legal-consent.schema.js';
+import { endUnpaidPurchase } from '../payments/fp-events.js';
 import { mandates, plans } from '../plans/plans.schema.js';
 import { AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock, MINUTE } from '../platform/clock.js';
@@ -21152,6 +21260,7 @@ import {
   fpObjectRef,
   redemptionAdoptTarget,
   redemptionResumeAction,
+  unpaidPurchaseSweepAt,
 } from '../platform/recon/recon-rules.js';
 import { ReconBreaks } from '../platform/runtime-config.js';
 import { releaseReservation } from '../portfolio/reservations.js';
@@ -21180,6 +21289,9 @@ type OrderRow = typeof orders.$inferSelect;
  * - RECONCILING purchases (E20, unchanged) and redemptions (F7): LOOKUP-ADOPT by source_ref_id (= order
  *   id); absent at two checks at least 10 minutes apart -> FAILED(PROVIDER_OBJECT_ABSENT). A redemption
  *   proven absent also releases its reservation in the same transaction (spec §4.4).
+ * - Unpaid purchases (RV-04-F7-7, owner decision 2026-10-06): once the order day's 23:00 IST FP sweep
+ *   has passed (P-07, plus 30 minutes), re-fetch each AWAITING_PAYMENT/PAYMENT_PENDING purchase and end
+ *   it through `endUnpaidPurchase`, so a lost `mf_purchase` event no longer leaves it unpaid for good.
  * - Plans in review, confirmation or RECONCILING (F7): re-enqueue F2's plans.sip.advance, which adopts.
  * - RECONCILING mandates (F7): D3 has no FP list-by-bank read, so the CRITICAL MANDATE_CREATE_AMBIGUOUS
  *   break F2 opened is kept open (re-opened if someone resolved it while the mandate is still stuck).
@@ -21201,6 +21313,7 @@ export class ReconcileNonfinalJob {
   async handle(_job: Job<'fp.reconcile.nonfinal'>): Promise<void> {
     await this.resumeRedemptions();
     await this.resumePurchases();
+    await this.closeUnpaidPurchases();
     const stuck = await this.dbh.db.select().from(orders).where(eq(orders.status, 'RECONCILING'));
     for (const order of stuck) {
       try {
@@ -21243,6 +21356,37 @@ export class ReconcileNonfinalJob {
         { orderId: order.id, challengeId: order.challengeId },
         { singletonKey: order.id },
       );
+    }
+  }
+
+  /**
+   * RV-04-F7-7: only FP's `mf_purchase` event ended an unpaid purchase (RV-03-43), so a lost event left it
+   * AWAITING_PAYMENT or PAYMENT_PENDING for good. After its sweep time, re-fetch it and apply the same
+   * `endUnpaidPurchase` the handler uses: one FP read per such order per run until FP ends it.
+   */
+  private async closeUnpaidPurchases(): Promise<void> {
+    const db = this.dbh.db;
+    const now = this.clock.now().getTime();
+    const unpaid = await db
+      .select({ id: orders.id, status: orders.status, fpOrderId: orders.fpOrderId, createdAt: orders.createdAt })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.type, 'PURCHASE'),
+          inArray(orders.status, ['AWAITING_PAYMENT', 'PAYMENT_PENDING']),
+          isNotNull(orders.fpOrderId),
+        ),
+      );
+    for (const order of unpaid) {
+      if (order.fpOrderId === null || now < unpaidPurchaseSweepAt(order.createdAt).getTime()) continue;
+      try {
+        await endUnpaidPurchase(db, order, toFpPurchaseView(await this.fpRead.purchase(order.fpOrderId)));
+      } catch (err) {
+        // FP unreachable for this one: it stays unpaid and the next run retries.
+        this.log.warn(
+          `fp.reconcile.nonfinal: unpaid order ${order.id} (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
     }
   }
 
@@ -21795,6 +21939,7 @@ SELECT * FROM app.v_recon_breaks_open ORDER BY severity, created_at;
 SELECT * FROM app.v_payouts_due ORDER BY payout_due_by;
 SELECT * FROM app.v_ops_audit WHERE action = 'OPS_KILL_SWITCH' ORDER BY occurred_at DESC LIMIT 20;
 SELECT * FROM app.v_pilot_invites_count ORDER BY status;
+SELECT * FROM app.v_refunds_pending ORDER BY updated_at;
 ```
 
 `v_reconciling_orders.reconciling_since` follows F1's gauge: the latest real move into RECONCILING (the
@@ -21802,7 +21947,7 @@ SELECT * FROM app.v_pilot_invites_count ORDER BY status;
 `audit_events` without their `data`, IP or user agent. `v_pilot_invites_count` always has three rows:
 `LIVE`, `USED` and `EXPIRED`.
 
-`sanchay_readonly` can read these six views and nothing else in schema `app`: no `*_enc`, `*_bidx`,
+`sanchay_readonly` can read these seven views and nothing else in schema `app`: no `*_enc`, `*_bidx`,
 contact, bank, IP or reference column is reachable (`ops-views.int.test.ts`).
 ````
 
@@ -21820,9 +21965,9 @@ pnpm --filter=@sanchay/api test:int orders ledger folio-sync sip-mandate payment
 After the `--custom` command, paste the Step 3 SQL into the empty `0033_ops_views.sql`, then run the rest. The first line rebuilds the API's workspace dependencies, and is a cache hit when nothing under `packages/` changed. F7 changes nothing there, but `db:generate`, the typecheck and the tests read `@sanchay/domain` and `@sanchay/contract` from `dist`. A direct `pnpm --filter` run never triggers turbo's `^build` (Plan 01 B7–B9).
 
 Expected:
-- The generated `ops_refund_ref` migration is the three statements shown in Step 3 and nothing else; `ops_views` creates the six views and the grant.
-- Unit: `ops-common` 37/37 (35 plus the two boundary cases for `ops-inputs.ts`), `ops-db` 2/2, `ops-inputs` 20/20 (AWS's 4 SigV4 vectors, the signed `GetParameter`, 9 SSM refusal cases, 6 file cases), `ops-invite` 15/15, `recon-rules` 45/45; `env.test.ts` gains one passing case (the `env` filter also runs Plan 01's `dotenv.test.ts`, unchanged).
-- Integration: `integrity-invariants.int.test.ts` 12/12, `recon-fp.int.test.ts` 19/19, `ops-cli.int.test.ts` 23/23 (the `ops:invite` describe has 3 cases: the SSM list, the refusals and the file path, and a concurrent invite), `ops-views.int.test.ts` 4/4; F5's `redemption.int.test.ts` keeps its case count, with the edited case green. The last `ops-cli` cases boot a second application context through `runOpsCli` as the pinned `sanchay_app` role: they need D2's `pgboss` grants to `sanchay_app`, the same ones the api role uses.
+- The generated `ops_refund_ref` migration is the three statements shown in Step 3 and nothing else; `ops_views` creates the seven views and the grant.
+- Unit: `ops-common` 37/37 (35 plus the two boundary cases for `ops-inputs.ts`), `ops-db` 2/2, `ops-inputs` 20/20 (AWS's 4 SigV4 vectors, the signed `GetParameter`, 9 SSM refusal cases, 6 file cases), `ops-invite` 15/15, `recon-rules` 48/48 (RV-04-F7-7's three sweep-time cases included); `env.test.ts` gains one passing case (the `env` filter also runs Plan 01's `dotenv.test.ts`, unchanged).
+- Integration: `integrity-invariants.int.test.ts` 12/12, `recon-fp.int.test.ts` 21/21 (RV-04-F7-7's two unpaid-purchase cases included), `ops-cli.int.test.ts` 23/23 (the `ops:invite` describe has 3 cases: the SSM list, the refusals and the file path, and a concurrent invite), `ops-views.int.test.ts` 4/4; F5's `redemption.int.test.ts` keeps its case count, with the edited case green. The last `ops-cli` cases boot a second application context through `runOpsCli` as the pinned `sanchay_app` role: they need D2's `pgboss` grants to `sanchay_app`, the same ones the api role uses.
 - The last line stays green: E20's `orders` (its RECONCILING purchase still adopts to UNDER_REVIEW and gets `orders.purchase.advance` in the same transaction, RV-04-F7-4; its absent purchase still fails), F4's `ledger` and `folio-sync`, F2's `sip-mandate`, E21's `payments`, E1's `fp-webhooks`, and the migration and grant suites. D7's and D9's own tests never import their CLIs, so rewriting `ops-invite.ts` and `ops-nav-release.ts` changes no other test.
 
 Locally, after `pnpm db:migrate`, against the dev database (`SANCHAY_APP_ENV=local`), the CLI runs end to end; it refuses with exit code 1 when the role check fails and prints the usage with exit code 2 (both lines run unchanged in PowerShell 5.1 and Git Bash):
@@ -21842,7 +21987,7 @@ pnpm --filter=@sanchay/api test:int integrity-invariants recon-fp ops-cli ops-vi
 pnpm --filter=@sanchay/api test:int orders ledger folio-sync sip-mandate payments fp-webhooks migrations grants
 pnpm lint
 git add apps/api/src/cli/ops-common.ts apps/api/src/cli/ops-common.test.ts apps/api/src/cli/ops-db.ts apps/api/src/cli/ops-db.test.ts apps/api/src/cli/ops-inputs.ts apps/api/src/cli/ops-inputs.test.ts apps/api/src/cli/ops-invite.test.ts apps/api/src/cli/ops-sync.ts apps/api/src/cli/ops-kill-switch.ts apps/api/src/cli/ops-sip-switch.ts apps/api/src/cli/ops-refund-utr.ts apps/api/src/cli/ops-payout-ref.ts apps/api/src/cli/ops-invite.ts apps/api/src/cli/ops-nav-release.ts apps/api/src/cli/ops-resolve-break.ts apps/api/src/cli/ops-runner.ts apps/api/src/cli/ops.ts apps/api/src/modules/platform/recon apps/api/src/modules/orders/reconcile-nonfinal.job.ts apps/api/src/modules/payments/payments.schema.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/config/env.ts apps/api/src/config/env.test.ts apps/api/src/main.ts apps/api/src/app.module.ts apps/api/drizzle apps/api/test/int/recon-seed.ts apps/api/test/int/integrity-invariants.int.test.ts apps/api/test/int/recon-fp.int.test.ts apps/api/test/int/ops-cli.int.test.ts apps/api/test/int/ops-views.int.test.ts apps/api/test/int/redemption.int.test.ts docs/runbooks/ops-cli.md apps/api/package.json package.json
-git commit -m "feat(ops): hourly invariants M1-M4, recon.fp.daily, the redemption saga backstop in fp.reconcile.nonfinal, ops role CLIs (sync, kill and SIP switches, refund UTR, payout ref, invite, NAV release, resolve break) and six read-only views (F7)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(ops): hourly invariants M1-M4, recon.fp.daily, the redemption saga backstop in fp.reconcile.nonfinal, ops role CLIs (sync, kill and SIP switches, refund UTR, payout ref, invite, NAV release, resolve break) and seven read-only views (F7)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands before committing again.
 
@@ -29647,7 +29792,7 @@ If the install needed a `minimumReleaseAgeExclude` entry, also stage `pnpm-works
 - **Errata found while writing this task:**
   1. **E5 `me.get`** returns `bank: null` forever (`MeViewSchema.bank` is `z.null()`), `nomineesCount: 0` and `riskLevel: null` even after E7–E9 exist, and `legalVersionsAccepted` hard-codes `version: '1'`. Fixed here (deviation 4).
   2. **E12 / E17 dependencies.** E12's `packages/ui/src/MoneyText.tsx` and E17's `packages/features/src/explore/*` import `@sanchay/money`, but neither `packages/ui/package.json` nor `packages/features/package.json` lists it, and pnpm's isolated layout will not resolve it. F14 adds it to `features` if still missing; `ui` must get the same line in E12 (or here, in the same commit, if E12 shipped without it).
-  3. **E13 breaks Plan 01's AppShell tests.** E13 renders `LegalPendingBanner` (GET `/legal/pending`) in `AppShell`, but C9's AppShell cases in `HomeScreen.test.tsx` run MSW with `onUnhandledRequest: 'error'` and register no `/legal/pending` handler. F14's rewrite of that file adds a default handler. Separately, E13's `legal.acceptPending` records the re-accept in `consent_records`, while E10's `legal.pending` judges the seven declaration keys from `declaration_stagings`, so the banner never clears after a re-accept of, say, `TNC`. F14's `me.get` reads both sources, but E10/E13 must make `legal.pending` read both too.
+  3. **E13 breaks Plan 01's AppShell tests.** E13 renders `LegalPendingBanner` (GET `/legal/pending`) in `AppShell`, but C9's AppShell cases in `HomeScreen.test.tsx` run MSW with `onUnhandledRequest: 'error'` and register no `/legal/pending` handler. F14's rewrite of that file adds a default handler. Separately, E13's `legal.acceptPending` records the re-accept in `consent_records`, while E10's `legal.pending` judges the seven declaration keys from `declaration_stagings`, so the banner never clears after a re-accept of, say, `TNC`. F14's `me.get` reads both sources, and Plan 03 RV-03-54 now makes `legal.pending` read both too.
   4. **E24 mobile routes.** `(tabs)/portfolio/orders/index.tsx` and `[orderId].tsx` sit next to Plan 01's `(tabs)/portfolio.tsx`, so Expo Router makes them extra tabs. F14's Stack layout fixes it. E24's `OrdersListScreen` also passes `<MoneyText amount={…} />` as `ListRow`'s `value`, but `MoneyText` takes `value: Money | null` and `ListRow.value` is a `string`; E24's typecheck step will fail as written.
   5. **E12's Playwright command** uses `--project=chromium`; the projects are `desktop-chromium` and `mobile-chromium` (`apps/web/playwright.config.ts`).
   6. `formatIsoDate` zero-pads the day ("02 Mar 2026"); copy in specs that shows "2 Mar" is illustrative only. Tests here assert the real output.
@@ -32990,6 +33135,7 @@ git commit -m "feat(portfolio): allocation bar chart above the allocation list (
 - **Create (web):** `apps/web/src/app/(app)/redeem/[folioId]/[isin]/page.tsx`, `apps/web/e2e/redeem.smoke.spec.ts`
 - **Create (mobile):** `apps/mobile/src/app/redeem/[folioId]/[isin].tsx`
 - **Modify (Plan 01):** `packages/features/src/index.ts` (append), `packages/features/package.json` (`@sanchay/money`, only if E12/E23 have not added it) and `pnpm-lock.yaml`, `apps/web/src/client/routes.tsx` (`RedeemRoute`), `apps/mobile/src/app/_layout.tsx` (one protected `Stack.Screen`)
+- **Modify (Plan 01, key-level; RV-04-F16-3):** `packages/features/src/nav/NavContext.tsx` (`NavAdapter.dismissTo`), `packages/features/src/test-utils.tsx` (`makeNav`), `apps/web/src/client/WebAppProviders.tsx` and `apps/mobile/src/native/AppProviders.tsx` (each adapter's `dismissTo`)
 - **Modify (E20, after F5):** `packages/contract/src/orders.ts` (six `OrderSchema` fields), `apps/api/src/modules/orders/orders.router.ts` (`toWire`), `apps/api/openapi.json` (regenerated)
 - **Modify (F5):** `apps/api/test/int/redemption.int.test.ts` (one appended `describe`)
 - **Not modified:** `ERROR_CATALOGUE` and `messageForError` (every code shown is Plan 01's or E20's), E13's `ConsentOtpSheet`/`useConsentChallenge`, `ApiContext.tsx` (E13/E23 own the `consents` key), `apps/web/src/lib/nav.ts` (Plan 01 already highlights Portfolio for `/redeem/**`), the order state machine and every F5 service.
@@ -33006,6 +33152,7 @@ git commit -m "feat(portfolio): allocation bar chart above the allocation list (
   - Test helpers `redeem-fixtures.ts`: `readyQuote()`, `ELSS_RESIDUAL_QUOTE`, `order()`, `REDEMPTION_CHALLENGE`, `errorReply()`, `FOLIO_ID`, `ISIN`, `ORDER_ID`, `CHALLENGE_ID`.
   - `orders.get`/`orders.list` (`OrderSchema`) gain `mode`, `redeemedUnits`, `redeemedAmount`, `payoutStatus`, `payoutExpectedOn`, `payoutDueBy`.
   - Web route `/redeem/[folioId]/[isin]` (`RedeemRoute`); mobile route `redeem/[folioId]/[isin]` inside the signed-in `Stack.Protected`, with FLAG_SECURE.
+  - `NavAdapter.dismissTo(href)` (Plan 01's adapter, RV-04-F16-3): leaves the current flow for `href` without stacking a second copy of it. Web: `router.replace`; Android: Expo Router's `router.dismissTo`, which pops back to `href` when it is on the stack and replaces otherwise.
 - **F6 and F17 are SKIPPED** (T5 forced by P-09, BRIEF D2), and nothing in this task depends on them. `RedemptionDraft`, `REDEEM_MODE_OPTIONS`, `draftFrom`, `allNote` and `draftAmountLine` would be the UNITS seams if T5 ever returns; `allNote`'s switch is exhaustive over F5's three `all` kinds, so a future UNITS member fails to compile until it is handled.
 - **For F14/E24:** link "Redeem" to `/redeem/{folioId}/{isin}`. ORD-02 can show a redemption's payout with `<PayoutStatus orderId={id} />` (exported); it reads only `orders.get`.
 - **For F18:** the RED-02/CNF-01 route is `apps/mobile/src/app/redeem/[folioId]/[isin].tsx`, the path F18's `SECURE_ROUTES` already lists; it calls `usePreventScreenCapture('redeem')` itself (F18's check accepts any key).
@@ -33016,9 +33163,10 @@ git commit -m "feat(portfolio): allocation bar chart above the allocation list (
   - **RED-02.** Fund, mode, amount (or units and approximate value), NAV date, payout bank, then DSC-09, DSC-20 and "Once sent to the registrar this can't be cancelled.". "Confirm & get OTP" calls `orders.createRedemption` with one Idempotency-Key per intent: a retry after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS` replays the same draft, and any other 4xx (for example `ORDERS_DISABLED`) is a final refusal, so the next tap mints a new key (a refusal ends the intent and D1 releases its key, Plan 02 RV-02-37; F28's rule). A refusal that means the quote moved (`FOLIO_RECONCILIATION_REQUIRED`, `REDEMPTION_CONFLICT_PENDING`, `INSUFFICIENT_REDEEMABLE`, `NAV_UNAVAILABLE`) shows its copy and offers only "Back", which re-quotes.
   - **CNF-01** is E13's sheet for the returned challenge; the server decides the factors (F5: SMS + EMAIL). Closing it cancels the draft with `orders.cancel` (F5 releases the reservation there) and returns to RED-01; otherwise the units stay reserved until the challenge lapses.
   - **CNF-02 and payout** (D-MONEY-053): `orders.get` is polled every 3 s until a terminal state (at most 60 polls). Copy per state: UNDER_REVIEW "With the fund house for review" (GAP-01), PROCESSING "Withdrawal placed", SETTLED with EXPECTED "{units} units redeemed for ₹{amount}. Expected in your bank by {date}.", DELAYED the investor rights (due date, 15% a year, SEBI SCORES), CREDITED only as the server reports it, REJECTED/FAILED/EXPIRED/CONSENT_EXPIRED/CANCELLED "did not go through … your units are available again" with the catalogue reason when there is one.
+  - **Leaving CNF-02** (RV-04-F16-3, owner decision 2026-10-06): "View order" and "Go to portfolio" call `nav.dismissTo`. A `push` from the root-stack redeem screen put a second `(tabs)` entry above it on Android, so Back returned to CNF-02. Confirm Back on F25's device build.
   - **Redeem remaining** (D-MONEY-051): after an ALL that was sent as an amount settles (`mode = 'ALL'`, `amount` set), CNF-02 offers "Redeem remaining", which re-quotes and reopens RED-01 with All selected; F5's quote then decides what is left.
   - **The server stays authoritative.** Every number shown comes from the quote or the order; the client checks only what keeps Continue honest (amount ≤ `maxAmount`). Money, units and NAV are `@sanchay/money` values, never JavaScript numbers.
-  - **No Units mode (T5 forced).** P-09 showed that a units redemption fails at the ONDC gateway (`order_failure_at_gateway`), so "Redeem by" offers Amount and All available units only. F5's contract has no UNITS member (`CreateRedemptionInputSchema.mode` and `RedemptionCreatedSchema.mode` are `AMOUNT | ALL`), and RED-01 reads no `redeemByUnits` flag. An ALL that FP must receive as an amount is already F5's AMOUNT_WITH_RESIDUAL, with "Redeem remaining" after it settles. F5's ALL FULL sends neither amount nor units; P-09 did not try that form on ONDC, so whether it settles there is F5's open question, not this screen's (a gateway failure would reach CNF-02 as "did not go through").
+  - **No Units mode (T5 forced).** P-09 showed that a units redemption fails at the ONDC gateway (`order_failure_at_gateway`), so "Redeem by" offers Amount and All available units only. F5's contract has no UNITS member (`CreateRedemptionInputSchema.mode` and `RedemptionCreatedSchema.mode` are `AMOUNT | ALL`), and RED-01 reads no `redeemByUnits` flag. An ALL that FP must receive as an amount is already F5's AMOUNT_WITH_RESIDUAL, with "Redeem remaining" after it settles. F5's ALL FULL sends neither amount nor units, and P-09's addendum (2026-10-01) confirmed that form on ONDC: the whole holding was redeemed in 10 s, so it needs no amount fallback (RV-04-F16-2). A gateway failure would still reach CNF-02 as "did not go through".
   - **Units shown after settlement** are F5's stored `orders.redeemed_units`: FP's report-back rounded HALF_UP to 3 dp (FP reports 4 dp, BRIEF D7), the figure the ledger applied. FP's raw value stays in F5's evidence and never reaches the wire.
 - **Deviations from the outline:**
   1. The outline names a web route `/redeem/[folioId]/[isin]` and "mobile equivalent"; there is no separate review route, so the draft never travels in a URL.
@@ -33381,7 +33529,7 @@ describe('RedeemScreen (RED-01)', () => {
     await waitFor(() => expect(screen.getByLabelText('NAV date: 03 Nov 2026')).toBeTruthy());
   });
 
-  it('ALL with a residual: CNF-01 → payout status → "Redeem remaining" reopens RED-01 with All chosen', async () => {
+  it('ALL with a residual: CNF-01 → payout status (leaving it dismisses, RV-04-F16-3) → "Redeem remaining" reopens RED-01 with All chosen', async () => {
     const seen = quoteReturns(
       ELSS_RESIDUAL_QUOTE,
       readyQuote({
@@ -33431,7 +33579,7 @@ describe('RedeemScreen (RED-01)', () => {
       ),
     );
     const user = userEvent.setup();
-    renderWithProviders(<RedeemScreen folioId={FOLIO_ID} isin={ISIN} orderPollMs={20} />);
+    const { nav } = renderWithProviders(<RedeemScreen folioId={FOLIO_ID} isin={ISIN} orderPollMs={20} />);
     await user.click(await screen.findByRole('radio', { name: 'All available units' }));
     await user.click(continueButton());
     await user.click(await screen.findByRole('button', { name: 'Confirm & get OTP' }));
@@ -33439,6 +33587,10 @@ describe('RedeemScreen (RED-01)', () => {
     await user.type(screen.getByLabelText('Email code'), '654321');
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(await screen.findByText('Withdrawal processed')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'View order' }));
+    await user.click(screen.getByRole('button', { name: 'Go to portfolio' }));
+    expect(nav.dismissTo.mock.calls).toEqual([[`/portfolio/orders/${ORDER_ID}`], ['/portfolio']]);
+    expect(nav.push).not.toHaveBeenCalled();
     await user.click(await screen.findByRole('button', { name: 'Redeem remaining' }));
     expect(
       await screen.findByText(
@@ -34633,12 +34785,13 @@ function RedemptionPlaced({ orderId, pollIntervalMs, onRedeemRemaining }: Redemp
       {order.data !== undefined && leftResidual(order.data) ? (
         <Button label="Redeem remaining" onPress={onRedeemRemaining} />
       ) : null}
+      {/* RV-04-F16-3: dismissTo, not push, so Android's Back never returns to CNF-02. */}
       <Button
         variant="secondary"
         label="View order"
-        onPress={() => nav.push(`/portfolio/orders/${orderId}`)}
+        onPress={() => nav.dismissTo(`/portfolio/orders/${orderId}`)}
       />
-      <Button variant="secondary" label="Go to portfolio" onPress={() => nav.push('/portfolio')} />
+      <Button variant="secondary" label="Go to portfolio" onPress={() => nav.dismissTo('/portfolio')} />
     </Screen>
   );
 }
@@ -34749,6 +34902,21 @@ export {
   redemptionStatusCopy,
 } from './redeem/redemption-copy';
 ```
+
+`packages/features/src/nav/NavContext.tsx` (Plan 01's file; key-level, RV-04-F16-3). Add to `NavAdapter`, after `back(): void;`:
+```ts
+  /**
+   * Leave the current flow for `href` without stacking a second copy of it (RV-04-F16-3): web replaces;
+   * native pops back to `href` when it is on the stack, else replaces (Expo Router's dismissTo).
+   */
+  dismissTo(href: string): void;
+```
+
+`packages/features/src/test-utils.tsx` (Plan 01's file; key-level): `makeNav()` gains `dismissTo: vi.fn(),` after `back: vi.fn(),`.
+
+`apps/web/src/client/WebAppProviders.tsx` (Plan 01's file; key-level): the `nav` object gains `dismissTo: (href) => router.replace(href as Route),` after `back`.
+
+`apps/mobile/src/native/AppProviders.tsx` (Plan 01's file; key-level): the `nav` object gains `dismissTo: (href) => router.dismissTo(href as Href),` after `back` (expo-router 57's `router.dismissTo`).
 
 `packages/contract/src/orders.ts` (E20's file, after F5; key-level). Add `import { ORDER_MODES, PAYOUT_STATUSES } from '@sanchay/domain';` (F5 already imports `unitsWireSchema` and `nullableMoneyWireSchema`), then append to `OrderSchema`, after `createdAt`:
 ```ts
@@ -34879,7 +35047,7 @@ Expected: `2 passed` (the signed-out redirect, and RED-01 → RED-02 → CNF-01 
 - [ ] **Step 5: Commit**
 
 ```
-pnpm exec biome check --write packages/features/src/redeem packages/features/src/index.ts packages/features/package.json apps/web/src/client/routes.tsx "apps/web/src/app/(app)/redeem" apps/web/e2e/redeem.smoke.spec.ts apps/mobile/src/app/redeem apps/mobile/src/app/_layout.tsx packages/contract/src/orders.ts apps/api/src/modules/orders/orders.router.ts apps/api/test/int/redemption.int.test.ts
+pnpm exec biome check --write packages/features/src/redeem packages/features/src/index.ts packages/features/src/nav/NavContext.tsx packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx packages/features/package.json apps/web/src/client/routes.tsx "apps/web/src/app/(app)/redeem" apps/web/e2e/redeem.smoke.spec.ts apps/mobile/src/app/redeem apps/mobile/src/app/_layout.tsx packages/contract/src/orders.ts apps/api/src/modules/orders/orders.router.ts apps/api/test/int/redemption.int.test.ts
 pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm exec turbo run build --filter=@sanchay/features^...
 pnpm --filter=@sanchay/features test
@@ -34891,7 +35059,7 @@ pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test:int redemption
 pnpm --filter=@sanchay/api test openapi
 pnpm lint
-git add packages/features/src/redeem packages/features/src/index.ts packages/features/package.json pnpm-lock.yaml apps/web/src/client/routes.tsx "apps/web/src/app/(app)/redeem" apps/web/e2e/redeem.smoke.spec.ts apps/mobile/src/app/redeem apps/mobile/src/app/_layout.tsx packages/contract/src/orders.ts apps/api/src/modules/orders/orders.router.ts apps/api/openapi.json apps/api/test/int/redemption.int.test.ts
+git add packages/features/src/redeem packages/features/src/index.ts packages/features/src/nav/NavContext.tsx packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx packages/features/package.json pnpm-lock.yaml apps/web/src/client/routes.tsx "apps/web/src/app/(app)/redeem" apps/web/e2e/redeem.smoke.spec.ts apps/mobile/src/app/redeem apps/mobile/src/app/_layout.tsx packages/contract/src/orders.ts apps/api/src/modules/orders/orders.router.ts apps/api/openapi.json apps/api/test/int/redemption.int.test.ts
 git commit -m "feat(redeem): RED-01/02 with CNF-01, REFRESHING polling, payout status and redeem remaining (F16)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test and typecheck commands. (`git add` takes the two route directories, not the bracketed file names: git reads `[folioId]` in a pathspec as a glob.)
@@ -35435,7 +35603,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
 - **Plan 01 `AppShell` hydration mismatch (web, desktop width).** `navLayoutFor(useWindowDimensions().width)` is 0 on the server and the real width in the browser, so the sidebar layout differs between the server HTML and the first client render; Next's dev overlay reports it on `/explore` and `/redeem/…`. Not caused by F16; fixed by Plan 02 D0 (RV-02-66): `AppShell` reads the width through `useSyncExternalStore` with a server snapshot of 0.
 - **`next dev` writes `apps/web/AGENTS.md` and `apps/web/CLAUDE.md`** (Next 16.3 `agentRules`). They are untracked noise in every executor's tree; `agentRules: false` in `next.config.ts` or a `.gitignore` line would stop it (shared files, so the owner decides).
 - **F18** lists the redeem route as `redeem/[folioId]/[isin].tsx`, which F16 uses; F18's suggested key `'redeem-review'` differs from F16's `'redeem'`, which F18's check accepts.
-- **Android, after CNF-02 (open, found at assembly 2026-10-01).** The redeem route is a root-stack screen, so `nav.push('/portfolio')` ("Go to portfolio") and `nav.push('/portfolio/orders/{id}')` ("View order") reach Expo Router as a PUSH on the root stack, where the current and target states diverge (`getNavigateAction`). That pushes a second `(tabs)` entry above the redeem screen, and Back then returns to CNF-02. Plan 01's `NavAdapter` has only `push`, `replace` and `back`; a `dismissTo`-style method in C9/C13's adapter would fix it. Web is unaffected. Check it on the device build (F25).
+- **Android, after CNF-02 (open, found at assembly 2026-10-01).** The redeem route is a root-stack screen, so `nav.push('/portfolio')` ("Go to portfolio") and `nav.push('/portfolio/orders/{id}')` ("View order") reach Expo Router as a PUSH on the root stack, where the current and target states diverge (`getNavigateAction`). That pushes a second `(tabs)` entry above the redeem screen, and Back then returns to CNF-02. Plan 01's `NavAdapter` has only `push`, `replace` and `back`; a `dismissTo`-style method in C9/C13's adapter would fix it. Web is unaffected. Check it on the device build (F25). **Resolved 2026-10-06 (owner decision; RV-04-F16-3):** F16 adds `NavAdapter.dismissTo` and both buttons use it; F25's device build still confirms Back.
 
 **Contract assumptions (to reconcile):**
 - None open against unwritten backend tasks: F5 (`p4tasks/F5.md`) is consumed with its exact procedure names, shapes and error codes (re-checked at assembly, 2026-10-01: `RedemptionTargetSchema`, `RedemptionQuoteSchema` with `payoutBank {ifsc, last4, bankName} | null`, `CreateRedemptionInputSchema` and `RedemptionCreatedSchema` with `mode: AMOUNT | ALL`, the `orders` columns `redeemed_units` numeric(20,3), `redeemed_amount`, `payout_expected_on`, `payout_due_by`, and the integration helpers `processing()`, `orderOf`, `SETTLED_FIELDS`, `advanceRedemption`, `deliverRedemptionEvent`). F6 is SKIPPED (T5 forced by P-09) and is not consumed by F16; only F17's reference text (also SKIPPED) reads it.
@@ -41663,7 +41831,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test command.
 ### Task F23: Gate evidence pack for GO-1, with the separate GO-2 (SIP) section (Dev A, 4 h)
 
 **Why:** The Fri 11-27 call needs one document that links every §7 item's evidence. Two of those items are mechanical and easy to get wrong by hand:
-- **G-E4 (R-21):** three sandbox smoke runs per chain, on three distinct days, counted from Mon 11-16 and due Wed 11-25.
+- **G-E4 (R-21):** three sandbox smoke runs per chain, on three distinct days, counted from Mon 11-16 and due Wed 11-25. Since R-37 (owner decision 2026-10-06), a step past the sandbox limit is proven by the founders' canary leg instead (G-E7 a for lumpsum, b for SIP), and GO-1 needs the onboarding, lumpsum and redemption chains; SIP is GO-2 evidence (RV-04-F23-2).
 - **GO-2 (R-06):** mandate APPROVED + plan ACTIVE + FP first-instalment date recorded. The debit and allotment are evidenced when they land and do not block.
 
 This task makes both computed:
@@ -41708,7 +41876,7 @@ This task makes both computed:
   - E20: `apps/api/src/modules/orders/orders.schema.ts` `orders` (`planId`, `origin` `'SIP_INSTALMENT'`, `status`, `allottedUnits` `numeric(20,4)`, `allottedNavDate` text, `createdAt`).
   - F7 (`p4tasks/F7.md`): `OpsCommand`, `OpsCliError`, `parseFlags`, `requireUuid` (`ops-common.ts`); `opsContextOf(app)`, `OPS_COMMANDS`, `USAGE`, `runOpsCli` (`ops-runner.ts`); the boundary test's `sources` list (`ops-common.test.ts`); the registration pattern; the deployed run form (`docs/runbooks/ops-cli.md`, "Running a command in a deployed environment"); `ops:kill-switch --off --by <handle> --reason <text>` and `ops:sip-switch --on --approver1 <handle> --approver2 <handle> --reason <text>`.
   - F1 (`p4tasks/F1.md`): the ops task definition `sanchay-prod-ops` (container `ops`, `SANCHAY_APP_ROLE=ops`, login `sanchay_app_login`); the stack outputs `OpsTaskDefinitionArn`, `AppSubnetIds`, `ServiceSecurityGroupId`; cluster `sanchay-prod`; log group `/sanchay/prod/app` with stream prefix `prod`; `deploy.yml` (dispatch with `-f environment=<env>`); the "Alarm drill (Wed 11-18, G-E5)" and "PITR restore test" sections of `docs/runbooks/credential-rotation.md`.
-  - F20: `docs/probes/canary-2026-11.md` (its GO-1/GO-2 verdicts, EUIN table and G-B8 boxes). F21/F22: `docs/security/g-e3-checklist.md`.
+  - F20: `docs/probes/canary-2026-11.md` (its GO-1/GO-2 verdicts, EUIN table and G-B8 boxes, and the generated legs table, whose `| <leg> | <ref> | PASS |` rows `gate-evidence g-e4` reads for R-37). F21/F22: `docs/security/g-e3-checklist.md`.
   - F24: `docs/runbooks/README.md` and `pnpm check-runbooks`. F25: `docs/probes/g-e6-android-2026-11-23.md`. F26: `docs/probes/defect-log-2026-11.md` and `pnpm defects:gate`.
 - **Consumes (Plan 01, as built):** `apps/api/src/db/client.ts` `DbExecutor`; `apps/api/test/int/app.ts` `bootTestApp()` → `TestApp {app, db: {db}, close}`; `auditEvents` (`platform.schema.ts`); the `scripts/check-brand.ts` pattern.
 - **Produces:**
@@ -41716,15 +41884,15 @@ This task makes both computed:
     - `istDay(at: Date): string`.
     - `writeEvidence(dir, chain, result, env?)` writes `smoke-<IST day>-<chain>.md` (sandbox) or `smoke-<IST day>-<chain>-fake.md` (fake) with an `Env: <env>` line.
   - `scripts/gate-evidence.ts`:
-    - `SMOKE_CHAINS`, `G_E4_WINDOW` (`from 2026-11-16`, `due 2026-11-25`, `daysRequired 3`), `istDayOf(iso)`.
-    - `parseSmokeEvidence(file, text): SmokeRun | null`.
-    - `rejectionOf(run, from)`, with reasons `ENV_UNSTAMPED`, `ENV_NOT_SANDBOX`, `NO_TIMESTAMP`, `BEFORE_WINDOW`, `NO_STEPS`, `STEP_SKIPPED` (only SKIPPED besides PASSED: D4's placeholder, the chain is not wired) and `STEP_NOT_PASSED` (a FAILED step). A `SKIPPED` step does not count, so G-E4 means every step passed on the real sandbox.
-    - `evaluateGE4(runs, window?)` returns `{met, onTime, ownerRulingRequired, chains[{chain, days[{day, file}], met, onTime, unwired, rejected}]}`, and `renderGE4`, whose verdict line is `MET`, `MET after the due date`, `NOT MET`, or `NOT MET: owner ruling required` while an unmet chain is not wired.
+    - `SMOKE_CHAINS`, `G_E4_WINDOW` (`from 2026-11-16`, `due 2026-11-25`, `daysRequired 3`), `istDayOf(iso)`; R-37's `GO1_CHAINS` (onboarding, lumpsum, redemption), `CANARY_LEGS_FOR` (lumpsum: `A_UPI`, `A_NETBANKING`; sip: `B_SIP`; onboarding and redemption: none) and `SANDBOX_LIMIT` (a SKIPPED step whose detail starts `sandbox limit`).
+    - `parseSmokeEvidence(file, text): SmokeRun | null`; each step carries its Detail cell (unescaped).
+    - `atSandboxLimit(chain, step)` (R-37) and `rejectionOf(run, from)`, with reasons `ENV_UNSTAMPED`, `ENV_NOT_SANDBOX`, `NO_TIMESTAMP`, `BEFORE_WINDOW`, `NO_STEPS`, `STEP_SKIPPED` (a SKIPPED step that is not at a canary-backed sandbox limit: D4's placeholder, the chain is not wired) and `STEP_NOT_PASSED` (a FAILED step). A step at the sandbox limit counts; any other SKIPPED step does not.
+    - `evaluateGE4(runs, window?, canaryPassed?)` returns `{met, onTime, wiringMissing, canaryPending, chains[{chain, days[{day, file}], sandboxMet, canary[{leg, pass}], met, onTime, unwired, rejected}]}`; `met` covers `GO1_CHAINS`, and a chain whose counted runs stopped at the sandbox limit is met only once each of its canary legs passed. `parseCanaryPassedLegs(text)` reads the PASS legs from F20's generated legs table. `renderGE4`'s verdict line is `MET`, `MET after the due date`, `NOT MET: chains not wired`, `NOT MET: waiting on the canary` or `NOT MET`.
     - `Go2Evidence`, `parseGo2Evidence(text)`. It finds the evidence among the messages `aws logs get-log-events --output text` joins with tabs, or on prefixed lines; the last one wins.
     - `decodeText(buffer)` handles UTF-8 (with or without a BOM), and UTF-16LE with a BOM from PowerShell 5.1's `>`.
     - `evaluateGo2(e)` returns `{ready, reasons[MANDATE_NOT_APPROVED | PLAN_NOT_ACTIVE | FIRST_INSTALMENT_DATE_MISSING], debitAndAllotment: LANDED | PENDING}`, and `renderGo2`.
     - `replaceBlock(doc, id, body)` uses `<!-- <id>:BEGIN/END -->` markers.
-    - CLI: `pnpm gate-evidence g-e4` and `pnpm gate-evidence go-2 <file>` (flags `--probes=`, `--doc=`). Each exits 1 when its item is not met. `go-2` rewrites `<file>` to the single evidence line (UTF-8).
+    - CLI: `pnpm gate-evidence g-e4` and `pnpm gate-evidence go-2 <file>` (flags `--probes=`, `--doc=`, and for `g-e4` `--canary=`, default `docs/probes/canary-2026-11.md`). Each exits 1 when its item is not met. `go-2` rewrites `<file>` to the single evidence line (UTF-8).
     - CI step "Gate evidence tests (G-E4, GO-2)".
   - `apps/api`:
     - `readGo2Evidence(db, planId, now): Promise<Go2Evidence | null>`. It is read-only and returns no PII and no FP ids, only `fpPlanIdRecorded`.
@@ -41736,10 +41904,10 @@ This task makes both computed:
   - F1: `deploy.yml`, the cluster, the log group and stream prefix, and the G-E5 record sections are as listed under Prerequisites.
   - D4: the file contents are exactly as Plan 02 writes them, RV-02-24 included. Part A edits `evidence.ts` whole and `smoke.ts` by one line.
   - F2's `sip-seed.ts`: `seedSipInvestor` returns E20's `seedInvestableInvestor` shape (`investorId`, `bankId`) with the bank registered at FP.
-  - **G-E4 depends on two things this task does not provide, so GO-1's G-E4 line needs an owner ruling until both exist (FR-12, assembly 2026-10-01).**
+  - **G-E4 depends on two things this task does not provide, so GO-1's G-E4 line needs an owner ruling until both exist (FR-12, assembly 2026-10-01).** **Settled 2026-10-06 by R-37 (RV-04-F23-2):** dependency 2 no longer blocks, because the canary leg proves what the sandbox cannot settle; dependency 1 still does, up to each chain's sandbox limit.
     1. **D4's sandbox chains must be wired end to end.** Each D4 chain still carries one SKIPPED placeholder step: onboarding's FP provisioning (investor profile, contacts, bank, MF investment account), lumpsum's consent, confirm, payment and allotment, SIP's mandate authorise, plan create and first instalment, and redemption's create, consent and confirm. No Plan 02-04 task wires them (F5 deviation 3 and F28 deviation 7 leave theirs SKIPPED), and F23 does not either: the assembler raises it with the owner.
     2. **Sandbox ONDC purchases must settle.** In probe P-07 (`docs/probes/P-07-allotted-units.md`, result PENDING) three paid sandbox purchases stayed `submitted` while a watcher polled them, none of the tenant's 145 earlier sandbox purchases ever reached `successful`, and the order simulator refuses ONDC orders. Cybrilla's answer on how sandbox ONDC purchases settle is pending, so even a wired lumpsum or SIP chain may never reach a terminal state in the sandbox.
-  - G-E4 counts a run only when every step PASSED, so a placeholder is never evidence. `rejectionOf` names a run whose only non-PASSED steps are SKIPPED `STEP_SKIPPED` (the chain is not wired) and a run with a FAILED step `STEP_NOT_PASSED`. While any unmet chain is not wired, the generated block reads `**G-E4: NOT MET: owner ruling required.**`, names the chains and both dependencies, and GO-1's G-E4 row reads "owner ruling required" (Part C, step 2). The ruling is recorded in the decision record. When a chain is wired, each wired step must poll the FP object to a terminal state with no fixed deadline, and must not assume quick ONDC settlement in the sandbox (BRIEF D7).
+  - G-E4 counts a run only when every step PASSED, apart from steps at R-37's sandbox limit: a chain records each step it cannot complete in the sandbox as SKIPPED with a detail starting `sandbox limit` and naming its canary leg, and only lumpsum and SIP have such legs. Any other SKIPPED step is D4's placeholder and is rejected as `STEP_SKIPPED` (the chain is not wired); a FAILED step is `STEP_NOT_PASSED`. A chain with a limited run reads `NOT MET (canary pending)` until its legs read PASS in `canary-2026-11.md`. The block reads `**G-E4: NOT MET: chains not wired.**` while a GO-1 chain is not wired, and `**G-E4: NOT MET: waiting on the canary.**` while one waits on its legs. A wired step polls the FP object to a terminal state with no fixed deadline and never assumes quick ONDC settlement in the sandbox (BRIEF D7).
 
 #### Part A: D4 evidence fix and the gate-evidence script (by Fri 11-13)
 
@@ -41753,8 +41921,10 @@ import {
   decodeText,
   evaluateGE4,
   evaluateGo2,
+  G_E4_WINDOW,
   type Go2Evidence,
   istDayOf,
+  parseCanaryPassedLegs,
   parseGo2Evidence,
   parseSmokeEvidence,
   renderGE4,
@@ -41817,8 +41987,8 @@ describe('parseSmokeEvidence', () => {
       env: 'sandbox',
       istDay: '2026-11-16',
       steps: [
-        { name: 'purchase.create', status: 'PASSED' },
-        { name: 'purchase.get', status: 'PASSED' },
+        { name: 'purchase.create', status: 'PASSED', detail: 'detail with | pipe' },
+        { name: 'purchase.get', status: 'PASSED', detail: 'detail with | pipe' },
       ],
     });
   });
@@ -41874,7 +42044,7 @@ describe('evaluateGE4 (R-21)', () => {
       ['BEFORE_WINDOW', 'ENV_NOT_SANDBOX', 'ENV_UNSTAMPED', 'STEP_NOT_PASSED', 'NO_STEPS'],
     );
     assert.equal(sip?.unwired, false);
-    assert.equal(verdict.ownerRulingRequired, false);
+    assert.equal(verdict.wiringMissing, false);
   });
 
   it("tells D4's SKIPPED placeholder (the chain is not wired) apart from a failed step", () => {
@@ -41898,7 +42068,7 @@ describe('evaluateGE4 (R-21)', () => {
     assert.equal(sip?.unwired, true);
   });
 
-  it('asks for an owner ruling while an unmet chain is not wired', () => {
+  it('names the GO-1 chains that are not wired (R-37 still needs every reachable step to PASS)', () => {
     const unwired = (day: string) =>
       run('redemption', day, {
         steps: [
@@ -41916,12 +42086,12 @@ describe('evaluateGE4 (R-21)', () => {
       ]),
     );
     assert.equal(verdict.met, false);
-    assert.equal(verdict.ownerRulingRequired, true);
+    assert.equal(verdict.wiringMissing, true);
     const md = renderGE4(verdict);
-    assert.match(md, /\| redemption \| 0 \| - \| NOT MET \(not wired\) \|/);
-    assert.match(md, /\*\*G-E4: NOT MET: owner ruling required\.\*\*/);
+    assert.match(md, /\| redemption \| 0 \| - \| - \| NOT MET \(not wired\) \|/);
+    assert.match(md, /\*\*G-E4: NOT MET: chains not wired\.\*\*/);
     assert.match(md, /Not wired: `redemption`\./);
-    assert.match(md, /probe P-07/);
+    assert.doesNotMatch(md, /owner ruling/);
   });
 
   it('is met but late when the third day falls after 11-25', () => {
@@ -41939,10 +42109,102 @@ describe('evaluateGE4 (R-21)', () => {
     const md = renderGE4(evaluateGE4(allChains('2026-11-16')));
     assert.match(
       md,
-      /\| lumpsum \| 1 \| \[2026-11-16\]\(smoke-2026-11-16-lumpsum\.md\) \| NOT MET \|/,
+      /\| lumpsum \| 1 \| \[2026-11-16\]\(smoke-2026-11-16-lumpsum\.md\) \| - \| NOT MET \|/,
     );
+    assert.match(md, /\| sip \(GO-2\) \| 1 \|/);
     assert.match(md, /\*\*G-E4: NOT MET\.\*\*/);
     assert.doesNotMatch(md, /owner ruling/);
+  });
+});
+
+describe('evaluateGE4 split proof (R-37, owner decision 2026-10-06)', () => {
+  const DAYS = ['2026-11-16', '2026-11-18', '2026-11-20'];
+  /** A lumpsum run that PASSES up to FP `submitted` and stops at the sandbox limit (P-07). */
+  const limited = (day: string) =>
+    run('lumpsum', day, {
+      steps: [
+        {
+          name: 'purchase create, consent, payment, confirm',
+          status: 'PASSED',
+          detail: 'submitted',
+        },
+        {
+          name: 'allotment',
+          status: 'SKIPPED',
+          detail: 'sandbox limit: proven by G-E7(a) A_UPI, A_NETBANKING',
+        },
+      ],
+    });
+  const go1Runs = (lumpsum: (day: string) => SmokeRun) =>
+    DAYS.flatMap((day) => [run('onboarding', day), lumpsum(day), run('redemption', day)]);
+
+  it('counts a run that stops at the sandbox limit, and waits on both lumpsum canary legs', () => {
+    const verdict = evaluateGE4(go1Runs(limited), G_E4_WINDOW, new Set(['A_UPI']));
+    const lumpsum = verdict.chains.find((c) => c.chain === 'lumpsum');
+    assert.equal(lumpsum?.sandboxMet, true);
+    assert.deepEqual(lumpsum?.rejected, []);
+    assert.deepEqual(lumpsum?.canary, [
+      { leg: 'A_UPI', pass: true },
+      { leg: 'A_NETBANKING', pass: false },
+    ]);
+    assert.equal(verdict.met, false);
+    assert.equal(verdict.canaryPending, true);
+    const md = renderGE4(verdict);
+    assert.match(
+      md,
+      /\| lumpsum \| 3 \| .+ \| A_UPI PASS, A_NETBANKING pending \| NOT MET \(canary pending\) \|/,
+    );
+    assert.match(md, /\*\*G-E4: NOT MET: waiting on the canary\.\*\*/);
+    assert.match(md, /`lumpsum` \(A_NETBANKING\) must read PASS/);
+  });
+
+  it('is met once every leg passed, on time by the sandbox days, and without the SIP chain (GO-2)', () => {
+    const verdict = evaluateGE4(go1Runs(limited), G_E4_WINDOW, new Set(['A_UPI', 'A_NETBANKING']));
+    assert.equal(verdict.met, true);
+    assert.equal(verdict.onTime, true);
+    assert.equal(verdict.chains.find((c) => c.chain === 'sip')?.met, false);
+    assert.match(renderGE4(verdict), /\*\*G-E4: MET\.\*\*/);
+  });
+
+  it('does not let the marker excuse a chain with no canary leg, nor a SKIPPED step without it', () => {
+    const onboarding = run('onboarding', '2026-11-16', {
+      steps: [
+        { name: 'POA pre-verification', status: 'PASSED' },
+        { name: 'FP provisioning', status: 'SKIPPED', detail: 'sandbox limit: none known' },
+      ],
+    });
+    const placeholder = run('lumpsum', '2026-11-16', {
+      steps: [
+        { name: 'purchase create', status: 'PASSED' },
+        {
+          name: 'consent, confirm, payment, allotment',
+          status: 'SKIPPED',
+          detail: 'wired in E20 (Plan 03)',
+        },
+      ],
+    });
+    const verdict = evaluateGE4([onboarding, placeholder]);
+    assert.deepEqual(
+      verdict.chains.flatMap((c) => c.rejected.map((r) => r.reason)),
+      ['STEP_SKIPPED', 'STEP_SKIPPED'],
+    );
+  });
+
+  it("reads PASS legs only from the generated legs table of F20's report", () => {
+    const report = [
+      '| A_NETBANKING | ref | PASS | written by hand above the markers |',
+      '<!-- canary:generated:start -->',
+      '| Leg | Ref | Result | Ledger units | Statement units | Delta | Failures |',
+      '|---|---|---|---|---|---|---|',
+      '| A_UPI | mfp_1 | PASS | 10.000 | 10.000 | 0.000 | — |',
+      '| A_NETBANKING | mfp_2 | BLOCKED | — | — | — | STATEMENT_MISSING |',
+      '| B_SIP | mfpp_1 | PASS | — | — | — | — |',
+      '| Leg | EUIN on the FP object | EUIN on the statement |',
+      '| A_UPI | …1234 | …1234 |',
+      '<!-- canary:generated:end -->',
+    ].join('\n');
+    assert.deepEqual([...parseCanaryPassedLegs(report)].sort(), ['A_UPI', 'B_SIP']);
+    assert.deepEqual([...parseCanaryPassedLegs('no markers')], []);
   });
 });
 
@@ -42102,12 +42364,14 @@ Create `scripts/gate-evidence.ts`:
 /**
  * GO-1 / GO-2 gate evidence (Task F23; spec §7, R-06, R-21). Plain Node 24 (type stripping).
  *   pnpm gate-evidence g-e4            rewrites the G-E4 block of the gate doc from docs/probes/smoke-*.md
+ *                                      and the canary report's legs (R-37)
  *   pnpm gate-evidence go-2 <file>     rewrites the GO-2 block from the saved `ops:gate-go2` output, and
  *                                      rewrites <file> itself to that one JSON line (UTF-8)
- * Optional flags: --probes=<dir> (default docs/probes), --doc=<file> (default docs/probes/gate-2026-11-27.md).
+ * Optional flags: --probes=<dir> (default docs/probes), --doc=<file> (default docs/probes/gate-2026-11-27.md),
+ * --canary=<file> (default docs/probes/canary-2026-11.md; a missing file means no leg has passed).
  * Exit 1 when the item is not met, so the command doubles as the check.
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
@@ -42117,13 +42381,39 @@ export type SmokeChain = (typeof SMOKE_CHAINS)[number];
 /** R-21: runs count from Mon 11-16; three distinct days are due by Wed 11-25. */
 export const G_E4_WINDOW = { from: '2026-11-16', due: '2026-11-25', daysRequired: 3 } as const;
 
+/** R-06: GO-1 needs these chains; the SIP chain is GO-2 evidence (a GO-1 without it keeps SIPs off). */
+export const GO1_CHAINS: readonly SmokeChain[] = ['onboarding', 'lumpsum', 'redemption'];
+
+/**
+ * R-37 (owner decision 2026-10-06, option A): the founders' canary legs (F20's
+ * `docs/probes/canary-2026-11.md`) that prove what the FP sandbox cannot complete. Lumpsum stops at FP
+ * `submitted` after a simulated payment (P-07) and SIP at the first instalment `submitted` (P-09).
+ * Onboarding and redemption have no known sandbox limit, so their sandbox runs alone decide.
+ */
+export const CANARY_LEGS_FOR: Readonly<Record<SmokeChain, readonly string[]>> = {
+  onboarding: [],
+  lumpsum: ['A_UPI', 'A_NETBANKING'],
+  sip: ['B_SIP'],
+  redemption: [],
+};
+
+/** R-37: a chain records a step past the sandbox limit as SKIPPED, with a detail that starts so. */
+export const SANDBOX_LIMIT = /^sandbox limit\b/i;
+
 export interface SmokeRun {
   readonly file: string;
   readonly chain: SmokeChain;
   readonly env: 'sandbox' | 'fake' | 'unstamped';
   /** IST calendar day of the `Run at` timestamp; null when the line is missing. */
   readonly istDay: string | null;
-  readonly steps: ReadonlyArray<{ name: string; status: string }>;
+  readonly steps: ReadonlyArray<SmokeStep>;
+}
+
+export interface SmokeStep {
+  readonly name: string;
+  readonly status: string;
+  /** The row's Detail cell, unescaped; R-37's sandbox-limit marker lives here. */
+  readonly detail?: string;
 }
 
 export type RunRejection =
@@ -42156,7 +42446,11 @@ export function parseSmokeEvidence(file: string, text: string): SmokeRun | null 
     .split(/\r?\n/)
     .filter((line) => line.startsWith('| ') && !line.startsWith('| Step |'))
     .map((line) => line.split(' | '))
-    .map((cells) => ({ name: (cells[0] ?? '').slice(2), status: cells[1] ?? '' }));
+    .map((cells) => ({
+      name: (cells[0] ?? '').slice(2),
+      status: cells[1] ?? '',
+      detail: (cells[2] ?? '').replace(/ ?\|$/, '').replace(/\\\|/g, '|'),
+    }));
   return {
     file,
     chain: chain as SmokeChain,
@@ -42166,10 +42460,19 @@ export function parseSmokeEvidence(file: string, text: string): SmokeRun | null 
   };
 }
 
+/** R-37: a SKIPPED step past the sandbox limit, on a chain whose canary legs prove it instead. */
+export function atSandboxLimit(chain: SmokeChain, step: SmokeStep): boolean {
+  return (
+    step.status === 'SKIPPED' &&
+    SANDBOX_LIMIT.test(step.detail ?? '') &&
+    CANARY_LEGS_FOR[chain].length > 0
+  );
+}
+
 /**
- * Why a run does not count toward G-E4, or null when it counts. A step D4 left SKIPPED (a placeholder
- * that names the task meant to wire it) is STEP_SKIPPED: the chain is not wired, which only the owner
- * can rule on. A FAILED step is STEP_NOT_PASSED.
+ * Why a run does not count toward G-E4, or null when it counts. A step at R-37's sandbox limit counts
+ * (its chain then waits on the canary). Any other step D4 left SKIPPED (a placeholder that names the
+ * task meant to wire it) is STEP_SKIPPED: the chain is not wired. A FAILED step is STEP_NOT_PASSED.
  */
 export function rejectionOf(run: SmokeRun, from: string): RunRejection | null {
   if (run.env === 'unstamped') return 'ENV_UNSTAMPED';
@@ -42177,7 +42480,7 @@ export function rejectionOf(run: SmokeRun, from: string): RunRejection | null {
   if (run.istDay === null) return 'NO_TIMESTAMP';
   if (run.istDay < from) return 'BEFORE_WINDOW';
   if (run.steps.length === 0) return 'NO_STEPS';
-  const notPassed = run.steps.filter((s) => s.status !== 'PASSED');
+  const notPassed = run.steps.filter((s) => s.status !== 'PASSED' && !atSandboxLimit(run.chain, s));
   if (notPassed.length === 0) return null;
   return notPassed.every((s) => s.status === 'SKIPPED') ? 'STEP_SKIPPED' : 'STEP_NOT_PASSED';
 }
@@ -42186,8 +42489,16 @@ export interface ChainVerdict {
   readonly chain: SmokeChain;
   /** Distinct IST days with a fully PASSED sandbox run, ascending, each with its evidence file. */
   readonly days: ReadonlyArray<{ day: string; file: string }>;
+  /** Three qualifying sandbox days (R-21). */
+  readonly sandboxMet: boolean;
+  /**
+   * R-37: the canary legs this chain waits on because a counted run stopped at the sandbox limit, each
+   * with its PASS state in the canary report; empty when no counted run needed one.
+   */
+  readonly canary: ReadonlyArray<{ leg: string; pass: boolean }>;
+  /** Both proofs: the sandbox days and every canary leg it waits on. */
   readonly met: boolean;
-  /** The third qualifying day is on or before the R-21 due date. */
+  /** The third qualifying day is on or before the R-21 due date (the canary is not counted as late). */
   readonly onTime: boolean;
   /** A sandbox run in the window still had one of D4's SKIPPED placeholder steps (STEP_SKIPPED). */
   readonly unwired: boolean;
@@ -42195,13 +42506,13 @@ export interface ChainVerdict {
 }
 
 export interface GE4Verdict {
+  /** Every GO-1 chain is met (R-06; the SIP chain is GO-2 evidence). */
   readonly met: boolean;
   readonly onTime: boolean;
-  /**
-   * NOT MET while at least one unmet chain is not wired: G-E4 then needs the owner's ruling, and the
-   * block and GO-1's G-E4 row say so instead of a plain NOT MET.
-   */
-  readonly ownerRulingRequired: boolean;
+  /** NOT MET while an unmet GO-1 chain is not wired: its runs still carry a D4 placeholder. */
+  readonly wiringMissing: boolean;
+  /** NOT MET while an unmet GO-1 chain has its sandbox days and waits only on the canary (R-37). */
+  readonly canaryPending: boolean;
   readonly chains: readonly ChainVerdict[];
 }
 
@@ -42211,73 +42522,133 @@ export interface GE4Window {
   readonly daysRequired: number;
 }
 
+/**
+ * `canaryPassed` holds the canary legs that read PASS in F20's report (`parseCanaryPassedLegs`). A chain
+ * whose counted runs stopped at the sandbox limit is met only once all its legs passed (R-37).
+ */
 export function evaluateGE4(
   runs: readonly SmokeRun[],
   window: GE4Window = G_E4_WINDOW,
+  canaryPassed: ReadonlySet<string> = new Set<string>(),
 ): GE4Verdict {
   const chains = SMOKE_CHAINS.map((chain): ChainVerdict => {
     const mine = runs.filter((r) => r.chain === chain);
     const rejected: Array<{ file: string; reason: RunRejection }> = [];
     const days = new Map<string, string>();
+    let limited = false;
     for (const run of mine) {
       const reason = rejectionOf(run, window.from);
-      if (reason !== null) rejected.push({ file: run.file, reason });
-      else if (run.istDay !== null && !days.has(run.istDay)) days.set(run.istDay, run.file);
+      if (reason !== null) {
+        rejected.push({ file: run.file, reason });
+        continue;
+      }
+      if (run.steps.some((s) => atSandboxLimit(chain, s))) limited = true;
+      if (run.istDay !== null && !days.has(run.istDay)) days.set(run.istDay, run.file);
     }
     const sorted = [...days.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([day, file]) => ({ day, file }));
     const third = sorted[window.daysRequired - 1]?.day;
+    const canary = (limited ? CANARY_LEGS_FOR[chain] : []).map((leg) => ({
+      leg,
+      pass: canaryPassed.has(leg),
+    }));
+    const sandboxMet = third !== undefined;
     return {
       chain,
       days: sorted,
-      met: third !== undefined,
+      sandboxMet,
+      canary,
+      met: sandboxMet && canary.every((c) => c.pass),
       onTime: third !== undefined && third <= window.due,
       unwired: rejected.some((r) => r.reason === 'STEP_SKIPPED'),
       rejected,
     };
   });
-  const met = chains.every((c) => c.met);
+  const go1 = chains.filter((c) => GO1_CHAINS.includes(c.chain));
+  const met = go1.every((c) => c.met);
   return {
     met,
-    onTime: chains.every((c) => c.onTime),
-    ownerRulingRequired: !met && chains.some((c) => !c.met && c.unwired),
+    onTime: go1.every((c) => c.onTime),
+    wiringMissing: !met && go1.some((c) => !c.met && c.unwired),
+    canaryPending: !met && go1.some((c) => !c.met && c.sandboxMet),
     chains,
   };
 }
 
+/**
+ * R-37: the canary legs that read PASS in the generated legs table of F20's report (rows
+ * `| <leg> | <ref> | PASS | … |` between the `canary:generated` markers); nothing outside them counts.
+ */
+export function parseCanaryPassedLegs(text: string): Set<string> {
+  const start = text.indexOf('<!-- canary:generated:start -->');
+  const end = text.indexOf('<!-- canary:generated:end -->');
+  const passed = new Set<string>();
+  if (start < 0 || end < start) return passed;
+  for (const line of text.slice(start, end).split(/\r?\n/)) {
+    const cells = line.split('|').map((cell) => cell.trim());
+    const leg = cells[1] ?? '';
+    if (/^[A-C]_[A-Z]+$/.test(leg) && cells[3] === 'PASS') passed.add(leg);
+  }
+  return passed;
+}
+
 function ge4Headline(verdict: GE4Verdict): string {
   if (verdict.met) return verdict.onTime ? 'MET' : 'MET after the due date';
-  return verdict.ownerRulingRequired ? 'NOT MET: owner ruling required' : 'NOT MET';
+  if (verdict.wiringMissing) return 'NOT MET: chains not wired';
+  return verdict.canaryPending ? 'NOT MET: waiting on the canary' : 'NOT MET';
+}
+
+function chainStatus(c: ChainVerdict): string {
+  if (c.met) return c.onTime ? 'MET' : 'MET LATE';
+  if (c.unwired) return 'NOT MET (not wired)';
+  return c.sandboxMet ? 'NOT MET (canary pending)' : 'NOT MET';
 }
 
 export function renderGE4(verdict: GE4Verdict): string {
   const rows = verdict.chains.map((c) => {
-    const notMet = c.unwired ? 'NOT MET (not wired)' : 'NOT MET';
-    const status = c.met ? (c.onTime ? 'MET' : 'MET LATE') : notMet;
     const files = c.days.map((d) => `[${d.day}](${d.file})`).join(', ');
-    return `| ${c.chain} | ${c.days.length} | ${files === '' ? '-' : files} | ${status} |`;
+    const canary = c.canary.map((l) => `${l.leg} ${l.pass ? 'PASS' : 'pending'}`).join(', ');
+    const name = GO1_CHAINS.includes(c.chain) ? c.chain : `${c.chain} (GO-2)`;
+    return `| ${name} | ${c.days.length} | ${files === '' ? '-' : files} | ${canary === '' ? '-' : canary} | ${chainStatus(c)} |`;
   });
   const rejected = verdict.chains.flatMap((c) =>
     c.rejected.map((r) => `- \`${r.file}\`: ${r.reason}`),
   );
   const unwired = verdict.chains.filter((c) => !c.met && c.unwired).map((c) => `\`${c.chain}\``);
-  const ruling = verdict.ownerRulingRequired
-    ? [
-        `Not wired: ${unwired.join(', ')}. Their sandbox runs still carry D4's SKIPPED placeholder steps, so they cannot count. G-E4 also depends on sandbox ONDC purchases settling (probe P-07). GO-1 cannot be called on G-E4 until the owner rules: record the ruling in the decision record.`,
-        '',
-      ]
-    : [];
+  const waiting = verdict.chains
+    .filter((c) => !c.met && c.sandboxMet)
+    .map(
+      (c) =>
+        `\`${c.chain}\` (${c.canary
+          .filter((l) => !l.pass)
+          .map((l) => l.leg)
+          .join(', ')})`,
+    );
+  const notes = [
+    ...(unwired.length === 0
+      ? []
+      : [
+          `Not wired: ${unwired.join(', ')}. Their sandbox runs still carry one of D4's SKIPPED placeholder steps, so they cannot count: R-37 needs every step the sandbox can reach to PASS, with only the steps past the sandbox limit SKIPPED as \`sandbox limit: …\`.`,
+          '',
+        ]),
+    ...(waiting.length === 0
+      ? []
+      : [
+          `Waiting on the founders' canary (R-37): ${waiting.join('; ')} must read PASS in [\`canary-2026-11.md\`](canary-2026-11.md).`,
+          '',
+        ]),
+  ];
   return [
-    `G-E4 sandbox smoke (R-21: ${G_E4_WINDOW.daysRequired} distinct IST days from ${G_E4_WINDOW.from}, due ${G_E4_WINDOW.due}).`,
+    `G-E4 sandbox smoke (R-21: ${G_E4_WINDOW.daysRequired} distinct IST days from ${G_E4_WINDOW.from}, due ${G_E4_WINDOW.due}; R-37: a step past the sandbox limit is proven by the founders' canary leg; GO-1 needs ${GO1_CHAINS.join(', ')}, and SIP is GO-2 evidence).`,
     '',
-    '| Chain | Days | Evidence | Status |',
-    '|---|---|---|---|',
+    '| Chain | Days | Evidence | Canary (R-37) | Status |',
+    '|---|---|---|---|---|',
     ...rows,
     '',
     `**G-E4: ${ge4Headline(verdict)}.**`,
     '',
-    ...ruling,
+    ...notes,
     ...(rejected.length === 0 ? [] : ['Runs not counted:', '', ...rejected, '']),
   ].join('\n');
 }
@@ -42421,6 +42792,7 @@ function main(argv: readonly string[]): number {
   const [command, input] = argv.filter((a) => !a.startsWith('--'));
   const probes = flag(argv, 'probes', join('docs', 'probes'));
   const docPath = flag(argv, 'doc', join('docs', 'probes', 'gate-2026-11-27.md'));
+  const canaryPath = flag(argv, 'canary', join('docs', 'probes', 'canary-2026-11.md'));
   const doc = readFileSync(docPath, 'utf8');
   if (command === 'g-e4') {
     // Only smoke evidence files are read: docs/probes also holds other evidence and folders
@@ -42431,7 +42803,10 @@ function main(argv: readonly string[]): number {
         const run = parseSmokeEvidence(file, readFileSync(join(probes, file), 'utf8'));
         return run === null ? [] : [run];
       });
-    const verdict = evaluateGE4(runs);
+    const canaryPassed = existsSync(canaryPath)
+      ? parseCanaryPassedLegs(readFileSync(canaryPath, 'utf8'))
+      : new Set<string>();
+    const verdict = evaluateGE4(runs, G_E4_WINDOW, canaryPassed);
     const body = renderGE4(verdict);
     writeFileSync(docPath, replaceBlock(doc, 'G-E4', body));
     process.stdout.write(`${body}\n`);
@@ -42515,8 +42890,8 @@ Create `docs/probes/gate-2026-11-27.md`:
 Spec §7 (tiered gate, R-06; dates R-21). Owner: PO. Prepared by Dev A (F23).
 
 - **GO-1 (Fri 11-27): onboarding, lumpsum and redemption.** Every G-item below except G-E7(b) must be green.
-  A G-E4 that reads "owner ruling required" (a sandbox chain is not wired) needs the owner's recorded ruling
-  in the decision record before GO-1 is called.
+  G-E4 follows R-37 (owner decision 2026-10-06): sandbox runs up to each chain's sandbox limit, plus the
+  founders' canary leg for the steps past it. The SIP chain is GO-2 evidence.
 - **GO-2 (SIP):** called separately once the canary SIP shows mandate APPROVED + plan ACTIVE + FP
   first-instalment date recorded. The debit and the allotment are evidenced when they land; they do
   not block GO-2. `plans.sip.enabled` stays `false` in prod until GO-2 is called, apart from the
@@ -42526,7 +42901,7 @@ Spec §7 (tiered gate, R-06; dates R-21). Owner: PO. Prepared by Dev A (F23).
 Freeze commit: `<sha from git rev-parse main>`. Prod stack deploy run: `<deploy.yml run URL>`.
 
 Status values: GREEN (evidence linked and checked), RED (missing or failing), N/A (not in this tier),
-and, for G-E4 only, "owner ruling required" (a sandbox chain is not wired; never counted as GREEN).
+and, for G-E4 only, "waiting on the canary" (sandbox days met, canary legs not yet PASS; never counted as GREEN).
 
 ## GO-1 checklist
 
@@ -42552,7 +42927,7 @@ and, for G-E4 only, "owner ruling required" (a sandbox chain is not wired; never
 | G-E1 | Consent-first suite incl. R-17 and R-20 tests | Dev A | Fri 11-20 | CI run at the freeze commit: `<url>` | |
 | G-E2 | Golden vectors green | Dev A | Fri 11-20 | CI run at the freeze commit: `<url>` | |
 | G-E3 | Security checklist incl. ZAP baseline, cross-signed by Dev B | Dev A / Dev B | Wed 11-25 | [`docs/security/g-e3-checklist.md`](../security/g-e3-checklist.md) | |
-| G-E4 | Sandbox smoke, every chain, 3 days (R-21). Depends on D4's sandbox chains being wired end to end and on sandbox ONDC purchases settling (probe [`P-07`](P-07-allotted-units.md), Cybrilla's answer pending); while a chain is not wired the block reads "owner ruling required", and so does this row | Dev A | Wed 11-25 | block below (`pnpm gate-evidence g-e4`) | |
+| G-E4 | Sandbox smoke, 3 days per GO-1 chain (R-21), split proof (R-37): every step the sandbox can reach passes, and a step past the sandbox limit is proven by its canary leg in [`canary-2026-11.md`](canary-2026-11.md) (lumpsum: G-E7 a; probe [`P-07`](P-07-allotted-units.md)). Needs D4's chains wired up to their sandbox limit | Dev A | Wed 11-25 (sandbox days); Thu 11-26 (canary) | block below (`pnpm gate-evidence g-e4`) | |
 | G-E5 | Prod stack: Multi-AZ, PITR, one restore test, alarms to both devs | Dev A | Wed 11-18 | the "Alarm drill (Wed 11-18, G-E5)" and "PITR restore test" records in [`docs/runbooks/credential-rotation.md`](../runbooks/credential-rotation.md) (F1) | |
 | G-E6 | Android build, App Links verified, returns, FLAG_SECURE, app lock | Dev B | Mon 11-23 | [`docs/probes/g-e6-android-2026-11-23.md`](g-e6-android-2026-11-23.md) (F25) | |
 | G-E7(a) | Canary lumpsum UPI + netbanking | Dev A + Dev B + PO | Thu 11-26 | [`docs/probes/canary-2026-11.md`](canary-2026-11.md) | |
@@ -42612,7 +42987,7 @@ pnpm --filter=@sanchay/fp-probes test
 pnpm --filter=@sanchay/fp-probes smoke --chain=lumpsum --env=fake
 ```
 Expected:
-- `gate-evidence.test.ts`: `ℹ tests 22`, `ℹ pass 22`.
+- `gate-evidence.test.ts`: `ℹ tests 26`, `ℹ pass 26` (RV-04-F23-2's four R-37 cases included).
 - `tsc` exits 0.
 - D4's suite passes, now 4 tests.
 - The fake smoke run prints `Evidence written to …/docs/probes/smoke-<IST day>-lumpsum-fake.md`, in both shells (no `--` before the flags, BRIEF D8).
@@ -43061,11 +43436,11 @@ gh run list --workflow=deploy.yml --limit=5 --json url,headSha,conclusion,create
    ```
    Pass criteria:
    - The command exits 0.
-   - The block reads `**G-E4: MET.**`, with each of `onboarding`, `lumpsum`, `sip` and `redemption` showing 3 or more days.
+   - The block reads `**G-E4: MET.**`, with `onboarding`, `lumpsum` and `redemption` each showing 3 or more days, and the lumpsum row's canary legs `A_UPI PASS, A_NETBANKING PASS` once F20's report is reconciled (R-37). The `sip (GO-2)` row is GO-2 evidence.
 
    `MET after the due date` is reported to the PO as a R-21 slip. It is not silently accepted.
 
-   **While a chain is not wired, G-E4 needs an owner ruling (see the G-E4 contract note in the header).** A run with one of D4's SKIPPED placeholder steps is rejected as `STEP_SKIPPED`, its chain reads `NOT MET (not wired)`, and the block reads `**G-E4: NOT MET: owner ruling required.**`. Then write `owner ruling required` (not RED, not GREEN) in GO-1's G-E4 Status cell, and take it to the owner before the GO-1 call. The ruling, recorded in the decision record with its reasons, either names the steps that may stay unwired for this gate or holds GO-1 until they are wired. It is never counted as MET, and the command still exits 1. A run rejected as `STEP_NOT_PASSED` has a FAILED step: that is a defect (F26), not a ruling.
+   **R-37 (owner decision 2026-10-06; RV-04-F23-2).** Each chain's runs record the steps the sandbox cannot complete as SKIPPED with a `sandbox limit: …` detail naming the canary leg (lumpsum after FP `submitted`, SIP after the first instalment `submitted`). Re-run the command after F20's report is reconciled on Thu 11-26, so the lumpsum legs read PASS; the block reads `**G-E4: NOT MET: waiting on the canary.**` until then, and GO-1's G-E4 Status cell says so (never GREEN). A run with one of D4's placeholder steps is rejected as `STEP_SKIPPED` and the block reads `**G-E4: NOT MET: chains not wired.**`: wire the chain, there is no ruling to take. A run rejected as `STEP_NOT_PASSED` has a FAILED step: that is a defect (F26).
 3. **G-E3:** F21 checklist, with row 12 and the Dev B row filled by F22.
    **G-E5:** the "Alarm drill (Wed 11-18, G-E5)" and "PITR restore test" records in `docs/runbooks/credential-rotation.md` (F1) are filled and linked.
    **G-E6:** `docs/probes/g-e6-android-2026-11-23.md` (F25), with every line ticked and App Links `verified`.
@@ -43169,12 +43544,12 @@ gh run list --workflow=deploy.yml --limit=5 --json url,headSha,conclusion,create
 **Interfaces:**
 - **Prerequisites (BRIEF D2 order: F24 runs after F23 and every task before it; F6 and F17 are skipped):**
   - F1: `docs/runbooks/credential-rotation.md` (first line `# Runbook: credential rotation`, an `Owner:` line, last section "If an alarm fires mid-rotation", last line `  after step 5, the two sides hold different secrets. Roll back and call Cybrilla.`) and `docs/runbooks/db-access.md` (section "Read-only SQL over SSM (spec §2.4)"). The ten prod alarms `sanchay-prod-{alb-5xx, target-unhealthy, worker-heartbeat-stale, job-queue-age, reconciling-sla, money-invariant-breach, webhook-signature-failures, otp-send-failure-rate, sms-cap-reached, nav-age}` on SNS topic `sanchay-ops-alerts-prod` (notifications on ALARM and OK); prod is the only stack (R-31; RV-04-F24-2), so there is no other alarm. Cluster `sanchay-{env}`, the one service `sanchay-app` (containers web, api, worker), stack `SanchayMvpStack-{env}` with outputs `OpsTaskDefinitionArn`, `AppSubnetIds`, `ServiceSecurityGroupId`. Log group `/sanchay/{env}/app`, stream prefix `{env}/{container}/<task id>`. Metric namespace `Sanchay/{env}`, OTP counters `otp.sent` and `otp.send_failed`, gauge `smsSentToday`. Secrets `sanchay/{env}/{keyring, fp, fp-webhook, msg91, db-app, db-readonly, db-master}`; read-only login `sanchay_readonly_login`.
-  - F7: the ops commands and their exact flags (below), the deployed run form and `docs/runbooks/ops-cli.md` (section "Running a command in a deployed environment (the one form)"), the six read-only views, `integrity.invariants` (hourly at :05 IST) and its `INVARIANT_*` kinds, `recon.fp.daily` (02:00 IST), the redemption backstop and LOOKUP-ADOPT in `fp.reconcile.nonfinal`.
+  - F7: the ops commands and their exact flags (below), the deployed run form and `docs/runbooks/ops-cli.md` (section "Running a command in a deployed environment (the one form)"), the seven read-only views, `integrity.invariants` (hourly at :05 IST) and its `INVARIANT_*` kinds, `recon.fp.daily` (02:00 IST), the redemption backstop and LOOKUP-ADOPT in `fp.reconcile.nonfinal`.
   - F2, F4, F5, F28: the jobs and break kinds the runbooks name. S1: the stub `docs/runbooks/otp-send-failure.md` (commit b90b137).
   - The lint itself needs nothing but Node 24.
 - **Consumes (owner task):**
   - F7 commands, copied verbatim: `ops:sync --order <order-id> --by <handle>`; `ops:kill-switch --off --by <handle> --reason <text>`; `ops:kill-switch --on --approver1 <handle> --approver2 <handle> --reason <text>`; `ops:sip-switch --off --by <handle> --reason <text>`; `ops:sip-switch --on --approver1 <handle> --approver2 <handle> --reason <text>`; `ops:refund-utr --order <order-id> --utr <utr> --approver1 <handle> --approver2 <handle>`; `ops:payout-ref --order <order-id> --ref <bank-ref> --approver1 <handle> --approver2 <handle>`; `ops:invite --mobiles-param /sanchay/{env}/invites/<name> --by <handle> [--note <text>]` (deployed: one mobile per line in an SSM SecureString, put before the run and deleted after it; `--mobiles-file <path>` in SANCHAY_APP_ENV local and test; never a mobile on the command line, FR-20/FR-21); `ops:nav-release --isin <isin> --approver1 <handle> --approver2 <handle>`; `ops:resolve-break --id <break-id> --note <text> --approver1 <handle> --approver2 <handle>`. Handles match `/^[a-z][a-z0-9._-]{1,31}$/`. Exit codes 0 done, 1 refused (nothing written), 2 usage. `ops:refund-utr` prints `ops:refund-utr: payment attempt <attempt-id> of order <order-id> is REFUNDED with UTR <utr> (approved by <a> and <b>)`. Locally `pnpm ops:<command> <flags>` (the runner forces `SANCHAY_APP_ROLE=ops`); deployed, the one form with `"name": "ops"` and a `command` array.
-  - F7 views (`sanchay_readonly` reads these six and no base table): `app.v_reconciling_orders(subject_table, id, investor_id, subject_kind, mode, units, status, fp_id, fp_state, reconciling_since, updated_at)`, `app.v_units_pending(id, investor_id, type, origin, plan_id, scheme_id, folio_id, amount, status, fp_order_id, fp_state, units_pending_since, updated_at)`, `app.v_recon_breaks_open(id, kind, severity, entity_type, entity_id, detail, created_at, updated_at)`, `app.v_payouts_due(id, investor_id, scheme_id, folio_id, mode, amount, status, payout_status, payout_expected_on, payout_due_by, payout_ref_recorded, fp_order_id, final_at, updated_at)`, `app.v_ops_audit(action, actor_type, actor_id, entity_type, entity_id, reason, occurred_at)` (ADMIN rows: `OPS_SYNC_REQUESTED`/`orders`, `OPS_KILL_SWITCH`/`app_config`/`orders.enabled`, `OPS_SIP_SWITCH`/`app_config`/`plans.sip.enabled`, `OPS_REFUND_UTR_RECORDED`/`payment_attempts`/attempt id, `OPS_PAYOUT_REF_RECORDED`/`orders`, `PILOT_INVITE_ADDED`/`pilot_invite`, `NAV_RELEASE`/`scheme_navs`, `OPS_BREAK_RESOLVED`/`recon_breaks`), `app.v_pilot_invites_count(status, invites)`.
+  - F7 views (`sanchay_readonly` reads these seven and no base table): `app.v_reconciling_orders(subject_table, id, investor_id, subject_kind, mode, units, status, fp_id, fp_state, reconciling_since, updated_at)`, `app.v_units_pending(id, investor_id, type, origin, plan_id, scheme_id, folio_id, amount, status, fp_order_id, fp_state, units_pending_since, updated_at)`, `app.v_recon_breaks_open(id, kind, severity, entity_type, entity_id, detail, created_at, updated_at)`, `app.v_payouts_due(id, investor_id, scheme_id, folio_id, mode, amount, status, payout_status, payout_expected_on, payout_due_by, payout_ref_recorded, fp_order_id, final_at, updated_at)`, `app.v_ops_audit(action, actor_type, actor_id, entity_type, entity_id, reason, occurred_at)` (ADMIN rows: `OPS_SYNC_REQUESTED`/`orders`, `OPS_KILL_SWITCH`/`app_config`/`orders.enabled`, `OPS_SIP_SWITCH`/`app_config`/`plans.sip.enabled`, `OPS_REFUND_UTR_RECORDED`/`payment_attempts`/attempt id, `OPS_PAYOUT_REF_RECORDED`/`orders`, `PILOT_INVITE_ADDED`/`pilot_invite`, `NAV_RELEASE`/`scheme_navs`, `OPS_BREAK_RESOLVED`/`recon_breaks`), `app.v_pilot_invites_count(status, invites)`, `app.v_refunds_pending(order_id, attempt_id, refund_status, updated_at)` (RV-04-F7-8).
   - F7 break kinds (CRITICAL): `INVARIANT_M1_PROVIDER_ID_WITHOUT_CONSENT`, `INVARIANT_M2_LOT_CONSERVATION`, `INVARIANT_M3_DUPLICATE_PAYMENT_SUCCESS`, `INVARIANT_M4_SETTLED_PURCHASE_LOT`, `INVARIANT_RESERVATIONS_OVER_HELD` (they resolve themselves on the next hourly run once the data is right; `ops:resolve-break` refuses them), `RECON_FP_OBJECT_UNKNOWN`, `RECON_ORDER_OUTCOME_DIFFERS`.
   - F4: `orders.units.reconcile` (every 2 h; `UNITS_PENDING_T3` WARNING past T+3 business days, `UNITS_PENDING_T5` CRITICAL past T+5; F5 extends it to redemptions; it never closes its breaks), `folio.sync` (05:00; MATCHED within 0.001), `ledger_exceptions(UNITS_SHORTFALL)` with `LEDGER_UNITS_SHORTFALL`, `LEDGER_REVERSAL_CONSUMED_LOT`, `ALLOTMENT_INVALID` (CRITICAL), folio MISMATCH.
   - F5: `payout.watch` (10:00 IST; once today (IST) is after `payout_due_by`: DELAYED, the PAYOUT_DELAYED email and a WARNING `REDEMPTION_PAYOUT_OVERDUE`; CREDITED only on FP's bank credit reference or a recorded `orders.payout_ref`), payout dates (D-MONEY-053: debt, liquid and overnight T+1 expected; equity, hybrid, index and ELSS T+2; maximum T+3; the reserved INTERNATIONAL class T+5/T+5), `REDEMPTION_EXIT_INVALID` and `REDEMPTION_REVERSED` (CRITICAL), `createRedemption` refusing `ORDERS_DISABLED`, the MISMATCH refusal of ALL and cap on AMOUNT.
@@ -43188,7 +43563,7 @@ gh run list --workflow=deploy.yml --limit=5 --json url,headSha,conclusion,create
 - **Deviation from outline:** the outline says "from sprint stubs". Two runbooks exist before F24: F1's `credential-rotation.md` and the S1 stub `docs/runbooks/otp-send-failure.md` (commit b90b137), whose status line says the pilot week (F24, G-E8) turns it into the final runbook. F24 extends both instead of replacing them: the stub keeps its name and its sections and becomes G-E8 item 2 ("SMS outage"); F1's runbook gains the six shared sections after its last line. F24 writes the other 11 in full. `docs/runbooks/provisioning-failed.md` (spec §4.5, E11) is not a G-E8 item and stays out of this task.
 - **Review fixes (assembly, 2026-10-01; BRIEF D5, D7, D8; defects-F24F27):**
   1. Every ops command uses F7's exact flags (`ops:sync … --by <handle>`; `ops:kill-switch --off --by <handle> --reason <text>`; `--on` with two different founders and a reason) and, in a deployed environment, F7's one run form; no runbook sets `SANCHAY_APP_ROLE` by hand (the runner forces it).
-  2. Read-only SQL uses F7's six views only; audit checks read `app.v_ops_audit` filtered on `action` (and on the payment attempt id for a refund), never `audit_events` or `pilot_invites`.
+  2. Read-only SQL uses F7's seven views only; audit checks read `app.v_ops_audit` filtered on `action` (and on the payment attempt id for a refund), never `audit_events` or `pilot_invites`.
   3. Alarm names are F1's and exist in prod, the only stack (`sanchay-prod-*`; R-31); the service is `sanchay-app`; the credential-rotation sections follow F1's last section. The lint refuses an alarm name F1 does not create and any `sanchay-dev-` name (`ALARM`).
   4. Invariants carry F7's kinds (M1–M4 per D-MONEY-071 plus `INVARIANT_RESERVATIONS_OVER_HELD`); the kill switch pauses new redemptions too; payouts follow F5 (DELAYED after `payout_due_by`, both dates in `v_payouts_due`); a handled break that does not resolve itself leaves the open list through `ops:resolve-break`.
   5. The app config is read on the app host with the web header.
@@ -43753,8 +44128,9 @@ alarms into ALARM together: start with [Worker down](worker-down.md).
 - Operators are named by handle: a lower-case id such as `f.anita` (2 to 32 characters from `a-z`, `0-9`, `.`,
   `_`, `-`, starting with a letter), never a name or an email. It lands in `audit_events.actor_id`.
 - SQL is read-only, as `sanchay_readonly_login` over SSM ([database access](db-access.md), "Read-only SQL over
-  SSM (spec §2.4)"), against F7's six views only: `app.v_reconciling_orders`, `app.v_units_pending`,
-  `app.v_recon_breaks_open`, `app.v_payouts_due`, `app.v_ops_audit` and `app.v_pilot_invites_count`. No base
+  SSM (spec §2.4)"), against F7's seven views only: `app.v_reconciling_orders`, `app.v_units_pending`,
+  `app.v_recon_breaks_open`, `app.v_payouts_due`, `app.v_ops_audit`, `app.v_pilot_invites_count` and
+  `app.v_refunds_pending`. No base
   table is readable: not `audit_events`, `pilot_invites`, `payment_attempts` or `order_events`, and no `*_enc`
   column.
 - Evidence goes in `docs/probes/incidents/<yyyy-mm-dd>-<runbook>.md`: times in IST, order and challenge ids,
@@ -44069,8 +44445,14 @@ Owner: Dev A with both founders (two-founder action). Gate: G-E8 item 5.
 ## Detect
 - The investor's email ("money debited, no order"), or the app's refund line on a FAILED or EXPIRED order.
 - The FP dashboard's payment view: payment state, refund state and, once paid, the bank UTR.
-- Our refund state lives on `payment_attempts`, which no read-only view shows; `ops:refund-utr` itself refuses
-  an order with no refund in progress (exit 1, nothing written).
+- Every refund in progress, oldest first, as `sanchay_readonly_login` ([database access](db-access.md)); F7's
+  view, RV-04-F7-8:
+
+```
+SELECT order_id, attempt_id, refund_status, updated_at FROM app.v_refunds_pending ORDER BY updated_at;
+```
+
+  `ops:refund-utr` itself refuses an order with no refund in progress (exit 1, nothing written).
 
 ## Act
 1. Find the order id from the investor's email thread (ask for the order reference shown in the app; never ask

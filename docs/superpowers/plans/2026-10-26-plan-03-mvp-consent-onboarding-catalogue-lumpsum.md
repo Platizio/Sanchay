@@ -201,6 +201,8 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-51: the consent-first check proves something (E4, E11; owner decision 2026-10-06; major).** A test file shares one FakeFp call log and one FakeClock, and no approve helper moved the clock, so a consumed challenge's window [created, consumed) was empty and `expectNoPmWritesBeforeConsumed` passed for nothing (E11's provisioning case, Plan 04 F2's two). The helper now fails when the window is empty and a P/M call sits on its edge. The approve helpers move the clock 1 ms before the create, so earlier tests' writes fall before the window, and 1 ms after approve, so the job's writes fall after it; 1 ms keeps every cut-off and TTL. The owner accepted the proposal with the before-create step added here, because the after-approve step alone would have put the previous test's writes inside the next window. E11 here, F2 and F5 in Plan 04 (RV-04-F2-6, RV-04-F5-2). Not run.
 - **RV-03-52: the risk questionnaire waits for a named sign-off (E9; R-36; major).** `seedRiskQuestionnaire` published v1.0.0 as `system:seed`, and only tests called it, so no environment had a questionnaire and the risk step could not open. The JSON now carries `approvedBy: null` in place of `"status": "PUBLISHED"`; the seed loads it as DRAFT until compliance names themself there, then publishes the DRAFT row on the next run and never changes a PUBLISHED one (`ON CONFLICT … DO UPDATE … WHERE status = 'DRAFT'`). Tests pass their own `approvedBy`. Plan 04 F1's `seedReferenceData` runs it on every deploy (RV-04-F1-14). Not run.
 - **RV-03-53: E20 ends a purchase FP expires before it is confirmed (E20; Plan 04 backlog, ADOPT follow-up; major).** E20's advance job rejected only FP `failed` and `review_failed`; an `expired` purchase in UNDER_REVIEW or CONFIRMING was re-enqueued for good. It now rejects `expired` too, as Plan 04 F5's `REVIEW_TERMINAL` does for redemptions. A CONFIRMING purchase whose saga window closed before `confirmed` was sent now returns instead of rethrowing `CONSENT_EXPIRED` on every retry; FP then expires it and the next re-fetch rejects it (Plan 04 F7's backstop re-enqueues the job, RV-04-F7-6). Not run.
+- **RV-03-54: `legal.pending` lists titled versions and reads both acceptance sources (E10, E13; owner decision 2026-10-06; major).** `legal.pending` now returns `Array<{key, version, title}>`, with titles from a new `LEGAL_DOCUMENT_TITLES` in `@sanchay/domain`. A key counts as accepted when its current PUBLISHED version is in `declaration_stagings` or in a `consent_records` DOCUMENT_ACCEPTANCE row, read as the version in force at its `consumed_at`, so the R-18 banner clears after E13's `legal.acceptPending`. `DeclarationsScreen` stages `{accept: [{key, version}]}` for the declaration keys it shows, and `stageDeclarations` lets a key be left out when it is already held at its current version, so a return visit after a new version stages only what is pending. Found on the way and fixed: E10's `pending` called a `LegalDocs.hasAcceptedCurrent` that E3 never defines, its tests sent PUT to a POST route, and `seedDocs` omitted the actor columns and dated documents by the wall clock, which the FakeClock never reaches. Not run.
+- **RV-03-55: PAY-01 gets its data from `payments.forOrder` (E21, E24; owner decision 2026-10-06; blocker).** No procedure returned the payment link or the TPV bank, so PAY-01 could not start a payment and no lumpsum could complete. E21 adds `payments.forOrder` GET `/orders/{orderId}/payment`: the order's latest attempt with FP's `token_url` and UPI intent decrypted (null unless the attempt can still be paid), the return link's expiry and the order's bank (`account_last4`, `bank_name`), NOT_FOUND for another investor's order, with a value case and an `expectBola` case. E24's PayScreen names the bank in the TPV line and opens the link with `Linking.openURL`; Android's in-app auth session still waits for Plan 04's `openAuthSession`. Not run.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -9510,6 +9512,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/src/modules/onboarding/onboarding.module.ts` (register `DeclarationsService` — or import it from `LegalConsentModule`'s exports)
   - `packages/contract/src/index.ts` (append the `legal` router key)
   - `packages/contract/src/onboarding.ts` (append `onboarding.stageDeclarations`)
+  - `packages/domain/src/platform.ts` (append `LEGAL_DOCUMENT_TITLES`; RV-03-54)
 - Generated: `apps/api/drizzle/<n>_declaration_stagings.sql` (`db:generate --name=declaration_stagings`; no custom SQL). Review fix: `legal_documents.version` is text (E3), so `document_version` and every contract `version` here are strings; a number never equals the string and every declaration would be `DECLARATION_OUTDATED`.
 - Test:
   - `apps/api/test/int/declarations.int.test.ts`
@@ -9525,7 +9528,8 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
 - Produces:
   - `apps/api/src/modules/legal-consent/legal-consent.schema.ts` (fragment; append): table `declaration_stagings`: `id`, `created_at`, `investor_id` FK, `document_key` text CHECK IN a fixed subset `DECLARATION_KEYS = ['TNC','PRIVACY_NOTICE','RISK_DISCLOSURE','REGULAR_PLAN_COMMISSION','EXECUTION_ONLY_DECLARATION','FATCA_CRS_DECLARATION','NOMINATION_OPT_OUT_ANNEX_B'] as const satisfies readonly LegalDocumentKey[]` (excludes `KYC_CONSENT`, already recorded by E6 at ONB-02 — see the deviation note below), `document_version` integer, `accepted_at` tstz, `ip` inet nullable, `user_agent` text nullable, `superseded_at` tstz nullable. Unique partial index `(investor_id, document_key)` where `superseded_at IS NULL`.
   - `legal.getDocument` GET `/legal/documents/{key}` (P) — returns the current `PUBLISHED` `legal_documents` row for `key` (404 for an unknown or unpublished key).
-  - `legal.pending` GET `/legal/pending` (I) — for the seven staged keys, plus `KYC_CONSENT`, compares each `LegalDocs.current(key).version` against the investor's latest acceptance (`declaration_stagings` for the seven; the existing `consent_records` row for `KYC_CONSENT`) and returns only the keys whose current version has not been accepted. This is also the endpoint R-18's `legal.pending` banner (E13) polls after a document version changes.
+  - `legal.pending` GET `/legal/pending` (I) — returns `Array<{key, version, title}>`: every document the investor must hold (the six always-required declarations, `NOMINATION_OPT_OUT_ANNEX_B` when they opted out, and `KYC_CONSENT`) whose current PUBLISHED version (`LegalDocs.current`) they have not accepted, with `title` from `LEGAL_DOCUMENT_TITLES` (`@sanchay/domain`). An acceptance counts from either source: the current `declaration_stagings` row, or a `consent_records` DOCUMENT_ACCEPTANCE row (E6's `KYC_CONSENT`, E13's `legal.acceptPending`), whose version is the one PUBLISHED and in force at its `consumed_at` (RV-03-54). This is also the endpoint R-18's `legal.pending` banner (E13) polls after a document version changes, so it clears once the new version is re-accepted.
+  - `LEGAL_DOCUMENT_TITLES` (`@sanchay/domain`, appended to `platform.ts`): the display title of each of those eight keys.
   - `legal.commissionRates` GET `/legal/commission-rates` (P) — **out of this task's runtime data**: `commission_disclosures` is a Plan-02 catalogue table (D8–D10) that does not exist yet in this DAG position. This task defines the procedure and its contract shape now (so E13/E17 can build against a stable type) but the handler returns `[]` until Plan-02 lands; a one-line `// TODO(Plan-02 D9): read commission_disclosures once it exists` is **not** used here per the plan-writing rule against placeholders — instead the handler is written against an injected `CommissionRatesSource` interface with a `InMemoryCommissionRatesSource` (empty array) bound today, so Plan 02's D9 task only has to bind the real Drizzle-backed implementation, not touch this task's router or contract.
   - `onboarding.stageDeclarations` POST `/onboarding/declarations` [K] (I): body is `{ accept: Array<{ key: typeof DECLARATION_KEYS[number]; version: string }> }`. For each entry: loads `LegalDocs.current(key)`; if `entry.version !== current.version` → `DECLARATION_OUTDATED` (existing `ERROR_CATALOGUE` code, B5); else upserts a `declaration_stagings` row (superseding any prior one for that key). Requires every one of `TNC, PRIVACY_NOTICE, RISK_DISCLOSURE, REGULAR_PLAN_COMMISSION, EXECUTION_ONLY_DECLARATION, FATCA_CRS_DECLARATION` to be present in `accept` (else `VALIDATION_FAILED`); `NOMINATION_OPT_OUT_ANNEX_B` is required in `accept` only when `requiresAnnexureBAcceptance(nominationDecisions.decision) === true` for this investor (else it must be absent, also `VALIDATION_FAILED` if present without a matching OPTED_OUT decision, and required-but-missing when OPTED_OUT — checked against E8's `nominationDecisions` row). Sets `onboardingApplications.declarationsStatus = 'DONE'` once every required key is staged. Writes `AUDIT_ACTIONS.ONBOARDING_DECLARATIONS_STAGED`. **Deviation from outline:** `KYC_CONSENT` is named in the outline's set but is **not** re-staged here — `LegalDocs.recordAcceptance` (E6) already wrote a real `consent_records` row for it at ONB-02, and `consent_records` only accepts inserts from a CONSUMED-consent flow or E6's direct-record helper, never from a staging table. `onboarding.stageDeclarations`'s response still echoes `KYC_CONSENT`'s existing acceptance (read via `LegalDocs`-adjacent lookup) alongside the six it stages, so the client's declarations screen (ONB-15, E13) can render all seven rows from one call.
   - **Sealed at attest:** this task deliberately writes no `consent_records` rows. E11's `onboarding.attest` reads every `declaration_stagings` row (plus the existing `KYC_CONSENT` `consent_records` row) into `SNAPSHOT_BUILDERS.ONBOARDING_ATTEST` and, on CONSUMED, E4's `ConsentEngine.approve` step 6 writes the real `consent_records` rows "one per document version" (E11's own Produces line). E10 only stages the checkbox state.
@@ -9536,7 +9540,9 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
 ```ts
 import { and, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { LEGAL_DOCUMENT_TITLES } from '@sanchay/domain';
 import {
+  consentRecords,
   declarationStagings,
   legalDocuments,
 } from '../../src/modules/legal-consent/legal-consent.schema.js';
@@ -9555,21 +9561,32 @@ const REQUIRED = [
   'FATCA_CRS_DECLARATION',
 ] as const;
 
+// Dated by the FakeClock (LegalDocs.current reads it), one second later per call, so a version-1 row a
+// call inserts is the one in force (RV-03-54).
 async function seedDocs() {
+  app.clock.advance(1_000);
   for (const key of [...REQUIRED, 'NOMINATION_OPT_OUT_ANNEX_B', 'KYC_CONSENT'] as const) {
     await app.db.db
       .insert(legalDocuments)
       .values({
+        createdBy: 'test',
+        updatedBy: 'test',
         key,
         version: '1',
         bodyMarkdown: `# ${key}`,
         sha256: Buffer.alloc(32),
         status: 'PUBLISHED',
-        effectiveFrom: new Date(),
+        effectiveFrom: app.clock.now(),
       })
       .onConflictDoNothing();
   }
 }
+
+const titled = (key: (typeof REQUIRED)[number] | 'KYC_CONSENT', version = '1') => ({
+  key,
+  version,
+  title: LEGAL_DOCUMENT_TITLES[key],
+});
 
 beforeAll(async () => {
   app = await bootTestApp();
@@ -9580,18 +9597,16 @@ afterAll(async () => {
 });
 
 describe('legal.pending', () => {
-  it('lists only unaccepted current versions', async () => {
+  it('lists only unaccepted current versions, with their titles', async () => {
     await seedDocs();
-    const { investor, req } = await signedInInvestor(app);
+    const { req } = await signedInInvestor(app);
     const before = await req.get('/api/v1/legal/pending');
-    expect(before.body.keys.sort()).toEqual(
-      [...REQUIRED, 'KYC_CONSENT'].sort(),
-    );
-    await req.put('/api/v1/onboarding/declarations', {
+    expect(before.body).toEqual([...REQUIRED, 'KYC_CONSENT' as const].map((key) => titled(key)));
+    await req.post('/api/v1/onboarding/declarations', {
       accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     const after = await req.get('/api/v1/legal/pending');
-    expect(after.body.keys).toEqual(['KYC_CONSENT']);
+    expect(after.body).toEqual([titled('KYC_CONSENT')]);
   });
 });
 
@@ -9600,7 +9615,7 @@ describe('onboarding.stageDeclarations', () => {
     await seedDocs();
     const { investor, req } = await signedInInvestor(app);
     await app.db.db.update(legalDocuments).set({ version: '2' }).where(eq(legalDocuments.key, 'TNC'));
-    const res = await req.put('/api/v1/onboarding/declarations', {
+    const res = await req.post('/api/v1/onboarding/declarations', {
       accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     expect(res.status).toBe(409);
@@ -9617,12 +9632,12 @@ describe('onboarding.stageDeclarations', () => {
       decision: 'OPTED_OUT',
       decidedAt: new Date(),
     });
-    const withoutAnnex = await req.put('/api/v1/onboarding/declarations', {
+    const withoutAnnex = await req.post('/api/v1/onboarding/declarations', {
       accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     expect(withoutAnnex.status).toBe(400);
 
-    const withAnnex = await req.put('/api/v1/onboarding/declarations', {
+    const withAnnex = await req.post('/api/v1/onboarding/declarations', {
       accept: [
         ...REQUIRED.map((key) => ({ key, version: '1' })),
         { key: 'NOMINATION_OPT_OUT_ANNEX_B', version: '1' },
@@ -9646,7 +9661,7 @@ describe('onboarding.stageDeclarations', () => {
   it('does not restage KYC_CONSENT (already recorded at ONB-02 by E6)', async () => {
     await seedDocs();
     const { investor, req } = await signedInInvestor(app);
-    const res = await req.put('/api/v1/onboarding/declarations', {
+    const res = await req.post('/api/v1/onboarding/declarations', {
       accept: REQUIRED.map((key) => ({ key, version: '1' })),
     });
     expect(res.status).toBe(200);
@@ -9655,6 +9670,18 @@ describe('onboarding.stageDeclarations', () => {
       .from(declarationStagings)
       .where(eq(declarationStagings.investorId, investor.id));
     expect(staged.some((r) => r.documentKey === 'KYC_CONSENT')).toBe(false);
+  });
+
+  it('stages only the pending keys when the rest are held at their current version (RV-03-54)', async () => {
+    await seedDocs();
+    const { req } = await signedInInvestor(app);
+    await req.post('/api/v1/onboarding/declarations', {
+      accept: REQUIRED.map((key) => ({ key, version: '1' })),
+    });
+    const again = await req.post('/api/v1/onboarding/declarations', {
+      accept: [{ key: 'TNC', version: '1' }],
+    });
+    expect(again.status).toBe(200);
   });
 });
 
@@ -9666,6 +9693,43 @@ describe('legal.commissionRates', () => {
     expect(res.body).toEqual([]);
   });
 });
+
+// Last in the file: it publishes TNC version 3 into the shared test database ('rejects a stale version
+// acceptance' already turned the first TNC row into version 2).
+describe('legal.pending after a re-accept (R-18)', () => {
+  it('clears a key once its new version is accepted through E13 legal.acceptPending', async () => {
+    await seedDocs();
+    const { investor, req } = await signedInInvestor(app);
+    await req.post('/api/v1/onboarding/declarations', {
+      accept: REQUIRED.map((key) => ({ key, version: '1' })),
+    });
+    app.clock.advance(60_000);
+    await app.db.db.insert(legalDocuments).values({
+      createdBy: 'test',
+      updatedBy: 'test',
+      key: 'TNC',
+      version: '3',
+      bodyMarkdown: '# TNC v3',
+      sha256: Buffer.alloc(32, 3),
+      status: 'PUBLISHED',
+      effectiveFrom: app.clock.now(),
+    });
+    const stale = await req.get('/api/v1/legal/pending');
+    expect(stale.body).toContainEqual(titled('TNC', '3'));
+    app.clock.advance(60_000);
+    // The row E13's legal.acceptPending writes through LegalDocs.recordAcceptance.
+    await app.db.db.insert(consentRecords).values({
+      createdBy: investor.id,
+      kind: 'DOCUMENT_ACCEPTANCE',
+      investorId: investor.id,
+      documentKey: 'TNC',
+      channel: 'APP',
+      consumedAt: app.clock.now(),
+    });
+    const after = await req.get('/api/v1/legal/pending');
+    expect(after.body).toEqual([titled('KYC_CONSENT')]);
+  });
+});
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -9675,6 +9739,21 @@ pnpm --filter=@sanchay/api test:int declarations
 Expected: fails to boot — `declaration_stagings` has no schema, `legal.pending`/`legal.getDocument`/`legal.commissionRates`/`onboarding.stageDeclarations` are not on the contract.
 
 - [ ] **Step 3: Minimal implementation**
+
+`packages/domain/src/platform.ts` (append after `LegalDocumentKey`; RV-03-54; the onboarding smoke's checkbox labels match these titles):
+```ts
+/** Display titles of the documents an investor accepts in onboarding and re-accepts (E10's legal.pending). */
+export const LEGAL_DOCUMENT_TITLES = {
+  TNC: 'Terms and Conditions',
+  PRIVACY_NOTICE: 'Privacy Notice',
+  RISK_DISCLOSURE: 'Risk Disclosure',
+  REGULAR_PLAN_COMMISSION: 'Regular plan commission disclosure',
+  EXECUTION_ONLY_DECLARATION: 'Execution-only declaration',
+  FATCA_CRS_DECLARATION: 'FATCA/CRS declaration',
+  NOMINATION_OPT_OUT_ANNEX_B: 'Nomination opt-out declaration (Annexure B)',
+  KYC_CONSENT: 'KYC consent',
+} as const satisfies Partial<Record<LegalDocumentKey, string>>;
+```
 
 `apps/api/src/modules/legal-consent/legal-consent.schema.ts` (fragment; append, importing `LEGAL_DOCUMENT_KEYS` and `investors` the same way E3's own tables already do):
 ```ts
@@ -9716,7 +9795,8 @@ export const declarationStagings = appSchema.table(
 `apps/api/src/modules/onboarding/declarations.service.ts`:
 ```ts
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { LEGAL_DOCUMENT_TITLES } from '@sanchay/domain';
 import { requiresAnnexureBAcceptance } from '@sanchay/domain/rules/nominee-split.js';
 import { DB, type DbHandle } from '../../db/client.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
@@ -9724,7 +9804,12 @@ import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
 import type { AuthContext } from '../platform/request-context.js';
 import { LegalDocs } from '../legal-consent/legal-docs.service.js';
-import { DECLARATION_KEYS, declarationStagings } from '../legal-consent/legal-consent.schema.js';
+import {
+  consentRecords,
+  DECLARATION_KEYS,
+  declarationStagings,
+  legalDocuments,
+} from '../legal-consent/legal-consent.schema.js';
 import { nominationDecisions } from './nomination.schema.js';
 import { onboardingApplications } from './onboarding.schema.js';
 
@@ -9736,6 +9821,14 @@ const ALWAYS_REQUIRED = [
   'EXECUTION_ONLY_DECLARATION',
   'FATCA_CRS_DECLARATION',
 ] as const;
+
+type PendingKey = (typeof DECLARATION_KEYS)[number] | 'KYC_CONSENT';
+
+export interface PendingLegalDocument {
+  key: PendingKey;
+  version: string; // legal_documents.version is text
+  title: string;
+}
 
 export interface StageDeclarationsInput {
   accept: Array<{ key: (typeof DECLARATION_KEYS)[number]; version: string }>; // legal_documents.version is text
@@ -9750,39 +9843,47 @@ export class DeclarationsService {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async pending(auth: AuthContext): Promise<{ keys: string[] }> {
-    const missing: string[] = [];
-    for (const key of ALWAYS_REQUIRED) {
-      if (!(await this.hasCurrentAcceptance(auth.investorId, key))) missing.push(key);
-    }
+  /**
+   * The documents the investor must hold whose current PUBLISHED version they have not accepted, in a
+   * fixed order (RV-03-54). An acceptance counts from either source: declaration_stagings (ONB-15) or a
+   * consent_records DOCUMENT_ACCEPTANCE row (E6's KYC_CONSENT at ONB-02, E13's legal.acceptPending).
+   */
+  async pending(auth: AuthContext): Promise<PendingLegalDocument[]> {
+    const keys: PendingKey[] = [...ALWAYS_REQUIRED];
     const [decision] = await this.dbh.db
       .select()
       .from(nominationDecisions)
       .where(eq(nominationDecisions.investorId, auth.investorId));
-    if (
-      decision &&
-      requiresAnnexureBAcceptance(decision.decision) &&
-      !(await this.hasCurrentAcceptance(auth.investorId, 'NOMINATION_OPT_OUT_ANNEX_B'))
-    ) {
-      missing.push('NOMINATION_OPT_OUT_ANNEX_B');
+    if (decision && requiresAnnexureBAcceptance(decision.decision)) keys.push('NOMINATION_OPT_OUT_ANNEX_B');
+    keys.push('KYC_CONSENT');
+    const accepted = await this.acceptedVersions(auth.investorId);
+    const missing: PendingLegalDocument[] = [];
+    for (const key of keys) {
+      const current = await this.legalDocs.current(this.dbh.db, key);
+      if (!accepted.get(key)?.has(current.version)) {
+        missing.push({ key, version: current.version, title: LEGAL_DOCUMENT_TITLES[key] });
+      }
     }
-    if (!(await this.legalDocs.hasAcceptedCurrent(auth.investorId, 'KYC_CONSENT'))) {
-      missing.push('KYC_CONSENT');
-    }
-    return { keys: missing };
+    return missing;
   }
 
   async stage(auth: AuthContext, input: StageDeclarationsInput): Promise<{ ok: true }> {
     const keys = new Set(input.accept.map((a) => a.key));
+    // A key left out must already be held at its current version, so a return visit after a new
+    // version stages only what legal.pending lists (RV-03-54).
+    const accepted = await this.acceptedVersions(auth.investorId);
+    const held = async (key: PendingKey) =>
+      accepted.get(key)?.has((await this.legalDocs.current(this.dbh.db, key)).version) ?? false;
     for (const key of ALWAYS_REQUIRED) {
-      if (!keys.has(key)) throw new AppError('VALIDATION_FAILED');
+      if (!keys.has(key) && !(await held(key))) throw new AppError('VALIDATION_FAILED');
     }
     const [decision] = await this.dbh.db
       .select()
       .from(nominationDecisions)
       .where(eq(nominationDecisions.investorId, auth.investorId));
     const needsAnnexure = decision ? requiresAnnexureBAcceptance(decision.decision) : false;
-    if (needsAnnexure !== keys.has('NOMINATION_OPT_OUT_ANNEX_B')) {
+    const annexure = 'NOMINATION_OPT_OUT_ANNEX_B';
+    if (keys.has(annexure) ? !needsAnnexure : needsAnnexure && !(await held(annexure))) {
       throw new AppError('VALIDATION_FAILED');
     }
 
@@ -9822,22 +9923,36 @@ export class DeclarationsService {
     });
   }
 
-  private async hasCurrentAcceptance(
-    investorId: string,
-    key: (typeof DECLARATION_KEYS)[number],
-  ): Promise<boolean> {
-    const current = await this.legalDocs.current(this.dbh.db, key);
-    const [row] = await this.dbh.db
-      .select()
+  /**
+   * Every version the investor has accepted, per key. consent_records keeps no version, so a row accepts
+   * the version that was PUBLISHED and in force at its consumed_at, by the same rule as E3's
+   * `LegalDocs.current` (RV-03-54; F14's me.get v2 resolves it the same way).
+   */
+  private async acceptedVersions(investorId: string): Promise<Map<string, Set<string>>> {
+    const staged = await this.dbh.db
+      .select({ key: declarationStagings.documentKey, version: declarationStagings.documentVersion })
       .from(declarationStagings)
-      .where(
-        and(
-          eq(declarationStagings.investorId, investorId),
-          eq(declarationStagings.documentKey, key),
-          isNull(declarationStagings.supersededAt),
-        ),
-      );
-    return row?.documentVersion === current.version;
+      .where(and(eq(declarationStagings.investorId, investorId), isNull(declarationStagings.supersededAt)));
+    const versionAtAcceptance = sql<string | null>`(
+      select ld.version from ${legalDocuments} as ld
+      where ld.key = ${consentRecords}.document_key
+        and ld.status = 'PUBLISHED'
+        and (ld.effective_from is null or ld.effective_from <= ${consentRecords}.consumed_at)
+      order by ld.effective_from desc nulls last
+      limit 1
+    )`;
+    const recorded = await this.dbh.db
+      .select({ key: consentRecords.documentKey, version: versionAtAcceptance })
+      .from(consentRecords)
+      .where(and(eq(consentRecords.investorId, investorId), eq(consentRecords.kind, 'DOCUMENT_ACCEPTANCE')));
+    const accepted = new Map<string, Set<string>>();
+    for (const row of [...staged, ...recorded]) {
+      if (row.key === null || row.version === null) continue;
+      const versions = accepted.get(row.key) ?? new Set<string>();
+      versions.add(row.version);
+      accepted.set(row.key, versions);
+    }
+    return accepted;
   }
 }
 ```
@@ -9918,7 +10033,9 @@ export const LegalDocumentSchema = z.object({
   sha256: z.string(),
 });
 
-export const PendingLegalDocsSchema = z.object({ keys: z.array(z.string()) });
+export const PendingLegalDocsSchema = z.array(
+  z.object({ key: LegalDocumentKeySchema, version: z.string().min(1), title: z.string().min(1) }),
+);
 
 export const CommissionRateSchema = z.object({
   amcId: z.string().nullable(),
@@ -10001,16 +10118,16 @@ pnpm --filter=@sanchay/api test:int declarations
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
 ```
-Expected: 5/5 cases in `declarations.int.test.ts` green (`legal.pending` before/after, stale-version rejection, Annexure-B conditional requirement, KYC_CONSENT not restaged, commission-rates empty array); typechecks clean.
+Expected: 7/7 cases in `declarations.int.test.ts` green (`legal.pending` before/after, stale-version rejection, Annexure-B conditional requirement, KYC_CONSENT not restaged, a partial re-stage, commission-rates empty array, and `legal.pending` clearing after a re-accept; RV-03-54); typechecks clean.
 
 - [ ] **Step 5: Commit**
 ```
-pnpm exec biome check --write apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts
+pnpm exec biome check --write apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts packages/domain/src/platform.ts
 pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int declarations
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
-git add apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts apps/api/drizzle packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts
+git add apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts apps/api/drizzle packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts packages/domain/src/platform.ts
 git commit -m "feat(legal-consent): declarations staging and legal document procedures" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committing.
@@ -14234,7 +14351,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { renderWithProviders, TEST_API } from '../test-utils';
 import { LegalPendingBanner } from './LegalPendingBanner';
 
-const pending = [{ key: 'TNC', version: 3, title: 'Terms and Conditions' }];
+const pending = [{ key: 'TNC', version: '3', title: 'Terms and Conditions' }];
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -14976,6 +15093,20 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useApi } from '../api/ApiContext';
 
+// KYC_CONSENT is accepted at ONB-02 and re-accepted through the banner, never staged here (RV-03-54).
+const DECLARATION_KEYS = [
+  'TNC',
+  'PRIVACY_NOTICE',
+  'RISK_DISCLOSURE',
+  'REGULAR_PLAN_COMMISSION',
+  'EXECUTION_ONLY_DECLARATION',
+  'FATCA_CRS_DECLARATION',
+  'NOMINATION_OPT_OUT_ANNEX_B',
+] as const;
+type DeclarationKey = (typeof DECLARATION_KEYS)[number];
+const isDeclarationKey = (key: string): key is DeclarationKey =>
+  (DECLARATION_KEYS as readonly string[]).includes(key);
+
 export function DeclarationsScreen({ onContinue }: { onContinue(): void }) {
   const { utils } = useApi();
   const pending = useQuery(utils.legal.pending.queryOptions());
@@ -14990,13 +15121,16 @@ export function DeclarationsScreen({ onContinue }: { onContinue(): void }) {
     );
   }
 
-  const ready = pending.data.every((doc) => accepted[doc.key]);
+  const documents = pending.data.flatMap(({ key, version, title }) =>
+    isDeclarationKey(key) ? [{ key, version, title }] : [],
+  );
+  const ready = documents.every((doc) => accepted[doc.key]);
 
   return (
     <Screen testID="declarations-screen">
       <AppText variant="title">A few declarations</AppText>
       <View style={styles.stack}>
-        {pending.data.map((doc) => (
+        {documents.map((doc) => (
           <Checkbox
             key={doc.key}
             label={doc.title}
@@ -15009,7 +15143,7 @@ export function DeclarationsScreen({ onContinue }: { onContinue(): void }) {
           disabled={!ready}
           loading={stage.isPending}
           onPress={async () => {
-            await stage.mutateAsync({ keys: pending.data.map((d) => d.key) });
+            await stage.mutateAsync({ accept: documents.map(({ key, version }) => ({ key, version })) });
             onContinue();
           }}
         />
@@ -15166,7 +15300,7 @@ import { useApi } from '../api/ApiContext';
 
 export interface PendingLegalDocument {
   key: string;
-  version: number;
+  version: string; // E10's legal.pending (RV-03-54)
   title: string;
 }
 
@@ -19467,6 +19601,7 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
   - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, then every 2 m through UPI's 30-minute window, then every 15 m, while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends: at most 2 minutes later inside the payment window (RV-03-44; it was 15).
   - FP event handlers `payment` and `mf_purchase` registered in E1's `FP_EVENT_HANDLERS` at `payments.module.ts` load (they re-fetch and apply the same transitions; idempotent).
   - `payments.get` GET `/payments/{attemptId}`.
+  - `payments.forOrder` GET `/orders/{orderId}/payment` (I; RV-03-55, owner decision 2026-10-06): the order's latest attempt as `{attemptId, status, method, paymentUrl, upiUri, expiresAt, bankLast4, bankName}`. `paymentUrl` and `upiUri` are FP's `token_url` and UPI intent, decrypted with the AAD `createAttempt` used, and are null unless the attempt can still be paid (REDIRECTED or PENDING); `expiresAt` is the return link's 30-minute expiry; the bank is the order's TPV account (`bank_accounts.account_last4`, `bank_name`). Another investor's order, or an order with no attempt, is NOT_FOUND (an `expectBola` case, which Plan 04 F9's scan counts). E24's PAY-01 reads it.
   - FP failing or expiring an unpaid purchase (AWAITING_PAYMENT or PAYMENT_PENDING) ends the order FAILED/EXPIRED with FP's `failure_code` (Plan 02 D5 RV-02-78). P-07: FP fails an ONDC purchase whose payment URL was never used with `fp_payment_url_unused` at 23:00 IST on the order day, a simulated payment does not prevent it, and nothing was paid; E24's result screen shows "Payment not completed" for that code (RV-03-43). Cybrilla has not yet confirmed in writing that no money can be taken on such an order (open item).
   - Emails via `Notify.enqueue`: `ORDER_PLACED` when an attempt succeeds, `ORDER_FAILED` on FP `failed`, `REFUND_IN_PROGRESS` when a payment fails after success (late auth reversal).
 - Review fix: the draft wrote a second FP client (`fp-pay.ts`) over an invented `FpGateway`, used `@JobHandler(…, {retryBackoffSeconds})`, a `fakeConsumedConsent()` test helper and FakeFp scripts that do not exist, and several tests asserted nothing. This version fills D3's `createPayment` and follows the custom-checkout order (payment created before `confirmed`). Its tests drive the real saga end to end on FakeFp.
@@ -19491,8 +19626,10 @@ import { handleMfPurchaseEvent } from '../../src/modules/payments/fp-events.js';
 import { FpRead } from '../../src/integrations/fp/fp-read.js';
 import { appConfig } from '../../src/modules/platform/kernel.schema.js';
 import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
+import { bankAccounts } from '../../src/modules/onboarding/bank.schema.js';
 import { expectBola } from './bola.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
+import { webHeaders } from './http.js';
 import { jobOf } from './jobs.js';
 import { seedInvestableInvestor, seedScheme } from './orders-seed.js';
 
@@ -19664,6 +19801,33 @@ describe('payments.get', () => {
     await expectBola(t, 'payments.get', { attemptId });
   });
 });
+
+describe('payments.forOrder (PAY-01, RV-03-55)', () => {
+  it("returns the live attempt's payment link and the order's TPV bank", async () => {
+    const { investor, orderId, attemptId } = await checkedOut();
+    const [bank] = await t.db.db.select().from(bankAccounts).where(eq(bankAccounts.id, investor.bankId));
+    const res = await t.app.inject({
+      method: 'GET',
+      url: `/api/v1/orders/${orderId}/payment`,
+      headers: webHeaders({ cookies: investor.cookies }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      attemptId,
+      status: 'REDIRECTED',
+      method: 'NETBANKING',
+      paymentUrl: expect.stringMatching(/^https:\/\/pg\.fake\.local\/pay\//), // FakeFp's token_url (D4)
+      upiUri: null,
+      bankLast4: bank?.accountLast4,
+      bankName: null,
+    });
+  });
+
+  it('BOLA', async () => {
+    const { orderId } = await checkedOut();
+    await expectBola(t, 'payments.forOrder', { orderId });
+  });
+});
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -19776,7 +19940,7 @@ export function toFpPaymentView(raw: Record<string, unknown>): FpPaymentView {
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { canTransition, type OrderStatus, type PaymentAttemptStatus } from '@sanchay/domain';
-import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import type { ConsumedConsent } from '../../integrations/fp/consumed-consent.js';
@@ -19795,6 +19959,18 @@ import { paymentAttempts } from './payments.schema.js';
 
 type OrderRow = typeof orders.$inferSelect;
 export type AttemptRow = typeof paymentAttempts.$inferSelect;
+
+/** PAY-01's read (RV-03-55). */
+export interface PaymentForOrder {
+  attemptId: string;
+  status: PaymentAttemptStatus;
+  method: AttemptRow['method'];
+  paymentUrl: string | null;
+  upiUri: string | null;
+  expiresAt: Date;
+  bankLast4: string;
+  bankName: string | null;
+}
 const RETURN_REF_TTL_MS = 30 * MINUTE;
 
 /** Only in tests: the last minted return ref per attempt (the DB keeps only its hash). */
@@ -19888,6 +20064,37 @@ export class PaymentsService {
       .where(and(eq(paymentAttempts.id, attemptId), eq(paymentAttempts.investorId, investorId)));
     if (row === undefined) throw new AppError('NOT_FOUND');
     return row;
+  }
+
+  /**
+   * PAY-01 (RV-03-55): the order's latest attempt, its payment link while it can still be paid, and the
+   * order's TPV bank. Another investor's order and an order with no attempt are NOT_FOUND (BOLA).
+   */
+  async forOrder(investorId: string, orderId: string): Promise<PaymentForOrder> {
+    const [row] = await this.dbh.db
+      .select({ attempt: paymentAttempts, bankLast4: bankAccounts.accountLast4, bankName: bankAccounts.bankName })
+      .from(paymentAttempts)
+      .innerJoin(orders, eq(orders.id, paymentAttempts.orderId))
+      .innerJoin(bankAccounts, eq(bankAccounts.id, orders.bankAccountId))
+      .where(and(eq(paymentAttempts.orderId, orderId), eq(paymentAttempts.investorId, investorId)))
+      .orderBy(desc(paymentAttempts.createdAt))
+      .limit(1);
+    if (row === undefined) throw new AppError('NOT_FOUND');
+    const { attempt } = row;
+    const payable = attempt.status === 'REDIRECTED' || attempt.status === 'PENDING';
+    const aad = (column: string) => ({ table: 'payment_attempts' as const, column, rowId: asRowId('payment_attempts', attempt.id) });
+    const open = (cipher: Buffer | null, column: string) =>
+      payable && cipher !== null ? this.crypto.decrypt(cipher, aad(column)) : null;
+    return {
+      attemptId: attempt.id,
+      status: attempt.status,
+      method: attempt.method,
+      paymentUrl: open(attempt.tokenUrlEnc, 'token_url_enc'),
+      upiUri: open(attempt.upiUriEnc, 'upi_uri_enc'),
+      expiresAt: attempt.returnRefExpiresAt,
+      bankLast4: row.bankLast4,
+      bankName: row.bankName,
+    };
   }
 
   async moveAttempt(
@@ -20075,6 +20282,7 @@ export class PgReturnController {
 ```ts
 import { oc } from '@orpc/contract';
 import { z } from 'zod';
+import { InstantSchema } from './common.js';
 import { COMMON_ERRORS, errorMap, SESSION_ERRORS } from './errors.js';
 
 export const PaymentAttemptSchema = z.object({
@@ -20084,12 +20292,29 @@ export const PaymentAttemptSchema = z.object({
   method: z.enum(['NETBANKING', 'UPI']),
 });
 
+/** PAY-01 (RV-03-55): the link is null unless the attempt can still be paid (REDIRECTED or PENDING). */
+export const PaymentForOrderSchema = z.object({
+  attemptId: z.uuid(),
+  status: z.enum(['CREATING', 'REDIRECTED', 'PENDING', 'SUCCESS', 'FAILED', 'EXPIRED']),
+  method: z.enum(['NETBANKING', 'UPI']),
+  paymentUrl: z.string().nullable(),
+  upiUri: z.string().nullable(),
+  expiresAt: InstantSchema,
+  bankLast4: z.string().length(4),
+  bankName: z.string().nullable(),
+});
+
 export const paymentsContract = {
   get: oc
     .route({ method: 'GET', path: '/payments/{attemptId}', tags: ['payments'], summary: 'Get one of my payment attempts' })
     .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
     .input(z.strictObject({ attemptId: z.uuid() }))
     .output(PaymentAttemptSchema),
+  forOrder: oc
+    .route({ method: 'GET', path: '/orders/{orderId}/payment', tags: ['payments'], summary: 'Get the payment for one of my orders (PAY-01)' })
+    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'NOT_FOUND'))
+    .input(z.strictObject({ orderId: z.uuid() }))
+    .output(PaymentForOrderSchema),
 };
 ```
 
@@ -20115,6 +20340,14 @@ export class PaymentsRouter {
     return implement(contract.payments.get).handler(async ({ input }) => {
       const row = await this.payments.get(requireAuth(this.cls).investorId, input.attemptId);
       return { attemptId: row.id, orderId: row.orderId, status: row.status, method: row.method };
+    });
+  }
+
+  @Implement(contract.payments.forOrder)
+  forOrder() {
+    return implement(contract.payments.forOrder).handler(async ({ input }) => {
+      const view = await this.payments.forOrder(requireAuth(this.cls).investorId, input.orderId);
+      return { ...view, expiresAt: view.expiresAt.toISOString() };
     });
   }
 }
@@ -20203,7 +20436,7 @@ pnpm --filter=@sanchay/api test:int payments orders infra-routes fp-webhooks
 pnpm --filter=@sanchay/api openapi
 pnpm --filter=@sanchay/api test openapi
 ```
-Expected: `payments.int.test.ts` 10/10 (RV-03-43's unpaid-failure case included); E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
+Expected: `payments.int.test.ts` 12/12 (RV-03-43's unpaid-failure case and RV-03-55's two `payments.forOrder` cases included); E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
 
 - [ ] **Step 5: Commit**
 
@@ -22327,7 +22560,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/mobile/src/app/_layout.tsx` (RV-03-47: Plan 03's root routes join the signed-in `Stack.Protected`; key-level)
 
 **Interfaces:**
-- Prerequisites: **E21** (`payments.get`, the raw `GET|POST /api/v1/pg/return/{ref}` route, `PAY_ATTEMPT` states). **E20** (`orders.get`, `orders.list`, `orders.cancel` [K]; the wire's `status`, `schemeName`, `cancellable` and `next`, RV-03-16). **E23** (`ConsentStatusScreen` pushes here on `next: 'PAYMENT' | 'DONE'`; INV-02 opens CNF-01 and goes to `/confirm/{challengeId}?orderId={orderId}`). **E17** (FUND-01's "Invest" link, RV-03-8) for the smoke. Plan 01 **B18/C10** (`@InfraRoute`, HostGuard) for context only — this task adds no server route.
+- Prerequisites: **E21** (`payments.get`, `payments.forOrder` (RV-03-55), the raw `GET|POST /api/v1/pg/return/{ref}` route, `PAY_ATTEMPT` states). **E20** (`orders.get`, `orders.list`, `orders.cancel` [K]; the wire's `status`, `schemeName`, `cancellable` and `next`, RV-03-16). **E23** (`ConsentStatusScreen` pushes here on `next: 'PAYMENT' | 'DONE'`; INV-02 opens CNF-01 and goes to `/confirm/{challengeId}?orderId={orderId}`). **E17** (FUND-01's "Invest" link, RV-03-8) for the smoke. Plan 01 **B18/C10** (`@InfraRoute`, HostGuard) for context only — this task adds no server route.
 - Consumes:
   - `safeNext`, `isPublicAppPath` (`apps/web/src/lib/routing.ts`, Plan 01 ground truth — **already rejects `//evil`**, see below).
   - `NavAdapter`, `useNav` (Plan 01). `usePlatform`, `PlatformAdapters` (Plan 01, extended here).
@@ -22338,7 +22571,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `packages/api-client/src/errors.ts`: `VERSION_ERROR_CODES = new Set(['APP_VERSION_UNSUPPORTED'])`; `isVersionUnsupportedError(error): boolean`.
   - `packages/api-client/src/client.ts`: `BuildOptions.onVersionUnsupported?: (() => void) | undefined` (optional, RV-03-46); both `WebApiClientOptions` and `NativeApiClientOptions` gain the same field; the `interceptors` array gains `onError((error) => { if (isVersionUnsupportedError(error)) options.onVersionUnsupported(); })`.
   - `PlatformAdapters.androidStoreUrl: string` (the Play Store listing URL SYS-01 links to).
-  - `PayScreen({ orderId }: { orderId: string })` (PAY-01): the target is the TPV line ("Pay only from A/c ••1234 (HDFC)…, shows as Cybrilla") and, per platform, a same-tab redirect on web (mobile-web gets a UPI intent link, desktop a QR) or `WebBrowser.openAuthSessionAsync` on Android with `Linking.openURL(upiUri)` as the UPI fallback, polling `payments.get` on `AppState` resume. **Open item (RV-03-16):** no procedure returns the attempt's payment link (E21 stores `token_url` and `upi_uri` encrypted and exposes neither) or the TPV bank's last 4 digits, so this task's PAY-01 shows the order and the TPV copy, follows `orders.get`'s `next` to the result, and offers no pay action until the owner adds that read.
+  - `PayScreen({ orderId }: { orderId: string })` (PAY-01): the target is the TPV line ("Pay only from A/c ••1234 (HDFC)…, shows as Cybrilla") and, per platform, a same-tab redirect on web (mobile-web gets a UPI intent link, desktop a QR) or `WebBrowser.openAuthSessionAsync` on Android with `Linking.openURL(upiUri)` as the UPI fallback, polling `payments.get` on `AppState` resume. **RV-03-55 (owner decision 2026-10-06):** PAY-01 reads E21's `payments.forOrder`: the TPV line names the bank's last 4 digits (and its name when known), "Pay with a UPI app" opens the `upi://` intent and "Continue to payment" opens FP's payment page, both with `Linking.openURL` (a new tab on web), and the screen follows `orders.get`'s `next` to the result. Android's in-app `WebBrowser.openAuthSessionAsync` session waits for Plan 04's `PlatformAdapters.openAuthSession` (F13), and desktop web shows no QR code (no QR library in the catalog).
   - `ResultScreen({ orderId }: { orderId: string })`: polls `orders.get` until its `status` has result copy and renders SETTLED/REJECTED/PROCESSING copy.
   - `OrdersListScreen()` (ORD-01) and `OrderDetailScreen({ orderId })` (ORD-02): list/detail over `orders.list`/`orders.get`, showing E20's `schemeName`; ORD-02 shows "Cancel order" when E20's `cancellable` is true (the server's GAP-01(b) flag) and sends `orders.cancel` with one `Idempotency-Key` per intent (F28's reuse rule), showing a refusal's copy.
   - `UpdateRequiredScreen()` (SYS-01, R-18): full-screen "Update Sanchay" card with a button linking to `platform.androidStoreUrl`; wired by `onVersionUnsupported` in the app's root API-client construction so **any** 426 from any call navigates here.
@@ -22352,7 +22585,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - **Deviation from outline:** `apps/web/src/lib/routing.ts`'s `safeNext` (Plan 01 ground truth) already rejects `//evil` — `SAFE_NEXT = /^\/(?!\/)[A-Za-z0-9/_-]*$/` has a negative lookahead against a second leading slash — and `isPublicAppPath` already recognises `/r` and `/r/*`. This task does not change `safeNext`'s regex; "Files (modify)" on `routing.ts` is a no-op kept only so Step 5's `git add` is explicit, and the new coverage is a regression test in `routing.test.ts` plus the `OpenSanchayFallback` integration test below, not a new sanitiser.
   - **Deviation from outline:** mobile routes live under `apps/mobile/src/app/**`, not `apps/mobile/app/**` (see E23's identical note); `+native-intent.tsx` is likewise `apps/mobile/src/native-intent.tsx` (Expo Router's native-intent file is a sibling of `src/app`, not inside it).
   - **Review fix (RV-03-9):** E12's props: `MoneyText` takes `value: Money | null` (no `amount` prop), and `ListRow.value` is a string, so ORD-01 formats the row amount with `formatInr` and ORD-02 passes a parsed `Money`. E13's sheet labels its button "Confirm" and sends the OTPs when it opens, so the lumpsum smoke and the Maestro flow tap "Confirm" and no longer tap a "Send code" button that does not exist.
-  - **Review fix (RV-03-16):** ORD-01, ORD-02 and the result screen read `schemeName`, `state` and `cancellable` (and CNF-02 `next`), which E20's `OrderSchema` lacked (its field is `status`), so `features` failed typecheck. E20 now puts `schemeName`, `cancellable` and `next` on the wire, and these screens read `status`. ORD-02's cancel sent no `Idempotency-Key` to the [K] `orders.cancel` (a 428 every time); it sends one per intent with F28's reuse rule and shows a refusal's copy. PAY-01 read `tpvBankLast4`, `tpvBankName` and `paymentUrl`, which no wire carries: see the open item under Produces.
+  - **Review fix (RV-03-16):** ORD-01, ORD-02 and the result screen read `schemeName`, `state` and `cancellable` (and CNF-02 `next`), which E20's `OrderSchema` lacked (its field is `status`), so `features` failed typecheck. E20 now puts `schemeName`, `cancellable` and `next` on the wire, and these screens read `status`. ORD-02's cancel sent no `Idempotency-Key` to the [K] `orders.cancel` (a 428 every time); it sends one per intent with F28's reuse rule and shows a refusal's copy. PAY-01 read `tpvBankLast4`, `tpvBankName` and `paymentUrl`, which no wire carried; E21's `payments.forOrder` now carries them (RV-03-55).
   - **Review fix (RV-03-17):** the four web pages imported `@sanchay/features` into server components, which `next build` refuses (React context and hooks); they render client wrappers from `apps/web/src/client/routes.tsx`, as Plan 01's pages do.
   - **Review fix (RV-03-18):** the lumpsum smoke ran in CI's e2e job unconditionally, never signed in, clicked a fund name no seed has, read Mailpit's newest message unfiltered and filled only the SMS code, and E23's old INV-02 never opened CNF-01, so the e2e job was red from this task on. The spec is skipped unless `SANCHAY_E2E_LUMPSUM_MOBILE` and `SANCHAY_E2E_LUMPSUM_SCHEME_SLUG` are set. It signs in as Plan 01's tests do, opens `/funds/<slug>`, clicks "Invest", reads each CNF-01 code with `readNextOtp` (a message newer than the one before the click; `readLatestOtp`'s clock window would return the login code) and clicks `{ name: 'Confirm', exact: true }`. It stops once the worker has taken the order past CONSENT_PENDING: ONDC purchases can stay `submitted` for a long time in the sandbox, and FakeFp never advances on its own (BRIEF D7). `readNextOtp` and its two helpers move here from Plan 04's F12, which runs later.
   - **Review fix (RV-03-19):** Step 5 chained scripts (`pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, which finds no test file and exits 1). There is one script per line now, after a build of the packages `features` reads.
@@ -22682,14 +22915,14 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
   ```
 
-  `packages/features/src/pay/PayScreen.tsx` (RV-03-16: PAY-01 reads only what `orders.get` carries; see the open item under Produces)
+  `packages/features/src/pay/PayScreen.tsx` (RV-03-55: the pay action and the TPV bank come from E21's `payments.forOrder`)
   ```tsx
   import { Money } from '@sanchay/money';
   import { space } from '@sanchay/tokens';
-  import { AppText, Banner, MoneyText, Screen } from '@sanchay/ui';
+  import { AppText, Banner, Button, MoneyText, Screen } from '@sanchay/ui';
   import { useQuery } from '@tanstack/react-query';
   import { useEffect } from 'react';
-  import { StyleSheet, View } from 'react-native';
+  import { Linking, StyleSheet, View } from 'react-native';
   import { useApi } from '../api/ApiContext';
   import { useNav } from '../nav/NavContext';
 
@@ -22698,10 +22931,10 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   }
 
   /**
-   * PAY-01: the TPV line and "shows as Cybrilla" copy (D-MONEY money-flow §4.2 AWAITING_PAYMENT row).
-   * Open item (RV-03-16): no procedure returns the attempt's payment link (E21 stores `token_url` and
-   * `upi_uri` encrypted and exposes neither) or the TPV bank's last 4 digits, so this screen cannot start
-   * the payment. Until the owner adds that read it shows the order and follows `orders.get`'s `next`.
+   * PAY-01: the TPV line and "shows as Cybrilla" copy (D-MONEY money-flow §4.2 AWAITING_PAYMENT row), and
+   * the pay action from E21's `payments.forOrder` (RV-03-55). `Linking.openURL` opens the link in a new
+   * tab on web and in the browser or UPI app on Android; the PG return lands on `/r/payment` while this
+   * screen keeps polling and follows `orders.get`'s `next`.
    */
   export function PayScreen({ orderId }: PayScreenProps) {
     const { client } = useApi();
@@ -22711,7 +22944,18 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       queryFn: () => client.orders.get({ id: orderId }),
       refetchInterval: (query) => (query.state.data?.next === 'DONE' ? false : 5000),
     });
+    const payment = useQuery({
+      queryKey: ['orderPayment', orderId],
+      queryFn: () => client.payments.forOrder({ orderId }),
+      refetchInterval: () => (order.data?.next === 'DONE' ? false : 5000),
+    });
     const next = order.data?.next ?? null;
+    const upiUri = payment.data?.upiUri ?? null;
+    const paymentUrl = payment.data?.paymentUrl ?? null;
+    const bank =
+      payment.data === undefined
+        ? 'your registered bank account'
+        : `A/c ••${payment.data.bankLast4}${payment.data.bankName === null ? '' : ` (${payment.data.bankName})`}`;
 
     useEffect(() => {
       if (next === 'DONE') nav.replace(`/result/${orderId}`);
@@ -22725,12 +22969,15 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     return (
       <Screen testID="pay-screen">
         <View style={styles.stack}>
-          <Banner
-            tone="info"
-            message="Pay only from your registered bank account. On your statement this shows as Cybrilla."
-          />
+          <Banner tone="info" message={`Pay only from ${bank}. On your statement this shows as Cybrilla.`} />
           <AppText variant="title">{order.data.schemeName}</AppText>
           <MoneyText value={order.data.amount === null ? null : Money.parse(order.data.amount)} />
+          {upiUri !== null ? (
+            <Button label="Pay with a UPI app" onPress={() => void Linking.openURL(upiUri)} />
+          ) : null}
+          {paymentUrl !== null ? (
+            <Button label="Continue to payment" onPress={() => void Linking.openURL(paymentUrl)} />
+          ) : null}
         </View>
       </Screen>
     );
