@@ -200,6 +200,7 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-50: E12's FATCA step has no non-null assertions (E12; found in this round; minor).** `FatcaScreen` built `PutProfileInput` from nine `draft.x!` reads, which `biome ci` refuses; a guard now sends an emptied draft (after a reload) back to the first profile step.
 - **RV-03-51: the consent-first check proves something (E4, E11; owner decision 2026-10-06; major).** A test file shares one FakeFp call log and one FakeClock, and no approve helper moved the clock, so a consumed challenge's window [created, consumed) was empty and `expectNoPmWritesBeforeConsumed` passed for nothing (E11's provisioning case, Plan 04 F2's two). The helper now fails when the window is empty and a P/M call sits on its edge. The approve helpers move the clock 1 ms before the create, so earlier tests' writes fall before the window, and 1 ms after approve, so the job's writes fall after it; 1 ms keeps every cut-off and TTL. The owner accepted the proposal with the before-create step added here, because the after-approve step alone would have put the previous test's writes inside the next window. E11 here, F2 and F5 in Plan 04 (RV-04-F2-6, RV-04-F5-2). Not run.
 - **RV-03-52: the risk questionnaire waits for a named sign-off (E9; R-36; major).** `seedRiskQuestionnaire` published v1.0.0 as `system:seed`, and only tests called it, so no environment had a questionnaire and the risk step could not open. The JSON now carries `approvedBy: null` in place of `"status": "PUBLISHED"`; the seed loads it as DRAFT until compliance names themself there, then publishes the DRAFT row on the next run and never changes a PUBLISHED one (`ON CONFLICT … DO UPDATE … WHERE status = 'DRAFT'`). Tests pass their own `approvedBy`. Plan 04 F1's `seedReferenceData` runs it on every deploy (RV-04-F1-14). Not run.
+- **RV-03-53: E20 ends a purchase FP expires before it is confirmed (E20; Plan 04 backlog, ADOPT follow-up; major).** E20's advance job rejected only FP `failed` and `review_failed`; an `expired` purchase in UNDER_REVIEW or CONFIRMING was re-enqueued for good. It now rejects `expired` too, as Plan 04 F5's `REVIEW_TERMINAL` does for redemptions. A CONFIRMING purchase whose saga window closed before `confirmed` was sent now returns instead of rethrowing `CONSENT_EXPIRED` on every retry; FP then expires it and the next re-fetch rejects it (Plan 04 F7's backstop re-enqueues the job, RV-04-F7-6). Not run.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -19011,7 +19012,8 @@ export class PurchaseAdvanceJob {
     if (order.status !== 'UNDER_REVIEW' && order.status !== 'CONFIRMING') return;
 
     const purchase = toFpPurchaseView(await this.fpRead.purchase(order.fpOrderId));
-    if (purchase.state === 'failed' || purchase.state === 'review_failed') {
+    // RV-03-53: FP expiring an unconfirmed purchase ends it too (F5's REVIEW_TERMINAL does the same).
+    if (purchase.state === 'failed' || purchase.state === 'review_failed' || purchase.state === 'expired') {
       await moveOrder(db, order, 'REJECTED', 'fp_review_failed', { fpState: purchase.state, failureCode: purchase.failureCode, finalAt: new Date() });
       return;
     }
@@ -19035,6 +19037,11 @@ export class PurchaseAdvanceJob {
     } catch (err) {
       if (err instanceof AppError && err.code === 'CONSENT_EXPIRED' && order.status === 'UNDER_REVIEW') {
         await moveOrder(db, order, 'CONSENT_EXPIRED', 'saga_expired_under_review', { finalAt: new Date() });
+        return;
+      }
+      if (err instanceof AppError && err.code === 'CONSENT_EXPIRED' && order.status === 'CONFIRMING') {
+        // RV-03-53: the window closed before `confirmed` was sent; FP expires the unconfirmed purchase,
+        // and the next re-fetch (Plan 04 F7's backstop re-enqueues this job) moves it REJECTED.
         return;
       }
       throw err;

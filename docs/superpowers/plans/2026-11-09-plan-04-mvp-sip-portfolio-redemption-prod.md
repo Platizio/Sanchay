@@ -188,6 +188,9 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-HDR-2: Step 5's prose matches its commands (F5, F10, F11, F28; backlog round 2; minor).** These four tasks once ran `openapi` and `git diff --exit-code apps/api/openapi.json` after `git add`; their commands now run the B10 drift test (`test … openapi`) before `git add`, behind a build, but the paragraph under each Step 5 and three Interfaces bullets still described the old order. The prose now says what the commands do; no command changed.
 - **RV-04-F5-3: a CONFIRMING redemption whose window closed stops retrying (backlog, F7 review; minor).** When the saga window passed after the consent PATCH but before the confirm, `useConsumed` threw `CONSENT_EXPIRED`, and the advance job rethrew it on every re-enqueue by F7's backstop, failing the job each time. It now returns: FP never processes an unconfirmed redemption and expires it, and the next re-fetch moves the order REJECTED and releases the reservation (D5 allows CONFIRMING to REJECTED). Not run.
 - **RV-04-F6-1: F6 builds before its api checks (backlog round 1, stale dist; minor).** F6 changes `@sanchay/domain` and `@sanchay/contract`, which export only `dist`, but its Steps 4 and 5 ran `db:generate` and the api typecheck without the build line; both start with `pnpm exec turbo run build --filter=@sanchay/api^...` now. A scan of Plan 04 finds no other task that changes a `dist` package and checks the api without a build first.
+- **RV-04-F4-5: `orders.units.reconcile` resolves its own breaks (backlog, F24–F27 review; major).** Once an order's units arrived, its `UNITS_PENDING_T3`/`T5` breaks stayed open, and an open T5 kept `sanchay-prod-money-invariant-breach` in ALARM until two founders ran `ops:resolve-break`. The job now resolves the order's two SLA breaks when the order leaves UNITS_PENDING, as F7's invariant sweep resolves its own; the SLA case asserts both RESOLVED after settlement (no new case). Not run.
+- **RV-04-F5-4: `payout.watch` resolves its overdue break when the payout lands (backlog, F24–F27 review; minor).** `REDEMPTION_PAYOUT_OVERDUE` stayed open after CREDITED. `credit` now resolves it in the same transaction, and the payout case asserts it (no new case). Not run.
+- **RV-04-F7-6: the backstop restarts a stalled purchase too (backlog, ADOPT follow-up; major).** D2 retries a failed job three times without a delay, so a short FP outage ended a purchase's `orders.purchase.advance` chain and left it in UNDER_REVIEW or CONFIRMING; `fp.reconcile.nonfinal` resumed redemptions and plans only. `resumePurchases` re-enqueues the advance job for such purchases (stately, keyed by the order id), and Plan 03 RV-03-53 makes that job end an expired one. Not run; no new case.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -8462,6 +8465,9 @@ describe('orders.units.reconcile', () => {
     allot(t, fpOrderId, ALLOTMENT);
     await reconcileAt('2026-11-11T06:30:00.000Z');
     expect(await statusOf(orderId)).toBe('SETTLED');
+    // RV-04-F4-5: once the units arrive, both SLA breaks resolve without an ops:resolve-break.
+    const after = await t.db.db.select().from(reconBreaks).where(eq(reconBreaks.entityId, orderId));
+    expect(after.map((b) => b.status)).toEqual(['RESOLVED', 'RESOLVED']);
   });
 
   it('a failed re-fetch still evaluates the SLA', async () => {
@@ -9936,6 +9942,7 @@ import { toFpPurchaseView } from '../orders/fp-purchase.js';
 import { orders } from '../orders/orders.schema.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
+import { reconBreaks } from '../platform/kernel.schema.js';
 import { ReconBreaks } from '../platform/runtime-config.js';
 import { PurchaseSettlement } from './purchase-settlement.js';
 
@@ -10000,7 +10007,23 @@ export class UnitsReconcileJob {
           `orders.units_reconcile_failed: order ${order.id} (${err instanceof Error ? err.message : String(err)})`,
         );
       }
-      if (status !== 'UNITS_PENDING' || pendingSince === null) continue;
+      if (status !== 'UNITS_PENDING') {
+        // RV-04-F4-5: the units arrived, so this job's own SLA breaks for the order resolve themselves
+        // (as F7's invariant sweep does); an open UNITS_PENDING_T5 kept the money-invariant alarm red.
+        await db
+          .update(reconBreaks)
+          .set({ status: 'RESOLVED', resolvedAt: now })
+          .where(
+            and(
+              eq(reconBreaks.entityType, 'orders'),
+              eq(reconBreaks.entityId, order.id),
+              inArray(reconBreaks.kind, ['UNITS_PENDING_T3', 'UNITS_PENDING_T5']),
+              eq(reconBreaks.status, 'OPEN'),
+            ),
+          );
+        continue;
+      }
+      if (pendingSince === null) continue;
       const elapsed = businessDaysAfter(istIsoDate(pendingSince), istIsoDate(now), holidays);
       if (elapsed > CRITICAL_AFTER_BUSINESS_DAYS) {
         await ReconBreaks.open(db, {
@@ -12866,6 +12889,9 @@ describe('payout.watch (10:00)', () => {
       payoutRef: 'UTR0001',
     });
     expect(await auditOf(run.orderId)).toContain('REDEMPTION_PAYOUT_CREDITED');
+    // RV-04-F5-4: the overdue break resolves with the payout.
+    const after = await t.db.db.select().from(reconBreaks).where(eq(reconBreaks.entityId, run.orderId));
+    expect(after.map((b) => b.status)).toEqual(['RESOLVED']);
   });
 });
 ```
@@ -14600,6 +14626,7 @@ import { Notify } from '../notifications/notify.service.js';
 import { AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
+import { reconBreaks } from '../platform/kernel.schema.js';
 import { ReconBreaks } from '../platform/runtime-config.js';
 import { toFpRedemptionView } from './fp-redemption.js';
 import { ORDER_AUDIT_ACTIONS, orders } from './orders.schema.js';
@@ -14683,6 +14710,17 @@ export class PayoutWatchJob {
         entityId: order.id,
         data: { status: 'CREDITED' },
       });
+      // RV-04-F5-4: the payout arrived, so this job's own overdue break resolves itself.
+      await tx
+        .update(reconBreaks)
+        .set({ status: 'RESOLVED', resolvedAt: now })
+        .where(
+          and(
+            eq(reconBreaks.kind, 'REDEMPTION_PAYOUT_OVERDUE'),
+            eq(reconBreaks.entityId, order.id),
+            eq(reconBreaks.status, 'OPEN'),
+          ),
+        );
     });
   }
 
@@ -21158,6 +21196,7 @@ export class ReconcileNonfinalJob {
 
   async handle(_job: Job<'fp.reconcile.nonfinal'>): Promise<void> {
     await this.resumeRedemptions();
+    await this.resumePurchases();
     const stuck = await this.dbh.db.select().from(orders).where(eq(orders.status, 'RECONCILING'));
     for (const order of stuck) {
       try {
@@ -21172,6 +21211,35 @@ export class ReconcileNonfinalJob {
     }
     await this.nudgePlans();
     await this.keepMandateBreaksOpen();
+  }
+
+  /**
+   * RV-04-F7-6: hands a purchase whose `orders.purchase.advance` chain died back to E20's job. D2 retries
+   * a failed job three times without a delay, so a short FP outage ended the chain and left the order in
+   * UNDER_REVIEW or CONFIRMING for good. The queue is `stately`, keyed by the order id (R-32): a null
+   * return means a chain is still queued, which is fine.
+   */
+  private async resumePurchases(): Promise<void> {
+    const db = this.dbh.db;
+    const stalled = await db
+      .select({ id: orders.id, challengeId: orders.consentChallengeId })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.type, 'PURCHASE'),
+          inArray(orders.status, ['UNDER_REVIEW', 'CONFIRMING']),
+          isNotNull(orders.consentChallengeId),
+        ),
+      );
+    for (const order of stalled) {
+      if (order.challengeId === null) continue;
+      await this.jobs.enqueue(
+        db,
+        'orders.purchase.advance',
+        { orderId: order.id, challengeId: order.challengeId },
+        { singletonKey: order.id },
+      );
+    }
   }
 
   /** Hands every redemption F5's saga left mid-way back to F5's own jobs, or ends it (see the class note). */
