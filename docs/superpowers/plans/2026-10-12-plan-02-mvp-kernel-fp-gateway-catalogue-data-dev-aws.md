@@ -135,6 +135,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-74: D9's daily sync survives AMFI's real NAVAll.txt (found while verifying R-33 against the live feed; blocker).** The feed of 2026-10-05 carries `Redeemed` (four IL&FS series) and `HDFCNIVODG` in its reinvestment-ISIN column; the parser emitted them as ISINs, and the first insert into `scheme_navs` failed `scheme_navs_isin_ck` (23514), so every sync stopped part-way with its run left `RUNNING` and never enqueued the returns. The same feed lists five matured ISINs twice, four of them with two dates, and applying both flipped `INF204KB1XN0` into quarantine, with a CRITICAL break, on every sync. The parser now skips an ISIN cell that fails `isIsin` (a new parser case), and `runNavSync` applies only the latest row per ISIN, as v1's `latestPerIsin` did (a duplicate in the sync case). With that file on PostgreSQL 18.6 the old code threw 23514 after 11,733 rows on both syncs; the new code finished `SUCCEEDED` with 17,852 rows parsed, none quarantined and 17,847 `nav_history` rows, and a second sync added none.
 - **RV-02-75: D0's `serializeErr` also redacts through pino-http (found by the R-34 review, 2026-10-05; major).** The app logs through nestjs-pino's pino-http logger, whose default `wrapSerializers` calls the `err` serializer with pino's already-serialised form, so D0's `instanceof Error` check skipped redaction: a `DrizzleQueryError` logged inside a request kept its bound mobile number in `err.message` and `err.stack`, with `"type":"Object"` (reproduced through `pinoHttp(buildPinoHttpOptions(env)).logger`; D0's test had used a bare `pino`). `serializeErr` now takes either form and redacts pino's serialised form through its documented non-enumerable `raw` Error, and D0's test logs through pino-http as well as plain pino. Verified on a clean checkout of `main` with D0 alone: api unit 134 (132 before), api integration 130 (129 before), features 23 (22 before), typechecks and `pnpm lint` clean. Plan 04 F1 follows in RV-04-F1-11.
 - **RV-02-76: D9's `ops:nav-release` lets the next feed value through once (R-35, owner decision 2026-10-05; major).** A release only cleared `quarantined`, so a genuine move over 25% was quarantined again on the next sync and never reached `nav_history`. The release now goes through `releaseNav` (new `nav-release.ts`): it refuses an ISIN that is not quarantined and writes a `NAV_RELEASE` audit row with the flag in one transaction; `runNavSync` reads the pending releases from `audit_events` once per run, takes a released ISIN's next feed value without the NAV-09 check, writes it to `scheme_navs` and `nav_history`, and audits `NAV_RELEASE_APPLIED` in the same transaction, so the following sync checks from the new NAV. D8's schema is unchanged. Two new integration cases (eight in all); verified on PostgreSQL 18.6 in a scratch worktree (the release case failed against the old sync with the break reopened, then 8/8 passed; `tsc` and `biome ci` clean). Plan 04 F7, which rewrites the CLI, keeps the `NAV_RELEASE` row the sync reads (RV-04-F7-5).
+- **RV-02-77: E25 keeps the document bucket and the NAT EIP on a teardown (backlog, R-34 and DOCS follow-ups 2026-10-05; major).** `sanchay-prod-docs` has a fixed name and used `RemovalPolicy.RETAIN`, so a failed first create left the bucket behind and the retry failed on the name, the hazard R-34 fixed for the logs and repositories. The NAT `CfnEIP` had no DeletionPolicy, so a teardown or a replacement released the address Cybrilla allowlists (PB-19). Both now use `RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `RetainExceptOnCreate`, `UpdateReplacePolicy: Retain`; aws-cdk-lib 2.216.0's `CfnResource.applyRemovalPolicy` maps it so). The bucket case now asserts both policies and one new case asserts the EIP's and that the one NAT gateway uses it: 26 infra tests (Plan 04 F1's totals follow, RV-04-F1-12). Verified with aws-cdk-lib 2.216.0 and vitest 5.0.1 in a scratch folder: both assertions failed on the old stack (`Retain`, no policy), then 24 of 26 passed, the other two only because they read `apps/api` files that the scratch folder does not have; `tsc` and `biome ci` clean.
 
 **Verify at execution time (not changed here):**
 - **Resolved (R-32, RV-02-69): queue policies.** D2 no longer leaves every queue on pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises. `JOB_POLICIES` gives each job its policy: `stately` for per-aggregate sync, poll, reconcile and sweep jobs, `exclusive` for jobs that submit to FP, and `standard` for `notifications.send` only. `JobsService` creates each queue with that policy, and `Jobs.enqueue` returns null for a send the policy refuses. `jobs.int.test.ts` pins the stored policies and both refusals on PostgreSQL. A policy cannot change in place (`createQueue` on an existing queue keeps the old one, and `updateQueue` refuses `policy`), so `JobsService` refuses to start when a stored policy differs from the registry. D2's table "Queue policies (R-32)" lists every job in Plans 02–04.
@@ -11699,6 +11700,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
 > **Amended 2026-10-05 for R-34 (RV-02-72).** RV-02-64's one log group and two image repositories are the owner's decision (R-34). Both log groups and both repositories use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE`, and the infra test file has 25 tests.
 
+> **Amended 2026-10-06 (RV-02-77).** The document bucket `sanchay-prod-docs` (a fixed name) and the NAT `CfnEIP` that Cybrilla allowlists (PB-19) use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE` too, each with an assertion, and the infra test file has 26 tests.
+
 **Files:**
 - Create: `infra/package.json`, `infra/tsconfig.json`, `infra/cdk.json`, `infra/vitest.config.ts`, `infra/bin/sanchay.ts`, `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts`
 - Create (fetched asset, Step 3): `infra/certs/rds-global-bundle.pem`
@@ -11720,12 +11723,12 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   - `infra/lib/config.ts`: `loadStackConfig(envName: SanchayEnvName, source: DeployInputSource = process.env): SanchayStackConfig`, `SanchayEnvName` (`'prod'` only: R-31), `SanchayStackConfig` (`envName`, `rootDomain`, `multiAz`, `deletionProtection`, `backupRetentionDays`, `desiredCount`, `githubRepo: string | undefined` read from the deploy input `SANCHAY_GITHUB_REPOSITORY` (RV-02-33), `dbInstanceSize: 'MICRO' | 'MEDIUM'`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `DeployInputSource`, `StackConfigError`, `assertDeployInputs(config)`. One static config, `PROD_CONFIG`: Multi-AZ, 14-day backups, deletion protection, 2 tasks, `db.t4g.medium`, FP `production` at `https://api.fintechprimitives.com` (no dev config and no dev subdomain, RV-02-70). It refuses to synthesise without the deploy inputs `SANCHAY_PLATFORM_ARN` (`ARN-<digits>`) and `SANCHAY_SMS_RETRIEVER_HASH` (11 characters of `[A-Za-z0-9+/]`) and refuses a `SANCHAY_GITHUB_REPOSITORY` that is not `<owner>/<repo>`; `assertDeployInputs` refuses a missing one (a real synth or deploy, never the tests).
   - `infra/bin/sanchay.ts`: `SanchayMvpStack-prod` (R-31: the only stack), region pinned to `ap-south-1`; it calls `assertDeployInputs(config)` before building the stack (RV-02-33).
   - CDK context flag `-c noTasks=true`: the service is created, or kept, at 0 tasks (ADR-0014 "First deploy"; Plan 04 F1 uses it to move the running stack onto its D6 logins). It is not R-31's pause: paused prod runs its tasks and keeps investors out with D7's invite gate and RuntimeConfig.
-  - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`; no ingress allow-list (R-31): port 443 is open to the internet.
+  - VPC (2 AZs, 1 NAT with a stable EIP that a teardown or replacement keeps, `RETAIN_ON_UPDATE_OR_DELETE` (PB-19, RV-02-77), output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`; no ingress allow-list (R-31): port 443 is open to the internet.
   - Listener rules (R-11): host `api.sanchay.in` (any path) → api target group (3000); host `app.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.sanchay.in` and the rest of `app.sanchay.in`) → web target group (3001); host `sanchay.in` (the apex) → 301 to `https://www.sanchay.in`, path and query kept (rule `ApexToWww`; spec §2.4 and H-1, RV-02-63). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
   - One ECS Fargate ARM64 service, containers `web`, `api`, `worker`, plus the one-off `MigrateTaskDef` (container `migrate`, run with `aws ecs run-task`). `SANCHAY_FP_CREDENTIALS_JSON` goes only into `worker`; `SANCHAY_FP_WEBHOOK_SECRET` and `SANCHAY_SMS_RETRIEVER_HASH` only into `api`; `SANCHAY_KEYRING_JSON` into `api`, `worker` and `migrate` (the boot guard's keyring check runs in every role).
   - RDS PostgreSQL 18.6 with `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group; Multi-AZ, 14-day backups (PITR), deletion protection, `db.t4g.medium` (spec §2.4); master login `sanchay_master`, secret `sanchay/{env}/db-master` (BRIEF D6). The migrate task logs in as the master; api and worker share that login until F1 adds `sanchay_app_login` (secret `sanchay/{env}/db-app`) and moves `appDbLogin` to it.
   - Task role statement `SesSendFromSanchayDomain` (`ses:SendEmail`, `ses:SendRawEmail`, condition `ses:FromAddress` = `SANCHAY_SES_FROM`).
-  - S3 document bucket `sanchay-prod-docs` (public access blocked, SSE, versioning; spec §2.4, RV-02-62), ECR repos (`sanchay-prod-api`, `sanchay-prod-web`, the last 20 images each), Secrets Manager secrets (`sanchay/prod/keyring`, `sanchay/prod/fp`, `sanchay/prod/fp-webhook`, `sanchay/prod/msg91`, `sanchay/prod/db-master`), CloudWatch log groups `/sanchay/prod/app` and `/sanchay/prod/ecs-exec` at 400-day retention (both log groups and both repositories with `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE`, R-34), ECS Exec logging (R-16) on cluster `sanchay-prod`, and, in the `sanchay.in` hosted zone (it must exist in the prod account before the first deploy, R-31), the A-alias records `www`, `app`, `api` and the apex (RV-02-63) and the DNS validation of one ACM certificate for `*.sanchay.in` and `sanchay.in`.
+  - S3 document bucket `sanchay-prod-docs` (public access blocked, SSE, versioning, `RETAIN_ON_UPDATE_OR_DELETE`; spec §2.4, RV-02-62, RV-02-77), ECR repos (`sanchay-prod-api`, `sanchay-prod-web`, the last 20 images each), Secrets Manager secrets (`sanchay/prod/keyring`, `sanchay/prod/fp`, `sanchay/prod/fp-webhook`, `sanchay/prod/msg91`, `sanchay/prod/db-master`), CloudWatch log groups `/sanchay/prod/app` and `/sanchay/prod/ecs-exec` at 400-day retention (both log groups and both repositories with `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE`, R-34), ECS Exec logging (R-16) on cluster `sanchay-prod`, and, in the `sanchay.in` hosted zone (it must exist in the prod account before the first deploy, R-31), the A-alias records `www`, `app`, `api` and the apex (RV-02-63) and the DNS validation of one ACM certificate for `*.sanchay.in` and `sanchay.in`.
   - **One log group and two image repositories per env (spec §2.4 as amended by R-34; RV-02-64, RV-02-72).** Every container logs to `/sanchay/{env}/app` (400 days) with the awslogs stream prefix `{env}`, so each container has its own streams (`{env}/web/…`, `{env}/api/…`, `{env}/worker/…`, `{env}/migrate/…`; F1 adds `{env}/ops/…`): F1's metric filters tell the containers apart by each line's `service` field (R-34), and the F7, F20, F23, F24 and F27 runbook lines read the streams by prefix. The two images go to `sanchay-{env}-api` and `sanchay-{env}-web`, each keeping its last 20 (`deploy.yml`, ADR-0014's first deploy and the deploy role's `grantPullPush` on both). Both log groups and both repositories use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `DeletionPolicy: RetainExceptOnCreate`, `UpdateReplacePolicy: Retain`): a stack teardown or rename never deletes the 400-day logs (CERT-In needs 180 days) or the images, while a failed first create still removes them, so the retry can create the same names. The ECS Exec group gets the same policy because it holds the same kind of record. Deferred to Phase 2 (R-34): a customer-managed KMS key and any split of the log group.
   - No CloudWatch alarm. R-12's NAV-age alarm needs a published metric, and no task before F1 publishes one; F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm with its metric source.
   - The account's GitHub OIDC provider and the deploy role `sanchay-prod-github-deploy` (output `GithubDeployRoleArn`), built only when the deploy input `SANCHAY_GITHUB_REPOSITORY` is set (RV-02-33). It trusts exactly `repo:<SANCHAY_GITHUB_REPOSITORY>:environment:prod` (`StringEquals`: jobs of the GitHub `prod` environment, whose required reviewers are both founders) and may do only what `deploy.yml` does: assume the CDK bootstrap roles, log in to ECR and push both repositories, read the stack's outputs, run the migrate task (`ecs:RunTask` and `iam:PassRole` through `grantRun`) and read its tasks, and force a new deployment of `sanchay-app` (statements `AssumeCdkBootstrapRoles`, `EcrLogin`, `ReadStackOutputs`, `WaitForMigrateTask`, `ForceNewDeployment`; no `AdministratorAccess`; moved here from Plan 04 F1, RV-02-70). It is consumed by `.github/workflows/deploy.yml` (manual dispatch, `prod` its only environment), which reads the GitHub `prod` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs the one-off migrate task and stops unless it exits 0 (spec §2.4), runs `cdk deploy`, forces a new deployment of `sanchay-app` and fails unless that deployment's rollout completes (RV-02-61).
@@ -11735,7 +11738,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   - **Deviation from outline: the RDS connection string is not injected as one Secrets-Manager-composed `DATABASE_URL` value.** CDK/Secrets Manager cannot concatenate a generated-secret field with plain strings into one ECS secret at deploy time without a custom resource. Instead the containers get plain env `SANCHAY_DB_HOST`/`SANCHAY_DB_PORT`/`SANCHAY_DB_NAME`/`SANCHAY_DB_USER` plus one ECS secret `SANCHAY_DB_PASSWORD` (the login secret's `password` field), and `apps/api/docker-entrypoint.sh` composes `DATABASE_URL` with `?sslmode=verify-full` before `exec`ing the container command. `EnvSchema.DATABASE_URL` is unaffected.
   - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist until Plan 03 E3, and a `COPY` of a missing path fails the build (`"/docs/legal": not found`), so the Dockerfile omits the line and a comment names F1 (Plan 04), whose migrate task seeds it. It does copy `data/`, which D8 creates before E25 (RV-02-59).
   - **Deviation from outline: `.github/workflows/deploy.yml` authenticates to AWS by scripting the OIDC token exchange (`aws sts assume-role-with-web-identity`) and pushes to ECR with the AWS CLI and `docker build`, instead of the `aws-actions/configure-aws-credentials` / `aws-actions/amazon-ecr-login` marketplace actions.** It reuses only the three action pins `ci.yml` already carries; the arm64 emulation installer (`tonistiigi/binfmt`) is a container image pinned by digest, not an action.
-- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rules: api host (any path) and app host + /api/v1/* → api target group (R-11)`, `the apex sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log groups: 400 days, kept on a teardown or rename, removed after a failed first create (R-34)`, `image repositories sanchay-prod-api and sanchay-prod-web keep 20 images each and survive a teardown (R-34)`, `S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned (spec §2.4)`, `ECS Exec logging configured on cluster sanchay-prod`, `DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service sanchay-app: 2 tasks, never below 100 % healthy, rollback circuit breaker; -c noTasks=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `prod database: Multi-AZ, 14-day backups, deletion protection, db.t4g.medium (spec §2.4)`, `closed to investors until GO-1 (R-31): invite-only, no orders or SIP override, no ingress allow-list`, `the GitHub deploy role trusts only the prod environment of SANCHAY_GITHUB_REPOSITORY, is no administrator, and exists only with it`, `the deploy role can do exactly what deploy.yml does, the migrate run included`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
+- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rules: api host (any path) and app host + /api/v1/* → api target group (R-11)`, `the apex sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log groups: 400 days, kept on a teardown or rename, removed after a failed first create (R-34)`, `image repositories sanchay-prod-api and sanchay-prod-web keep 20 images each and survive a teardown (R-34)`, `S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned, survives a teardown (spec §2.4)`, `the NAT EIP that Cybrilla allowlists survives a teardown or replacement (PB-19)`, `ECS Exec logging configured on cluster sanchay-prod`, `DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service sanchay-app: 2 tasks, never below 100 % healthy, rollback circuit breaker; -c noTasks=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `prod database: Multi-AZ, 14-day backups, deletion protection, db.t4g.medium (spec §2.4)`, `closed to investors until GO-1 (R-31): invite-only, no orders or SIP override, no ingress allow-list`, `the GitHub deploy role trusts only the prod environment of SANCHAY_GITHUB_REPOSITORY, is no administrator, and exists only with it`, `the deploy role can do exactly what deploy.yml does, the migrate run included`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
 - **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to prod: /api/v1/health 200 on app.sanchay.in and api.sanchay.in`; `https://www.sanchay.in/ serves the public site (200)`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; `https://sanchay.in/ answers 301 to https://www.sanchay.in/` (RV-02-63); an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
 
 ---
@@ -12035,21 +12038,44 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       }
     });
 
-    it('S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned (spec §2.4)', () => {
-      synthProdTemplate().hasResourceProperties('AWS::S3::Bucket', {
-        BucketName: 'sanchay-prod-docs',
-        BucketEncryption: {
-          ServerSideEncryptionConfiguration: [
-            { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
-          ],
-        },
-        PublicAccessBlockConfiguration: {
-          BlockPublicAcls: true,
-          BlockPublicPolicy: true,
-          IgnorePublicAcls: true,
-          RestrictPublicBuckets: true,
-        },
-        VersioningConfiguration: { Status: 'Enabled' },
+    it('S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned, survives a teardown (spec §2.4)', () => {
+      const template = synthProdTemplate();
+      template.resourceCountIs('AWS::S3::Bucket', 1);
+      template.hasResource('AWS::S3::Bucket', {
+        Properties: Match.objectLike({
+          BucketName: 'sanchay-prod-docs',
+          BucketEncryption: {
+            ServerSideEncryptionConfiguration: [
+              { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
+            ],
+          },
+          PublicAccessBlockConfiguration: {
+            BlockPublicAcls: true,
+            BlockPublicPolicy: true,
+            IgnorePublicAcls: true,
+            RestrictPublicBuckets: true,
+          },
+          VersioningConfiguration: { Status: 'Enabled' },
+        }),
+        // A fixed name: a teardown or rename keeps it, a failed first create removes it so the retry works.
+        DeletionPolicy: 'RetainExceptOnCreate',
+        UpdateReplacePolicy: 'Retain',
+      });
+    });
+
+    it('the NAT EIP that Cybrilla allowlists survives a teardown or replacement (PB-19)', () => {
+      const template = synthProdTemplate();
+      template.resourceCountIs('AWS::EC2::EIP', 1);
+      const eips = template.findResources('AWS::EC2::EIP', {
+        Properties: { Domain: 'vpc' },
+        DeletionPolicy: 'RetainExceptOnCreate',
+        UpdateReplacePolicy: 'Retain',
+      });
+      const [eipId] = Object.keys(eips);
+      expect(eipId).toBeDefined();
+      template.resourceCountIs('AWS::EC2::NatGateway', 1);
+      template.hasResourceProperties('AWS::EC2::NatGateway', {
+        AllocationId: { 'Fn::GetAtt': [eipId, 'AllocationId'] },
       });
     });
 
@@ -12564,7 +12590,10 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       const apiOrigin = `https://api.${domain}`;
 
       // --- Network -----------------------------------------------------------------------
+      // PB-19: Cybrilla allowlists this address. A teardown or a replacement keeps it (to re-attach, not
+      // re-allowlist); a failed first create removes it, so the retry allocates one again.
       const natEip = new ec2.CfnEIP(this, 'NatEip', { domain: 'vpc' });
+      natEip.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE);
       const vpc = new ec2.Vpc(this, 'Vpc', {
         maxAzs: 2,
         natGateways: 1,
@@ -12577,14 +12606,16 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
 
       // --- S3, ECR -------------------------------------------------------------------------
-      // Spec §2.4: sanchay-{env}-docs with public access blocked, SSE and versioning.
+      // Spec §2.4: sanchay-{env}-docs with public access blocked, SSE and versioning. Its name is fixed, so,
+      // as for the logs and repositories (R-34), a teardown or rename keeps it and a failed first create
+      // removes it, so the retry can create the name again.
       const documentsBucket = new s3.Bucket(this, 'DocumentsBucket', {
         bucketName: `sanchay-${envName}-docs`,
         encryption: s3.BucketEncryption.S3_MANAGED,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         enforceSSL: true,
         versioned: true,
-        removalPolicy: config.deletionProtection ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+        removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
       });
       // R-34: two repositories, one per image, each keeping its own last 20. A stack teardown or rename
       // keeps them; a failed first create removes them, so the retry can create the names again.
@@ -13494,7 +13525,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/web typecheck
   ```
-  Expected: `tsc` exits 0; the 25 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
+  Expected: `tsc` exits 0; the 26 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
 
   Then the two images (Docker; not part of `pnpm test`), from the repo root:
   ```
