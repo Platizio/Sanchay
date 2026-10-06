@@ -185,6 +185,9 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F2-6: F2's consent-first cases move the clock (Plan 03 RV-03-51; owner decision 2026-10-06; major).** `draftSip` moves the FakeClock 1 ms before `createSip` and `approve` moves it 1 ms after `engine.approve`, so `expectNoPmWritesBeforeConsumed` sees a real window in "mandates.submit" and "reused mandate within headroom" (both passed for nothing before). Not run.
 - **RV-04-F5-2: F5's consent-first case moves the clock (Plan 03 RV-03-51; owner decision 2026-10-06; minor).** `draft` moves the FakeClock 1 ms before `createRedemption` and `approve` 1 ms after `engine.approve`. F5's explicit `redemption.create` counts already covered it; the window now does too. Not run.
 - **RV-04-F1-15: F1 says where the G-E5 results go (backlog, F20–F23 review; minor).** The PITR restore test, the alarm drill and the go-live checklist said to record results "in the G-E5 evidence" without naming a place. They now go in a dated **Result** line at the end of each `credential-rotation.md` section, which F23's G-E5 row already links.
+- **RV-04-HDR-2: Step 5's prose matches its commands (F5, F10, F11, F28; backlog round 2; minor).** These four tasks once ran `openapi` and `git diff --exit-code apps/api/openapi.json` after `git add`; their commands now run the B10 drift test (`test … openapi`) before `git add`, behind a build, but the paragraph under each Step 5 and three Interfaces bullets still described the old order. The prose now says what the commands do; no command changed.
+- **RV-04-F5-3: a CONFIRMING redemption whose window closed stops retrying (backlog, F7 review; minor).** When the saga window passed after the consent PATCH but before the confirm, `useConsumed` threw `CONSENT_EXPIRED`, and the advance job rethrew it on every re-enqueue by F7's backstop, failing the job each time. It now returns: FP never processes an unconfirmed redemption and expires it, and the next re-fetch moves the order REJECTED and releases the reservation (D5 allows CONFIRMING to REJECTED). Not run.
+- **RV-04-F6-1: F6 builds before its api checks (backlog round 1, stale dist; minor).** F6 changes `@sanchay/domain` and `@sanchay/contract`, which export only `dist`, but its Steps 4 and 5 ran `db:generate` and the api typecheck without the build line; both start with `pnpm exec turbo run build --filter=@sanchay/api^...` now. A scan of Plan 04 finds no other task that changes a `dist` package and checks the api without a build first.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -14507,6 +14510,16 @@ export class RedemptionAdvanceJob {
         });
         return;
       }
+      if (
+        err instanceof AppError &&
+        err.code === 'CONSENT_EXPIRED' &&
+        order.status === 'CONFIRMING'
+      ) {
+        // RV-04-F5-3: the window closed before the confirm was sent. FP never processes an unconfirmed
+        // redemption and expires it; the next re-fetch (F7's backstop) then moves the order REJECTED and
+        // releases it. Rethrowing only failed this job again on every re-enqueue.
+        return;
+      }
       const [after] = await db.select().from(orders).where(eq(orders.id, orderId));
       if (after?.status === 'CONFIRMING' && err instanceof FpAmbiguousError) {
         // Spec §4.1: the confirm may have landed; nothing is released while RECONCILING.
@@ -15215,7 +15228,7 @@ pnpm lint
 git add packages/domain/src/rules/business-days.ts packages/domain/src/rules/redemption-buffer.ts packages/domain/src/rules/redemption-availability.ts packages/domain/src/rules/index.ts packages/domain/test/redemption-availability.test.ts packages/test-fixtures/src/golden/redemption-availability.json apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake/fake-fp.state.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/redemption-seed.ts apps/api/test/int/redemption.int.test.ts packages/contract/src/orders.ts
 git commit -m "feat(orders): redemption by amount and all with reservations, consent-first submit with a live holdings re-check, FIFO settlement and payout.watch (F5)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists the two new paths and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands before committing again.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands before committing again.
 
 **How part 2 was checked (written 2026-10-01; re-checked after the assembly review the same day).** Plans 02–04 are not implemented in the repo, so the API half could not run end to end; what ran, and what was only checked by reading:
 - **Ran after the review fixes** (an isolated worktree of `main` after `pnpm install --frozen-lockfile --offline`; Vitest 5.0.1, drizzle-orm 0.45.3, drizzle-kit 0.31.11, PostgreSQL 18.6 in Docker; part 1's and F4's rule files staged beside the domain sources):
@@ -16456,6 +16469,7 @@ P-09 is due with the S1 probes (business checklist PB-12, by Fri 10-16; Cybrilla
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=redemption_units
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/domain test
@@ -16477,6 +16491,7 @@ Expected:
 ```
 pnpm exec biome check --write packages/domain/src/rules/redemption-units.ts packages/domain/src/rules/index.ts packages/domain/test/redemption-units.test.ts apps/api/src/modules/orders apps/api/src/modules/portfolio/redemption-settlement.ts apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake apps/api/test/int/redemption.int.test.ts packages/contract/src/orders.ts
 pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test redemption-request
 pnpm --filter=@sanchay/api test:int redemption
@@ -24359,7 +24374,7 @@ pnpm lint
 git add packages/test-fixtures/src/golden/sip-first-instalment.json packages/domain/src/rules/sip-counts.ts packages/domain/src/rules/index.ts packages/domain/test/sip-counts.test.ts packages/domain/test/sip-first-instalment.test.ts packages/contract/src/plans.ts packages/contract/src/plans-quote.test.ts apps/api/src/modules/plans/sip-quote.ts apps/api/src/modules/plans/sip-quote.test.ts apps/api/src/modules/plans/sip-quote.service.ts apps/api/src/modules/plans/sip.service.ts apps/api/src/modules/plans/plans.router.ts apps/api/src/modules/plans/plans.module.ts apps/api/test/int/sip-quote.int.test.ts apps/api/openapi.json
 git commit -m "feat(plans): plans.quoteSip preview, first-instalment golden vectors and sipCounts (F10)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists this task's own new path and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage before committing. Never `--no-verify`.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage before committing. Never `--no-verify`.
 
 **How this task was checked while it was written (2026-10-01).** Plans 02–04 are not implemented in the repo, so the code was run in a scratch worktree at `main`, next to verbatim copies of the F2, D5 and E22 code it builds on:
 - **Domain:** F2's `sip-dates.ts`, D5's `PLAN_STATUSES` and E22's `CutoffHolidays` were copied in, and the golden file, `sip-counts.ts` and both domain tests were run with Vitest 5.0.1 and `@sanchay/money` from `main`. Result: 19/19 pass, `sip-counts.ts` has 100% statement and branch coverage, and `tsc -p packages/domain` is clean. Every SIPD date was also checked by hand against the weekday calendar.
@@ -24378,7 +24393,7 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
 - **FR-8.** The `createSip` call in `sip-quote.int.test.ts` passes `rail: 'UPI_AUTOPAY'`, because F3 (earlier in D2 order) makes `CreateSipInput.rail` required. Without it the API typecheck fails with TS2345, since `apps/api`'s `tsconfig` includes `test/`. F12 and F28 carry the same line and comment.
 - **FR-6/FR-7.**
   - The build line is now the first line of Steps 4 and 5. Step 3's regeneration and Step 5's drift check each run right after a build.
-  - The drift check is the repo's: `openapi`, then `git diff --exit-code apps/api/openapi.json`. It runs after `git add`, the only place it can exit 0 for a task that adds a path.
+  - The drift check is the B10 test: `openapi`, then `pnpm --filter=@sanchay/api test … openapi`, before `git add`, behind a build (RV-04-HDR-2; a bare `git diff --exit-code` fails on a real, unstaged regeneration).
   - The domain pass checks stay unfiltered.
 - **What ran** (a worktree of `main`, after `pnpm install --frozen-lockfile --offline`):
   - The build line rebuilt `money`, `validation`, `domain` and `contract` (4 turbo tasks).
@@ -26804,7 +26819,7 @@ pnpm lint
 git add packages/domain/src/rules/xirr.ts packages/domain/src/rules/holding-valuation.ts packages/domain/src/rules/index.ts packages/domain/test/xirr.test.ts packages/domain/test/holding-valuation.test.ts packages/test-fixtures/src/golden/xirr.json packages/test-fixtures/src/golden/holdings-valuation.json packages/contract/src/portfolio.ts packages/contract/src/index.ts apps/api/src/modules/portfolio/portfolio.queries.ts apps/api/src/modules/portfolio/portfolio.router.ts apps/api/src/modules/portfolio/portfolio.module.ts apps/api/test/int/portfolio.int.test.ts apps/api/openapi.json docs/specs/money/xirr.md
 git commit -m "feat(portfolio): XIRR engine port with golden vectors, holdings valuation and portfolio.summary/holdings/holding/allocation (F11)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists the four new paths and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. Never `--no-verify`.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. Never `--no-verify`.
 
 **How this task was checked while it was written (2026-10-01).** Plans 02–03 and F2/F4 are not implemented yet, so the code above ran in a scratch worktree on top of Plan 01's `main`:
 - **Domain (run).** `xirr.ts`, `holding-valuation.ts`, both test files and both golden files ran with Vitest 5.0.1 in `packages/domain` against Plan 01's real `@sanchay/money`, with F4's `business-days.ts` and `isLotUnlocked` copied in from this plan: **45/45 pass** (31 + 14); coverage `xirr.ts` 83/84 statements and 57/58 branches, `holding-valuation.ts` 100%. `tsc -p packages/domain/tsconfig.json --resolveJsonModule` is clean.
@@ -26846,7 +26861,7 @@ What was run:
   - The regeneration moved to the end of Step 3, right after a build.
   - Steps 4 and 5 now start with `pnpm exec turbo run build --filter=@sanchay/api^...`. The domain pass checks stay unfiltered.
   - Step 5 re-runs the contract typecheck and tests, which it had skipped although Step 4 runs them.
-  - The repo's drift check (`openapi`, then `git diff --exit-code apps/api/openapi.json`) runs after `git add`, behind its own build. That is the only place it can exit 0 for a task that adds paths.
+  - The drift check is the B10 test (`openapi`, then `pnpm --filter=@sanchay/api test openapi`), before `git add`, behind its own build (RV-04-HDR-2).
 - **Why the build matters.** In a worktree of `main`, a route added to the contract source without a build left `openapi` silently omitting the path. The drift test passed 2/2 and `git diff --exit-code` exited 0, so all three checks were fooled by the stale `dist`. After the build line the path appeared, and the diff exited 1 while unstaged and 0 after `git add` plus a rebuild and regeneration. A filtered domain run (`test enums`) exited 1 on the coverage gate, while the unfiltered run exited 0 (131/131 on `main`).
 - **No code changed in this round.**
 
@@ -48285,7 +48300,7 @@ pnpm lint
 git add packages/domain/src/states/plan.ts packages/domain/test/states.test.ts docs/specs/states.md apps/api/src/modules/plans apps/api/src/integrations/fp/fp-operations.ts apps/api/src/integrations/fp/fp-operations.test.ts apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake/fake-fp.state.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/notifications/notifications.schema.ts apps/api/src/modules/notifications/notify.service.ts apps/api/src/modules/notifications/templates.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/sip-cancel.int.test.ts apps/api/test/int/security/bola-coverage.int.test.ts packages/contract/src/plans.ts packages/contract/src/plans.test.ts packages/contract/src/plans-wire.test.ts packages/features/src/sip/CancelSipSheet.tsx packages/features/src/sip/CancelSipSheet.test.tsx packages/features/src/sip/SipDetailScreen.tsx packages/features/src/sip/SipDetailScreen.test.tsx
 git commit -m "feat(sip): investor SIP cancel plans.cancel with consent-first FP cancel, re-read and sweep (F28, R-08)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists this task's new path and fields and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test and typecheck commands.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test and typecheck commands.
 
 **Assembly fixes in this pass (2026-10-01, review of F28):**
 - **SIPM-02 fragment (blocker).** Rewritten against F12's real names (`plan` is the query, `p` its data, `p.schemeName`, `plan.refetch()`); `Banner tone="info"` (Plan 01's `BannerProps.tone` is `'error' | 'info'`); `useState` imported and declared before F12's `isPending`/`isError` early returns; the sheet formats the amount with `formatInr`. F12's test gains one case.
@@ -48301,7 +48316,7 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
 - Step 3's regeneration now runs right after a build.
 - The domain pass check runs the whole package (`pnpm --filter=@sanchay/domain test`). The old filtered `test states` exited 1 on the 95% coverage gate. Step 2 stays filtered.
 - Step 4 checks the regenerated file with the `openapi` drift test, plus the contract typecheck, because F28 edits contract tests.
-- The repo's drift check (`openapi`, then `git diff --exit-code apps/api/openapi.json`) runs in Step 5 after `git add`, behind its own build. Before staging, `git diff` exits 1 on this task's own new path.
+- The drift check is the B10 test (`openapi`, then `pnpm --filter=@sanchay/api test … openapi`), in Step 4 and again in Step 5 before `git add`, behind its own build (RV-04-HDR-2).
 - Step 5 now re-runs every Step 4 test and typecheck command. Before, it skipped the domain test and D6's `notifications` int test.
 - What ran: both build lines on a worktree of `main` (4 and 6 turbo tasks), the filtered-vs-unfiltered coverage-gate exit codes (1 and 0), and the stale-`dist` OpenAPI trap shown in F10's and F11's round-2 notes. No F28 code changed in this round.
 
