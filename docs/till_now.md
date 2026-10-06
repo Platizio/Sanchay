@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-06. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only. The latest sessions are §10 and §11 (branch `claude/sanchay-plan-02-03-backlog-huz9ym`, not yet merged)._
+_Last updated: 2026-10-06. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only, apart from the 10-06 `source-map-js` lockfile bump (PR #5). The latest sessions are §10 to §12: §10 and §11 merged in PR #5, §12 is on branch `claude/sanchay-plan-02-03-backlog-huz9ym` in a follow-up PR._
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -196,7 +196,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | The plan backlog is worked for Plans 02, 03 and 04 (§10, §11) on branch `claude/sanchay-plan-02-03-backlog-huz9ym` (no PR yet); owner decisions 1 and 2 are written in (R-36). Next: the remaining owner decisions in §11, then a PR for that branch when ready. | Owner + Claude |
+| 1 | The plan backlog for Plans 02, 03 and 04 is worked and merged (§10, §11; PR #5). All 11 open owner decisions were accepted on 10-06 and are written into the plans (§12, follow-up PR). Next: assign the wiring of D4's sandbox chains (the one open backlog item), send the Cybrilla email (`docs/business/cybrilla-payment-url-unused-email.md`), then Sprint 2. | Owner + Claude |
 | 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
 | 4 | ~~Create the GitHub repo~~ **Done:** `Platizio/Sanchay`. Push local `main` when ready: it contains PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1) (F4) plus the merge, so the PR then shows as merged. | Owner |
@@ -512,3 +512,38 @@ Observed only, not changed:
     - R-34's "every log line" wording.
   - **From §10:** Cybrilla's written confirmation on `fp_payment_url_unused`, a backstop for a missed `mf_purchase` webhook, and E24's Maestro flow.
 - **Resume here:** the open owner decisions above, then a PR for this branch when the owner wants it merged. Sprint 2 starts Mon 10-12 on `feat/plan-02-mvp-kernel`, Task D0 first.
+
+---
+
+## 12. Session 2026-10-06 (continued): PR #5 merged; the 11 open decisions written in
+
+- **PR #5** (§10, §11) went green and was merged. Its one failure was CI's `pnpm audit`: a new high advisory, GHSA-68fv-2mgg-jv7q, in `source-map-js` 1.2.1 (via Expo's toolchain). The lockfile now has 1.2.2, with an exact `minimumReleaseAgeExclude` entry and an ADR-0001 row (expires 2026-10-07).
+- **Decisions page.** The 11 open decisions were put on one page (Claude Docs, "Sanchay: 11 open decisions"), each with a recommendation. The owner accepted all 11, with option A for the go-live gate. Work restarted from `main` on the same branch name.
+- **Rulings:** R-37 (G-E4 is met by split proof: sandbox runs up to each chain's sandbox limit, plus the founders' canary leg for the steps past it; GO-1 needs onboarding, lumpsum and redemption) and R-38 (R-34's `service` field covers the app logger's lines only).
+- **Plan 03:**
+  - RV-03-54: `legal.pending` returns `{key, version, title}` and reads both acceptance sources, so the re-accept banner clears.
+  - RV-03-55: E21 adds `payments.forOrder`, so PAY-01 can start a payment.
+- **Plan 04:**
+  - RV-04-F23-2: F23 evaluates R-37.
+  - RV-04-F16-3: `NavAdapter.dismissTo`, so Android's Back no longer returns to CNF-02.
+  - RV-04-F7-7: the 5-minute reconcile closes an unpaid purchase after FP's 23:00 IST sweep when its webhook was lost.
+  - RV-04-F7-8: a read-only `v_refunds_pending` view.
+  - RV-04-F1-16: F1's question 5 is settled by R-38.
+  - Decision 8 (ops gaps) and decision 3 (INV-01) keep the current behaviour, with no plan change.
+- **Found on the way:**
+  - F4 had silently dropped E21's handling of unpaid purchases that FP fails, together with its test. RV-04-F4-6 restores both.
+  - E10 had three defects: it called a `LegalDocs.hasAcceptedCurrent` that E3 never defines, its tests sent PUT to a POST route, and its seed missed the actor columns and used the wall clock. All three are fixed in RV-03-54.
+  - Decision 5 (the "withdraw everything" probe) was already met: P-09's addendum confirmed it on 10-01. The decisions page was wrong to call it untried; RV-04-F16-2 fixes F16's text.
+- **What ran:**
+  - F23's `gate-evidence`, extracted: the new cases failed first, then 26/26 passed. `biome check` is clean, and the CLI exits 1 without the canary legs and 0 with them.
+  - `NavAdapter.dismissTo` on Plan 01's code: features, web and mobile typecheck cleanly; features tests pass 22/22; the mobile check fails without the new line.
+  - `v_refunds_pending` and E10's version-at-acceptance subquery, on PostgreSQL 18.6.
+  - The unpaid-sweep time arithmetic, in Node (6/6).
+  - Changed code blocks in both plans parse, fences are balanced, and no RV id repeats.
+  - **Not run:** E10's and E21's services and tests, F4's handler, F7's job and the E24 screen; each erratum says so.
+- **Still open:**
+  - **Wiring D4's sandbox chains up to their sandbox limit.** R-37 needs it, and no task does it. This is the one open backlog item (needs-owner: who and when).
+  - Cybrilla's written answers: the email is drafted in `docs/business/cybrilla-payment-url-unused-email.md`, and the owner sends it.
+  - E24's local Maestro flow still types fixed codes (Claude, next round).
+- **Resume here:** assign the chain wiring, send the Cybrilla email, then Sprint 2 from Mon 10-12 on `feat/plan-02-mvp-kernel` (Task D0 first).
+
