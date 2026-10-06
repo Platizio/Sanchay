@@ -193,6 +193,11 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-43: an unpaid purchase that FP fails ends FAILED, shown as "Payment not completed" (E21, E24; P-07 addendum; major).** P-07 found that FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day with `fp_payment_url_unused`, even after a simulated payment. E21's `mf_purchase` handler ignored orders in AWAITING_PAYMENT and PAYMENT_PENDING, so they stayed open; it now applies FP `failed`/`expired` there (Plan 02 D5 RV-02-78 allows it) and stores FP's `failure_code`, with no refund because nothing was paid. One new case (10 in `payments.int.test.ts`). E24's result screen treats FAILED and EXPIRED as final and shows "Payment not completed. This order is closed and no money was taken." for that code. Not run (E20/E21 are not built). Open: Cybrilla to confirm in writing that no money can be taken on such an order, and a backstop if the `mf_purchase` webhook is missed.
 - **RV-03-44: a refused payment nudge waits at most 2 minutes inside the payment window (E21; R-32 follow-up; minor).** Under R-32 the `payments.poll` queue is `stately`, so the return route's and the webhook's immediate nudge is refused while a delayed poll is queued, and the investor back from the PG waited for that poll: up to 15 minutes from the fourth poll on. The schedule is now 30 s, 1 m, then every 2 m for UPI's 30-minute window, then 15 m. This is the smallest correct change: pulling a queued pg-boss job forward needs a raw `UPDATE` on pg-boss's tables, and the request path never calls a provider. No test pins the delays.
 - **RV-03-45: E21's commands (E21; ADOPT follow-up; minor).** `test:int` drops the literal `--`, Steps 4 and 5 build the api's workspace dependencies first (E21 adds the `payments` contract key), Step 4's `git diff --exit-code apps/api/openapi.json` becomes the drift test, and Step 5 re-runs Step 4's suites (it ran only `payments orders`).
+- **RV-03-46: SYS-01 type-checks and has somewhere to render (E24; backlog rounds 1 and 2; blocker).** E24 passed `role` and `href` to Plan 01's `Button`, whose props have neither, made `PlatformAdapters.androidStoreUrl` and the client's `onVersionUnsupported` required without supplying them in `test-utils.tsx`, `WebAppProviders.tsx` or `AppProviders.tsx`, and rendered SYS-01 nowhere, so `features`, `web` and `mobile` failed `typecheck`. The button now opens the store with `Linking.openURL` (as Plan 01's LoginScreen opens its link) and its test asserts that call; the three adapters supply `androidStoreUrl`; `onVersionUnsupported` is optional (Android only; the web build always matches the API), and the mobile client replaces the route with a new `update-required` screen. Not run.
+- **RV-03-47: Plan 03's mobile routes sit behind sign-in (E24; backlog rounds 1 and 2; major).** The onboarding, lumpsum, confirm, pay, result and `r/[kind]` routes were at the Expo Router root but outside the signed-in `Stack.Protected`, so a signed-out deep link rendered them. E24 registers all eight after `(tabs)`, where Plan 04 F12 and F16 add theirs (RV-04-F12-2).
+- **RV-03-48: E13 answers the banner's `GET /legal/pending` in the two AppShell suites (E13; 2026-10-05 review and backlog round 1; major).** Once `AppShell` renders `LegalPendingBanner`, every AppShell render reads `/legal/pending`: Plan 01's `HomeScreen.test.tsx` (MSW with `onUnhandledRequest: 'error'`) fails its C9 AppShell cases, and Plan 02 D0's `AppShell.hydration.test.tsx` made a real request to `http://app.test`. E13 adds a default MSW handler to the first and a `fetchImpl` to the second. Open, for the owner: E13's banner and `DeclarationsScreen` read `legal.pending` as a list of `{key, version, title}` and stage `{keys}`, while E10's contract returns `{keys: string[]}` and `stageDeclarations` takes `{accept: [{key, version}]}`; the stubs answer `[]`, the shape the screens read, until that is settled (backlog).
+- **RV-03-49: the onboarding smoke reads real codes and is skipped in CI (E12, E13; backlog rounds 1 and 2; major).** It filled fixed OTPs (`000000`, `123456`) that Plan 01 does not have, needed the worker that CI's e2e job does not start, and signed up a number nobody invited, so CI's e2e job would be red from E12 on. Like RV-03-18's lumpsum smoke, it is skipped unless `SANCHAY_E2E_ONBOARDING_MOBILE` names an invited mobile, and it reads every code from Mailpit: Plan 01's `readLatestOtp` now delegates to a new `readLatestOtpTo(request, to, since)`, which also reads an email OTP. Not run.
+- **RV-03-50: E12's FATCA step has no non-null assertions (E12; found in this round; minor).** `FatcaScreen` built `PutProfileInput` from nine `draft.x!` reads, which `biome ci` refuses; a guard now sends an emptied draft (after a reload) back to the first profile step.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -11638,6 +11643,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and `git add` agai
 - Modify: `apps/web/src/client/routes.tsx` (append `OnboardingHubRoute` and `OnboardingStepRoute`; key-level only)
 - Create: mobile `apps/mobile/src/app/onboarding/index.tsx`, `apps/mobile/src/app/onboarding/[step].tsx`, `apps/mobile/src/app/onboarding/[step].test.tsx`
 - Create: `apps/web/e2e/onboarding.smoke.spec.ts`
+- Modify: `apps/web/e2e/support/otp.ts` (Plan 01; RV-03-49: `readLatestOtpTo` reads a code by recipient, and `readLatestOtp` delegates to it; key-level)
 
 **Interfaces:**
 - Prerequisites: E2 (HostGuard/`meta.appConfig`), E5 (`onboarding.get`, `deriveOnboardingStage`, `me.get`), E6 (`onboarding.submitIdentity`, `onboarding.putProfile`, `ref.pincode`). Plan-01: `auth.session` (real, `packages/contract/src/auth.ts`), `meContract.requestEmailOtp`/`verifyEmail` (real, `packages/contract/src/me.ts`), `@sanchay/validation` (`panSchema`, `emailSchema`, `pincodeSchema`), `@sanchay/app-core` (`messageForError`, `formatCountdown`, `useOtpLogin`'s `SessionOutcome`-free pattern), `@sanchay/ui` (`AppText`, `Banner`, `Button`, `Card`, `Screen`, `TextField`, `OtpInput`), `packages/features/src/{api/ApiContext.tsx, nav/NavContext.tsx, platform/PlatformContext.tsx, test-utils.tsx}` (`useApi`, `useNav`, `renderWithProviders`, `makeNav`, `TEST_API`).
@@ -12160,21 +12166,30 @@ describe('mobile onboarding/[step] route', () => {
 `apps/web/e2e/onboarding.smoke.spec.ts`:
 ```ts
 import { expect, test } from '@playwright/test';
+import { readLatestOtp, readLatestOtpTo } from './support/otp';
 
 /**
- * @smoke — run with SANCHAY_PROVIDER_MODE_FP=fake against the FakeFp sandbox. Signs in a fresh
- * pilot-invited number by mobile OTP, then drives ONB-01 identity through ONB-07 FATCA.
+ * @smoke, local only (RV-03-49). KYC and provisioning need the worker, which CI's e2e job does not
+ * start, and sign-up needs a pilot-invited mobile, so the test is skipped unless
+ * SANCHAY_E2E_ONBOARDING_MOBILE names an invited mobile. Run the stack with
+ * SANCHAY_PROVIDER_MODE_FP=fake; every code is read from Mailpit (Plan 01 has no fixed OTP).
  */
-test('onboarding: identity through profile reaches the bank stage', async ({ page }) => {
+const mobile = process.env.SANCHAY_E2E_ONBOARDING_MOBILE ?? '';
+const email = `smoke.${mobile}@example.com`;
+
+test('onboarding: identity through profile reaches the bank stage', async ({ page, request }) => {
+  test.skip(mobile === '', 'set SANCHAY_E2E_ONBOARDING_MOBILE to a pilot-invited mobile');
   await page.goto('/signup');
-  await page.getByLabel('Mobile number').fill('9876543210');
+  await page.getByLabel('Mobile number').fill(mobile);
+  let since = Date.now();
   await page.getByRole('button', { name: 'Get OTP' }).click();
-  await page.getByLabel('One-time code').fill('000000');
+  await page.getByLabel('One-time code').fill(await readLatestOtp(request, mobile, since));
   await page.waitForURL('**/onboarding');
 
-  await page.getByLabel('Email address').fill('smoke.onboarding@example.com');
+  await page.getByLabel('Email address').fill(email);
+  since = Date.now();
   await page.getByRole('button', { name: 'Send code' }).click();
-  await page.getByLabel('One-time code').fill('000000');
+  await page.getByLabel('One-time code').fill(await readLatestOtpTo(request, email, since));
   await expect(page.getByTestId('onboarding-hub')).toBeVisible();
 
   await page.getByRole('link', { name: 'Continue' }).click();
@@ -12215,6 +12230,28 @@ test('onboarding: identity through profile reaches the bank stage', async ({ pag
 
   await expect(page.getByText('Bank')).toBeVisible();
 });
+```
+
+`apps/web/e2e/support/otp.ts` (Plan 01's file; key-level, RV-03-49). `readLatestOtp`'s body moves into `readLatestOtpTo`, which searches `to:"<to>"`; `readLatestOtp` keeps its signature and delegates, so Plan 01's callers do not change:
+```ts
+/** Reads the newest OTP SMS that the API's MailpitSmsSender delivered to sms-<mobile>@sanchay.local. */
+export async function readLatestOtp(
+  request: APIRequestContext,
+  mobile: string,
+  sinceMs: number,
+): Promise<string> {
+  return readLatestOtpTo(request, `sms-${mobile}@sanchay.local`, sinceMs);
+}
+
+/** The newest six-digit code Mailpit holds for `to`: an email OTP's address, or an SMS mailbox. */
+export async function readLatestOtpTo(
+  request: APIRequestContext,
+  to: string,
+  sinceMs: number,
+): Promise<string> {
+  // ...readLatestOtp's former body, unchanged except the search query: `to:"${to}"`, and the
+  // poll message: `Mailpit never received an OTP for ${to}`.
+}
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -13486,16 +13523,34 @@ export function FatcaScreen() {
 
   const submit = async () => {
     const draft = getProfileDraft();
+    const { gender, occupation, incomeSlab, pep, sourceOfWealth, countryOfBirth, placeOfBirth, nationality, taxStatus } =
+      draft;
+    if (
+      gender === undefined ||
+      occupation === undefined ||
+      incomeSlab === undefined ||
+      pep === undefined ||
+      sourceOfWealth === undefined ||
+      countryOfBirth === undefined ||
+      placeOfBirth === undefined ||
+      nationality === undefined ||
+      taxStatus === undefined
+    ) {
+      // The earlier sub-steps fill the draft; a reload empties it, so start the profile again (RV-03-50:
+      // the `!` assertions here failed `biome ci`).
+      nav.replace('/onboarding/personal');
+      return;
+    }
     const input: PutProfileInput = {
-      gender: draft.gender!,
-      occupation: draft.occupation!,
-      incomeSlab: draft.incomeSlab!,
-      pep: draft.pep!,
-      sourceOfWealth: draft.sourceOfWealth!,
-      countryOfBirth: draft.countryOfBirth!,
-      placeOfBirth: draft.placeOfBirth!,
-      nationality: draft.nationality!,
-      taxStatus: draft.taxStatus!,
+      gender,
+      occupation,
+      incomeSlab,
+      pep,
+      sourceOfWealth,
+      countryOfBirth,
+      placeOfBirth,
+      nationality,
+      taxStatus,
       address: {
         line1: draft.address?.line1 ?? '',
         line2: draft.address?.line2 ?? '',
@@ -13862,13 +13917,13 @@ Then the Playwright smoke against `FakeFp` (`playwright.config.ts` passes the sh
 
 PowerShell:
 ```
-$env:SANCHAY_PROVIDER_MODE_FP='fake'; pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
+$env:SANCHAY_PROVIDER_MODE_FP='fake'; $env:SANCHAY_E2E_ONBOARDING_MOBILE='<an invited mobile>'; pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
 ```
 Git Bash:
 ```
-SANCHAY_PROVIDER_MODE_FP=fake pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
+SANCHAY_PROVIDER_MODE_FP=fake SANCHAY_E2E_ONBOARDING_MOBILE='<an invited mobile>' pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
 ```
-Expected: all Vitest suites green (`packages/ui`: 2 new files, `~13` tests; `packages/features`: 6 new files, `~13` tests); `@sanchay/features`, `@sanchay/web` and `@sanchay/mobile` typecheck clean; the mobile `usePreventScreenCapture` test passes; Playwright's `onboarding.smoke` reaches the "Bank" stage label against `FakeFp`.
+Expected: all Vitest suites green (`packages/ui`: 2 new files, `~13` tests; `packages/features`: 6 new files, `~13` tests); `@sanchay/features`, `@sanchay/web` and `@sanchay/mobile` typecheck clean; the mobile `usePreventScreenCapture` test passes; Playwright's `onboarding.smoke` reaches the "Bank" stage label against `FakeFp` (with the worker running and an invited mobile set; without `SANCHAY_E2E_ONBOARDING_MOBILE` it is skipped, which is how CI's e2e job runs it, RV-03-49).
 
 - [ ] **Step 5: Commit**
 ```
@@ -13887,7 +13942,7 @@ pnpm --filter=@sanchay/mobile test onboarding
 pnpm lint
 ```
 ```
-git add packages/ui/src packages/ui/package.json packages/features/package.json pnpm-lock.yaml packages/features/src "apps/web/src/app/(app)/onboarding" apps/web/src/client/routes.tsx apps/mobile/src/app/onboarding apps/web/e2e/onboarding.smoke.spec.ts
+git add packages/ui/src packages/ui/package.json packages/features/package.json pnpm-lock.yaml packages/features/src "apps/web/src/app/(app)/onboarding" apps/web/src/client/routes.tsx apps/mobile/src/app/onboarding apps/web/e2e/onboarding.smoke.spec.ts apps/web/e2e/support/otp.ts
 ```
 ```
 git commit -m "feat(onboarding): identity, profile, address, FATCA screens and ui batch 2 (E12)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -13915,6 +13970,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage befor
   `packages/features/src/api/ApiContext.tsx` (RV-03-9: `ApiContextValue` gains `consents: ConsentApi`, built in `ApiProvider`)
   `packages/features/src/index.ts` (append the new exports)
   `packages/features/src/home/AppShell.tsx` (render `<LegalPendingBanner />` above `children`)
+  `packages/features/src/home/HomeScreen.test.tsx` (Plan 01) and `packages/features/src/home/AppShell.hydration.test.tsx` (Plan 02 D0): answer the banner's `GET /legal/pending` (RV-03-48; key-level)
   `packages/contract/src/legal.ts` (append `acceptPending`), `packages/contract/src/index.ts` (no new router key — `legal` already exists from E10), `apps/api/openapi.json` (regenerated, B10 drift test)
   `apps/api/src/modules/legal-consent/legal.router.ts` (append the handler)
   `apps/web/src/app/(app)/onboarding/[step]/page.tsx` (add the six batch-2 step slugs, created by E12)
@@ -14223,9 +14279,11 @@ describe('LegalPendingBanner (R-18)', () => {
     await page.getByLabel(label).check();
   }
   await page.getByRole('button', { name: 'Continue to review' }).click();
+  since = Date.now();
   await page.getByRole('button', { name: 'Attest and submit' }).click();
-  await page.getByLabel('SMS code').fill('123456');
-  await page.getByLabel('Email code').fill('123456');
+  // CNF-01's two codes, read from Mailpit (RV-03-49; Plan 01 has no fixed OTP).
+  await page.getByLabel('SMS code').fill(await readLatestOtp(request, mobile, since));
+  await page.getByLabel('Email code').fill(await readLatestOtpTo(request, email, since));
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Your account is ready')).toBeVisible({ timeout: 15_000 });
 ```
@@ -15143,6 +15201,19 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
         </View>
 ```
 
+The banner makes every AppShell render read `GET /legal/pending`, so the two existing AppShell suites answer it (RV-03-48; the empty list is the shape the banner reads, see the legal.pending open item in RV-03-48):
+
+`packages/features/src/home/HomeScreen.test.tsx` (Plan 01's file; key-level: C9's AppShell cases run MSW with `onUnhandledRequest: 'error'`, so the handler is a default that survives `resetHandlers`):
+```tsx
+const server = setupServer(http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json([])));
+```
+
+`packages/features/src/home/AppShell.hydration.test.tsx` (Plan 02 D0's file; key-level: it has no MSW and made a real request to `http://app.test`; inside `shell()`, add to the `createWebApiClient` options):
+```tsx
+    // E13: AppShell's LegalPendingBanner reads GET /legal/pending; answer it here, not on the network.
+    fetchImpl: async () => Response.json([]),
+```
+
 `apps/web/src/app/(app)/onboarding/[step]/page.tsx` (modify: add the six batch-2 cases to E12's step switch):
 ```tsx
     case 'bank':
@@ -15190,14 +15261,14 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
   ```
   pnpm exec turbo run build --filter=@sanchay/api^...
   pnpm exec turbo run build --filter=@sanchay/features^...
-  pnpm exec biome check --write packages/features/src packages/contract/src apps/api/src/modules/legal-consent apps/web/src/app apps/web/e2e apps/mobile/src/app/onboarding
+  pnpm exec biome check --write packages/features/src packages/contract/src apps/api/src/modules/legal-consent apps/web/src/app apps/web/e2e apps/mobile/src/app/onboarding packages/features/src/home/HomeScreen.test.tsx packages/features/src/home/AppShell.hydration.test.tsx
   pnpm --filter=@sanchay/contract test
   pnpm --filter=@sanchay/features test
   pnpm --filter=@sanchay/api test legal
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/features typecheck
   pnpm lint
-  git add packages/features/src/onboarding packages/features/src/consent packages/features/src/legal packages/features/src/api/ApiContext.tsx packages/features/src/index.ts packages/features/src/home/AppShell.tsx packages/contract/src/legal.ts apps/api/src/modules/legal-consent/legal.router.ts apps/api/openapi.json "apps/web/src/app/(app)/onboarding" apps/web/e2e/onboarding.smoke.spec.ts apps/mobile/src/app/onboarding
+  git add packages/features/src/onboarding packages/features/src/consent packages/features/src/legal packages/features/src/api/ApiContext.tsx packages/features/src/index.ts packages/features/src/home/AppShell.tsx packages/contract/src/legal.ts apps/api/src/modules/legal-consent/legal.router.ts apps/api/openapi.json "apps/web/src/app/(app)/onboarding" apps/web/e2e/onboarding.smoke.spec.ts apps/mobile/src/app/onboarding packages/features/src/home/HomeScreen.test.tsx packages/features/src/home/AppShell.hydration.test.tsx
   git commit -m "feat(onboarding): batch-2 screens, CNF-01 consent sheet and legal.pending re-accept UI" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   If lefthook reports `stage_fixed`, re-run the Step 4 test/typecheck commands before re-committing.
@@ -22201,6 +22272,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/mobile/src/app/pay/[orderId].tsx`
   - `apps/mobile/src/app/result/[orderId].tsx`
   - `apps/mobile/src/app/r/[kind].tsx`
+  - `apps/mobile/src/app/update-required.tsx` (RV-03-46: the route SYS-01 renders in)
   - `apps/mobile/src/native-intent.tsx`
   - `apps/mobile/src/native-intent.test.ts`
   - `apps/mobile/src/app/(tabs)/portfolio/orders/index.tsx`
@@ -22216,6 +22288,8 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/web/src/lib/routing.test.ts` (append 1 regression case)
   - `apps/web/src/client/routes.tsx` (RV-03-17: append `PayRoute`, `ResultRoute`, `OrdersListRoute`, `OrderDetailRoute`; key-level only)
   - `apps/web/e2e/support/otp.ts` (RV-03-18: append `smsInbox`, `newestMessageId` and `readNextOtp`; Plan 01's `readLatestOtp` stays unchanged)
+  - `packages/features/src/test-utils.tsx`, `apps/web/src/client/WebAppProviders.tsx`, `apps/mobile/src/native/AppProviders.tsx` (RV-03-46: each supplies `androidStoreUrl`; the mobile client routes a 426 to SYS-01; key-level)
+  - `apps/mobile/src/app/_layout.tsx` (RV-03-47: Plan 03's root routes join the signed-in `Stack.Protected`; key-level)
 
 **Interfaces:**
 - Prerequisites: **E21** (`payments.get`, the raw `GET|POST /api/v1/pg/return/{ref}` route, `PAY_ATTEMPT` states). **E20** (`orders.get`, `orders.list`, `orders.cancel` [K]; the wire's `status`, `schemeName`, `cancellable` and `next`, RV-03-16). **E23** (`ConsentStatusScreen` pushes here on `next: 'PAYMENT' | 'DONE'`; INV-02 opens CNF-01 and goes to `/confirm/{challengeId}?orderId={orderId}`). **E17** (FUND-01's "Invest" link, RV-03-8) for the smoke. Plan 01 **B18/C10** (`@InfraRoute`, HostGuard) for context only — this task adds no server route.
@@ -22227,7 +22301,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `PAYMENT_METHODS`, `type PaymentMethod` (`@sanchay/domain`, Plan 01).
 - Produces:
   - `packages/api-client/src/errors.ts`: `VERSION_ERROR_CODES = new Set(['APP_VERSION_UNSUPPORTED'])`; `isVersionUnsupportedError(error): boolean`.
-  - `packages/api-client/src/client.ts`: `BuildOptions.onVersionUnsupported: () => void`; both `WebApiClientOptions` and `NativeApiClientOptions` gain the same field; the `interceptors` array gains `onError((error) => { if (isVersionUnsupportedError(error)) options.onVersionUnsupported(); })`.
+  - `packages/api-client/src/client.ts`: `BuildOptions.onVersionUnsupported?: (() => void) | undefined` (optional, RV-03-46); both `WebApiClientOptions` and `NativeApiClientOptions` gain the same field; the `interceptors` array gains `onError((error) => { if (isVersionUnsupportedError(error)) options.onVersionUnsupported(); })`.
   - `PlatformAdapters.androidStoreUrl: string` (the Play Store listing URL SYS-01 links to).
   - `PayScreen({ orderId }: { orderId: string })` (PAY-01): the target is the TPV line ("Pay only from A/c ••1234 (HDFC)…, shows as Cybrilla") and, per platform, a same-tab redirect on web (mobile-web gets a UPI intent link, desktop a QR) or `WebBrowser.openAuthSessionAsync` on Android with `Linking.openURL(upiUri)` as the UPI fallback, polling `payments.get` on `AppState` resume. **Open item (RV-03-16):** no procedure returns the attempt's payment link (E21 stores `token_url` and `upi_uri` encrypted and exposes neither) or the TPV bank's last 4 digits, so this task's PAY-01 shows the order and the TPV copy, follows `orders.get`'s `next` to the result, and offers no pay action until the owner adds that read.
   - `ResultScreen({ orderId }: { orderId: string })`: polls `orders.get` until its `status` has result copy and renders SETTLED/REJECTED/PROCESSING copy.
@@ -22306,9 +22380,11 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   `packages/features/src/system/UpdateRequiredScreen.test.tsx`
   ```tsx
   import { screen } from '@testing-library/react';
+  import userEvent from '@testing-library/user-event';
   import { HttpResponse, http } from 'msw';
   import { setupServer } from 'msw/node';
-  import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+  import { Linking } from 'react-native';
+  import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
   import { renderWithProviders, TEST_API } from '../test-utils';
   import { UpdateRequiredScreen } from './UpdateRequiredScreen';
 
@@ -22318,10 +22394,11 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   afterAll(() => server.close());
 
   describe('UpdateRequiredScreen (SYS-01, R-18)', () => {
-    it('renders the store link from PlatformAdapters', () => {
+    it('opens the store listing from PlatformAdapters', async () => {
+      const open = vi.spyOn(Linking, 'openURL').mockResolvedValue(true);
       renderWithProviders(<UpdateRequiredScreen />);
-      const link = screen.getByRole('link', { name: 'Update on Play Store' });
-      expect(link.getAttribute('href')).toBe('https://play.google.com/store/apps/details?id=in.sanchay.app');
+      await userEvent.click(screen.getByRole('button', { name: 'Update on Play Store' }));
+      expect(open).toHaveBeenCalledWith('https://play.google.com/store/apps/details?id=in.sanchay.app');
     });
   });
   ```
@@ -22393,17 +22470,18 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     credentials: RequestCredentials;
     fetchImpl: FetchLike | undefined;
     onUnauthenticated: () => void;
-    onVersionUnsupported: () => void;
+    /** R-18: Android only; the web build always matches the API (RV-03-46). */
+    onVersionUnsupported?: (() => void) | undefined;
   }
   // ... inside buildClient, interceptors:
     interceptors: [
       onError((error) => {
         if (isSessionError(error)) options.onUnauthenticated();
-        if (isVersionUnsupportedError(error)) options.onVersionUnsupported();
+        if (isVersionUnsupportedError(error)) options.onVersionUnsupported?.();
       }),
     ],
   // ... WebApiClientOptions and NativeApiClientOptions each gain:
-    onVersionUnsupported: () => void;
+    onVersionUnsupported?: (() => void) | undefined;
   // ... and both createWebApiClient/createNativeApiClient pass it through to buildClient({ ..., onVersionUnsupported: options.onVersionUnsupported }).
   ```
 
@@ -22412,11 +22490,41 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   androidStoreUrl: string;
   ```
 
+  RV-03-46: every `PlatformAdapters` value now supplies it (key-level, after `privacyNoticeUrl`). `packages/features/src/test-utils.tsx` (`makePlatform`), `apps/web/src/client/WebAppProviders.tsx` (the `platform` memo) and `apps/mobile/src/native/AppProviders.tsx` (the `platform` memo) each add:
+  ```ts
+      androidStoreUrl: 'https://play.google.com/store/apps/details?id=in.sanchay.app',
+  ```
+  `apps/mobile/src/native/AppProviders.tsx` also passes the 426 callback to `createNativeApiClient` (key-level, after `onUnauthenticated`); `router` is already imported there:
+  ```ts
+        onVersionUnsupported: () => router.replace('/update-required' as Href),
+  ```
+
+  `apps/mobile/src/app/update-required.tsx` (new; outside both `Stack.Protected` groups, so it renders signed in or out):
+  ```tsx
+  import { UpdateRequiredScreen } from '@sanchay/features';
+
+  export default function UpdateRequiredRoute() {
+    return <UpdateRequiredScreen />;
+  }
+  ```
+
+  `apps/mobile/src/app/_layout.tsx` (Plan 01's file; key-level, RV-03-47). Inside `<Stack.Protected guard={signedIn}>`, after `<Stack.Screen name="(tabs)" />`, so a signed-out deep link never renders an investor screen (Plan 04 F12 and F16 add theirs after the same anchor):
+  ```tsx
+          <Stack.Screen name="onboarding/index" />
+          <Stack.Screen name="onboarding/[step]" />
+          <Stack.Screen name="invest/[schemeId]/lumpsum" />
+          <Stack.Screen name="invest/[schemeId]/review" />
+          <Stack.Screen name="confirm/[challengeId]" />
+          <Stack.Screen name="pay/[orderId]" />
+          <Stack.Screen name="result/[orderId]" />
+          <Stack.Screen name="r/[kind]" />
+  ```
+
   `packages/features/src/system/UpdateRequiredScreen.tsx`
   ```tsx
   import { space } from '@sanchay/tokens';
   import { AppText, Button, Screen } from '@sanchay/ui';
-  import { StyleSheet, View } from 'react-native';
+  import { Linking, StyleSheet, View } from 'react-native';
   import { usePlatform } from '../platform/PlatformContext';
 
   /** SYS-01 (R-18): shown for any 426 APP_VERSION_UNSUPPORTED, wired via onVersionUnsupported. */
@@ -22431,9 +22539,10 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
           </AppText>
           <Button
             label="Update on Play Store"
-            role="link"
-            href={platform.androidStoreUrl}
-            onPress={() => undefined}
+            onPress={() => {
+              // Plan 01's Button has no role or href (RV-03-46); LoginScreen opens its link the same way.
+              void Linking.openURL(platform.androidStoreUrl);
+            }}
           />
         </View>
       </Screen>
@@ -23067,7 +23176,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   One script per line (RV-03-19): `pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, finds no test file and exits 1. The `(app)` and `(tabs)` paths are quoted, so the lines work in PowerShell 5.1 and Git Bash alike.
   ```
   pnpm exec turbo run build --filter=@sanchay/web^... --filter=@sanchay/mobile^...
-  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src
+  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
   pnpm --filter=@sanchay/web test
   pnpm --filter=@sanchay/web typecheck
   pnpm --filter=@sanchay/mobile test
@@ -23077,7 +23186,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   pnpm --filter=@sanchay/api-client test
   pnpm --filter=@sanchay/api-client typecheck
   pnpm lint
-  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml
+  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
   git commit -m "feat(pay): add PAY-01, result, ORD-01/02 and SYS-01 with 426 interceptor (E24, R-18)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   Expected: all eight test and typecheck commands exit 0 and `pnpm lint` exits 0. If a gitleaks false positive fires on the Maestro fixture ref, add a narrow regex to `.gitleaks.toml` in this same commit (never a path wildcard); none is expected here since `maestro-local-ref` matches no secret pattern.
