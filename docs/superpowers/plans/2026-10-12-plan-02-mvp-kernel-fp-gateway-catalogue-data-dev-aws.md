@@ -136,6 +136,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-75: D0's `serializeErr` also redacts through pino-http (found by the R-34 review, 2026-10-05; major).** The app logs through nestjs-pino's pino-http logger, whose default `wrapSerializers` calls the `err` serializer with pino's already-serialised form, so D0's `instanceof Error` check skipped redaction: a `DrizzleQueryError` logged inside a request kept its bound mobile number in `err.message` and `err.stack`, with `"type":"Object"` (reproduced through `pinoHttp(buildPinoHttpOptions(env)).logger`; D0's test had used a bare `pino`). `serializeErr` now takes either form and redacts pino's serialised form through its documented non-enumerable `raw` Error, and D0's test logs through pino-http as well as plain pino. Verified on a clean checkout of `main` with D0 alone: api unit 134 (132 before), api integration 130 (129 before), features 23 (22 before), typechecks and `pnpm lint` clean. Plan 04 F1 follows in RV-04-F1-11.
 - **RV-02-76: D9's `ops:nav-release` lets the next feed value through once (R-35, owner decision 2026-10-05; major).** A release only cleared `quarantined`, so a genuine move over 25% was quarantined again on the next sync and never reached `nav_history`. The release now goes through `releaseNav` (new `nav-release.ts`): it refuses an ISIN that is not quarantined and writes a `NAV_RELEASE` audit row with the flag in one transaction; `runNavSync` reads the pending releases from `audit_events` once per run, takes a released ISIN's next feed value without the NAV-09 check, writes it to `scheme_navs` and `nav_history`, and audits `NAV_RELEASE_APPLIED` in the same transaction, so the following sync checks from the new NAV. D8's schema is unchanged. Two new integration cases (eight in all); verified on PostgreSQL 18.6 in a scratch worktree (the release case failed against the old sync with the break reopened, then 8/8 passed; `tsc` and `biome ci` clean). Plan 04 F7, which rewrites the CLI, keeps the `NAV_RELEASE` row the sync reads (RV-04-F7-5).
 - **RV-02-77: E25 keeps the document bucket and the NAT EIP on a teardown (backlog, R-34 and DOCS follow-ups 2026-10-05; major).** `sanchay-prod-docs` has a fixed name and used `RemovalPolicy.RETAIN`, so a failed first create left the bucket behind and the retry failed on the name, the hazard R-34 fixed for the logs and repositories. The NAT `CfnEIP` had no DeletionPolicy, so a teardown or a replacement released the address Cybrilla allowlists (PB-19). Both now use `RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `RetainExceptOnCreate`, `UpdateReplacePolicy: Retain`; aws-cdk-lib 2.216.0's `CfnResource.applyRemovalPolicy` maps it so). The bucket case now asserts both policies and one new case asserts the EIP's and that the one NAT gateway uses it: 26 infra tests (Plan 04 F1's totals follow, RV-04-F1-12). Verified with aws-cdk-lib 2.216.0 and vitest 5.0.1 in a scratch folder: both assertions failed on the old stack (`Retain`, no policy), then 24 of 26 passed, the other two only because they read `apps/api` files that the scratch folder does not have; `tsc` and `biome ci` clean.
+- **RV-02-78: D5 lets FP end an unpaid order (P-07 addendum 2026-10-05, Plan 03 E21; major).** The ORDER machine had no way out of AWAITING_PAYMENT or PAYMENT_PENDING except payment success, and D5's own test asserted that nothing in AWAITING_PAYMENT could reach FAILED. FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day (`fp_payment_url_unused`), so such an order could never become final and HOME-02 would ask the investor to "Complete your payment" forever. D5 now has `fp_failed` and `fp_expired` from both states, the FP re-fetch spec §4.2 already describes; a payment attempt's own failure still moves no order. The test now pins exactly those four transitions and refuses `provider_failed`. Verified on the real `@sanchay/domain` in a scratch worktree: the revised case failed against the old machine, then `states.test.ts` 15/15; `tsc` clean and `biome ci` clean after Step 5's `--write`.
 
 **Verify at execution time (not changed here):**
 - **Resolved (R-32, RV-02-69): queue policies.** D2 no longer leaves every queue on pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises. `JOB_POLICIES` gives each job its policy: `stately` for per-aggregate sync, poll, reconcile and sweep jobs, `exclusive` for jobs that submit to FP, and `standard` for `notifications.send` only. `JobsService` creates each queue with that policy, and `Jobs.enqueue` returns null for a send the policy refuses. `jobs.int.test.ts` pins the stored policies and both refusals on PostgreSQL. A policy cannot change in place (`createQueue` on an existing queue keeps the old one, and `updateQueue` refuses `policy`), so `JobsService` refuses to start when a stored policy differs from the registry. D2's table "Queue policies (R-32)" lists every job in Plans 02–04.
@@ -5774,15 +5775,24 @@ describe('state machine registry', () => {
     expect(outgoing.some((e) => e.to === 'FAILED' && e.trigger === 'provider_object_absent')).toBe(true);
   });
 
-  it('PAYMENT_ATTEMPT FAILED does not move the order to FAILED (H-2)', () => {
+  it('PAYMENT_ATTEMPT FAILED does not move the order to FAILED (H-2); FP failing the purchase does', () => {
     // The attempt machine and the order machine are independent: a FAILED payment attempt has no
-    // corresponding ORDER transition out of AWAITING_PAYMENT. The order stays AWAITING_PAYMENT until
-    // the FP order itself reaches a terminal state (re-fetch), per spec §4.2's "(attempt FAILED /
-    // EXPIRED while the FP order is non-final)" row.
-    const fromAwaitingPayment = STATE_MACHINES.ORDER.transitions.filter(
-      (t) => t.from === 'AWAITING_PAYMENT',
+    // ORDER transition, and the order stays AWAITING_PAYMENT, per spec §4.2's "(attempt FAILED /
+    // EXPIRED while the FP order is non-final)" row. It ends when the FP order itself reaches a
+    // terminal state (re-fetched): FP fails an unpaid ONDC purchase at 23:00 IST with
+    // `fp_payment_url_unused` (P-07, RV-02-78).
+    const outOfUnpaid = STATE_MACHINES.ORDER.transitions.filter(
+      (t) =>
+        (t.from === 'AWAITING_PAYMENT' || t.from === 'PAYMENT_PENDING') &&
+        (t.to === 'FAILED' || t.to === 'EXPIRED'),
     );
-    expect(fromAwaitingPayment.every((t) => t.to !== 'FAILED')).toBe(true);
+    expect(outOfUnpaid.map((t) => `${t.from} ${t.to} ${t.trigger}`).sort()).toEqual([
+      'AWAITING_PAYMENT EXPIRED fp_expired',
+      'AWAITING_PAYMENT FAILED fp_failed',
+      'PAYMENT_PENDING EXPIRED fp_expired',
+      'PAYMENT_PENDING FAILED fp_failed',
+    ]);
+    expect(canTransition('ORDER', 'AWAITING_PAYMENT', 'FAILED', 'provider_failed')).toBe(false);
     expect(canTransition('PAYMENT_ATTEMPT', 'PENDING', 'FAILED', 'provider_failed')).toBe(true);
   });
 
@@ -5942,6 +5952,12 @@ export const ORDER_TRANSITIONS: readonly Transition<OrderStatus>[] = [
   { from: 'CONFIRMING', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'AWAITING_PAYMENT', to: 'PAYMENT_PENDING', trigger: 'payment_postback_or_return' },
   { from: 'PAYMENT_PENDING', to: 'PROCESSING', trigger: 'attempt_success' },
+  // FP failed or expired the purchase while it was unpaid, re-fetched (never the attempt): it fails an
+  // unpaid ONDC purchase at 23:00 IST on the order day with `fp_payment_url_unused` (P-07, RV-02-78).
+  { from: 'AWAITING_PAYMENT', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'AWAITING_PAYMENT', to: 'EXPIRED', trigger: 'fp_expired' },
+  { from: 'PAYMENT_PENDING', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'PAYMENT_PENDING', to: 'EXPIRED', trigger: 'fp_expired' },
   { from: 'PROCESSING', to: 'SETTLED', trigger: 'fp_successful_with_units' },
   { from: 'PROCESSING', to: 'UNITS_PENDING', trigger: 'fp_successful_units_null' },
   { from: 'PROCESSING', to: 'FAILED', trigger: 'fp_failed' },

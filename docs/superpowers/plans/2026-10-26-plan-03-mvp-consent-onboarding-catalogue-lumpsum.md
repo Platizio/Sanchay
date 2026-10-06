@@ -190,6 +190,9 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-40: E17's own tests pass on E17's own screens (E17; backlog round 1, seen when run; major).** `getByText('₹500.00')` matched both minimums, the commission regex also matched DSC-03, and `/High/` matched "Very High"; each threw "Found multiple elements". They now use the `ListRow` labels, the scheme's own commission line and `'Benchmark: High'`, as Plan 04 F19 found by running them. The fund page printed returns as `12.3400%` against its test's `12.34%`, and the TER through a signed `formatPct` (`+1.00%`); both now use `formatPct(value, { signed: false })`, which also prints the dash for a null. F19 keeps these (RV-04-F19-4).
 - **RV-03-41: E15's completeness stays within 100, and its seed helper passes `biome ci` (E15; backlog round 1 and the CAT review; major).** Seven tracked fields plus the SID+KIM slot were divided by 7, so a complete record scored 114 and broke `fund_facts_completeness_ck` on every fully populated scheme from S3 on; it divides by 8 now (`toBe(25)` for two fields), as F19 would have done in S4. `amc!.id` and `cat!.code` become a guard.
 - **RV-03-42: E14–E17 commands (E14–E17; BRIEF D8 backlog; minor).** As RV-03-31: 19 `--` filters dropped, a build of the api's workspace dependencies before the checks in E14's and E16's Steps 4 and 5 (E15 and E17 change no `dist` package), and E14's `git diff --exit-code apps/api/openapi.json` replaced by the drift test. E22's commands were already right (RV-03-19).
+- **RV-03-43: an unpaid purchase that FP fails ends FAILED, shown as "Payment not completed" (E21, E24; P-07 addendum; major).** P-07 found that FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day with `fp_payment_url_unused`, even after a simulated payment. E21's `mf_purchase` handler ignored orders in AWAITING_PAYMENT and PAYMENT_PENDING, so they stayed open; it now applies FP `failed`/`expired` there (Plan 02 D5 RV-02-78 allows it) and stores FP's `failure_code`, with no refund because nothing was paid. One new case (10 in `payments.int.test.ts`). E24's result screen treats FAILED and EXPIRED as final and shows "Payment not completed. This order is closed and no money was taken." for that code. Not run (E20/E21 are not built). Open: Cybrilla to confirm in writing that no money can be taken on such an order, and a backstop if the `mf_purchase` webhook is missed.
+- **RV-03-44: a refused payment nudge waits at most 2 minutes inside the payment window (E21; R-32 follow-up; minor).** Under R-32 the `payments.poll` queue is `stately`, so the return route's and the webhook's immediate nudge is refused while a delayed poll is queued, and the investor back from the PG waited for that poll: up to 15 minutes from the fourth poll on. The schedule is now 30 s, 1 m, then every 2 m for UPI's 30-minute window, then 15 m. This is the smallest correct change: pulling a queued pg-boss job forward needs a raw `UPDATE` on pg-boss's tables, and the request path never calls a provider. No test pins the delays.
+- **RV-03-45: E21's commands (E21; ADOPT follow-up; minor).** `test:int` drops the literal `--`, Steps 4 and 5 build the api's workspace dependencies first (E21 adds the `payments` contract key), Step 4's `git diff --exit-code apps/api/openapi.json` becomes the drift test, and Step 5 re-runs Step 4's suites (it ran only `payments orders`).
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -19355,9 +19358,10 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
   - `PaymentsService.createAttempt(consent, order) → {attemptId, returnRef}` (inside `useConsumed` only), `resolveReturn(ref) → redirect path`, `get(investorId, attemptId)`.
   - `PurchaseAdvanceJob.checkout` (E20's extension point): PATCH consent → `createAttempt` → PATCH `state: 'confirmed'` → returns `true` (order → `AWAITING_PAYMENT`).
   - Raw route `GET|POST /api/v1/pg/return/{ref}` (`@InfraRoute('API_HOST')`): single-use, 30-minute ref (hash stored, never the ref); marks the attempt `PENDING`, the order `PAYMENT_PENDING`, enqueues `payments.poll`, and returns 303 to `/app/r/payment?ref=<attemptId>` (APP) or `https://app.sanchay.in/r/payment?ref=<attemptId>` (WEB). The postback body is never read (research fp-api §4.1: never trust a postback).
-  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, 2 m, 5 m, 15 m while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends, at most 15 minutes later.
+  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, then every 2 m through UPI's 30-minute window, then every 15 m, while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends: at most 2 minutes later inside the payment window (RV-03-44; it was 15).
   - FP event handlers `payment` and `mf_purchase` registered in E1's `FP_EVENT_HANDLERS` at `payments.module.ts` load (they re-fetch and apply the same transitions; idempotent).
   - `payments.get` GET `/payments/{attemptId}`.
+  - FP failing or expiring an unpaid purchase (AWAITING_PAYMENT or PAYMENT_PENDING) ends the order FAILED/EXPIRED with FP's `failure_code` (Plan 02 D5 RV-02-78). P-07: FP fails an ONDC purchase whose payment URL was never used with `fp_payment_url_unused` at 23:00 IST on the order day, a simulated payment does not prevent it, and nothing was paid; E24's result screen shows "Payment not completed" for that code (RV-03-43). Cybrilla has not yet confirmed in writing that no money can be taken on such an order (open item).
   - Emails via `Notify.enqueue`: `ORDER_PLACED` when an attempt succeeds, `ORDER_FAILED` on FP `failed`, `REFUND_IN_PROGRESS` when a payment fails after success (late auth reversal).
 - Review fix: the draft wrote a second FP client (`fp-pay.ts`) over an invented `FpGateway`, used `@JobHandler(…, {retryBackoffSeconds})`, a `fakeConsumedConsent()` test helper and FakeFp scripts that do not exist, and several tests asserted nothing. This version fills D3's `createPayment` and follows the custom-checkout order (payment created before `confirmed`). Its tests drive the real saga end to end on FakeFp.
 - Review fix (RV-03-6, RV-03-7): the suite's `beforeAll` upserts `app_config` `orders.enabled = true` (the default is `false`, so `checkedOut()` failed with ORDERS_DISABLED), and `checkout` normalises the consent mobile with `.replace(/\D/g, '').slice(-10)`, as E20 does.
@@ -19533,6 +19537,19 @@ describe('mf_purchase events', () => {
     });
     expect((await orderOf(orderId))?.status).toMatch(/^(SETTLED|UNITS_PENDING)$/);
   });
+
+  it('FP fails an unpaid purchase with fp_payment_url_unused: FAILED and final, the attempt untouched (RV-03-43)', async () => {
+    const { orderId, attemptId } = await checkedOut();
+    const fpOrderId = (await orderOf(orderId))?.fpOrderId as string;
+    // P-07: FP fails an ONDC purchase whose payment URL was never used, at 23:00 IST on the order day.
+    t.fakeFp.advance(fpOrderId, 'failed');
+    const fpRead = t.app.get(FpRead);
+    const raw = await fpRead.purchase(fpOrderId); // FakeFp has no failure_code; the spy adds FP's
+    vi.spyOn(fpRead, 'purchase').mockResolvedValueOnce({ ...raw, failure_code: 'fp_payment_url_unused' });
+    await handleMfPurchaseEvent({ db: t.db.db, fpRead, event: { objectType: 'mf_purchase', objectId: fpOrderId } as never });
+    expect(await orderOf(orderId)).toMatchObject({ status: 'FAILED', failureCode: 'fp_payment_url_unused' });
+    expect((await attemptOf(attemptId))?.status).toBe('REDIRECTED');
+  });
 });
 
 describe('payments.get', () => {
@@ -19546,7 +19563,7 @@ describe('payments.get', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test:int -- payments
+pnpm --filter=@sanchay/api test:int payments
 ```
 Expected: `Cannot find module '../../src/modules/payments/payments.schema.js'`.
 
@@ -19800,7 +19817,16 @@ import { toFpPaymentView } from './fp-payment.js';
 import { PaymentsService } from './payments.service.js';
 import { paymentAttempts } from './payments.schema.js';
 
-const BACKOFF_SECONDS = [30, 60, 120, 300, 900];
+/**
+ * 30 s, 1 m, then every 2 m through UPI's 30-minute window, then 15 m. R-32: the stately queue refuses
+ * the return route's and the webhook's nudge while a poll is queued, so this gap is how long an investor
+ * back from the PG waits for the result (RV-03-44; it was up to 15 minutes from the fourth poll on).
+ */
+function pollDelaySeconds(pollAttempts: number): number {
+  if (pollAttempts === 0) return 30;
+  if (pollAttempts === 1) return 60;
+  return pollAttempts < 16 ? 120 : 900;
+}
 
 /** Worker only. Re-fetches the payment (never trusts a postback) and applies it; reschedules while pending. */
 @Injectable()
@@ -19847,7 +19873,7 @@ export class PaymentsPollJob {
         return; // the order stays put: "Try again" is a new order with a new consent
       }
       if (payment.status !== 'SUCCESS') {
-        const delay = BACKOFF_SECONDS[Math.min(attempt.pollAttempts, BACKOFF_SECONDS.length - 1)] ?? 900;
+        const delay = pollDelaySeconds(attempt.pollAttempts);
         await tx.update(paymentAttempts).set({ pollAttempts: attempt.pollAttempts + 1 }).where(eq(paymentAttempts.id, attempt.id));
         await this.jobs.enqueue(tx, 'payments.poll', { attemptId }, { startAfter: delay, singletonKey: attemptId });
       }
@@ -19872,19 +19898,25 @@ import { moveOrder } from '../orders/order-transitions.js';
 import { orders } from '../orders/orders.schema.js';
 
 const FP_ORDER_STATES: readonly string[] = ['under_review', 'pending', 'submitted', 'successful', 'failed', 'expired', 'reversed'];
+const UNPAID: readonly string[] = ['AWAITING_PAYMENT', 'PAYMENT_PENDING'];
 
 /**
  * E1 handler for `mf_purchase.*`: re-fetches the purchase (never trusts the payload) and applies the one
- * transition it implies from PROCESSING/UNITS_PENDING; everything earlier belongs to the saga jobs.
+ * transition it implies from PROCESSING/UNITS_PENDING, or FP failing or expiring an unpaid purchase
+ * (RV-03-43); everything else earlier belongs to the saga jobs.
  */
 export async function handleMfPurchaseEvent({ db, event, fpRead }: FpEventHandlerContext): Promise<void> {
   if (event.objectId === null) return;
   const [order] = await db.select().from(orders).where(eq(orders.fpOrderId, event.objectId));
-  if (order === undefined || !['PROCESSING', 'UNITS_PENDING', 'SETTLED'].includes(order.status)) return;
+  if (order === undefined || ![...UNPAID, 'PROCESSING', 'UNITS_PENDING', 'SETTLED'].includes(order.status)) return;
   const purchase = toFpPurchaseView(await fpRead.purchase(event.objectId));
   if (!FP_ORDER_STATES.includes(purchase.state)) return;
   const to = fpStateToOrderStatus(purchase.state as FpOrderState, { unitsAllotted: purchase.allottedUnits !== null });
   if (to === order.status) return;
+  // P-07: FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day
+  // (`fp_payment_url_unused`); nothing was paid, so the order ends FAILED with no refund. A payment
+  // success on an unpaid order belongs to payments.poll, not to this handler.
+  if (UNPAID.includes(order.status) && to !== 'FAILED' && to !== 'EXPIRED') return;
   const trigger = { SETTLED: 'fp_successful_with_units', UNITS_PENDING: 'fp_successful_units_null', FAILED: 'fp_failed', EXPIRED: 'fp_expired', REVERSED: 'fp_reversed' }[to as string];
   if (trigger === undefined) return;
   await moveOrder(db, order, to, trigger, {
@@ -20058,20 +20090,22 @@ Key-level edits: `job-registry.ts` append `'payments.poll': 'stately', // key: t
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=payment_attempts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- payments orders infra-routes fp-webhooks
+pnpm --filter=@sanchay/api test:int payments orders infra-routes fp-webhooks
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 ```
-Expected: `payments.int.test.ts` 9/9; E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
+Expected: `payments.int.test.ts` 10/10 (RV-03-43's unpaid-failure case included); E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
 
 - [ ] **Step 5: Commit**
 
 ```
 pnpm exec biome check --write apps/api/src/modules/payments apps/api/src/modules/orders apps/api/src/integrations/fp apps/api/src/modules/platform apps/api/src/app.module.ts apps/api/test/int packages/contract/src
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- payments orders
+pnpm --filter=@sanchay/api test:int payments orders infra-routes fp-webhooks
 pnpm lint
 git add apps/api/src/modules/payments apps/api/src/modules/orders apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/ids.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/app.module.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/payments.int.test.ts apps/api/test/int/orders.int.test.ts apps/api/test/int/infra-routes.ts apps/api/test/int/infra-routes.int.test.ts packages/contract/src
 git commit -m "feat(payments): H-2 payment before confirm, single-use return route, polling, FP events, order emails (E21)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -22576,9 +22610,15 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   const TERMINAL_COPY: Record<string, string> = {
     SETTLED: 'Your investment is confirmed.',
     REJECTED: "This order couldn't go through. Try again.",
+    FAILED: "This order couldn't go through. Try again.",
+    EXPIRED: "This order couldn't go through. Try again.",
     PROCESSING: 'Sent to the fund house for allotment.',
   };
   const TERMINAL_STATES = new Set(Object.keys(TERMINAL_COPY));
+  /** E21 (RV-03-43, P-07): FP fails an unpaid ONDC purchase at 23:00 IST with this code; nothing was paid. */
+  const FAILURE_COPY: Record<string, string> = {
+    fp_payment_url_unused: 'Payment not completed. This order is closed and no money was taken. Start a new order to invest.',
+  };
 
   /** Polls `orders.get` until its `status` has result copy (RV-03-16: the wire field is `status`). */
   export function ResultScreen({ orderId }: ResultScreenProps) {
@@ -22589,8 +22629,9 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       refetchInterval: (query) =>
         TERMINAL_STATES.has(query.state.data?.status ?? '') ? false : 2000,
     });
+    const failure = order.data?.failureCode ? FAILURE_COPY[order.data.failureCode] : undefined;
     const copy = order.data
-      ? (TERMINAL_COPY[order.data.status] ?? 'Confirming your investment…')
+      ? (failure ?? TERMINAL_COPY[order.data.status] ?? 'Confirming your investment…')
       : 'Loading…';
     return (
       <Screen testID="result-screen">
