@@ -198,6 +198,8 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-48: E13 answers the banner's `GET /legal/pending` in the two AppShell suites (E13; 2026-10-05 review and backlog round 1; major).** Once `AppShell` renders `LegalPendingBanner`, every AppShell render reads `/legal/pending`: Plan 01's `HomeScreen.test.tsx` (MSW with `onUnhandledRequest: 'error'`) fails its C9 AppShell cases, and Plan 02 D0's `AppShell.hydration.test.tsx` made a real request to `http://app.test`. E13 adds a default MSW handler to the first and a `fetchImpl` to the second. Open, for the owner: E13's banner and `DeclarationsScreen` read `legal.pending` as a list of `{key, version, title}` and stage `{keys}`, while E10's contract returns `{keys: string[]}` and `stageDeclarations` takes `{accept: [{key, version}]}`; the stubs answer `[]`, the shape the screens read, until that is settled (backlog).
 - **RV-03-49: the onboarding smoke reads real codes and is skipped in CI (E12, E13; backlog rounds 1 and 2; major).** It filled fixed OTPs (`000000`, `123456`) that Plan 01 does not have, needed the worker that CI's e2e job does not start, and signed up a number nobody invited, so CI's e2e job would be red from E12 on. Like RV-03-18's lumpsum smoke, it is skipped unless `SANCHAY_E2E_ONBOARDING_MOBILE` names an invited mobile, and it reads every code from Mailpit: Plan 01's `readLatestOtp` now delegates to a new `readLatestOtpTo(request, to, since)`, which also reads an email OTP. Not run.
 - **RV-03-50: E12's FATCA step has no non-null assertions (E12; found in this round; minor).** `FatcaScreen` built `PutProfileInput` from nine `draft.x!` reads, which `biome ci` refuses; a guard now sends an emptied draft (after a reload) back to the first profile step.
+- **RV-03-51: the consent-first check proves something (E4, E11; owner decision 2026-10-06; major).** A test file shares one FakeFp call log and one FakeClock, and no approve helper moved the clock, so a consumed challenge's window [created, consumed) was empty and `expectNoPmWritesBeforeConsumed` passed for nothing (E11's provisioning case, Plan 04 F2's two). The helper now fails when the window is empty and a P/M call sits on its edge. The approve helpers move the clock 1 ms before the create, so earlier tests' writes fall before the window, and 1 ms after approve, so the job's writes fall after it; 1 ms keeps every cut-off and TTL. The owner accepted the proposal with the before-create step added here, because the after-approve step alone would have put the previous test's writes inside the next window. E11 here, F2 and F5 in Plan 04 (RV-04-F2-6, RV-04-F5-2). Not run.
+- **RV-03-52: the risk questionnaire waits for a named sign-off (E9; R-36; major).** `seedRiskQuestionnaire` published v1.0.0 as `system:seed`, and only tests called it, so no environment had a questionnaire and the risk step could not open. The JSON now carries `approvedBy: null` in place of `"status": "PUBLISHED"`; the seed loads it as DRAFT until compliance names themself there, then publishes the DRAFT row on the next run and never changes a PUBLISHED one (`ON CONFLICT … DO UPDATE … WHERE status = 'DRAFT'`). Tests pass their own `approvedBy`. Plan 04 F1's `seedReferenceData` runs it on every deploy (RV-04-F1-14). Not run.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -3257,7 +3259,11 @@ import type { FpTestApp } from './fake-fp.js';
  * The canonical consent-first assertion (outline §0.1): "FakeFp has zero P/M writes before CONSUMED".
  * FakeFp stamps its call log from the app Clock, the same clock that writes `created_at` (RV-03-4) and
  * `consumed_at`. The structural guard (FpTransport requires a ConsumedConsent for P/M) is primary; this
- * checks the flow.
+ * checks the flow. A file shares one FakeFp log and one FakeClock, so the window [created, consumed)
+ * means something only when the test moves the clock 1 ms before the create (earlier tests' writes fall
+ * before it) and 1 ms after approve (the job's writes fall after it): the approve helpers do both
+ * (owner decision 2026-10-06, RV-03-51). A consumed challenge with an empty window and a P/M call on
+ * its edge fails here instead of passing for nothing.
  */
 export async function expectNoPmWritesBeforeConsumed(app: FpTestApp, challengeId: string): Promise<void> {
   const [challenge] = await app.db.db
@@ -3267,9 +3273,12 @@ export async function expectNoPmWritesBeforeConsumed(app: FpTestApp, challengeId
   expect(challenge, `consent challenge ${challengeId} exists`).toBeDefined();
   const since = challenge?.createdAt.getTime() ?? 0;
   const consumedAt = challenge?.consumedAt?.getTime() ?? Number.POSITIVE_INFINITY;
-  const early = app.fakeFp
-    .calls()
-    .filter((c) => (c.class === 'P' || c.class === 'M') && c.at >= since && c.at < consumedAt);
+  const pm = app.fakeFp.calls().filter((c) => c.class === 'P' || c.class === 'M');
+  expect(
+    consumedAt > since || !pm.some((c) => c.at === since),
+    'move the FakeClock 1 ms before the create and 1 ms after approve, or this check proves nothing',
+  ).toBe(true);
+  const early = pm.filter((c) => c.at >= since && c.at < consumedAt);
   expect(early, 'FakeFp has zero P/M writes before CONSUMED').toHaveLength(0);
 }
 ```
@@ -8601,7 +8610,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
     - `scoreRiskQuestionnaire(dob: string, answers: RiskQuestionnaireAnswers, asOf: string): RiskScoreResult` — `{ rawScore, level, maxRiskometer, cappedBy: string[] }`. Bands and caps exactly per GAP-03 §1: 8–13 CONSERVATIVE/LOW_TO_MODERATE, 14–18 MOD_CONSERVATIVE/MODERATE, 19–23 MODERATE/MODERATELY_HIGH, 24–28 MOD_AGGRESSIVE/HIGH, 29–32 AGGRESSIVE/VERY_HIGH; `horizon === '<1'` caps at CONSERVATIVE; `horizon === '1-3' || reaction === 'SELL_ALL'` caps at MOD_CONSERVATIVE; the final level is the more conservative of the score band and any triggered cap.
   - `packages/domain/src/rules/suitability.ts`:
     - `compareRiskometer(maxAllowed: Riskometer, schemeRiskometer: Riskometer): 'MATCH' | 'MISMATCH'` — pure, via `RISKOMETER_LEVELS` index comparison.
-  - `data/risk-questionnaire-v1.0.0.json` — the compliance-owned questionnaire body (GAP-03 §1 wording, semver `1.0.0`, `requiresRetake: false`), seeded via the `pnpm ops:catalogue:seed` CLI that E15 extends (this task only writes the JSON and the `risk_questionnaires` row insert helper `seedRiskQuestionnaire(tx)`, exported from `risk-profile.service.ts`, since a dedicated ops CLI is out of this task's scope).
+  - `data/risk-questionnaire-v1.0.0.json` — the compliance-owned questionnaire body (GAP-03 §1 wording, semver `1.0.0`, `requiresRetake: false`, `approvedBy: null` until compliance signs it off, R-36), seeded via the `pnpm ops:catalogue:seed` CLI that E15 extends (this task only writes the JSON and the `risk_questionnaires` row insert helper `seedRiskQuestionnaire(tx)`, exported from `risk-profile.service.ts`, since a dedicated ops CLI is out of this task's scope).
   - Tables (migration `risk_suitability`):
     - `risk_questionnaires`: `id`, std columns, `version` text (semver), `status` text CHECK (`DRAFT`,`PUBLISHED`,`SUPERSEDED`), `questions_and_scoring` jsonb, `sha256` bytea, `effective_at` tstz nullable, `approved_by` text nullable.
     - `risk_profiles` (status transitions in place — see design note below; **not** grant-revoked the way `consent_records`/`audit_events` are, because `status` must move ACTIVE→STALE/EXPIRED/SUPERSEDED after insert): `investor_id` FK, `questionnaire_id` FK, `answers` jsonb, `raw_score` smallint, `caps` jsonb (`string[]`), `level` text CHECK IN `RISK_LEVELS`, `max_riskometer` text CHECK IN `RISKOMETER_LEVELS`, `status` text CHECK (`ACTIVE`,`STALE`,`EXPIRED`,`SUPERSEDED`), `completed_at` tstz, `expires_at` tstz, `source` text (`'ONBOARDING'|'RETAKE'`), `ip` inet nullable, `ua` text nullable.
@@ -8624,7 +8633,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
 ```json
 {
   "version": "1.0.0",
-  "status": "PUBLISHED",
+  "approvedBy": null,
   "requiresRetake": false,
   "questions": [
     { "id": "Q1", "text": "Age", "derivedFromDob": true },
@@ -8815,7 +8824,7 @@ const ANSWERS_AGGRESSIVE = {
 
 beforeAll(async () => {
   app = await bootTestApp();
-  await seedRiskQuestionnaire(app.db.db);
+  await seedRiskQuestionnaire(app.db.db, { approvedBy: 'test' }); // R-36: the shipped file is unsigned
 });
 
 afterAll(async () => {
@@ -9151,7 +9160,7 @@ REVOKE UPDATE, DELETE ON app.suitability_acknowledgements FROM sanchay_app;
 ```ts
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { scoreRiskQuestionnaire, type RiskQuestionnaireAnswers } from '@sanchay/domain';
 import { DB, type DbHandle, type Database } from '../../db/client.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
@@ -9165,19 +9174,36 @@ import questionnaireBody from '../../../../../data/risk-questionnaire-v1.0.0.jso
 
 const TWENTY_FOUR_MONTHS_MS = 24 * 30 * 24 * 60 * 60 * 1000;
 
-export async function seedRiskQuestionnaire(db: Database): Promise<void> {
+/**
+ * R-36 (owner decision 2026-10-06): the compliance-owned questionnaire is published only with a named
+ * sign-off. The JSON's `approvedBy` stays null until compliance signs it off in a docs-only commit (like
+ * G-C1 for the legal documents); until then the row loads as DRAFT and the risk step stays closed. A
+ * re-run after the sign-off publishes the DRAFT row; a PUBLISHED row never changes. Plan 04 F1's
+ * `seedReferenceData` runs this on every deploy; tests pass their own `approvedBy`.
+ */
+export async function seedRiskQuestionnaire(
+  db: Database,
+  options: { approvedBy?: string | undefined } = {},
+): Promise<void> {
+  const approvedBy = options.approvedBy ?? questionnaireBody.approvedBy ?? null;
+  const status = approvedBy === null ? 'DRAFT' : 'PUBLISHED';
+  const effectiveAt = approvedBy === null ? null : new Date();
   const sha256 = createHash('sha256').update(JSON.stringify(questionnaireBody)).digest();
   await db
     .insert(riskQuestionnaires)
     .values({
       version: questionnaireBody.version,
-      status: 'PUBLISHED',
+      status,
       questionsAndScoring: questionnaireBody,
       sha256,
-      effectiveAt: new Date(),
-      approvedBy: 'system:seed',
+      effectiveAt,
+      approvedBy,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: riskQuestionnaires.version,
+      set: { status, questionsAndScoring: questionnaireBody, sha256, effectiveAt, approvedBy },
+      setWhere: sql`${riskQuestionnaires.status} = 'DRAFT'`,
+    });
 }
 
 export interface RiskProfileView {
@@ -10430,6 +10456,7 @@ async function attest(investor: ReadyInvestor) {
 
 /** Attest over HTTP, then send both OTPs and approve through the real ConsentEngine; returns the provision job's data. */
 async function attestAndApprove(investor: ReadyInvestor): Promise<ConsentApprovedJobData> {
+  t.clock.advance(1); // consent-first window (RV-03-51): earlier writes in this file fall before the create
   const res = await attest(investor);
   expect(res.statusCode).toBe(200);
   const { challengeId } = res.json<{ challengeId: string }>();
@@ -10440,6 +10467,7 @@ async function attestAndApprove(investor: ReadyInvestor): Promise<ConsentApprove
     smsCode: t.sms.latestCode(investor.mobile),
     emailCode: t.email.latestCode(investor.email),
   });
+  t.clock.advance(1); // the job consumes, and writes to FP, after the window (RV-03-51)
   const job = enqueued.find((j) => j.name === 'onboarding.provision');
   expect(job, 'approve enqueues onboarding.provision').toBeDefined();
   return job?.data as ConsentApprovedJobData;

@@ -181,6 +181,9 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F1-12: F1's infra totals count E25's new retention case (Plan 02 RV-02-77; minor).** E25's document bucket and NAT EIP now use `RETAIN_ON_UPDATE_OR_DELETE`, with one new case, so E25's file has 26 tests. F1's Step 2 now expects `sanchay-mvp-stack.test.ts` 25 passed, 1 failed, and Step 4 expects 56 infra tests (E25's 26). F1's `NatEipAddress` output check is unchanged: the EIP keeps the logical id `NatEip`.
 - **RV-04-F1-13: F1's legal seed keeps `effective_from` on a re-seed (Plan 03 RV-03-29; minor).** E3's `LegalDocs.current` now picks the PUBLISHED version in force by `effective_from`, so a re-seed that publishes a version with a date must store that date. F1's replacement `ops-legal-seed.ts` set only the body, sha256 and status on conflict; it now sets `effectiveFrom` too. Nothing else in F1 changes.
 - **RV-04-F12-2: Plan 03's mobile routes are already protected when F12 adds its own (Plan 03 RV-03-47; minor).** E24 now registers the onboarding, lumpsum, confirm, pay, result and `r/[kind]` routes inside the signed-in `Stack.Protected` after `(tabs)`. F12's review note that listed them as unprotected now says so; F12's two SIP lines still go after the same anchor.
+- **RV-04-F1-14: the migrate task loads E9's risk questionnaire (Plan 03 RV-03-52, R-36; major).** `seedReferenceData` gains a fourth idempotent step, E9's `seedRiskQuestionnaire`, which loads v1.0.0 as DRAFT until compliance signs the file off and publishes it on the deploy after. `reference-data.int.test.ts` counts `risk_questionnaires: 1`; its case count is unchanged.
+- **RV-04-F2-6: F2's consent-first cases move the clock (Plan 03 RV-03-51; owner decision 2026-10-06; major).** `draftSip` moves the FakeClock 1 ms before `createSip` and `approve` moves it 1 ms after `engine.approve`, so `expectNoPmWritesBeforeConsumed` sees a real window in "mandates.submit" and "reused mandate within headroom" (both passed for nothing before). Not run.
+- **RV-04-F5-2: F5's consent-first case moves the clock (Plan 03 RV-03-51; owner decision 2026-10-06; minor).** `draft` moves the FakeClock 1 ms before `createRedemption` and `approve` 1 ms after `engine.approve`. F5's explicit `redemption.create` counts already covered it; the window now does too. Not run.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -277,7 +280,7 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
   - No new stack and no second environment (R-31): F1 changes the `SanchayMvpStack-prod` that E25 deployed paused in S2. Its Multi-AZ, PITR 14 days, deletion protection, `db.t4g.medium`, 2 tasks of **`sanchay-app`**, R-11 listener rules, health checks and web container, `rds.force_ssl` + `verify-full` (R-15), ECS Exec logging (R-16) and least-privilege deploy role are E25's and stay as they are.
   - **D6 logins:** RDS master `sanchay_master` (E25; secret `sanchay/{env}/db-master`, migrate only); `sanchay_app_login` (secret `sanchay/{env}/db-app`; api, worker, ops; member of `sanchay_app` WITH INHERIT, SET); `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`; people over SSM; member of `sanchay_readonly`; `default_transaction_read_only = on`, `statement_timeout = 60s`). The two login secrets are generated JSON `{username, password}` with 40 letters and digits.
   - `apps/api/src/db/db-logins.ts`: `ensureDbLogins(db, {app, readonly}) → string[]`, `DB_LOGINS`, `DbLoginPasswords`, `scramSha256Verifier(password, salt?)`, `DbLoginError`.
-  - **Reference data (FR-3):** `apps/api/src/cli/reference-data.ts`: `seedReferenceData(db, dirs = REFERENCE_DATA_DIRS) → summary`, `REFERENCE_DATA_DIRS`, `ReferenceDataDirs`. Its three idempotent steps: `seedLegalDocumentFiles(db, dir = LEGAL_DOCUMENTS_DIR) → count`, `LEGAL_DOCUMENTS_DIR`, `LegalSeedError` (`ops-legal-seed.ts`; a version that is no longer DRAFT keeps its text); `seedRefTables(db, dataDir = REF_DATA_DIR) → {pincodes, ifsc}`, `REF_DATA_DIR` (`ops-ref-seed.ts`); `seedCatalogueReference(db, dataDir)` (`ops-catalogue-seed.ts`: AMCs, SEBI categories, aliases, market holidays; never schemes, fund facts or commission lines). `pnpm ops:legal:seed` and `pnpm ops:ref:seed` run the compiled modules. The api image holds `/repo/docs/legal` and `/repo/data`.
+  - **Reference data (FR-3):** `apps/api/src/cli/reference-data.ts`: `seedReferenceData(db, dirs = REFERENCE_DATA_DIRS) → summary`, `REFERENCE_DATA_DIRS`, `ReferenceDataDirs`. Its four idempotent steps (the fourth is E9's `seedRiskQuestionnaire`, DRAFT until signed off, R-36): `seedLegalDocumentFiles(db, dir = LEGAL_DOCUMENTS_DIR) → count`, `LEGAL_DOCUMENTS_DIR`, `LegalSeedError` (`ops-legal-seed.ts`; a version that is no longer DRAFT keeps its text); `seedRefTables(db, dataDir = REF_DATA_DIR) → {pincodes, ifsc}`, `REF_DATA_DIR` (`ops-ref-seed.ts`); `seedCatalogueReference(db, dataDir)` (`ops-catalogue-seed.ts`: AMCs, SEBI categories, aliases, market holidays; never schemes, fund facts or commission lines). `pnpm ops:legal:seed` and `pnpm ops:ref:seed` run the compiled modules. The api image holds `/repo/docs/legal` and `/repo/data`.
   - `apps/api/src/cli/migrate.ts`: with `SANCHAY_APP_ROLE=migrate` it also syncs the logins (both passwords set) and seeds the reference data; its pino lines (`service` `migrate`, R-34) are `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login` and `reference data seeded: <n> legal documents, <n> pincodes, <n> IFSC codes, catalogue reference tables`. A developer's `pnpm db:migrate` (role `api`) only migrates.
   - Env (B2 schema): `SANCHAY_DB_APP_PASSWORD`, `SANCHAY_DB_READONLY_PASSWORD` (migrate container only); boot invariant **14** (outside local/test, `SANCHAY_APP_ROLE=migrate` requires both).
   - ECS: task families `sanchay-{env}-migrate` (container `migrate`, command `node dist/cli/migrate.js`, login `sanchay_master`, E25's task role) and `sanchay-{env}-ops` (container `ops`, `SANCHAY_APP_ROLE=ops`, login `sanchay_app_login`, secrets `SANCHAY_DB_PASSWORD` and `SANCHAY_KEYRING_JSON` only, default command `node dist/main.js`, task role `OpsTaskRole` whose only statement is `ReadOpsInviteParameters`: `ssm:GetParameter` on `arn:aws:ssm:<region>:<account>:parameter/sanchay/{env}/invites/*`).
@@ -1328,7 +1331,7 @@ async function count(table: string): Promise<number> {
 
 async function counts(): Promise<Record<string, number>> {
   const tables = ['legal_documents', 'ref_pincodes', 'ref_ifsc', 'amcs', 'sebi_categories'];
-  const all = [...tables, 'category_aliases', 'market_holidays'];
+  const all = [...tables, 'category_aliases', 'market_holidays', 'risk_questionnaires'];
   return Object.fromEntries(await Promise.all(all.map(async (n) => [n, await count(n)] as const)));
 }
 
@@ -1362,6 +1365,7 @@ describe('seedReferenceData: what the migrate task loads on every deploy (F1, FR
       sebi_categories: await csvRows('sebi-categories.csv'),
       category_aliases: await csvRows('category-aliases.csv'),
       market_holidays: await csvRows('market-holidays-2026-2027.csv'),
+      risk_questionnaires: 1, // E9's v1.0.0, DRAFT until compliance signs it off (R-36)
     });
     expect(summary).toContain(`${legalFiles.length} legal documents`);
   });
@@ -3426,6 +3430,7 @@ import type { Database } from '../db/client.js';
 import { DEFAULT_DATA_DIR, seedCatalogueReference } from './ops-catalogue-seed.js';
 import { LEGAL_DOCUMENTS_DIR, seedLegalDocumentFiles } from './ops-legal-seed.js';
 import { seedRefTables } from './ops-ref-seed.js';
+import { seedRiskQuestionnaire } from '../modules/onboarding/risk-profile.service.js';
 
 /** Where the files are: the repo checkout locally, /repo in the api image (apps/api/Dockerfile). */
 export interface ReferenceDataDirs {
@@ -3443,7 +3448,8 @@ export const REFERENCE_DATA_DIRS: ReferenceDataDirs = {
  * D6 logins on every deploy. Each step is an idempotent upsert:
  * - E3's legal documents (docs/legal/documents; a version that is no longer DRAFT keeps its text);
  * - E6/E7's ref_pincodes and ref_ifsc (data/ref-pincodes.csv, data/ref-ifsc.csv);
- * - D8's catalogue reference tables: AMCs, SEBI categories and their aliases, market holidays.
+ * - D8's catalogue reference tables: AMCs, SEBI categories and their aliases, market holidays;
+ * - E9's risk questionnaire, DRAFT until its file names the compliance sign-off (R-36).
  * Never the curated scheme list, its fund facts or its commission lines: F19's ops command
  * `ops:catalogue:seed --pilot-list` loads those, with the G-B10 checks.
  */
@@ -3454,6 +3460,7 @@ export async function seedReferenceData(
   const legal = await seedLegalDocumentFiles(db, dirs.legalDocuments);
   const ref = await seedRefTables(db, dirs.data);
   await seedCatalogueReference(db, dirs.data);
+  await seedRiskQuestionnaire(db);
   const counts = `${legal} legal documents, ${ref.pincodes} pincodes, ${ref.ifsc} IFSC codes`;
   return `${counts}, catalogue reference tables`;
 }
@@ -4591,6 +4598,7 @@ type SipInvestor = Awaited<ReturnType<typeof seedSipInvestor>>;
 async function draftSip(opts: { amount?: string; day?: number; investor?: SipInvestor } = {}) {
   const investor = opts.investor ?? (await seedSipInvestor(t));
   const scheme = await seedSipScheme(t);
+  t.clock.advance(1); // consent-first window (Plan 03 RV-03-51): earlier writes fall before the create
   const created = await t.app.get(SipService).createSip({
     investorId: investor.investorId,
     schemeId: scheme.id,
@@ -4616,6 +4624,7 @@ async function approve(draft: { challengeId: string; investor: SipInvestor }, jo
     smsCode: t.sms.latestCode(draft.investor.mobile) ?? '',
     ...(needsEmail ? { emailCode: t.email.latestCode(draft.investor.email) ?? '' } : {}),
   });
+  t.clock.advance(1); // the job consumes, and writes to FP, after the window (Plan 03 RV-03-51)
   const job = lastJob(jobName);
   expect(job, `approve enqueues ${jobName}`).toBeDefined();
   return job?.data as ConsentApprovedJobData;
@@ -12244,8 +12253,9 @@ async function fresh(options: HoldingOptions = {}) {
 const service = () => t.app.get(RedemptionService);
 const quote = (investor: Investor, holding: Holding) =>
   service().quote(investor.investorId, { folioId: holding.folioId, isin: holding.scheme.isin });
-const draft = (investor: Investor, holding: Holding, mode: 'AMOUNT' | 'ALL', amount?: string) =>
-  service().createRedemption({
+const draft = (investor: Investor, holding: Holding, mode: 'AMOUNT' | 'ALL', amount?: string) => {
+  t.clock.advance(1); // consent-first window (Plan 03 RV-03-51): earlier writes fall before the create
+  return service().createRedemption({
     investorId: investor.investorId,
     folioId: holding.folioId,
     isin: holding.scheme.isin,
@@ -12254,6 +12264,7 @@ const draft = (investor: Investor, holding: Holding, mode: 'AMOUNT' | 'ALL', amo
     userIp: '203.0.113.10',
     initiatedVia: 'web',
   });
+};
 const orderOf = async (id: string) => {
   const [row] = await t.db.db.select().from(orders).where(eq(orders.id, id));
   if (row === undefined) throw new Error(`no order ${id}`);
@@ -12287,6 +12298,7 @@ async function approve(investor: Investor, challengeId: string): Promise<Consent
     smsCode: t.sms.latestCode(investor.mobile),
     emailCode: t.email.latestCode(investor.email),
   });
+  t.clock.advance(1); // the job consumes, and writes to FP, after the window (Plan 03 RV-03-51)
   const job = enqueued.find(
     (j) =>
       j.name === 'orders.redemption.submit' &&
