@@ -194,6 +194,7 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-HDR-3: the header says where Step 5's build line goes (backlog round 2; minor).** F5, F7, F10–F14, F16 and F28 start Step 5 with the workspace build, before biome, because the re-run checks read `dist`; the header's Commands rule said every Step 5 follows AGENTS.md's order without saying so. It now does; no command changed.
 - **RV-04-F16-1: a paused withdrawal says so (backlog round 2, F16 UX; minor).** RED-02 showed E20's ORDERS_DISABLED copy, "New investments are paused right now", on a withdrawal. `RedeemReviewScreen` now shows "Withdrawals are paused right now. Please try again later." for that code, and its refusal case expects it. F16's Prerequisites also credit E13, not E23, with `ApiContextValue.consents` (Plan 03 RV-03-9). Not run.
 - **RV-04-F19-5: F19's seed check sits before F1's reference step (backlog round 2; minor).** F1 moved D8's first four CSV loops into `seedCatalogueReference`, which `seedCatalogue` calls first, so F19's "before the `amcs.csv` loop" anchor now names that call; the validation stays first, so an invalid list writes nothing.
+- **RV-04-F2-7: F2's FakeFp case passes `biome ci` (sweep; minor).** `this.state.purchasePlans.get(params.id!)` was the one non-null assertion left in Plan 04's code; it is `params.id ?? ''`, as Plan 02 RV-02-47 wrote D4's (an unknown id finds no plan either way).
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit); where a task needs the workspace build, that line comes first, before biome, because the re-run reads `dist` (RV-04-HDR-3). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -6271,7 +6272,7 @@ const fpError = (statusCode: number, code: string, message: string): FakeReply =
         return { statusCode: 200, data: planPayload(plan) };
       }
       case 'purchasePlan.get': {
-        const plan = this.state.purchasePlans.get(params.id!);
+        const plan = this.state.purchasePlans.get(params.id ?? '');
         return plan === undefined ? fpError(404, 'NOT_FOUND', `mf_purchase_plan ${params.id} not found`) : { statusCode: 200, data: planPayload(plan) };
       }
       case 'purchasePlan.list': {
