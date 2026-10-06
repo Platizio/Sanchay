@@ -175,6 +175,10 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-25 (2026-10-05): no dev stack in Plan 03's text (R-31; minor).** The execution-order note said E18 and E19 fund "the protected dev stack", and RV-03-10 and E1's review fix 7 spoke of "the dev worker and migrate containers". R-31 removes the AWS dev environment: E25's protected S2 stack is the paused prod stack, so the note and both sentences now name it and the deployed containers. Wording only: `devSecrets` and the `'dev'` app-env test cases stay, because `SANCHAY_APP_ENV` keeps `dev` as a code value (Plan 01 `env.ts`). Checked by a full-text scan of Plan 03 for dev hosts, dev stacks and dev deploys.
 - **RV-03-26 (2026-10-05): E16 says what keeps `nav_history` current (follows Plan 02 RV-02-73; minor).** E16's returns read only `nav_history`. D9's backfill loads five years of it on prod before GO-1 (R-33), and D9's daily sync now appends every accepted NAV, so the latest point and the anniversaries move with each sync. E16's prerequisites say so; its code, tests and counts are unchanged.
 - **RV-03-27 (2026-10-05): a purchase LOOKUP-ADOPT adopts goes back to `orders.purchase.advance` (R-32 queue review; major).** E20's `fp.reconcile.nonfinal` moved the purchase it adopted by `source_ref_id` from RECONCILING to UNDER_REVIEW and enqueued nothing, while the submit job enqueues `orders.purchase.advance` only after a clean POST and E21's `mf_purchase` handler (like F4's, which replaces it) leaves orders before PROCESSING to the saga jobs: the H-2 checkout never ran, so the order stayed UNDER_REVIEW and the investor was never offered the payment. The adoption now runs in one transaction with the enqueue of `orders.purchase.advance` `{orderId, challengeId}`, `singletonKey` = order id (on R-32's `stately` queue a null return means one is already queued), and the job's miss-branch insert is written in Biome's stable form, because the file needed two `--write` passes and Step 5's `pnpm lint` failed after one (reproduced on the original text). A new `orders.int.test.ts` case checks the enqueue and that the job then PATCHes the adopted purchase's consent at FP `pending`; E20's Step 4 count becomes 19/19, and E21's count of that suite, stale at 16 since RV-03-16, follows. Checked in a scratch prototype (Plan 01 with D2's `Jobs` as written, pg-boss 12.34.0, PostgreSQL 18.6 in Testcontainers): the adoption and its job commit together, a failing enqueue rolls the adoption back, an advance job already queued makes the send return null while the adoption still commits (the original text left no job), and `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome` are clean on the job and the whole test file.
+- **RV-03-28: the contract index is edited key by key (E2, E4, E5, E6; backlog round 1; major).** E2, E4, E5 and E6 each showed `packages/contract/src/index.ts` as a whole file, and each dropped keys an earlier task had added: E4's had no `meta` (E2) or `catalogue` (Plan 02 D10), so applying it as written would unmount those routers from the contract and the client. Each task now shows one import, one re-export and one new key, and says which keys stay. E10's `legal` fragment is a separate defect, handled with E10.
+- **RV-03-29: `LegalDocs.current` finds the PUBLISHED version in force, and E3's seed loads (E3; backlog round 2; major).** `current` ordered by `effective_from DESC`, where PostgreSQL puts NULLs first, and checked the status after `LIMIT 1`: an undated DRAFT v2 hid the PUBLISHED v1 and broke every consent for that key. It now filters `status = 'PUBLISHED'` and `effective_from` NULL or not after now, and orders `DESC NULLS LAST` (the query shape type-checks with drizzle-orm on `main`; not run on PostgreSQL). The seed's upsert now also sets `effective_from` on conflict (Plan 04 F1's replacement too, RV-04-F1-13). E3's seed and its sha256 test resolved `docs/legal/documents` five directories up, outside the repo; four is right from `src/cli` and `test/int`. The CLI's `match[1]`/`match[2]` failed `typecheck` under `noUncheckedIndexedAccess` and a missing `key` or `version` is now refused, and the root script builds and runs `dist`, because Node's type stripping cannot load `.js` specifiers from `src`. F1 still replaces the CLI and its scripts.
+- **RV-03-30: E4's tests type-check, and only `consents.cancel` takes an Idempotency-Key (E3, E4; backlog round 1; minor).** Four E4 assertions and one E3 query read a destructured row without a guard, which `typecheck` (it includes `test/`) refuses under `noUncheckedIndexedAccess`; they now use `?.`, or a guard where the row feeds a query. E4's Produces marked `sendOtp` and `approve` `[K]`, but its router, its contract and R-20 require the key on `cancel` only, which is right: an OTP verifies once and a resend is cooldown-bound.
+- **RV-03-31: E3's commands (E3; BRIEF D8 backlog; minor).** `@sanchay/domain` runs unfiltered (a filtered run fails its 95% coverage gate), `test:int` filters drop the literal `--` (pnpm 11 passes it through and runs every suite), and Steps 4 and 5 build the api's workspace dependencies before the api checks, because `@sanchay/domain` exports only `dist`.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -1602,22 +1606,14 @@ Later errata (found while writing Plan 04; already applied below):
   };
   ```
 
-  Fragment for `packages/contract/src/index.ts`:
+  Fragment for `packages/contract/src/index.ts` (key-level, RV-03-28; Plan 02 D10 has already added `catalogue`):
   ```ts
-  import { authContract } from './auth.js';
-  import { healthContract } from './health.js';
-  import { meContract } from './me.js';
+  // with the other imports
   import { metaContract } from './meta.js';
-
-  export * from './auth.js';
-  export * from './common.js';
-  export * from './errors.js';
-  export * from './health.js';
-  export * from './me.js';
+  // with the other re-exports
   export * from './meta.js';
-
-  export const contract = { health: healthContract, auth: authContract, me: meContract, meta: metaContract };
-  export type Contract = typeof contract;
+  // one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, D10's `catalogue`)
+    meta: metaContract,
   ```
 
   Fragment for `apps/api/src/config/env.ts` (add next to `SANCHAY_APP_ORIGIN`):
@@ -2038,7 +2034,7 @@ describe('requiredFactorsFor (H-21)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- jcs snapshot-v2 required-factors
+pnpm --filter=@sanchay/domain test
 ```
 Expected failure: `Cannot find module '../src/consent/jcs.js'` (and the two sibling modules) — none of the three source files exist yet.
 
@@ -2420,7 +2416,7 @@ export const consentSubjects = appSchema.table(
 `apps/api/src/modules/legal-consent/legal-docs.service.ts`:
 ```ts
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import type { LegalDocumentKey } from '@sanchay/domain';
 import { CLOCK, type Clock } from '../platform/clock.js';
@@ -2450,15 +2446,25 @@ export class LegalDocs {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  /** The single PUBLISHED version of `key`, newest `effectiveFrom` first. */
+  /**
+   * The PUBLISHED version of `key` in force now: the newest `effectiveFrom` that has arrived, and an
+   * undated version only when no dated one has (RV-03-29: PostgreSQL sorts NULLs first under DESC, so a
+   * DRAFT or undated row used to hide the PUBLISHED one).
+   */
   async current(exec: DbExecutor, key: LegalDocumentKey): Promise<CurrentLegalDocument> {
     const [row] = await (exec ?? this.dbh.db)
       .select()
       .from(legalDocuments)
-      .where(eq(legalDocuments.key, key))
-      .orderBy(desc(legalDocuments.effectiveFrom))
+      .where(
+        and(
+          eq(legalDocuments.key, key),
+          eq(legalDocuments.status, 'PUBLISHED'),
+          or(isNull(legalDocuments.effectiveFrom), lte(legalDocuments.effectiveFrom, this.clock.now())),
+        ),
+      )
+      .orderBy(sql`${legalDocuments.effectiveFrom} DESC NULLS LAST`)
       .limit(1);
-    if (row === undefined || row.status !== 'PUBLISHED') {
+    if (row === undefined) {
       throw new AppError('INTERNAL', { message: `no PUBLISHED legal_documents row for ${key}` });
     }
     return { key: row.key as LegalDocumentKey, version: row.version, sha256: row.sha256.toString('hex') };
@@ -2567,24 +2573,30 @@ import { newId } from '../modules/platform/ids.js';
 function parseFrontMatter(body: string): { meta: Record<string, string>; markdown: string } {
   const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(body);
   if (match === null) throw new Error('ops:legal:seed: missing front matter');
+  const [, front = '', markdown = ''] = match;
   const meta: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
+  for (const line of front.split('\n')) {
     const [k, ...rest] = line.split(':');
     if (k === undefined || rest.length === 0) continue;
     meta[k.trim()] = rest.join(':').trim().replace(/^'(.*)'$/, '$1');
   }
-  return { meta, markdown: match[2].trim() };
+  return { meta, markdown: markdown.trim() };
 }
 
 async function main(): Promise<void> {
   const env = parseEnv(process.env);
   const db = createDb(env.DATABASE_URL);
-  const dir = path.resolve(fileURLToPath(new URL('../../../../../docs/legal/documents', import.meta.url)));
+  const dir = path.resolve(fileURLToPath(new URL('../../../../docs/legal/documents', import.meta.url)));
   const files = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort();
   let inserted = 0;
   for (const file of files) {
     const raw = await readFile(path.join(dir, file), 'utf8');
     const { meta, markdown } = parseFrontMatter(raw);
+    if (meta.key === undefined || meta.version === undefined) {
+      throw new Error(`ops:legal:seed: ${file} needs key and version in its front matter`);
+    }
+    const effectiveFrom = meta.effective_from === undefined ? null : new Date(meta.effective_from);
+    const status = (meta.status ?? 'DRAFT') as (typeof legalDocuments.$inferInsert)['status'];
     const sha256 = createHash('sha256').update(markdown, 'utf8').digest();
     await db.db
       .insert(legalDocuments)
@@ -2596,12 +2608,12 @@ async function main(): Promise<void> {
         version: meta.version,
         bodyMarkdown: markdown,
         sha256,
-        status: (meta.status ?? 'DRAFT') as (typeof legalDocuments.$inferInsert)['status'],
-        effectiveFrom: meta.effective_from === undefined ? null : new Date(meta.effective_from),
+        status,
+        effectiveFrom,
       })
       .onConflictDoUpdate({
         target: [legalDocuments.key, legalDocuments.version],
-        set: { bodyMarkdown: markdown, sha256, status: meta.status ?? 'DRAFT' },
+        set: { bodyMarkdown: markdown, sha256, status, effectiveFrom },
       });
     inserted += 1;
   }
@@ -2616,7 +2628,7 @@ main().catch((error: unknown) => {
 });
 ```
 
-Modify `package.json` — add one script line: `"ops:legal:seed": "pnpm --filter=@sanchay/api exec node --experimental-strip-types src/cli/ops-legal-seed.ts"`.
+Modify `package.json` — add one script line (RV-03-29: Node's type stripping cannot load `src/cli/*.ts`, whose imports end in `.js`, so the script builds and runs `dist`; Plan 04 F1 later moves the build into an `apps/api` script): `"ops:legal:seed": "pnpm --filter=@sanchay/api build && pnpm --filter=@sanchay/api exec node dist/cli/ops-legal-seed.js"`.
 
 The 30 legal document placeholders, one per `LEGAL_DOCUMENT_KEYS` entry, each with the same front-matter shape (`key`, `version: '1'`, `status: DRAFT` — counsel sign-off (G-C1) flips this to `PUBLISHED` in a later docs-only commit, per `LEGAL_COPY_STATUS = 'COUNSEL_PLACEHOLDER'` in `packages/domain/src/legal-entity.ts`) and a short counsel-placeholder body naming the operating entity where the document's own subject needs it:
 
@@ -3080,7 +3092,7 @@ describe('legal_consent schema and LegalDocs', () => {
 
   it('legal seed sha256 matches the body bytes', async () => {
     const dir = path.resolve(
-      fileURLToPath(new URL('../../../../../docs/legal/documents', import.meta.url)),
+      fileURLToPath(new URL('../../../../docs/legal/documents', import.meta.url)),
     );
     const raw = await readFile(path.join(dir, 'tnc.md'), 'utf8');
     const markdown = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
@@ -3123,6 +3135,7 @@ describe('legal_consent schema and LegalDocs', () => {
       sessionId: null,
     });
     const [row] = await ta.db.db.select().from(consentRecords).limit(1);
+    if (row === undefined) throw new Error('recordAcceptance wrote no consent_records row');
     await expect(
       ta.db.appPool.query('UPDATE app.consent_records SET channel = $1 WHERE id = $2', [
         'X',
@@ -3139,14 +3152,15 @@ describe('legal_consent schema and LegalDocs', () => {
 - [ ] **Step 2 (API side): Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test:int -- legal-consent
+pnpm --filter=@sanchay/api test:int legal-consent
 ```
 Expected failure: `Cannot find module '../../src/modules/legal-consent/legal-consent.schema.js'` — the module does not exist yet.
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/domain test -- jcs snapshot-v2 required-factors
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=legal_consent
 pnpm --filter=@sanchay/api db:generate --custom --name=legal_consent_grants
 ```
@@ -3157,7 +3171,7 @@ REVOKE UPDATE, DELETE ON app.consent_records FROM sanchay_app;
 Then:
 ```
 pnpm --filter=@sanchay/api db:check
-pnpm --filter=@sanchay/api test:int -- legal-consent
+pnpm --filter=@sanchay/api test:int legal-consent
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/domain typecheck
 ```
@@ -3167,8 +3181,9 @@ Expected: all suites green; `db:check` reports no drift between the Drizzle sche
 
 ```
 pnpm exec biome check --write packages/domain/src/consent packages/domain/test/jcs.test.ts packages/domain/test/snapshot-v2.test.ts packages/domain/test/required-factors.test.ts packages/domain/src/index.ts apps/api/src/modules/legal-consent apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/src/cli/ops-legal-seed.ts apps/api/test/int/legal-consent.int.test.ts docs/legal/documents package.json
-pnpm --filter=@sanchay/domain test -- jcs snapshot-v2 required-factors
-pnpm --filter=@sanchay/api test:int -- legal-consent
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int legal-consent
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
@@ -3188,7 +3203,7 @@ git commit -m "feat(legal-consent): sanchay.consent.v2 snapshot, JCS hashing and
 - Prerequisites: E3 (`legal_documents`, `consent_challenges`, `consent_records`, `consent_subjects`, `LegalDocs`, `SNAPSHOT_BUILDERS`, `canonicalize`, `snapshotSha256`, `requiredFactorsFor`).
 - Consumes (Plan-01 ground truth): `OtpService.issue(input: IssueOtpInput): Promise<IssuedOtp>` and `OtpService.verify(exec, {challengeId, purpose, code}): Promise<VerifiedOtp>` — note `challengeId` here is the **otp_codes row id**, not the consent challenge id (`apps/api/src/modules/identity/otp.service.ts`); `type ConsentSms`, `renderConsentSms`, `SMS_TEMPLATE_IDS` (`apps/api/src/integrations/sms/templates.ts`); `AuditService.record`, `AUDIT_ACTIONS`; `Crypto`; `CLOCK`/`Clock`/`FakeClock`, `MINUTE`/`HOUR`/`DAY`/`SECOND`; `AppError`; `newId`/`asRowId`; `investors`, `investorContacts` (`apps/api/src/modules/identity/identity.schema.ts`); `InvestorAccounts.decryptMobile(row)` (`identity/investor-accounts.service.ts`, exported by `IdentityModule`) and `maskMobile` (`identity/masking.ts`); `bootTestApp`; `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`, `ERROR_CATALOGUE` (`@sanchay/contract`); `route`/`oc` contract pattern from `packages/contract/src/auth.ts`.
 - Consumes (Plan 02, as built): `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler`, `type Job<N>`, `type JobName` (`jobs/job-registry.ts`; `consent.expiry.sweep` and `drafts.abandon` are already in `JOB_NAMES`), `registerSchedules` (`jobs/schedules.ts`); `type ConsumedConsent`, `assertConsumed` (D3, `apps/api/src/integrations/fp/consumed-consent.ts`); `CHALLENGE_STATUSES`, `type ChallengeStatus` (D5, `@sanchay/domain`); `bootFpTestApp`, `type FpTestApp`, `FakeFp.calls()` (D4, `apps/api/test/int/fake-fp.ts`; call-log `at` is stamped from the app `Clock`); `AppConfig` (Plan 01).
-- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void>` (RV-03-1), `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
+- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void>` (RV-03-1), `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp`, `consents.approve` POST `.../{id}/approve` (no Idempotency-Key: an OTP verifies once and a resend is cooldown-bound; R-20 names `cancel` only, RV-03-30), `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
 - Review fix (Plan 02 as built): `ConsumedConsent`/`assertConsumed` come from D3 and `CHALLENGE_STATUSES` from D5; there are no local copies. `useConsumed` mints the D3 brand (`subjectIds` are the subject row ids) and checks it with `assertConsumed`. It refuses unless `SANCHAY_APP_ROLE === 'worker'` (from `AppConfig`), replacing the draft's `asWorker()` object-copy.
 - Review fix: `ConsentRouter` uses Plan 01's `@Controller` + `@Implement` pattern (the draft's `implement(...).router(...)` object on an `@Injectable` would never have been mounted), checks that every challenge belongs to the signed-in investor (the draft let any investor read, send, approve or cancel any challenge), and applies `requireIdempotency(idem, cls)` to `cancel` (the draft called it with no arguments).
 - Review fix: both sweeps are `@JobHandler` classes whose `handle(job)` calls `run()`, scheduled through `registerSchedules` (`consent.expiry.sweep` `*/5 * * * *`, `drafts.abandon` `0 * * * *`). `LegalConsentModule` injects real tokens (`DB`, `CLOCK`, `Crypto`, `OtpService` from `IdentityModule`, the global `Jobs`), not string tokens and not a no-op `JOBS`. Tests boot the worker app with FakeFp and spy on the injected `Jobs`.
@@ -3430,7 +3445,7 @@ describe('ConsentEngine.approve', () => {
       .select()
       .from(consentRecords)
       .where(eq(consentRecords.challengeId, c.challengeId));
-    expect(record.deliveryEvidence).not.toBeNull();
+    expect(record?.deliveryEvidence ?? null).not.toBeNull();
     expect(enqueued).toEqual([]); // no job registered for PURCHASE until E20
   });
 
@@ -3461,12 +3476,12 @@ describe('ConsentEngine.approve', () => {
       .select()
       .from(otpCodes)
       .where(and(eq(otpCodes.referenceId, c.challengeId), isNull(otpCodes.consumedAt)));
-    expect(otpRow.attempts).toBe(1);
+    expect(otpRow?.attempts).toBe(1);
     const [challenge] = await ta.db.db
       .select()
       .from(consentChallenges)
       .where(eq(consentChallenges.id, c.challengeId));
-    expect(challenge.status).toBe('PENDING');
+    expect(challenge?.status).toBe('PENDING');
   });
 
   it('a tampered subject row after create is caught: CONSENT_MISMATCH, SUPERSEDED, no job enqueued', async () => {
@@ -3484,7 +3499,7 @@ describe('ConsentEngine.approve', () => {
       .select()
       .from(consentChallenges)
       .where(eq(consentChallenges.id, c.challengeId));
-    expect(challenge.status).toBe('SUPERSEDED');
+    expect(challenge?.status).toBe('SUPERSEDED');
     expect(enqueued).toHaveLength(0);
   });
 
@@ -4740,22 +4755,14 @@ export const consentsContract = {
 };
 ```
 
-Modify `packages/contract/src/index.ts`:
+Modify `packages/contract/src/index.ts` (key-level, RV-03-28):
 ```ts
-import { authContract } from './auth.js';
+// with the other imports
 import { consentsContract } from './consents.js';
-import { healthContract } from './health.js';
-import { meContract } from './me.js';
-
-export * from './auth.js';
-export * from './common.js';
+// with the other re-exports
 export * from './consents.js';
-export * from './errors.js';
-export * from './health.js';
-export * from './me.js';
-
-export const contract = { health: healthContract, auth: authContract, me: meContract, consents: consentsContract };
-export type Contract = typeof contract;
+// one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, D10's `catalogue`, E2's `meta`)
+  consents: consentsContract,
 ```
 
 `apps/api/src/modules/legal-consent/consent.router.ts` (Plan 01's `@Controller` + `@Implement` pattern; every procedure first proves the challenge belongs to the signed-in investor, so a foreign id is 404, never readable or actionable):
@@ -5704,27 +5711,14 @@ And append to `meContract` (after `verifyEmail`):
 ```
 (`import { OnboardingStageSchema } from './onboarding.js';` is placed with the other relative imports at the top of the file rather than inline — shown inline above only to mark where the new export sits.)
 
-Modify `packages/contract/src/index.ts`:
+Modify `packages/contract/src/index.ts` (key-level, RV-03-28):
 ```ts
-import { authContract } from './auth.js';
-import { healthContract } from './health.js';
-import { meContract } from './me.js';
+// with the other imports
 import { onboardingContract } from './onboarding.js';
-
-export * from './auth.js';
-export * from './common.js';
-export * from './errors.js';
-export * from './health.js';
-export * from './me.js';
+// with the other re-exports
 export * from './onboarding.js';
-
-export const contract = {
-  health: healthContract,
-  auth: authContract,
-  me: meContract,
+// one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, `catalogue`, `meta`, E4's `consents`)
   onboarding: onboardingContract,
-};
-export type Contract = typeof contract;
 ```
 
 Modify `apps/api/src/modules/platform/ids.ts`:
@@ -6723,19 +6717,14 @@ export const refContract = {
 };
 ```
 
-Modify `packages/contract/src/index.ts`:
+Modify `packages/contract/src/index.ts` (key-level, RV-03-28):
 ```ts
+// with the other imports
 import { refContract } from './ref.js';
-// ...
+// with the other re-exports
 export * from './ref.js';
-// ...
-export const contract = {
-  health: healthContract,
-  auth: authContract,
-  me: meContract,
-  onboarding: onboardingContract,
+// one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, `catalogue`, `meta`, `consents`, E5's `onboarding`)
   ref: refContract,
-};
 ```
 
 Modify `packages/contract/src/onboarding.ts` — append two input schemas and two procedures:

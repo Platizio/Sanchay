@@ -178,6 +178,7 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F7-4 (2026-10-05): F7's `adoptPurchase` keeps E20's hand-off to `orders.purchase.advance` (follows Plan 03 RV-03-27; major).** F7's full-content rewrite of `fp.reconcile.nonfinal` moved an adopted purchase to UNDER_REVIEW and enqueued nothing, unlike its own `adoptRedemption`, so the H-2 checkout never ran for it: F4's `mf_purchase` handler leaves orders before PROCESSING to the saga jobs. `adoptPurchase` now moves the order and enqueues `orders.purchase.advance` `{orderId, challengeId}` (`singletonKey` = order id) in one transaction, as E20 does. `recon-fp.int.test.ts` gains the matching case (19/19), Consumes and Produces name the job, and Step 4's last line, which runs E20's `orders` suite with its own adoption case, now says what that suite guards. Checked in the scratch prototype: `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome ci` are clean on F7's job and on `recon-fp.int.test.ts` as written, and the purchase branch, run on PostgreSQL 18.6 with pg-boss 12.34.0 and D2's `Jobs`, commits the move with its job and rolls both back when the enqueue fails (the original text left no job).
 - **RV-04-F7-5: `ops:nav-release` keeps the row R-35's sync reads (Plan 02 RV-02-76, R-35; major).** D9's release now lets the next feed value through once: `runNavSync` takes a released ISIN's value without the 25% check when its latest `NAV_RELEASE`/`NAV_RELEASE_APPLIED` audit row is a `NAV_RELEASE` for `scheme_navs`. F7's rewritten command already writes exactly that row and refuses a NAV that is not quarantined, so its code is unchanged; its doc comment, the runbook's command table and its "after checking it on the AMC site" row now say what the release does, and the `ops:nav-release` case asserts that D9's `pendingNavReleases` sees the release (one more assertion, no new case). D9's `releaseNav` stays as D9's tested helper; after F7 the CLI no longer calls it.
 - **RV-04-F1-12: F1's infra totals count E25's new retention case (Plan 02 RV-02-77; minor).** E25's document bucket and NAT EIP now use `RETAIN_ON_UPDATE_OR_DELETE`, with one new case, so E25's file has 26 tests. F1's Step 2 now expects `sanchay-mvp-stack.test.ts` 25 passed, 1 failed, and Step 4 expects 56 infra tests (E25's 26). F1's `NatEipAddress` output check is unchanged: the EIP keeps the logical id `NatEip`.
+- **RV-04-F1-13: F1's legal seed keeps `effective_from` on a re-seed (Plan 03 RV-03-29; minor).** E3's `LegalDocs.current` now picks the PUBLISHED version in force by `effective_from`, so a re-seed that publishes a version with a date must store that date. F1's replacement `ops-legal-seed.ts` set only the body, sha256 and status on conflict; it now sets `effectiveFrom` too. Nothing else in F1 changes.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -3307,7 +3308,12 @@ export async function seedLegalDocumentFiles(
         })
         .onConflictDoUpdate({
           target: [legalDocuments.key, legalDocuments.version],
-          set: { bodyMarkdown: doc.markdown, sha256: doc.sha256, status: doc.status },
+          set: {
+            bodyMarkdown: doc.markdown,
+            sha256: doc.sha256,
+            status: doc.status,
+            effectiveFrom: doc.effectiveFrom, // Plan 03 RV-03-29
+          },
         });
     }
   });
