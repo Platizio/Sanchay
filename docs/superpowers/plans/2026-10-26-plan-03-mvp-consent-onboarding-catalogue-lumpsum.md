@@ -175,6 +175,32 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-25 (2026-10-05): no dev stack in Plan 03's text (R-31; minor).** The execution-order note said E18 and E19 fund "the protected dev stack", and RV-03-10 and E1's review fix 7 spoke of "the dev worker and migrate containers". R-31 removes the AWS dev environment: E25's protected S2 stack is the paused prod stack, so the note and both sentences now name it and the deployed containers. Wording only: `devSecrets` and the `'dev'` app-env test cases stay, because `SANCHAY_APP_ENV` keeps `dev` as a code value (Plan 01 `env.ts`). Checked by a full-text scan of Plan 03 for dev hosts, dev stacks and dev deploys.
 - **RV-03-26 (2026-10-05): E16 says what keeps `nav_history` current (follows Plan 02 RV-02-73; minor).** E16's returns read only `nav_history`. D9's backfill loads five years of it on prod before GO-1 (R-33), and D9's daily sync now appends every accepted NAV, so the latest point and the anniversaries move with each sync. E16's prerequisites say so; its code, tests and counts are unchanged.
 - **RV-03-27 (2026-10-05): a purchase LOOKUP-ADOPT adopts goes back to `orders.purchase.advance` (R-32 queue review; major).** E20's `fp.reconcile.nonfinal` moved the purchase it adopted by `source_ref_id` from RECONCILING to UNDER_REVIEW and enqueued nothing, while the submit job enqueues `orders.purchase.advance` only after a clean POST and E21's `mf_purchase` handler (like F4's, which replaces it) leaves orders before PROCESSING to the saga jobs: the H-2 checkout never ran, so the order stayed UNDER_REVIEW and the investor was never offered the payment. The adoption now runs in one transaction with the enqueue of `orders.purchase.advance` `{orderId, challengeId}`, `singletonKey` = order id (on R-32's `stately` queue a null return means one is already queued), and the job's miss-branch insert is written in Biome's stable form, because the file needed two `--write` passes and Step 5's `pnpm lint` failed after one (reproduced on the original text). A new `orders.int.test.ts` case checks the enqueue and that the job then PATCHes the adopted purchase's consent at FP `pending`; E20's Step 4 count becomes 19/19, and E21's count of that suite, stale at 16 since RV-03-16, follows. Checked in a scratch prototype (Plan 01 with D2's `Jobs` as written, pg-boss 12.34.0, PostgreSQL 18.6 in Testcontainers): the adoption and its job commit together, a failing enqueue rolls the adoption back, an advance job already queued makes the send return null while the adoption still commits (the original text left no job), and `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome` are clean on the job and the whole test file.
+- **RV-03-28: the contract index is edited key by key (E2, E4, E5, E6; backlog round 1; major).** E2, E4, E5 and E6 each showed `packages/contract/src/index.ts` as a whole file, and each dropped keys an earlier task had added: E4's had no `meta` (E2) or `catalogue` (Plan 02 D10), so applying it as written would unmount those routers from the contract and the client. Each task now shows one import, one re-export and one new key, and says which keys stay. E10's `legal` fragment is a separate defect, handled with E10.
+- **RV-03-29: `LegalDocs.current` finds the PUBLISHED version in force, and E3's seed loads (E3; backlog round 2; major).** `current` ordered by `effective_from DESC`, where PostgreSQL puts NULLs first, and checked the status after `LIMIT 1`: an undated DRAFT v2 hid the PUBLISHED v1 and broke every consent for that key. It now filters `status = 'PUBLISHED'` and `effective_from` NULL or not after now, and orders `DESC NULLS LAST` (the query shape type-checks with drizzle-orm on `main`; not run on PostgreSQL). The seed's upsert now also sets `effective_from` on conflict (Plan 04 F1's replacement too, RV-04-F1-13). E3's seed and its sha256 test resolved `docs/legal/documents` five directories up, outside the repo; four is right from `src/cli` and `test/int`. The CLI's `match[1]`/`match[2]` failed `typecheck` under `noUncheckedIndexedAccess` and a missing `key` or `version` is now refused, and the root script builds and runs `dist`, because Node's type stripping cannot load `.js` specifiers from `src`. F1 still replaces the CLI and its scripts.
+- **RV-03-30: E4's tests type-check, and only `consents.cancel` takes an Idempotency-Key (E3, E4; backlog round 1; minor).** Four E4 assertions and one E3 query read a destructured row without a guard, which `typecheck` (it includes `test/`) refuses under `noUncheckedIndexedAccess`; they now use `?.`, or a guard where the row feeds a query. E4's Produces marked `sendOtp` and `approve` `[K]`, but its router, its contract and R-20 require the key on `cancel` only, which is right: an OTP verifies once and a resend is cooldown-bound.
+- **RV-03-31: E3's commands (E3; BRIEF D8 backlog; minor).** `@sanchay/domain` runs unfiltered (a filtered run fails its 95% coverage gate), `test:int` filters drop the literal `--` (pnpm 11 passes it through and runs every suite), and Steps 4 and 5 build the api's workspace dependencies before the api checks, because `@sanchay/domain` exports only `dist`.
+- **RV-03-32: the reference-data seed runs and type-checks (E6, E7, E3; backlog round 2; major).** `ops-ref-seed.ts` wrote `createdBy`/`updatedBy` into `ref_pincodes` and `ref_ifsc`, which have `stdColumns()` only (an excess-property error in `typecheck`), and its root script ran `src/cli/*.ts` under Node's type stripping, which cannot load the `.js` specifiers, so E6's and E7's Step 4 `pnpm ops:ref:seed` could not run. The inserts drop the two keys, the script builds and runs `dist` (as E3's now does), and both seed CLIs load `apps/api/.env` first, as Plan 01's `migrate.ts` does. Plan 04 F1 still replaces both CLIs and their scripts.
+- **RV-03-33: E8's and E9's BOLA checks run, and E9's and E10's public reads use a real harness (E8, E9, E10; backlog round 1; major).** `await expectBola(...)` sat directly in a `describe` body, so it ran at collection time and never as a test; each call is now its own `it`, which keeps the stated counts (E8 10, E9 6). `app.request.get(...)` does not exist on `TestApp`; the two public GETs now go through E8's `signedInInvestor` helper. E10's Step 4 count is 5, the number of its cases (it said 4).
+- **RV-03-34: one top-level `riskProfile` contract key (E9; backlog round 1; major).** E9's tests, E13's `RiskProfileScreen` and Plan 04 F9 call `riskProfile.questionnaire`, `riskProfile.get` and `riskProfile.submit`, but E9's contract appended flat `riskProfileQuestionnaire`/`riskProfileGet`/`riskProfileSubmit` keys to `onboardingContract`, so none of those names existed. E9 now declares `riskProfileContract` beside `onboardingContract` and adds the `riskProfile` key to the contract index; the routes and paths are unchanged.
+- **RV-03-35: E10 adds the `legal` key to the contract (E10; found in this round; major).** E10's fragment `export { legalContract as legal } from './legal.js'` only re-exported a name, so neither the server nor the client had any `legal.*` procedure. It is now a key-level edit like RV-03-28's.
+- **RV-03-36: a runbook stub for a failed provisioning (E11; backlog round 1; minor).** The sprint Definition of Done asks for a runbook stub per new failure mode, and Plan 04 F24 leaves `provisioning-failed.md` out because it is not a G-E8 item, so nobody wrote it. E11 now creates `docs/runbooks/provisioning-failed.md` from its own saga rules: the two failure reasons, the re-attest path (R-17) and what never to do by hand.
+- **RV-03-37: E10 calls E3's `LegalDocs` as E3 defines it (E10, E3, E13; found in this round; blocker).** E10 imported a `LegalDocsService` that E3 never exports (E3's class is `LegalDocs`), called `current(key)` where E3 takes `current(exec, key)`, and compared a `number` version with E3's text version (TS2367); `legal.getDocument` also returned E3's `{key, version, sha256}` without the `bodyMarkdown` its output schema requires. E10 now injects `LegalDocs` and `DB`, passes the transaction or the pool, and takes the version as a string, and E3's `current` also returns the body. E13's `acceptPending` fragment uses E10's `this.dbh.db` (it named a `this.db` that E10 never injected).
+- **RV-03-38: E5–E11 commands (E5–E11; BRIEF D8 backlog; minor).** As RV-03-31 for E3: 28 `--` filters dropped, `@sanchay/domain` unfiltered (duplicate domain lines merged), a build of the api's workspace dependencies before the first api or contract check in every Step 4 and Step 5, and E11's `git diff --exit-code apps/api/openapi.json` replaced by the drift test `pnpm --filter=@sanchay/api test openapi`.
+- **RV-03-39: E14's catalogue router reaches the database and its commission line prefers the scheme row (E14; backlog round 2 and the CAT review; blocker).** E14's full replacement of D10's router injected `DB` as a Drizzle `Database` again, so every catalogue call would answer 500 (Plan 02 RV-02-36); it now injects the `DbHandle` and passes `this.dbh.db`. `listSchemes` takes the contract's `ListSchemesInput` (its `{ q?: string }` parameter failed `typecheck` with TS2379), the cursor condition drops its `!`, and `resolveCommissionLine` sorts `coalesce(scheme_id = x, false)`, because an AMC row's `NULL = x` is NULL and DESC put it first, so the fund page showed the AMC range. The test drops an unused `eq` import, and its "requires a session" case sends the web client headers, without which Plan 01's client guard answers 403 before auth runs. Not run (E14 is not built); the shapes follow D10 as verified in RV-02-36.
+- **RV-03-40: E17's own tests pass on E17's own screens (E17; backlog round 1, seen when run; major).** `getByText('₹500.00')` matched both minimums, the commission regex also matched DSC-03, and `/High/` matched "Very High"; each threw "Found multiple elements". They now use the `ListRow` labels, the scheme's own commission line and `'Benchmark: High'`, as Plan 04 F19 found by running them. The fund page printed returns as `12.3400%` against its test's `12.34%`, and the TER through a signed `formatPct` (`+1.00%`); both now use `formatPct(value, { signed: false })`, which also prints the dash for a null. F19 keeps these (RV-04-F19-4).
+- **RV-03-41: E15's completeness stays within 100, and its seed helper passes `biome ci` (E15; backlog round 1 and the CAT review; major).** Seven tracked fields plus the SID+KIM slot were divided by 7, so a complete record scored 114 and broke `fund_facts_completeness_ck` on every fully populated scheme from S3 on; it divides by 8 now (`toBe(25)` for two fields), as F19 would have done in S4. `amc!.id` and `cat!.code` become a guard.
+- **RV-03-42: E14–E17 commands (E14–E17; BRIEF D8 backlog; minor).** As RV-03-31: 19 `--` filters dropped, a build of the api's workspace dependencies before the checks in E14's and E16's Steps 4 and 5 (E15 and E17 change no `dist` package), and E14's `git diff --exit-code apps/api/openapi.json` replaced by the drift test. E22's commands were already right (RV-03-19).
+- **RV-03-43: an unpaid purchase that FP fails ends FAILED, shown as "Payment not completed" (E21, E24; P-07 addendum; major).** P-07 found that FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day with `fp_payment_url_unused`, even after a simulated payment. E21's `mf_purchase` handler ignored orders in AWAITING_PAYMENT and PAYMENT_PENDING, so they stayed open; it now applies FP `failed`/`expired` there (Plan 02 D5 RV-02-78 allows it) and stores FP's `failure_code`, with no refund because nothing was paid. One new case (10 in `payments.int.test.ts`). E24's result screen treats FAILED and EXPIRED as final and shows "Payment not completed. This order is closed and no money was taken." for that code. Not run (E20/E21 are not built). Open: Cybrilla to confirm in writing that no money can be taken on such an order, and a backstop if the `mf_purchase` webhook is missed.
+- **RV-03-44: a refused payment nudge waits at most 2 minutes inside the payment window (E21; R-32 follow-up; minor).** Under R-32 the `payments.poll` queue is `stately`, so the return route's and the webhook's immediate nudge is refused while a delayed poll is queued, and the investor back from the PG waited for that poll: up to 15 minutes from the fourth poll on. The schedule is now 30 s, 1 m, then every 2 m for UPI's 30-minute window, then 15 m. This is the smallest correct change: pulling a queued pg-boss job forward needs a raw `UPDATE` on pg-boss's tables, and the request path never calls a provider. No test pins the delays.
+- **RV-03-45: E21's commands (E21; ADOPT follow-up; minor).** `test:int` drops the literal `--`, Steps 4 and 5 build the api's workspace dependencies first (E21 adds the `payments` contract key), Step 4's `git diff --exit-code apps/api/openapi.json` becomes the drift test, and Step 5 re-runs Step 4's suites (it ran only `payments orders`).
+- **RV-03-46: SYS-01 type-checks and has somewhere to render (E24; backlog rounds 1 and 2; blocker).** E24 passed `role` and `href` to Plan 01's `Button`, whose props have neither, made `PlatformAdapters.androidStoreUrl` and the client's `onVersionUnsupported` required without supplying them in `test-utils.tsx`, `WebAppProviders.tsx` or `AppProviders.tsx`, and rendered SYS-01 nowhere, so `features`, `web` and `mobile` failed `typecheck`. The button now opens the store with `Linking.openURL` (as Plan 01's LoginScreen opens its link) and its test asserts that call; the three adapters supply `androidStoreUrl`; `onVersionUnsupported` is optional (Android only; the web build always matches the API), and the mobile client replaces the route with a new `update-required` screen. Not run.
+- **RV-03-47: Plan 03's mobile routes sit behind sign-in (E24; backlog rounds 1 and 2; major).** The onboarding, lumpsum, confirm, pay, result and `r/[kind]` routes were at the Expo Router root but outside the signed-in `Stack.Protected`, so a signed-out deep link rendered them. E24 registers all eight after `(tabs)`, where Plan 04 F12 and F16 add theirs (RV-04-F12-2).
+- **RV-03-48: E13 answers the banner's `GET /legal/pending` in the two AppShell suites (E13; 2026-10-05 review and backlog round 1; major).** Once `AppShell` renders `LegalPendingBanner`, every AppShell render reads `/legal/pending`: Plan 01's `HomeScreen.test.tsx` (MSW with `onUnhandledRequest: 'error'`) fails its C9 AppShell cases, and Plan 02 D0's `AppShell.hydration.test.tsx` made a real request to `http://app.test`. E13 adds a default MSW handler to the first and a `fetchImpl` to the second. Open, for the owner: E13's banner and `DeclarationsScreen` read `legal.pending` as a list of `{key, version, title}` and stage `{keys}`, while E10's contract returns `{keys: string[]}` and `stageDeclarations` takes `{accept: [{key, version}]}`; the stubs answer `[]`, the shape the screens read, until that is settled (backlog).
+- **RV-03-49: the onboarding smoke reads real codes and is skipped in CI (E12, E13; backlog rounds 1 and 2; major).** It filled fixed OTPs (`000000`, `123456`) that Plan 01 does not have, needed the worker that CI's e2e job does not start, and signed up a number nobody invited, so CI's e2e job would be red from E12 on. Like RV-03-18's lumpsum smoke, it is skipped unless `SANCHAY_E2E_ONBOARDING_MOBILE` names an invited mobile, and it reads every code from Mailpit: Plan 01's `readLatestOtp` now delegates to a new `readLatestOtpTo(request, to, since)`, which also reads an email OTP. Not run.
+- **RV-03-50: E12's FATCA step has no non-null assertions (E12; found in this round; minor).** `FatcaScreen` built `PutProfileInput` from nine `draft.x!` reads, which `biome ci` refuses; a guard now sends an emptied draft (after a reload) back to the first profile step.
+- **RV-03-51: the consent-first check proves something (E4, E11; owner decision 2026-10-06; major).** A test file shares one FakeFp call log and one FakeClock, and no approve helper moved the clock, so a consumed challenge's window [created, consumed) was empty and `expectNoPmWritesBeforeConsumed` passed for nothing (E11's provisioning case, Plan 04 F2's two). The helper now fails when the window is empty and a P/M call sits on its edge. The approve helpers move the clock 1 ms before the create, so earlier tests' writes fall before the window, and 1 ms after approve, so the job's writes fall after it; 1 ms keeps every cut-off and TTL. The owner accepted the proposal with the before-create step added here, because the after-approve step alone would have put the previous test's writes inside the next window. E11 here, F2 and F5 in Plan 04 (RV-04-F2-6, RV-04-F5-2). Not run.
+- **RV-03-52: the risk questionnaire waits for a named sign-off (E9; R-36; major).** `seedRiskQuestionnaire` published v1.0.0 as `system:seed`, and only tests called it, so no environment had a questionnaire and the risk step could not open. The JSON now carries `approvedBy: null` in place of `"status": "PUBLISHED"`; the seed loads it as DRAFT until compliance names themself there, then publishes the DRAFT row on the next run and never changes a PUBLISHED one (`ON CONFLICT … DO UPDATE … WHERE status = 'DRAFT'`). Tests pass their own `approvedBy`. Plan 04 F1's `seedReferenceData` runs it on every deploy (RV-04-F1-14). Not run.
+- **RV-03-53: E20 ends a purchase FP expires before it is confirmed (E20; Plan 04 backlog, ADOPT follow-up; major).** E20's advance job rejected only FP `failed` and `review_failed`; an `expired` purchase in UNDER_REVIEW or CONFIRMING was re-enqueued for good. It now rejects `expired` too, as Plan 04 F5's `REVIEW_TERMINAL` does for redemptions. A CONFIRMING purchase whose saga window closed before `confirmed` was sent now returns instead of rethrowing `CONSENT_EXPIRED` on every retry; FP then expires it and the next re-fetch rejects it (Plan 04 F7's backstop re-enqueues the job, RV-04-F7-6). Not run.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -1602,22 +1628,14 @@ Later errata (found while writing Plan 04; already applied below):
   };
   ```
 
-  Fragment for `packages/contract/src/index.ts`:
+  Fragment for `packages/contract/src/index.ts` (key-level, RV-03-28; Plan 02 D10 has already added `catalogue`):
   ```ts
-  import { authContract } from './auth.js';
-  import { healthContract } from './health.js';
-  import { meContract } from './me.js';
+  // with the other imports
   import { metaContract } from './meta.js';
-
-  export * from './auth.js';
-  export * from './common.js';
-  export * from './errors.js';
-  export * from './health.js';
-  export * from './me.js';
+  // with the other re-exports
   export * from './meta.js';
-
-  export const contract = { health: healthContract, auth: authContract, me: meContract, meta: metaContract };
-  export type Contract = typeof contract;
+  // one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, D10's `catalogue`)
+    meta: metaContract,
   ```
 
   Fragment for `apps/api/src/config/env.ts` (add next to `SANCHAY_APP_ORIGIN`):
@@ -2038,7 +2056,7 @@ describe('requiredFactorsFor (H-21)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- jcs snapshot-v2 required-factors
+pnpm --filter=@sanchay/domain test
 ```
 Expected failure: `Cannot find module '../src/consent/jcs.js'` (and the two sibling modules) — none of the three source files exist yet.
 
@@ -2420,7 +2438,7 @@ export const consentSubjects = appSchema.table(
 `apps/api/src/modules/legal-consent/legal-docs.service.ts`:
 ```ts
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import type { LegalDocumentKey } from '@sanchay/domain';
 import { CLOCK, type Clock } from '../platform/clock.js';
@@ -2432,6 +2450,8 @@ export interface CurrentLegalDocument {
   key: LegalDocumentKey;
   version: string;
   sha256: string;
+  /** E10's `legal.getDocument` serves it (RV-03-37). */
+  bodyMarkdown: string;
 }
 
 export interface RecordAcceptanceInput {
@@ -2450,18 +2470,33 @@ export class LegalDocs {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  /** The single PUBLISHED version of `key`, newest `effectiveFrom` first. */
+  /**
+   * The PUBLISHED version of `key` in force now: the newest `effectiveFrom` that has arrived, and an
+   * undated version only when no dated one has (RV-03-29: PostgreSQL sorts NULLs first under DESC, so a
+   * DRAFT or undated row used to hide the PUBLISHED one).
+   */
   async current(exec: DbExecutor, key: LegalDocumentKey): Promise<CurrentLegalDocument> {
     const [row] = await (exec ?? this.dbh.db)
       .select()
       .from(legalDocuments)
-      .where(eq(legalDocuments.key, key))
-      .orderBy(desc(legalDocuments.effectiveFrom))
+      .where(
+        and(
+          eq(legalDocuments.key, key),
+          eq(legalDocuments.status, 'PUBLISHED'),
+          or(isNull(legalDocuments.effectiveFrom), lte(legalDocuments.effectiveFrom, this.clock.now())),
+        ),
+      )
+      .orderBy(sql`${legalDocuments.effectiveFrom} DESC NULLS LAST`)
       .limit(1);
-    if (row === undefined || row.status !== 'PUBLISHED') {
+    if (row === undefined) {
       throw new AppError('INTERNAL', { message: `no PUBLISHED legal_documents row for ${key}` });
     }
-    return { key: row.key as LegalDocumentKey, version: row.version, sha256: row.sha256.toString('hex') };
+    return {
+      key: row.key as LegalDocumentKey,
+      version: row.version,
+      sha256: row.sha256.toString('hex'),
+      bodyMarkdown: row.bodyMarkdown,
+    };
   }
 
   /**
@@ -2558,6 +2593,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
 import { legalDocuments } from '../modules/legal-consent/legal-consent.schema.js';
@@ -2567,24 +2603,31 @@ import { newId } from '../modules/platform/ids.js';
 function parseFrontMatter(body: string): { meta: Record<string, string>; markdown: string } {
   const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(body);
   if (match === null) throw new Error('ops:legal:seed: missing front matter');
+  const [, front = '', markdown = ''] = match;
   const meta: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
+  for (const line of front.split('\n')) {
     const [k, ...rest] = line.split(':');
     if (k === undefined || rest.length === 0) continue;
     meta[k.trim()] = rest.join(':').trim().replace(/^'(.*)'$/, '$1');
   }
-  return { meta, markdown: match[2].trim() };
+  return { meta, markdown: markdown.trim() };
 }
 
 async function main(): Promise<void> {
+  loadDotEnvFile(); // apps/api/.env, as Plan 01's migrate.ts
   const env = parseEnv(process.env);
   const db = createDb(env.DATABASE_URL);
-  const dir = path.resolve(fileURLToPath(new URL('../../../../../docs/legal/documents', import.meta.url)));
+  const dir = path.resolve(fileURLToPath(new URL('../../../../docs/legal/documents', import.meta.url)));
   const files = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort();
   let inserted = 0;
   for (const file of files) {
     const raw = await readFile(path.join(dir, file), 'utf8');
     const { meta, markdown } = parseFrontMatter(raw);
+    if (meta.key === undefined || meta.version === undefined) {
+      throw new Error(`ops:legal:seed: ${file} needs key and version in its front matter`);
+    }
+    const effectiveFrom = meta.effective_from === undefined ? null : new Date(meta.effective_from);
+    const status = (meta.status ?? 'DRAFT') as (typeof legalDocuments.$inferInsert)['status'];
     const sha256 = createHash('sha256').update(markdown, 'utf8').digest();
     await db.db
       .insert(legalDocuments)
@@ -2596,12 +2639,12 @@ async function main(): Promise<void> {
         version: meta.version,
         bodyMarkdown: markdown,
         sha256,
-        status: (meta.status ?? 'DRAFT') as (typeof legalDocuments.$inferInsert)['status'],
-        effectiveFrom: meta.effective_from === undefined ? null : new Date(meta.effective_from),
+        status,
+        effectiveFrom,
       })
       .onConflictDoUpdate({
         target: [legalDocuments.key, legalDocuments.version],
-        set: { bodyMarkdown: markdown, sha256, status: meta.status ?? 'DRAFT' },
+        set: { bodyMarkdown: markdown, sha256, status, effectiveFrom },
       });
     inserted += 1;
   }
@@ -2616,7 +2659,7 @@ main().catch((error: unknown) => {
 });
 ```
 
-Modify `package.json` — add one script line: `"ops:legal:seed": "pnpm --filter=@sanchay/api exec node --experimental-strip-types src/cli/ops-legal-seed.ts"`.
+Modify `package.json` — add one script line (RV-03-29: Node's type stripping cannot load `src/cli/*.ts`, whose imports end in `.js`, so the script builds and runs `dist`; Plan 04 F1 later moves the build into an `apps/api` script): `"ops:legal:seed": "pnpm --filter=@sanchay/api build && pnpm --filter=@sanchay/api exec node dist/cli/ops-legal-seed.js"`.
 
 The 30 legal document placeholders, one per `LEGAL_DOCUMENT_KEYS` entry, each with the same front-matter shape (`key`, `version: '1'`, `status: DRAFT` — counsel sign-off (G-C1) flips this to `PUBLISHED` in a later docs-only commit, per `LEGAL_COPY_STATUS = 'COUNSEL_PLACEHOLDER'` in `packages/domain/src/legal-entity.ts`) and a short counsel-placeholder body naming the operating entity where the document's own subject needs it:
 
@@ -3080,7 +3123,7 @@ describe('legal_consent schema and LegalDocs', () => {
 
   it('legal seed sha256 matches the body bytes', async () => {
     const dir = path.resolve(
-      fileURLToPath(new URL('../../../../../docs/legal/documents', import.meta.url)),
+      fileURLToPath(new URL('../../../../docs/legal/documents', import.meta.url)),
     );
     const raw = await readFile(path.join(dir, 'tnc.md'), 'utf8');
     const markdown = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
@@ -3123,6 +3166,7 @@ describe('legal_consent schema and LegalDocs', () => {
       sessionId: null,
     });
     const [row] = await ta.db.db.select().from(consentRecords).limit(1);
+    if (row === undefined) throw new Error('recordAcceptance wrote no consent_records row');
     await expect(
       ta.db.appPool.query('UPDATE app.consent_records SET channel = $1 WHERE id = $2', [
         'X',
@@ -3139,14 +3183,15 @@ describe('legal_consent schema and LegalDocs', () => {
 - [ ] **Step 2 (API side): Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test:int -- legal-consent
+pnpm --filter=@sanchay/api test:int legal-consent
 ```
 Expected failure: `Cannot find module '../../src/modules/legal-consent/legal-consent.schema.js'` — the module does not exist yet.
 
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/domain test -- jcs snapshot-v2 required-factors
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=legal_consent
 pnpm --filter=@sanchay/api db:generate --custom --name=legal_consent_grants
 ```
@@ -3157,7 +3202,7 @@ REVOKE UPDATE, DELETE ON app.consent_records FROM sanchay_app;
 Then:
 ```
 pnpm --filter=@sanchay/api db:check
-pnpm --filter=@sanchay/api test:int -- legal-consent
+pnpm --filter=@sanchay/api test:int legal-consent
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/domain typecheck
 ```
@@ -3167,8 +3212,9 @@ Expected: all suites green; `db:check` reports no drift between the Drizzle sche
 
 ```
 pnpm exec biome check --write packages/domain/src/consent packages/domain/test/jcs.test.ts packages/domain/test/snapshot-v2.test.ts packages/domain/test/required-factors.test.ts packages/domain/src/index.ts apps/api/src/modules/legal-consent apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/src/cli/ops-legal-seed.ts apps/api/test/int/legal-consent.int.test.ts docs/legal/documents package.json
-pnpm --filter=@sanchay/domain test -- jcs snapshot-v2 required-factors
-pnpm --filter=@sanchay/api test:int -- legal-consent
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int legal-consent
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
@@ -3188,7 +3234,7 @@ git commit -m "feat(legal-consent): sanchay.consent.v2 snapshot, JCS hashing and
 - Prerequisites: E3 (`legal_documents`, `consent_challenges`, `consent_records`, `consent_subjects`, `LegalDocs`, `SNAPSHOT_BUILDERS`, `canonicalize`, `snapshotSha256`, `requiredFactorsFor`).
 - Consumes (Plan-01 ground truth): `OtpService.issue(input: IssueOtpInput): Promise<IssuedOtp>` and `OtpService.verify(exec, {challengeId, purpose, code}): Promise<VerifiedOtp>` — note `challengeId` here is the **otp_codes row id**, not the consent challenge id (`apps/api/src/modules/identity/otp.service.ts`); `type ConsentSms`, `renderConsentSms`, `SMS_TEMPLATE_IDS` (`apps/api/src/integrations/sms/templates.ts`); `AuditService.record`, `AUDIT_ACTIONS`; `Crypto`; `CLOCK`/`Clock`/`FakeClock`, `MINUTE`/`HOUR`/`DAY`/`SECOND`; `AppError`; `newId`/`asRowId`; `investors`, `investorContacts` (`apps/api/src/modules/identity/identity.schema.ts`); `InvestorAccounts.decryptMobile(row)` (`identity/investor-accounts.service.ts`, exported by `IdentityModule`) and `maskMobile` (`identity/masking.ts`); `bootTestApp`; `errorMap`, `COMMON_ERRORS`, `SESSION_ERRORS`, `ERROR_CATALOGUE` (`@sanchay/contract`); `route`/`oc` contract pattern from `packages/contract/src/auth.ts`.
 - Consumes (Plan 02, as built): `Jobs` (D2, injectable: `enqueue(exec, name, data, opts?)`), class-level `@JobHandler`, `type Job<N>`, `type JobName` (`jobs/job-registry.ts`; `consent.expiry.sweep` and `drafts.abandon` are already in `JOB_NAMES`), `registerSchedules` (`jobs/schedules.ts`); `type ConsumedConsent`, `assertConsumed` (D3, `apps/api/src/integrations/fp/consumed-consent.ts`); `CHALLENGE_STATUSES`, `type ChallengeStatus` (D5, `@sanchay/domain`); `bootFpTestApp`, `type FpTestApp`, `FakeFp.calls()` (D4, `apps/api/test/int/fake-fp.ts`; call-log `at` is stamped from the app `Clock`); `AppConfig` (Plan 01).
-- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void>` (RV-03-1), `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp` [K], `consents.approve` POST `.../{id}/approve` [K], `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
+- Produces: `ConsentEngine` (`create`, `sendOtp`, `approve`, `cancel`, `markUnused(exec: DbExecutor, challengeId: string, reason: string): Promise<void>` (RV-03-1), `useConsumed(challengeId, fn: (consent: ConsumedConsent) => Promise<T>)`, worker role only); `CONSENT_SUBJECT_JOBS: Partial<Record<ConsentSubjectType, JobName>>` and `type ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds: string[]}` (subject tasks register their job at module load: E11 `ONBOARDING_ATTEST → 'onboarding.provision'`, E20 `PURCHASE → 'orders.purchase.submit'`, F2 plans/mandates; `approve` enqueues it in its own transaction with `singletonKey = challengeId`); `SUITABILITY_HOOK` token and `type SuitabilityHook` (E9 overrides the no-op); `ConsentSweepJob` (`consent.expiry.sweep`, */5) and `DraftsAbandonJob` (`drafts.abandon`, hourly), both `@JobHandler` classes; `ConsentDestinationResolver.resolve(exec, investorId, folioId)`; `consent.router.ts` implementing `consents.getChallenge` GET `/consents/challenges/{id}`, `consents.sendOtp` POST `.../{id}/otp`, `consents.approve` POST `.../{id}/approve` (no Idempotency-Key: an OTP verifies once and a resend is cooldown-bound; R-20 names `cancel` only, RV-03-30), `consents.cancel` POST `.../{id}/cancel` [K]; jobs `consent.expiry.sweep` (*/5) and `drafts.abandon` (hourly, 24 h); `packages/contract/src/consents.ts` (`consentsContract`); test helpers `expectNoPmWritesBeforeConsumed(fakeFp, challengeId)` and `expectBola(app, procedureKey, foreignIdArgs)`; custom migration `consent_guard` creating the plpgsql function `app.trg_consent_guard()`.
 - Review fix (Plan 02 as built): `ConsumedConsent`/`assertConsumed` come from D3 and `CHALLENGE_STATUSES` from D5; there are no local copies. `useConsumed` mints the D3 brand (`subjectIds` are the subject row ids) and checks it with `assertConsumed`. It refuses unless `SANCHAY_APP_ROLE === 'worker'` (from `AppConfig`), replacing the draft's `asWorker()` object-copy.
 - Review fix: `ConsentRouter` uses Plan 01's `@Controller` + `@Implement` pattern (the draft's `implement(...).router(...)` object on an `@Injectable` would never have been mounted), checks that every challenge belongs to the signed-in investor (the draft let any investor read, send, approve or cancel any challenge), and applies `requireIdempotency(idem, cls)` to `cancel` (the draft called it with no arguments).
 - Review fix: both sweeps are `@JobHandler` classes whose `handle(job)` calls `run()`, scheduled through `registerSchedules` (`consent.expiry.sweep` `*/5 * * * *`, `drafts.abandon` `0 * * * *`). `LegalConsentModule` injects real tokens (`DB`, `CLOCK`, `Crypto`, `OtpService` from `IdentityModule`, the global `Jobs`), not string tokens and not a no-op `JOBS`. Tests boot the worker app with FakeFp and spy on the injected `Jobs`.
@@ -3214,7 +3260,11 @@ import type { FpTestApp } from './fake-fp.js';
  * The canonical consent-first assertion (outline §0.1): "FakeFp has zero P/M writes before CONSUMED".
  * FakeFp stamps its call log from the app Clock, the same clock that writes `created_at` (RV-03-4) and
  * `consumed_at`. The structural guard (FpTransport requires a ConsumedConsent for P/M) is primary; this
- * checks the flow.
+ * checks the flow. A file shares one FakeFp log and one FakeClock, so the window [created, consumed)
+ * means something only when the test moves the clock 1 ms before the create (earlier tests' writes fall
+ * before it) and 1 ms after approve (the job's writes fall after it): the approve helpers do both
+ * (owner decision 2026-10-06, RV-03-51). A consumed challenge with an empty window and a P/M call on
+ * its edge fails here instead of passing for nothing.
  */
 export async function expectNoPmWritesBeforeConsumed(app: FpTestApp, challengeId: string): Promise<void> {
   const [challenge] = await app.db.db
@@ -3224,9 +3274,12 @@ export async function expectNoPmWritesBeforeConsumed(app: FpTestApp, challengeId
   expect(challenge, `consent challenge ${challengeId} exists`).toBeDefined();
   const since = challenge?.createdAt.getTime() ?? 0;
   const consumedAt = challenge?.consumedAt?.getTime() ?? Number.POSITIVE_INFINITY;
-  const early = app.fakeFp
-    .calls()
-    .filter((c) => (c.class === 'P' || c.class === 'M') && c.at >= since && c.at < consumedAt);
+  const pm = app.fakeFp.calls().filter((c) => c.class === 'P' || c.class === 'M');
+  expect(
+    consumedAt > since || !pm.some((c) => c.at === since),
+    'move the FakeClock 1 ms before the create and 1 ms after approve, or this check proves nothing',
+  ).toBe(true);
+  const early = pm.filter((c) => c.at >= since && c.at < consumedAt);
   expect(early, 'FakeFp has zero P/M writes before CONSUMED').toHaveLength(0);
 }
 ```
@@ -3430,7 +3483,7 @@ describe('ConsentEngine.approve', () => {
       .select()
       .from(consentRecords)
       .where(eq(consentRecords.challengeId, c.challengeId));
-    expect(record.deliveryEvidence).not.toBeNull();
+    expect(record?.deliveryEvidence ?? null).not.toBeNull();
     expect(enqueued).toEqual([]); // no job registered for PURCHASE until E20
   });
 
@@ -3461,12 +3514,12 @@ describe('ConsentEngine.approve', () => {
       .select()
       .from(otpCodes)
       .where(and(eq(otpCodes.referenceId, c.challengeId), isNull(otpCodes.consumedAt)));
-    expect(otpRow.attempts).toBe(1);
+    expect(otpRow?.attempts).toBe(1);
     const [challenge] = await ta.db.db
       .select()
       .from(consentChallenges)
       .where(eq(consentChallenges.id, c.challengeId));
-    expect(challenge.status).toBe('PENDING');
+    expect(challenge?.status).toBe('PENDING');
   });
 
   it('a tampered subject row after create is caught: CONSENT_MISMATCH, SUPERSEDED, no job enqueued', async () => {
@@ -3484,7 +3537,7 @@ describe('ConsentEngine.approve', () => {
       .select()
       .from(consentChallenges)
       .where(eq(consentChallenges.id, c.challengeId));
-    expect(challenge.status).toBe('SUPERSEDED');
+    expect(challenge?.status).toBe('SUPERSEDED');
     expect(enqueued).toHaveLength(0);
   });
 
@@ -4740,22 +4793,14 @@ export const consentsContract = {
 };
 ```
 
-Modify `packages/contract/src/index.ts`:
+Modify `packages/contract/src/index.ts` (key-level, RV-03-28):
 ```ts
-import { authContract } from './auth.js';
+// with the other imports
 import { consentsContract } from './consents.js';
-import { healthContract } from './health.js';
-import { meContract } from './me.js';
-
-export * from './auth.js';
-export * from './common.js';
+// with the other re-exports
 export * from './consents.js';
-export * from './errors.js';
-export * from './health.js';
-export * from './me.js';
-
-export const contract = { health: healthContract, auth: authContract, me: meContract, consents: consentsContract };
-export type Contract = typeof contract;
+// one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, D10's `catalogue`, E2's `meta`)
+  consents: consentsContract,
 ```
 
 `apps/api/src/modules/legal-consent/consent.router.ts` (Plan 01's `@Controller` + `@Implement` pattern; every procedure first proves the challenge belongs to the signed-in investor, so a foreign id is 404, never readable or actionable):
@@ -5113,7 +5158,7 @@ describe('deriveOnboardingStage (ONB-00 hub order)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- onboarding-stage
+pnpm --filter=@sanchay/domain test
 ```
 Expected failure: `Cannot find module '../src/rules/onboarding-stage.js'` — the file does not exist yet.
 
@@ -5704,27 +5749,14 @@ And append to `meContract` (after `verifyEmail`):
 ```
 (`import { OnboardingStageSchema } from './onboarding.js';` is placed with the other relative imports at the top of the file rather than inline — shown inline above only to mark where the new export sits.)
 
-Modify `packages/contract/src/index.ts`:
+Modify `packages/contract/src/index.ts` (key-level, RV-03-28):
 ```ts
-import { authContract } from './auth.js';
-import { healthContract } from './health.js';
-import { meContract } from './me.js';
+// with the other imports
 import { onboardingContract } from './onboarding.js';
-
-export * from './auth.js';
-export * from './common.js';
-export * from './errors.js';
-export * from './health.js';
-export * from './me.js';
+// with the other re-exports
 export * from './onboarding.js';
-
-export const contract = {
-  health: healthContract,
-  auth: authContract,
-  me: meContract,
+// one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, `catalogue`, `meta`, E4's `consents`)
   onboarding: onboardingContract,
-};
-export type Contract = typeof contract;
 ```
 
 Modify `apps/api/src/modules/platform/ids.ts`:
@@ -5859,8 +5891,9 @@ describe('GET /me', () => {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/domain test -- onboarding-stage
+pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/domain typecheck
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=onboarding_core
 pnpm --filter=@sanchay/api test:int onboarding-get
 pnpm --filter=@sanchay/api typecheck
@@ -5873,7 +5906,8 @@ Expected: 12/12 in `onboarding-stage.test.ts`; a new `apps/api/drizzle/000X_onbo
 
 ```
 pnpm exec biome check --write packages/domain/src/rules packages/domain/test/onboarding-stage.test.ts packages/domain/src/investor.ts packages/domain/src/index.ts apps/api/src/modules/onboarding apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/test/int/onboarding-get.int.test.ts packages/contract/src/onboarding.ts packages/contract/src/me.ts packages/contract/src/index.ts
-pnpm --filter=@sanchay/domain test -- onboarding-stage
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int onboarding-get
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
@@ -6661,6 +6695,7 @@ pincode,city,state
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
 import { refPincodes } from '../modules/onboarding/ref.schema.js';
@@ -6675,6 +6710,7 @@ function parseCsv(raw: string): string[][] {
 }
 
 async function main(): Promise<void> {
+  loadDotEnvFile(); // apps/api/.env, as Plan 01's migrate.ts
   const env = parseEnv(process.env);
   const db = createDb(env.DATABASE_URL);
   const dataDir = path.resolve(fileURLToPath(new URL('../../../../data', import.meta.url)));
@@ -6684,7 +6720,7 @@ async function main(): Promise<void> {
     if (!pincode || !city || !state) continue;
     await db.db
       .insert(refPincodes)
-      .values({ id: newId('ref_pincodes'), createdBy: 'ops:ref:seed', updatedBy: 'ops:ref:seed', pincode, city, state })
+      .values({ id: newId('ref_pincodes'), pincode, city, state }) // ref_pincodes has stdColumns() only (RV-03-32)
       .onConflictDoUpdate({ target: refPincodes.pincode, set: { city, state } });
     upserted += 1;
   }
@@ -6699,7 +6735,7 @@ main().catch((error: unknown) => {
 });
 ```
 
-Modify `package.json` — add one script line: `"ops:ref:seed": "pnpm --filter=@sanchay/api exec node --experimental-strip-types src/cli/ops-ref-seed.ts"`.
+Modify `package.json` — add one script line (RV-03-32, as E3's: Node's type stripping cannot load `src/cli/*.ts`; Plan 04 F1 later moves the build into an `apps/api` script): `"ops:ref:seed": "pnpm --filter=@sanchay/api build && pnpm --filter=@sanchay/api exec node dist/cli/ops-ref-seed.js"`.
 
 `packages/contract/src/ref.ts`:
 ```ts
@@ -6723,19 +6759,14 @@ export const refContract = {
 };
 ```
 
-Modify `packages/contract/src/index.ts`:
+Modify `packages/contract/src/index.ts` (key-level, RV-03-28):
 ```ts
+// with the other imports
 import { refContract } from './ref.js';
-// ...
+// with the other re-exports
 export * from './ref.js';
-// ...
-export const contract = {
-  health: healthContract,
-  auth: authContract,
-  me: meContract,
-  onboarding: onboardingContract,
+// one new key in the `contract` object; every existing key stays (`health`, `auth`, `me`, `catalogue`, `meta`, `consents`, E5's `onboarding`)
   ref: refContract,
-};
 ```
 
 Modify `packages/contract/src/onboarding.ts` — append two input schemas and two procedures:
@@ -6843,6 +6874,7 @@ Modify `apps/api/src/modules/platform/ids.ts` — add `'ref_pincodes'` to the `T
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=ref_pincodes
 pnpm --filter=@sanchay/api test:int onboarding-identity
 pnpm --filter=@sanchay/api typecheck
@@ -6855,6 +6887,7 @@ Expected: a new `apps/api/drizzle/000X_ref_pincodes.sql`; `onboarding-identity.i
 
 ```
 pnpm exec biome check --write apps/api/src/integrations/fp/pre-verification.ts apps/api/src/integrations/fp/pre-verification.test.ts apps/api/src/modules/onboarding apps/api/src/app.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/cli/ops-ref-seed.ts apps/api/test/int/onboarding-identity.int.test.ts packages/contract/src/onboarding.ts packages/contract/src/ref.ts packages/contract/src/index.ts apps/api/src/modules/platform/ids.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int onboarding-identity
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
@@ -7135,7 +7168,7 @@ describe('POST /onboarding/bank-accounts', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- name-match
+pnpm --filter=@sanchay/domain test
 ```
 Expected: `packages/domain` fails with `Cannot find module '../src/rules/name-match.js'`; `apps/api` fails to resolve `../../src/modules/onboarding/bank.schema.js` (or, if `pnpm install` has not yet linked the freshly created `@sanchay/test-fixtures` workspace package, run `pnpm install` first).
 
@@ -7617,7 +7650,7 @@ import { refIfsc } from '../modules/onboarding/ref.schema.js';
     if (!ifsc || !bankName || !branchName) continue;
     await db.db
       .insert(refIfsc)
-      .values({ id: newId('ref_ifsc'), createdBy: 'ops:ref:seed', updatedBy: 'ops:ref:seed', ifsc, bankName, branchName })
+      .values({ id: newId('ref_ifsc'), ifsc, bankName, branchName }) // stdColumns() only (RV-03-32)
       .onConflictDoUpdate({ target: refIfsc.ifsc, set: { bankName, branchName } });
     ifscUpserted += 1;
   }
@@ -7701,8 +7734,9 @@ Modify `apps/api/src/modules/platform/ids.ts` — add `'bank_accounts'` and `'re
 
 ```
 pnpm install
-pnpm --filter=@sanchay/domain test -- name-match
+pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/domain typecheck
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=bank_accounts_ref_ifsc
 pnpm --filter=@sanchay/api test:int onboarding-bank
 pnpm --filter=@sanchay/api typecheck
@@ -7715,7 +7749,8 @@ Expected: `name-match.test.ts` 25/25 (12 score assertions + 12 threshold asserti
 
 ```
 pnpm exec biome check --write packages/domain/src/rules packages/domain/test/name-match.test.ts packages/domain/src/investor.ts packages/domain/tsconfig.json packages/test-fixtures apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/cli/ops-ref-seed.ts apps/api/test/int/onboarding-bank.int.test.ts packages/contract/src/onboarding.ts packages/contract/src/ref.ts apps/api/src/modules/platform/ids.ts
-pnpm --filter=@sanchay/domain test -- name-match
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int onboarding-bank
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
@@ -8051,15 +8086,20 @@ describe('onboarding.putNomination / getNomination', () => {
     expect(decision?.displayPreference).toBeNull();
   });
 
-  await expectBola(app, 'onboarding.getNomination', {});
-  await expectBola(app, 'onboarding.putNomination', {});
+  it('BOLA: onboarding.getNomination (RV-03-33)', async () => {
+    await expectBola(app, 'onboarding.getNomination', {});
+  });
+
+  it('BOLA: onboarding.putNomination (RV-03-33)', async () => {
+    await expectBola(app, 'onboarding.putNomination', {});
+  });
 });
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
 ```
-pnpm --filter=@sanchay/domain test -- nominee-split
-pnpm --filter=@sanchay/api test:int -- nomination
+pnpm --filter=@sanchay/domain test
+pnpm --filter=@sanchay/api test:int nomination
 ```
 Expected: `packages/domain` fails with `Cannot find module '../src/rules/nominee-split.js'`; `apps/api` fails to boot the test app because `onboarding.getNomination`/`putNomination` are not on the contract (or, if `@sanchay/test-fixtures` was not yet created by E7's worktree, `pnpm install` first fails to resolve the workspace package — run `pnpm install` before Step 2 in that case).
 
@@ -8502,10 +8542,11 @@ export const NominationViewSchema = z.object({
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
-pnpm --filter=@sanchay/domain test -- nominee-split
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=nominees
 pnpm --filter=@sanchay/api db:generate --custom --name=nominees_set_sum
-pnpm --filter=@sanchay/api test:int -- nomination
+pnpm --filter=@sanchay/api test:int nomination
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
 ```
@@ -8514,8 +8555,9 @@ Expected: 6/6 golden-vector cases and the 3 extra `nominee-split.test.ts` cases 
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write packages/domain/src/rules/nominee-split.ts packages/domain/test/nominee-split.test.ts packages/test-fixtures apps/api/src/modules/onboarding/nomination.service.ts apps/api/src/modules/onboarding/nomination.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/nomination.int.test.ts packages/contract/src/onboarding.ts
-pnpm --filter=@sanchay/domain test -- nominee-split
-pnpm --filter=@sanchay/api test:int -- nomination
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int nomination
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add packages/domain/src/rules/nominee-split.ts packages/domain/test/nominee-split.test.ts packages/test-fixtures apps/api/src/modules/onboarding/nomination.service.ts apps/api/src/modules/onboarding/nomination.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/nomination.int.test.ts apps/api/drizzle packages/contract/src/onboarding.ts
@@ -8545,7 +8587,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/src/modules/identity/identity.schema.ts` (add `investors.current_risk_profile_id`)
   - `apps/api/src/modules/onboarding/onboarding.router.ts` (append `riskProfile.*` handlers)
   - `apps/api/src/modules/onboarding/onboarding.module.ts` (register `RiskProfileService`, `SuitabilityService`)
-  - `packages/contract/src/onboarding.ts` (append `riskProfile.questionnaire/get/submit`)
+  - `packages/contract/src/onboarding.ts` (append `riskProfileContract` with `questionnaire`/`get`/`submit`), `packages/contract/src/index.ts` (one `riskProfile` key, RV-03-34)
   - `apps/api/src/modules/platform/ids.ts` (append the four new table names)
   - `apps/api/src/modules/platform/audit.service.ts` (append `ONBOARDING_RISK_PROFILE_SUBMITTED`)
 - Generated: `apps/api/drizzle/<n>_risk_suitability.sql` (`db:generate --name=risk_suitability`: the four tables and `investors.current_risk_profile_id`) and `apps/api/drizzle/<n+1>_risk_suitability_guards.sql` (`db:generate --custom --name=risk_suitability_guards`: the FK and the append-only REVOKE). Also modify `packages/domain/src/rules/index.ts` (append `export * from './risk-scoring.js';` and `export * from './suitability.js';`); `@sanchay/domain` exports only `.`, so the API imports these from `@sanchay/domain`.
@@ -8569,7 +8611,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
     - `scoreRiskQuestionnaire(dob: string, answers: RiskQuestionnaireAnswers, asOf: string): RiskScoreResult` — `{ rawScore, level, maxRiskometer, cappedBy: string[] }`. Bands and caps exactly per GAP-03 §1: 8–13 CONSERVATIVE/LOW_TO_MODERATE, 14–18 MOD_CONSERVATIVE/MODERATE, 19–23 MODERATE/MODERATELY_HIGH, 24–28 MOD_AGGRESSIVE/HIGH, 29–32 AGGRESSIVE/VERY_HIGH; `horizon === '<1'` caps at CONSERVATIVE; `horizon === '1-3' || reaction === 'SELL_ALL'` caps at MOD_CONSERVATIVE; the final level is the more conservative of the score band and any triggered cap.
   - `packages/domain/src/rules/suitability.ts`:
     - `compareRiskometer(maxAllowed: Riskometer, schemeRiskometer: Riskometer): 'MATCH' | 'MISMATCH'` — pure, via `RISKOMETER_LEVELS` index comparison.
-  - `data/risk-questionnaire-v1.0.0.json` — the compliance-owned questionnaire body (GAP-03 §1 wording, semver `1.0.0`, `requiresRetake: false`), seeded via the `pnpm ops:catalogue:seed` CLI that E15 extends (this task only writes the JSON and the `risk_questionnaires` row insert helper `seedRiskQuestionnaire(tx)`, exported from `risk-profile.service.ts`, since a dedicated ops CLI is out of this task's scope).
+  - `data/risk-questionnaire-v1.0.0.json` — the compliance-owned questionnaire body (GAP-03 §1 wording, semver `1.0.0`, `requiresRetake: false`, `approvedBy: null` until compliance signs it off, R-36), seeded via the `pnpm ops:catalogue:seed` CLI that E15 extends (this task only writes the JSON and the `risk_questionnaires` row insert helper `seedRiskQuestionnaire(tx)`, exported from `risk-profile.service.ts`, since a dedicated ops CLI is out of this task's scope).
   - Tables (migration `risk_suitability`):
     - `risk_questionnaires`: `id`, std columns, `version` text (semver), `status` text CHECK (`DRAFT`,`PUBLISHED`,`SUPERSEDED`), `questions_and_scoring` jsonb, `sha256` bytea, `effective_at` tstz nullable, `approved_by` text nullable.
     - `risk_profiles` (status transitions in place — see design note below; **not** grant-revoked the way `consent_records`/`audit_events` are, because `status` must move ACTIVE→STALE/EXPIRED/SUPERSEDED after insert): `investor_id` FK, `questionnaire_id` FK, `answers` jsonb, `raw_score` smallint, `caps` jsonb (`string[]`), `level` text CHECK IN `RISK_LEVELS`, `max_riskometer` text CHECK IN `RISKOMETER_LEVELS`, `status` text CHECK (`ACTIVE`,`STALE`,`EXPIRED`,`SUPERSEDED`), `completed_at` tstz, `expires_at` tstz, `source` text (`'ONBOARDING'|'RETAKE'`), `ip` inet nullable, `ua` text nullable.
@@ -8583,7 +8625,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `SuitabilityService` (`Suitability.check`), the **E4 `SuitabilityHook`** implementation:
     - `export type SuitabilityHook = (tx: Tx, args: { investorId: string; schemeId: string; schemeRiskometer: Riskometer; fundFactsAsOf: Date }) => Promise<{ outcome: 'MATCH' | 'MISMATCH'; level: RiskLevel; maxRiskometer: Riskometer; riskProfileId: string }>` exported from `suitability.service.ts`. **Deviation from outline:** E4 (`consent-engine.ts`) does not exist in the current codebase (it is a Plan-03 sibling task, not yet implemented), so this task cannot wire a registry the way the outline's "registered as the E4 SuitabilityHook" phrasing implies. This task only produces the hook with the exact signature E4 will import; no file outside this task's own list is touched.
     - `Suitability.check(tx, { investorId, schemeId, schemeRiskometer, fundFactsAsOf })`: reads the investor's `ACTIVE` `risk_profiles` row (throwing `RISK_PROFILE_EXPIRED`/`RISK_PROFILE_STALE`/`ONBOARDING_INCOMPLETE` — reusing the existing `ERROR_CATALOGUE` codes, no new code needed — when missing/expired/stale), calls `compareRiskometer`, inserts a `suitability_checks` row (MATCH rows too, per the outline), and returns the hook result.
-  - Procedures (append to `onboardingContract`): `riskProfile.questionnaire` GET `/risk-profile/questionnaire` (P); `riskProfile.get` GET `/risk-profile` (I); `riskProfile.submit` PUT `/risk-profile` [K] (I).
+  - Procedures (a top-level `riskProfile` contract key, RV-03-34; the tests, E13's screens and Plan 04 F9 call these names): `riskProfile.questionnaire` GET `/risk-profile/questionnaire` (P); `riskProfile.get` GET `/risk-profile` (I); `riskProfile.submit` PUT `/risk-profile` [K] (I).
   - No new `ERROR_CATALOGUE` entries: `RISK_PROFILE_EXPIRED`, `RISK_PROFILE_STALE` and `SUITABILITY_CHANGED` are already declared in `packages/contract/src/errors.ts` (Plan-01 B5).
 
 - [ ] **Step 1: Write the failing tests**
@@ -8592,7 +8634,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
 ```json
 {
   "version": "1.0.0",
-  "status": "PUBLISHED",
+  "approvedBy": null,
   "requiresRetake": false,
   "questions": [
     { "id": "Q1", "text": "Age", "derivedFromDob": true },
@@ -8783,7 +8825,7 @@ const ANSWERS_AGGRESSIVE = {
 
 beforeAll(async () => {
   app = await bootTestApp();
-  await seedRiskQuestionnaire(app.db.db);
+  await seedRiskQuestionnaire(app.db.db, { approvedBy: 'test' }); // R-36: the shipped file is unsigned
 });
 
 afterAll(async () => {
@@ -8792,7 +8834,8 @@ afterAll(async () => {
 
 describe('riskProfile.questionnaire / get / submit', () => {
   it('publishes the sha-pinned questionnaire', async () => {
-    const res = await app.request.get('/api/v1/risk-profile/questionnaire');
+    const { req } = await signedInInvestor(app); // TestApp has no `request` (RV-03-33)
+    const res = await req.get('/api/v1/risk-profile/questionnaire');
     expect(res.status).toBe(200);
     expect(res.body.version).toBe('1.0.0');
     expect(res.body.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -8834,16 +8877,20 @@ describe('riskProfile.questionnaire / get / submit', () => {
     expect(res.body.status).toBe('EXPIRED');
   });
 
-  await expectBola(app, 'riskProfile.get', {});
-  await expectBola(app, 'riskProfile.submit', {});
+  it('BOLA: riskProfile.get (RV-03-33)', async () => {
+    await expectBola(app, 'riskProfile.get', {});
+  });
+
+  it('BOLA: riskProfile.submit (RV-03-33)', async () => {
+    await expectBola(app, 'riskProfile.submit', {});
+  });
 });
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
 ```
-pnpm --filter=@sanchay/domain test -- risk-scoring
-pnpm --filter=@sanchay/domain test -- suitability
-pnpm --filter=@sanchay/api test:int -- risk-profile
+pnpm --filter=@sanchay/domain test
+pnpm --filter=@sanchay/api test:int risk-profile
 ```
 Expected: both domain suites fail with "Cannot find module"; the API suite fails to boot (`seedRiskQuestionnaire` and `riskProfile.*` procedures do not exist).
 
@@ -9114,7 +9161,7 @@ REVOKE UPDATE, DELETE ON app.suitability_acknowledgements FROM sanchay_app;
 ```ts
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { scoreRiskQuestionnaire, type RiskQuestionnaireAnswers } from '@sanchay/domain';
 import { DB, type DbHandle, type Database } from '../../db/client.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
@@ -9128,19 +9175,36 @@ import questionnaireBody from '../../../../../data/risk-questionnaire-v1.0.0.jso
 
 const TWENTY_FOUR_MONTHS_MS = 24 * 30 * 24 * 60 * 60 * 1000;
 
-export async function seedRiskQuestionnaire(db: Database): Promise<void> {
+/**
+ * R-36 (owner decision 2026-10-06): the compliance-owned questionnaire is published only with a named
+ * sign-off. The JSON's `approvedBy` stays null until compliance signs it off in a docs-only commit (like
+ * G-C1 for the legal documents); until then the row loads as DRAFT and the risk step stays closed. A
+ * re-run after the sign-off publishes the DRAFT row; a PUBLISHED row never changes. Plan 04 F1's
+ * `seedReferenceData` runs this on every deploy; tests pass their own `approvedBy`.
+ */
+export async function seedRiskQuestionnaire(
+  db: Database,
+  options: { approvedBy?: string | undefined } = {},
+): Promise<void> {
+  const approvedBy = options.approvedBy ?? questionnaireBody.approvedBy ?? null;
+  const status = approvedBy === null ? 'DRAFT' : 'PUBLISHED';
+  const effectiveAt = approvedBy === null ? null : new Date();
   const sha256 = createHash('sha256').update(JSON.stringify(questionnaireBody)).digest();
   await db
     .insert(riskQuestionnaires)
     .values({
       version: questionnaireBody.version,
-      status: 'PUBLISHED',
+      status,
       questionsAndScoring: questionnaireBody,
       sha256,
-      effectiveAt: new Date(),
-      approvedBy: 'system:seed',
+      effectiveAt,
+      approvedBy,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: riskQuestionnaires.version,
+      set: { status, questionsAndScoring: questionnaireBody, sha256, effectiveAt, approvedBy },
+      setWhere: sql`${riskQuestionnaires.status} = 'DRAFT'`,
+    });
 }
 
 export interface RiskProfileView {
@@ -9376,32 +9440,42 @@ export const RiskProfileViewSchema = z.object({
   questionnaireVersion: z.string(),
 });
 
-// append to `onboardingContract`:
-  riskProfileQuestionnaire: oc
+// a sibling of `onboardingContract`, mounted as the top-level `riskProfile` key (RV-03-34):
+export const riskProfileContract = {
+  questionnaire: oc
     .route({ method: 'GET', path: '/risk-profile/questionnaire', tags: ['onboarding'] })
     .errors(errorMap(...COMMON_ERRORS))
     .output(z.object({ version: z.string(), sha256: z.string(), questions: z.array(z.unknown()) })),
-  riskProfileGet: oc
+  get: oc
     .route({ method: 'GET', path: '/risk-profile', tags: ['onboarding'] })
     .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
     .output(RiskProfileViewSchema.nullable()),
-  riskProfileSubmit: oc
+  submit: oc
     .route({ method: 'PUT', path: '/risk-profile', tags: ['onboarding'] })
     .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, ...IDEMPOTENCY_ERRORS))
     .input(RiskAnswersSchema)
     .output(RiskProfileViewSchema),
+};
 ```
-(exposed on the client as `riskProfile.questionnaire` / `riskProfile.get` / `riskProfile.submit` via a nested `riskProfile` key the same way `me.ts` nests under `me`; if E5 declared `onboardingContract` as a flat object rather than nesting sub-namespaces, this task instead adds a sibling `riskProfileContract` object and a `riskProfile` entry beside `onboarding` in `packages/contract/src/index.ts`'s top-level `contract` export — a one-line addition, consistent with "one appended router key per area", §0.1).
 
-`apps/api/src/modules/onboarding/onboarding.router.ts` and `onboarding.module.ts` (fragments; same `@Implement`/provider pattern as E8, wiring `riskProfileQuestionnaire/Get/Submit` to `RiskProfileService`, and registering `SuitabilityService`).
+`packages/contract/src/index.ts` (key-level; `riskProfileContract` is re-exported through the existing `export * from './onboarding.js'`):
+```ts
+// with the other imports
+import { onboardingContract, riskProfileContract } from './onboarding.js';
+// one new key in the `contract` object; every existing key stays
+  riskProfile: riskProfileContract,
+```
+(RV-03-34: one top-level `riskProfile` key, so the client calls `riskProfile.questionnaire` / `riskProfile.get` / `riskProfile.submit`, the names E9's `expectBola` cases, E13's `RiskProfileScreen` and Plan 04 F9's registry check use. The earlier text appended flat `riskProfileGet`-style keys to `onboardingContract`, which made those names `onboarding.riskProfileGet` and left the tests and screens calling procedures that did not exist.)
+
+`apps/api/src/modules/onboarding/onboarding.router.ts` and `onboarding.module.ts` (fragments; same `@Implement`/provider pattern as E8, wiring `contract.riskProfile.questionnaire/get/submit` to `RiskProfileService`, and registering `SuitabilityService`).
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
-pnpm --filter=@sanchay/domain test -- risk-scoring
-pnpm --filter=@sanchay/domain test -- suitability
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=risk_suitability
 pnpm --filter=@sanchay/api db:generate --custom --name=risk_suitability_guards
-pnpm --filter=@sanchay/api test:int -- risk-profile
+pnpm --filter=@sanchay/api test:int risk-profile
 pnpm --filter=@sanchay/api typecheck
 ```
 Expected: 12/12 `RP-001..RP-012` vectors green, 7/7 `SUIT-01..07` vectors green, `risk-profile.int.test.ts` green (6 cases incl. the two `expectBola` assertions); typecheck clean.
@@ -9409,8 +9483,9 @@ Expected: 12/12 `RP-001..RP-012` vectors green, 7/7 `SUIT-01..07` vectors green,
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write packages/domain/src/catalogue.ts packages/domain/src/rules/risk-scoring.ts packages/domain/src/rules/suitability.ts packages/domain/test/risk-scoring.test.ts packages/domain/test/suitability.test.ts packages/test-fixtures/src/golden/risk-profile.json packages/test-fixtures/src/golden/suitability-rp.json apps/api/src/modules/onboarding/risk-profile.schema.ts apps/api/src/modules/onboarding/risk-profile.service.ts apps/api/src/modules/onboarding/suitability.service.ts apps/api/src/modules/identity/identity.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/risk-profile.int.test.ts packages/contract/src/onboarding.ts data/risk-questionnaire-v1.0.0.json
-pnpm --filter=@sanchay/domain test -- risk-scoring suitability
-pnpm --filter=@sanchay/api test:int -- risk-profile
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int risk-profile
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add packages/domain/src/catalogue.ts packages/domain/src/rules/risk-scoring.ts packages/domain/src/rules/suitability.ts packages/domain/test/risk-scoring.test.ts packages/domain/test/suitability.test.ts packages/test-fixtures/src/golden/risk-profile.json packages/test-fixtures/src/golden/suitability-rp.json apps/api/src/modules/onboarding/risk-profile.schema.ts apps/api/src/modules/onboarding/risk-profile.service.ts apps/api/src/modules/onboarding/suitability.service.ts apps/api/src/modules/identity/identity.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/risk-profile.int.test.ts apps/api/drizzle packages/contract/src/onboarding.ts data/risk-questionnaire-v1.0.0.json
@@ -9585,7 +9660,8 @@ describe('onboarding.stageDeclarations', () => {
 
 describe('legal.commissionRates', () => {
   it('resolves without the Plan-02 catalogue table (empty until D9 binds the real source)', async () => {
-    const res = await app.request.get('/api/v1/legal/commission-rates');
+    const { req } = await signedInInvestor(app); // TestApp has no `request` (RV-03-33)
+    const res = await req.get('/api/v1/legal/commission-rates');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
@@ -9594,7 +9670,7 @@ describe('legal.commissionRates', () => {
 
 - [ ] **Step 2: Run it to confirm it fails**
 ```
-pnpm --filter=@sanchay/api test:int -- declarations
+pnpm --filter=@sanchay/api test:int declarations
 ```
 Expected: fails to boot — `declaration_stagings` has no schema, `legal.pending`/`legal.getDocument`/`legal.commissionRates`/`onboarding.stageDeclarations` are not on the contract.
 
@@ -9647,7 +9723,7 @@ import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
 import type { AuthContext } from '../platform/request-context.js';
-import { LegalDocsService } from '../legal-consent/legal-docs.service.js';
+import { LegalDocs } from '../legal-consent/legal-docs.service.js';
 import { DECLARATION_KEYS, declarationStagings } from '../legal-consent/legal-consent.schema.js';
 import { nominationDecisions } from './nomination.schema.js';
 import { onboardingApplications } from './onboarding.schema.js';
@@ -9662,14 +9738,14 @@ const ALWAYS_REQUIRED = [
 ] as const;
 
 export interface StageDeclarationsInput {
-  accept: Array<{ key: (typeof DECLARATION_KEYS)[number]; version: number }>;
+  accept: Array<{ key: (typeof DECLARATION_KEYS)[number]; version: string }>; // legal_documents.version is text
 }
 
 @Injectable()
 export class DeclarationsService {
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
-    @Inject(LegalDocsService) private readonly legalDocs: LegalDocsService,
+    @Inject(LegalDocs) private readonly legalDocs: LegalDocs,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -9712,7 +9788,7 @@ export class DeclarationsService {
 
     return this.dbh.db.transaction(async (tx) => {
       for (const entry of input.accept) {
-        const current = await this.legalDocs.current(entry.key);
+        const current = await this.legalDocs.current(tx, entry.key);
         if (entry.version !== current.version) throw new AppError('DECLARATION_OUTDATED');
         await tx
           .update(declarationStagings)
@@ -9750,7 +9826,7 @@ export class DeclarationsService {
     investorId: string,
     key: (typeof DECLARATION_KEYS)[number],
   ): Promise<boolean> {
-    const current = await this.legalDocs.current(key);
+    const current = await this.legalDocs.current(this.dbh.db, key);
     const [row] = await this.dbh.db
       .select()
       .from(declarationStagings)
@@ -9776,7 +9852,8 @@ import type { SanchayClsStore } from '../platform/request-context.js';
 import { requireAuth } from '../identity/request-auth.js';
 import { AppError } from '../platform/errors.js';
 import { DeclarationsService } from '../onboarding/declarations.service.js';
-import { LegalDocsService } from './legal-docs.service.js';
+import { DB, type DbHandle } from '../../db/client.js';
+import { LegalDocs } from './legal-docs.service.js';
 
 export interface CommissionRatesSource {
   list(): Promise<Array<{ amcId: string | null; schemeId: string | null; minBps: number; maxBps: number; kind: 'EXACT' | 'RANGE' }>>;
@@ -9792,7 +9869,8 @@ export class InMemoryCommissionRatesSource implements CommissionRatesSource {
 @Controller()
 export class LegalRouter {
   constructor(
-    @Inject(LegalDocsService) private readonly legalDocs: LegalDocsService,
+    @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(LegalDocs) private readonly legalDocs: LegalDocs,
     @Inject(DeclarationsService) private readonly declarations: DeclarationsService,
     @Inject(InMemoryCommissionRatesSource) private readonly commissionRates: CommissionRatesSource,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
@@ -9801,7 +9879,7 @@ export class LegalRouter {
   @Implement(contract.legal.getDocument)
   getDocument() {
     return implement(contract.legal.getDocument).handler(async ({ input }) => {
-      const doc = await this.legalDocs.current(input.key).catch(() => null);
+      const doc = await this.legalDocs.current(this.dbh.db, input.key).catch(() => null);
       if (!doc) throw new AppError('NOT_FOUND');
       return doc;
     });
@@ -9891,11 +9969,15 @@ export const StageDeclarationsInputSchema = z.strictObject({
     .output(OkSchema),
 ```
 
-`packages/contract/src/index.ts` (fragment; one appended key, per §0.1):
+`packages/contract/src/index.ts` (key-level, per §0.1; RV-03-35: a bare `export { legalContract as legal }` re-exported a name and never added the key, so the client and the server had no `legal.*` procedures):
 ```ts
-export { legalContract as legal } from './legal.js';
+// with the other imports
+import { legalContract } from './legal.js';
+// with the other re-exports
+export * from './legal.js';
+// one new key in the `contract` object; every existing key stays
+  legal: legalContract,
 ```
-(add alongside the existing router keys in the top-level `contract` object, matching how `me`/`auth`/`health` are already assembled there).
 
 `apps/api/src/modules/legal-consent/legal-consent.module.ts` (fragment): add `LegalRouter`, `DeclarationsService`, `InMemoryCommissionRatesSource` to `controllers`/`providers`, and export `DeclarationsService` so `OnboardingModule` (E5) can import it rather than re-registering it — `apps/api/src/modules/onboarding/onboarding.module.ts`'s fragment for this task is therefore only `imports: [LegalConsentModule]` (if not already imported for E6's `LegalDocs.recordAcceptance`) plus wiring `onboarding.stageDeclarations` in `onboarding.router.ts` to the imported `DeclarationsService`.
 
@@ -9913,17 +9995,19 @@ export { legalContract as legal } from './legal.js';
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=declaration_stagings
-pnpm --filter=@sanchay/api test:int -- declarations
+pnpm --filter=@sanchay/api test:int declarations
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
 ```
-Expected: 4/4 cases in `declarations.int.test.ts` green (`legal.pending` before/after, stale-version rejection, Annexure-B conditional requirement, KYC_CONSENT not restaged, commission-rates empty array); typechecks clean.
+Expected: 5/5 cases in `declarations.int.test.ts` green (`legal.pending` before/after, stale-version rejection, Annexure-B conditional requirement, KYC_CONSENT not restaged, commission-rates empty array); typechecks clean.
 
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts
-pnpm --filter=@sanchay/api test:int -- declarations
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int declarations
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts apps/api/drizzle packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts
@@ -9947,6 +10031,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/test/int/onboarding-seed.ts` (test helper: a fully onboarded, not-yet-attested investor)
   - `apps/api/test/int/onboarding-provision.int.test.ts`
   - `apps/api/test/int/onboarding-readiness.int.test.ts`
+  - `docs/runbooks/provisioning-failed.md` (runbook stub, the sprint Definition of Done; RV-03-36)
 - Modify:
   - `apps/api/src/integrations/fp/fp-operations.ts` (D3; append seven class-R list operations)
   - `apps/api/src/integrations/fp/fp-provision.ts` (D3; replace the stub bodies, add the lookups)
@@ -10372,6 +10457,7 @@ async function attest(investor: ReadyInvestor) {
 
 /** Attest over HTTP, then send both OTPs and approve through the real ConsentEngine; returns the provision job's data. */
 async function attestAndApprove(investor: ReadyInvestor): Promise<ConsentApprovedJobData> {
+  t.clock.advance(1); // consent-first window (RV-03-51): earlier writes in this file fall before the create
   const res = await attest(investor);
   expect(res.statusCode).toBe(200);
   const { challengeId } = res.json<{ challengeId: string }>();
@@ -10382,6 +10468,7 @@ async function attestAndApprove(investor: ReadyInvestor): Promise<ConsentApprove
     smsCode: t.sms.latestCode(investor.mobile),
     emailCode: t.email.latestCode(investor.email),
   });
+  t.clock.advance(1); // the job consumes, and writes to FP, after the window (RV-03-51)
   const job = enqueued.find((j) => j.name === 'onboarding.provision');
   expect(job, 'approve enqueues onboarding.provision').toBeDefined();
   return job?.data as ConsentApprovedJobData;
@@ -10606,8 +10693,8 @@ describe('trg_investor_readiness', () => {
 - [ ] **Step 2: Run them to confirm they fail**
 
 ```
-pnpm --filter=@sanchay/api test -- readiness.test fp-profile-mapping
-pnpm --filter=@sanchay/api test:int -- onboarding-provision onboarding-readiness
+pnpm --filter=@sanchay/api test readiness.test fp-profile-mapping
+pnpm --filter=@sanchay/api test:int onboarding-provision onboarding-readiness
 ```
 Expected: `Cannot find module './readiness.js'` / `'./fp-profile-mapping.js'`; the integration suites fail to import `provision.job.js` and `onboarding-seed.ts`'s dependencies.
 
@@ -11517,15 +11604,41 @@ CONSENT_SUBJECT_JOBS.ONBOARDING_ATTEST = 'onboarding.provision';
 
 `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)` to `JOB_POLICIES` (R-32, RV-03-24).
 
+`docs/runbooks/provisioning-failed.md` (new; a stub per the sprint Definition of Done, `docs/delivery/mvp-sprint-plans.md` item 10; RV-03-36):
+
+```markdown
+# Runbook: onboarding provisioning failed (stub)
+
+> **Status: stub (S3 Definition of Done).** It describes Task E11 as built. Plan 04 F24 does not cover it (it is not a G-E8 item); update it when the pilot shows a real case.
+
+## Symptoms
+- The investor's onboarding stage is `PROVISIONING_FAILED`, or it stays at provisioning for more than an hour.
+- `app.v_onboarding_blocked` lists the investor; for an FP rejection, a CRITICAL `ONBOARDING_PROVISIONING_REJECTED` recon break is open.
+
+## What the code already does (no action needed)
+- `onboarding.provision` resumes from `onboarding_applications.provisioning_step`, and every step looks the resource up on FP first (LOOKUP-ADOPT), so a retry never creates a second profile, account or bank.
+- FP 5xx, timeouts and ambiguous answers are retried by pg-boss; the next attempt adopts what FP already created.
+
+## Triage (in order)
+1. Read `provisioning_failed_reason` on the investor's `onboarding_applications` row.
+2. `SAGA_WINDOW_EXPIRED_NEW_RESOURCE_REQUIRED`: the attest consent expired before the next FP write. Ask the investor to attest again (R-17); the new job resumes the same step and adopts the FP ids already created.
+3. `FP_REJECTED:<op>`: FP refused the data (4xx), with no retry. Compare the investor's data with the FP error code (`provider_calls.error_code` for that operation), fix the cause with the investor, then ask for a re-attest. Resolve the recon break with `ops:resolve-break` (two founders; Plan 04 F7) once the re-attest succeeds.
+4. Stuck without a reason: check the worker heartbeat and the `onboarding.provision` queue before anything else.
+
+## Never
+- Never create or patch an FP resource by hand for the investor: the next job would not know about it.
+```
+
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --custom --name=readiness_trigger
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- readiness.test fp-profile-mapping fake-fp
-pnpm --filter=@sanchay/api test:int -- onboarding-provision onboarding-readiness fake-fp
+pnpm --filter=@sanchay/api test readiness.test fp-profile-mapping fake-fp
+pnpm --filter=@sanchay/api test:int onboarding-provision onboarding-readiness fake-fp
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 ```
 Expected: 8/8 readiness rows and 3/3 mapping tests green; D4's own `fake-fp` suites stay green; `onboarding-provision.int.test.ts` 10/10 and `onboarding-readiness.int.test.ts` 8/8 green; `openapi.json` regenerates with `POST /onboarding/attest` and then diffs clean once committed (B10).
 
@@ -11533,10 +11646,11 @@ Expected: 8/8 readiness rows and 3/3 mapping tests green; D4's own `fake-fp` sui
 
 ```
 pnpm exec biome check --write apps/api/src/integrations/fp apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/test/int/onboarding-seed.ts apps/api/test/int/onboarding-provision.int.test.ts apps/api/test/int/onboarding-readiness.int.test.ts packages/contract/src/onboarding.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- onboarding-provision onboarding-readiness
+pnpm --filter=@sanchay/api test:int onboarding-provision onboarding-readiness
 pnpm lint
-git add apps/api/src/integrations/fp apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/drizzle apps/api/test/int/onboarding-seed.ts apps/api/test/int/onboarding-provision.int.test.ts apps/api/test/int/onboarding-readiness.int.test.ts packages/contract/src/onboarding.ts apps/api/openapi.json
+git add apps/api/src/integrations/fp apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/drizzle apps/api/test/int/onboarding-seed.ts apps/api/test/int/onboarding-provision.int.test.ts apps/api/test/int/onboarding-readiness.int.test.ts packages/contract/src/onboarding.ts apps/api/openapi.json docs/runbooks/provisioning-failed.md
 git commit -m "feat(onboarding): attest, FP provisioning saga with LOOKUP-ADOPT, readiness trigger (E11)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook reports `stage_fixed`, re-run the Step 4 commands and `git add` again before committing.
@@ -11558,6 +11672,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and `git add` agai
 - Modify: `apps/web/src/client/routes.tsx` (append `OnboardingHubRoute` and `OnboardingStepRoute`; key-level only)
 - Create: mobile `apps/mobile/src/app/onboarding/index.tsx`, `apps/mobile/src/app/onboarding/[step].tsx`, `apps/mobile/src/app/onboarding/[step].test.tsx`
 - Create: `apps/web/e2e/onboarding.smoke.spec.ts`
+- Modify: `apps/web/e2e/support/otp.ts` (Plan 01; RV-03-49: `readLatestOtpTo` reads a code by recipient, and `readLatestOtp` delegates to it; key-level)
 
 **Interfaces:**
 - Prerequisites: E2 (HostGuard/`meta.appConfig`), E5 (`onboarding.get`, `deriveOnboardingStage`, `me.get`), E6 (`onboarding.submitIdentity`, `onboarding.putProfile`, `ref.pincode`). Plan-01: `auth.session` (real, `packages/contract/src/auth.ts`), `meContract.requestEmailOtp`/`verifyEmail` (real, `packages/contract/src/me.ts`), `@sanchay/validation` (`panSchema`, `emailSchema`, `pincodeSchema`), `@sanchay/app-core` (`messageForError`, `formatCountdown`, `useOtpLogin`'s `SessionOutcome`-free pattern), `@sanchay/ui` (`AppText`, `Banner`, `Button`, `Card`, `Screen`, `TextField`, `OtpInput`), `packages/features/src/{api/ApiContext.tsx, nav/NavContext.tsx, platform/PlatformContext.tsx, test-utils.tsx}` (`useApi`, `useNav`, `renderWithProviders`, `makeNav`, `TEST_API`).
@@ -12080,21 +12195,30 @@ describe('mobile onboarding/[step] route', () => {
 `apps/web/e2e/onboarding.smoke.spec.ts`:
 ```ts
 import { expect, test } from '@playwright/test';
+import { readLatestOtp, readLatestOtpTo } from './support/otp';
 
 /**
- * @smoke — run with SANCHAY_PROVIDER_MODE_FP=fake against the FakeFp sandbox. Signs in a fresh
- * pilot-invited number by mobile OTP, then drives ONB-01 identity through ONB-07 FATCA.
+ * @smoke, local only (RV-03-49). KYC and provisioning need the worker, which CI's e2e job does not
+ * start, and sign-up needs a pilot-invited mobile, so the test is skipped unless
+ * SANCHAY_E2E_ONBOARDING_MOBILE names an invited mobile. Run the stack with
+ * SANCHAY_PROVIDER_MODE_FP=fake; every code is read from Mailpit (Plan 01 has no fixed OTP).
  */
-test('onboarding: identity through profile reaches the bank stage', async ({ page }) => {
+const mobile = process.env.SANCHAY_E2E_ONBOARDING_MOBILE ?? '';
+const email = `smoke.${mobile}@example.com`;
+
+test('onboarding: identity through profile reaches the bank stage', async ({ page, request }) => {
+  test.skip(mobile === '', 'set SANCHAY_E2E_ONBOARDING_MOBILE to a pilot-invited mobile');
   await page.goto('/signup');
-  await page.getByLabel('Mobile number').fill('9876543210');
+  await page.getByLabel('Mobile number').fill(mobile);
+  let since = Date.now();
   await page.getByRole('button', { name: 'Get OTP' }).click();
-  await page.getByLabel('One-time code').fill('000000');
+  await page.getByLabel('One-time code').fill(await readLatestOtp(request, mobile, since));
   await page.waitForURL('**/onboarding');
 
-  await page.getByLabel('Email address').fill('smoke.onboarding@example.com');
+  await page.getByLabel('Email address').fill(email);
+  since = Date.now();
   await page.getByRole('button', { name: 'Send code' }).click();
-  await page.getByLabel('One-time code').fill('000000');
+  await page.getByLabel('One-time code').fill(await readLatestOtpTo(request, email, since));
   await expect(page.getByTestId('onboarding-hub')).toBeVisible();
 
   await page.getByRole('link', { name: 'Continue' }).click();
@@ -12135,6 +12259,28 @@ test('onboarding: identity through profile reaches the bank stage', async ({ pag
 
   await expect(page.getByText('Bank')).toBeVisible();
 });
+```
+
+`apps/web/e2e/support/otp.ts` (Plan 01's file; key-level, RV-03-49). `readLatestOtp`'s body moves into `readLatestOtpTo`, which searches `to:"<to>"`; `readLatestOtp` keeps its signature and delegates, so Plan 01's callers do not change:
+```ts
+/** Reads the newest OTP SMS that the API's MailpitSmsSender delivered to sms-<mobile>@sanchay.local. */
+export async function readLatestOtp(
+  request: APIRequestContext,
+  mobile: string,
+  sinceMs: number,
+): Promise<string> {
+  return readLatestOtpTo(request, `sms-${mobile}@sanchay.local`, sinceMs);
+}
+
+/** The newest six-digit code Mailpit holds for `to`: an email OTP's address, or an SMS mailbox. */
+export async function readLatestOtpTo(
+  request: APIRequestContext,
+  to: string,
+  sinceMs: number,
+): Promise<string> {
+  // ...readLatestOtp's former body, unchanged except the search query: `to:"${to}"`, and the
+  // poll message: `Mailpit never received an OTP for ${to}`.
+}
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -13406,16 +13552,34 @@ export function FatcaScreen() {
 
   const submit = async () => {
     const draft = getProfileDraft();
+    const { gender, occupation, incomeSlab, pep, sourceOfWealth, countryOfBirth, placeOfBirth, nationality, taxStatus } =
+      draft;
+    if (
+      gender === undefined ||
+      occupation === undefined ||
+      incomeSlab === undefined ||
+      pep === undefined ||
+      sourceOfWealth === undefined ||
+      countryOfBirth === undefined ||
+      placeOfBirth === undefined ||
+      nationality === undefined ||
+      taxStatus === undefined
+    ) {
+      // The earlier sub-steps fill the draft; a reload empties it, so start the profile again (RV-03-50:
+      // the `!` assertions here failed `biome ci`).
+      nav.replace('/onboarding/personal');
+      return;
+    }
     const input: PutProfileInput = {
-      gender: draft.gender!,
-      occupation: draft.occupation!,
-      incomeSlab: draft.incomeSlab!,
-      pep: draft.pep!,
-      sourceOfWealth: draft.sourceOfWealth!,
-      countryOfBirth: draft.countryOfBirth!,
-      placeOfBirth: draft.placeOfBirth!,
-      nationality: draft.nationality!,
-      taxStatus: draft.taxStatus!,
+      gender,
+      occupation,
+      incomeSlab,
+      pep,
+      sourceOfWealth,
+      countryOfBirth,
+      placeOfBirth,
+      nationality,
+      taxStatus,
       address: {
         line1: draft.address?.line1 ?? '',
         line2: draft.address?.line2 ?? '',
@@ -13782,13 +13946,13 @@ Then the Playwright smoke against `FakeFp` (`playwright.config.ts` passes the sh
 
 PowerShell:
 ```
-$env:SANCHAY_PROVIDER_MODE_FP='fake'; pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
+$env:SANCHAY_PROVIDER_MODE_FP='fake'; $env:SANCHAY_E2E_ONBOARDING_MOBILE='<an invited mobile>'; pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
 ```
 Git Bash:
 ```
-SANCHAY_PROVIDER_MODE_FP=fake pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
+SANCHAY_PROVIDER_MODE_FP=fake SANCHAY_E2E_ONBOARDING_MOBILE='<an invited mobile>' pnpm --filter=@sanchay/web exec playwright test onboarding.smoke --project=desktop-chromium
 ```
-Expected: all Vitest suites green (`packages/ui`: 2 new files, `~13` tests; `packages/features`: 6 new files, `~13` tests); `@sanchay/features`, `@sanchay/web` and `@sanchay/mobile` typecheck clean; the mobile `usePreventScreenCapture` test passes; Playwright's `onboarding.smoke` reaches the "Bank" stage label against `FakeFp`.
+Expected: all Vitest suites green (`packages/ui`: 2 new files, `~13` tests; `packages/features`: 6 new files, `~13` tests); `@sanchay/features`, `@sanchay/web` and `@sanchay/mobile` typecheck clean; the mobile `usePreventScreenCapture` test passes; Playwright's `onboarding.smoke` reaches the "Bank" stage label against `FakeFp` (with the worker running and an invited mobile set; without `SANCHAY_E2E_ONBOARDING_MOBILE` it is skipped, which is how CI's e2e job runs it, RV-03-49).
 
 - [ ] **Step 5: Commit**
 ```
@@ -13807,7 +13971,7 @@ pnpm --filter=@sanchay/mobile test onboarding
 pnpm lint
 ```
 ```
-git add packages/ui/src packages/ui/package.json packages/features/package.json pnpm-lock.yaml packages/features/src "apps/web/src/app/(app)/onboarding" apps/web/src/client/routes.tsx apps/mobile/src/app/onboarding apps/web/e2e/onboarding.smoke.spec.ts
+git add packages/ui/src packages/ui/package.json packages/features/package.json pnpm-lock.yaml packages/features/src "apps/web/src/app/(app)/onboarding" apps/web/src/client/routes.tsx apps/mobile/src/app/onboarding apps/web/e2e/onboarding.smoke.spec.ts apps/web/e2e/support/otp.ts
 ```
 ```
 git commit -m "feat(onboarding): identity, profile, address, FATCA screens and ui batch 2 (E12)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -13835,6 +13999,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage befor
   `packages/features/src/api/ApiContext.tsx` (RV-03-9: `ApiContextValue` gains `consents: ConsentApi`, built in `ApiProvider`)
   `packages/features/src/index.ts` (append the new exports)
   `packages/features/src/home/AppShell.tsx` (render `<LegalPendingBanner />` above `children`)
+  `packages/features/src/home/HomeScreen.test.tsx` (Plan 01) and `packages/features/src/home/AppShell.hydration.test.tsx` (Plan 02 D0): answer the banner's `GET /legal/pending` (RV-03-48; key-level)
   `packages/contract/src/legal.ts` (append `acceptPending`), `packages/contract/src/index.ts` (no new router key — `legal` already exists from E10), `apps/api/openapi.json` (regenerated, B10 drift test)
   `apps/api/src/modules/legal-consent/legal.router.ts` (append the handler)
   `apps/web/src/app/(app)/onboarding/[step]/page.tsx` (add the six batch-2 step slugs, created by E12)
@@ -14143,9 +14308,11 @@ describe('LegalPendingBanner (R-18)', () => {
     await page.getByLabel(label).check();
   }
   await page.getByRole('button', { name: 'Continue to review' }).click();
+  since = Date.now();
   await page.getByRole('button', { name: 'Attest and submit' }).click();
-  await page.getByLabel('SMS code').fill('123456');
-  await page.getByLabel('Email code').fill('123456');
+  // CNF-01's two codes, read from Mailpit (RV-03-49; Plan 01 has no fixed OTP).
+  await page.getByLabel('SMS code').fill(await readLatestOtp(request, mobile, since));
+  await page.getByLabel('Email code').fill(await readLatestOtpTo(request, email, since));
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Your account is ready')).toBeVisible({ timeout: 15_000 });
 ```
@@ -14186,7 +14353,7 @@ export type AcceptPendingInput = z.infer<typeof AcceptPendingInputSchema>;
     return implement(contract.legal.acceptPending).handler(async ({ input, context }) => {
       const auth = requireAuth(this.cls);
       for (const key of input.keys) {
-        await this.legalDocs.recordAcceptance(this.db, {
+        await this.legalDocs.recordAcceptance(this.dbh.db, {
           investorId: auth.investorId,
           key,
           channel: 'APP',
@@ -14199,7 +14366,7 @@ export type AcceptPendingInput = z.infer<typeof AcceptPendingInputSchema>;
     });
   }
 ```
-(`this.legalDocs` and `this.db` are the `LegalDocsService`/`DbExecutor` already injected by E10's constructor; no constructor change is needed.)
+(`this.legalDocs` and `this.dbh` are the `LegalDocs`/`DbHandle` E10's constructor injects (RV-03-37); no constructor change is needed.)
 
 `packages/features/src/consent/useConsentChallenge.ts`:
 ```ts
@@ -15063,6 +15230,19 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
         </View>
 ```
 
+The banner makes every AppShell render read `GET /legal/pending`, so the two existing AppShell suites answer it (RV-03-48; the empty list is the shape the banner reads, see the legal.pending open item in RV-03-48):
+
+`packages/features/src/home/HomeScreen.test.tsx` (Plan 01's file; key-level: C9's AppShell cases run MSW with `onUnhandledRequest: 'error'`, so the handler is a default that survives `resetHandlers`):
+```tsx
+const server = setupServer(http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json([])));
+```
+
+`packages/features/src/home/AppShell.hydration.test.tsx` (Plan 02 D0's file; key-level: it has no MSW and made a real request to `http://app.test`; inside `shell()`, add to the `createWebApiClient` options):
+```tsx
+    // E13: AppShell's LegalPendingBanner reads GET /legal/pending; answer it here, not on the network.
+    fetchImpl: async () => Response.json([]),
+```
+
 `apps/web/src/app/(app)/onboarding/[step]/page.tsx` (modify: add the six batch-2 cases to E12's step switch):
 ```tsx
     case 'bank':
@@ -15110,14 +15290,14 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
   ```
   pnpm exec turbo run build --filter=@sanchay/api^...
   pnpm exec turbo run build --filter=@sanchay/features^...
-  pnpm exec biome check --write packages/features/src packages/contract/src apps/api/src/modules/legal-consent apps/web/src/app apps/web/e2e apps/mobile/src/app/onboarding
+  pnpm exec biome check --write packages/features/src packages/contract/src apps/api/src/modules/legal-consent apps/web/src/app apps/web/e2e apps/mobile/src/app/onboarding packages/features/src/home/HomeScreen.test.tsx packages/features/src/home/AppShell.hydration.test.tsx
   pnpm --filter=@sanchay/contract test
   pnpm --filter=@sanchay/features test
   pnpm --filter=@sanchay/api test legal
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/features typecheck
   pnpm lint
-  git add packages/features/src/onboarding packages/features/src/consent packages/features/src/legal packages/features/src/api/ApiContext.tsx packages/features/src/index.ts packages/features/src/home/AppShell.tsx packages/contract/src/legal.ts apps/api/src/modules/legal-consent/legal.router.ts apps/api/openapi.json "apps/web/src/app/(app)/onboarding" apps/web/e2e/onboarding.smoke.spec.ts apps/mobile/src/app/onboarding
+  git add packages/features/src/onboarding packages/features/src/consent packages/features/src/legal packages/features/src/api/ApiContext.tsx packages/features/src/index.ts packages/features/src/home/AppShell.tsx packages/contract/src/legal.ts apps/api/src/modules/legal-consent/legal.router.ts apps/api/openapi.json "apps/web/src/app/(app)/onboarding" apps/web/e2e/onboarding.smoke.spec.ts apps/mobile/src/app/onboarding packages/features/src/home/HomeScreen.test.tsx packages/features/src/home/AppShell.hydration.test.tsx
   git commit -m "feat(onboarding): batch-2 screens, CNF-01 consent sheet and legal.pending re-accept UI" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   If lefthook reports `stage_fixed`, re-run the Step 4 test/typecheck commands before re-committing.
@@ -15165,7 +15345,6 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 `apps/api/test/int/catalogue-get-scheme.int.test.ts` (full file):
 
 ```typescript
-import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   amcs,
@@ -15375,7 +15554,8 @@ describe('catalogue.getScheme', () => {
 
   it('requires a session', async () => {
     const { scheme } = await seedScheme('PUBLISHED');
-    const res = await t.app.inject({ method: 'GET', url: `/api/v1/catalogue/schemes/${scheme.slug}` });
+    // Plan 01's client guard refuses a request without x-sanchay-client (403) before auth runs (RV-03-39).
+    const res = await t.app.inject({ method: 'GET', url: `/api/v1/catalogue/schemes/${scheme.slug}`, headers: webHeaders() });
     expect(res.statusCode).toBe(401);
   });
 });
@@ -15424,8 +15604,8 @@ describe('catalogue.amcs', () => {
 
 ```
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test:int -- catalogue-get-scheme
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test:int catalogue-get-scheme
+pnpm --filter=@sanchay/api test:int catalogue-router
 ```
 
 Expected failure: `contract.catalogue.getScheme`/`contract.catalogue.amcs` do not exist (TypeScript compile error in the test file), so both integration suites fail to boot; `/api/v1/catalogue/schemes/{slug}` and `/api/v1/catalogue/amcs` 404 against the still-unextended D10 router.
@@ -15562,6 +15742,7 @@ export const catalogueContract = {
 `apps/api/src/modules/catalogue/catalogue.queries.ts` (full file — replaces D10's):
 
 ```typescript
+import type { ListSchemesInput } from '@sanchay/contract';
 import { LAUNCH_SCHEME_OPTIONS } from '@sanchay/domain';
 import { and, asc, desc, eq, gt, inArray, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client.js';
@@ -15601,7 +15782,7 @@ function decodeCursor(raw: string): NameCursor {
 }
 
 /** Default and only sort today (spec: "sort (default A–Z…)"); E18 [T2] would add return-based sorts. */
-export async function listSchemes(db: Database, input: { q?: string; category?: string; sort?: 'name'; cursor?: string }) {
+export async function listSchemes(db: Database, input: ListSchemesInput) {
   const conditions = [
     eq(schemes.status, 'PUBLISHED'),
     eq(schemes.curated, true),
@@ -15612,7 +15793,8 @@ export async function listSchemes(db: Database, input: { q?: string; category?: 
   if (input.q) conditions.push(sql`${schemes.name} % ${input.q}`);
   if (input.cursor) {
     const c = decodeCursor(input.cursor);
-    conditions.push(or(sql`${schemes.name} > ${c.name}`, and(eq(schemes.name, c.name), gt(schemes.id, c.id)))!);
+    const after = or(sql`${schemes.name} > ${c.name}`, and(eq(schemes.name, c.name), gt(schemes.id, c.id)));
+    if (after !== undefined) conditions.push(after);
   }
 
   const rows = await db
@@ -15656,7 +15838,8 @@ async function resolveCommissionLine(db: Database, schemeId: string, amcId: stri
       ),
     )
     .orderBy(
-      desc(sql`(${commissionDisclosures.schemeId} = ${schemeId})`),
+      // An AMC row has scheme_id NULL, and `NULL = x` is NULL, which DESC sorts first: coalesce it (RV-03-39).
+      desc(sql`coalesce(${commissionDisclosures.schemeId} = ${schemeId}, false)`),
       desc(sql`(${commissionDisclosures.kind} = 'EXACT')`),
       desc(commissionDisclosures.effectiveFrom),
     )
@@ -15760,8 +15943,7 @@ import { Controller, Inject } from '@nestjs/common';
 import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { ClsService } from 'nestjs-cls';
-import type { Database } from '../../db/client.js';
-import { DB } from '../../db/client.js';
+import { DB, type DbHandle } from '../../db/client.js';
 import { requireAuth } from '../identity/request-auth.js';
 import { AppError } from '../platform/errors.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
@@ -15770,7 +15952,8 @@ import { getSchemeDetail, listAmcs, listCategories, listSchemes } from './catalo
 @Controller()
 export class CatalogueRouter {
   constructor(
-    @Inject(DB) private readonly db: Database,
+    // DB is PlatformModule's DbHandle (Plan 02 RV-02-36); the queries take its Drizzle db.
+    @Inject(DB) private readonly dbh: DbHandle,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
@@ -15778,7 +15961,7 @@ export class CatalogueRouter {
   categories() {
     return implement(contract.catalogue.categories).handler(() => {
       requireAuth(this.cls);
-      return listCategories(this.db);
+      return listCategories(this.dbh.db);
     });
   }
 
@@ -15786,7 +15969,7 @@ export class CatalogueRouter {
   listSchemes() {
     return implement(contract.catalogue.listSchemes).handler(({ input }) => {
       requireAuth(this.cls);
-      return listSchemes(this.db, input);
+      return listSchemes(this.dbh.db, input);
     });
   }
 
@@ -15794,7 +15977,7 @@ export class CatalogueRouter {
   getScheme() {
     return implement(contract.catalogue.getScheme).handler(async ({ input }) => {
       requireAuth(this.cls);
-      const detail = await getSchemeDetail(this.db, input.slug);
+      const detail = await getSchemeDetail(this.dbh.db, input.slug);
       if (!detail) throw new AppError('NOT_FOUND');
       return detail;
     });
@@ -15804,7 +15987,7 @@ export class CatalogueRouter {
   amcs() {
     return implement(contract.catalogue.amcs).handler(() => {
       requireAuth(this.cls);
-      return listAmcs(this.db);
+      return listAmcs(this.dbh.db);
     });
   }
 }
@@ -15813,11 +15996,12 @@ export class CatalogueRouter {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test:int -- catalogue-get-scheme
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test:int catalogue-get-scheme
+pnpm --filter=@sanchay/api test:int catalogue-router
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 pnpm --filter=@sanchay/api typecheck
 ```
 
@@ -15827,9 +16011,10 @@ Expected: every catalogue test passes; `openapi` shows a diff for the two new pa
 
 ```
 pnpm exec biome check --write packages/contract/src/catalogue.ts apps/api/src/modules/catalogue/catalogue.router.ts apps/api/src/modules/catalogue/catalogue.queries.ts apps/api/test/int/catalogue-get-scheme.int.test.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test:int -- catalogue-get-scheme
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test:int catalogue-get-scheme
+pnpm --filter=@sanchay/api test:int catalogue-router
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add packages/contract/src/catalogue.ts apps/api/src/modules/catalogue/catalogue.router.ts apps/api/src/modules/catalogue/catalogue.queries.ts apps/api/test/int/catalogue-get-scheme.int.test.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
@@ -15858,7 +16043,7 @@ git commit -m "feat(catalogue): add catalogue.getScheme, catalogue.amcs and name
 - Produces:
   - `apps/api/src/modules/catalogue/fund-facts.provider.ts`:
     - `interface FundFactsFieldValue<T> { value: T; source: FundFactsSource }`
-    - `FUND_FACTS_TRACKED_FIELDS` (the 8 fields the completeness percentage is computed over: `expenseRatioPct`, `expenseRatioAsOf`, `riskometer`, `riskometerAsOf`, `benchmarkName`, `benchmarkRiskometer`, `exitLoadText`, `sidUrl`/`kimUrl` counted together as one field since neither is useful alone — 7 tracked slots).
+    - `FUND_FACTS_TRACKED_FIELDS` (the 8 fields the completeness percentage is computed over: `expenseRatioPct`, `expenseRatioAsOf`, `riskometer`, `riskometerAsOf`, `benchmarkName`, `benchmarkRiskometer`, `exitLoadText`, `sidUrl`/`kimUrl` counted together as one field since neither is useful alone — 8 slots, so a complete record scores 100, RV-03-41).
     - `@Injectable() class FundFactsProvider { resolve(schemeId: string): Promise<FundFactsResolution> }`, where `FundFactsResolution = { fields: Record<string, FundFactsFieldValue<unknown>>; completeness: number }`. It reads every `fundFactsRevisions` row for `schemeId` ordered oldest→newest, folds them field-by-field so that, for each of the 7 tracked JSON keys present in a revision's `payload`, a later `ADMIN` revision always wins over an earlier or later `CYBRILLA`/`AMFI` one, and a `CYBRILLA` value wins over `AMFI`, but a *later* revision from the same source always overwrites an earlier one from that same source (precedence is per-field, recency is per-source). It then upserts `fund_facts` (`ON CONFLICT (scheme_id) DO UPDATE`) with the resolved values, `field_sources` (a `Record<string, FundFactsSource>` snapshot) and `completeness` (`round(100 * populated / 7)`).
   - `apps/api/src/modules/catalogue/publish-gate.ts`:
     - `type PublishGateRule = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7'`.
@@ -15990,9 +16175,10 @@ async function seedScheme() {
     .insert(sebiCategories)
     .values({ code: `CAT_${Date.now()}_${Math.random()}`, assetClass: 'EQUITY', name: 'Cat', slug: `cat-${Date.now()}-${Math.random()}`, cutoffClass: 'STANDARD', volatilityClass: 'V_EQUITY' })
     .returning();
+  if (amc === undefined || cat === undefined) throw new Error('seedScheme: no amc or category row returned'); // biome ci refuses `!` (RV-03-41)
   const [scheme] = await t.db.db
     .insert(schemes)
-    .values({ isin: `INF${String(Date.now()).slice(-9)}`, amcId: amc!.id, name: 'Test Scheme', slug: `scheme-${Date.now()}-${Math.random()}`, categoryCode: cat!.code })
+    .values({ isin: `INF${String(Date.now()).slice(-9)}`, amcId: amc.id, name: 'Test Scheme', slug: `scheme-${Date.now()}-${Math.random()}`, categoryCode: cat.code })
     .returning();
   if (!scheme) throw new Error('seedScheme: no row returned');
   return scheme;
@@ -16017,7 +16203,7 @@ describe('FundFactsProvider.resolve', () => {
     expect(row?.fieldSources).toMatchObject({ expenseRatioPct: 'ADMIN', riskometer: 'CYBRILLA' });
   });
 
-  it('computes completeness out of the 7 tracked fields', async () => {
+  it('computes completeness out of 8 slots (7 tracked fields and SID+KIM)', async () => {
     const scheme = await seedScheme();
     await t.db.db.insert(fundFactsRevisions).values({
       schemeId: scheme.id,
@@ -16025,7 +16211,7 @@ describe('FundFactsProvider.resolve', () => {
       payload: { expenseRatioPct: '1.00', riskometer: 'LOW' },
     });
     const resolution = await provider.resolve(scheme.id);
-    expect(resolution.completeness).toBe(29); // round(100 * 2/7)
+    expect(resolution.completeness).toBe(25); // round(100 * 2/8)
   });
 
   it('is idempotent: resolving twice keeps the same merged values', async () => {
@@ -16041,8 +16227,8 @@ describe('FundFactsProvider.resolve', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test -- publish-gate
-pnpm --filter=@sanchay/api test:int -- fund-facts-provider
+pnpm --filter=@sanchay/api test publish-gate
+pnpm --filter=@sanchay/api test:int fund-facts-provider
 ```
 
 Expected failure: `./publish-gate.js` and `./fund-facts.provider.js` do not exist, so both files fail at import time (module not found).
@@ -16140,7 +16326,7 @@ import { fundFacts, fundFactsRevisions, type FundFactsSource } from './catalogue
 
 export const FUND_FACTS_SOURCE_RANK: Record<FundFactsSource, number> = { ADMIN: 3, CYBRILLA: 2, AMFI: 1 };
 
-/** The 7 slots `completeness` is computed over; sidUrl/kimUrl are tracked together as one slot. */
+/** The 7 tracked fields; with sidUrl/kimUrl together as one more slot, `completeness` is out of 8. */
 export const FUND_FACTS_TRACKED_FIELDS = [
   'expenseRatioPct',
   'expenseRatioAsOf',
@@ -16187,7 +16373,8 @@ export class FundFactsProvider {
 
     const populated = FUND_FACTS_TRACKED_FIELDS.filter((key) => fields[key] !== undefined).length;
     const sidKimPopulated = fields.sidUrl !== undefined && fields.kimUrl !== undefined;
-    const completeness = Math.round((100 * (populated + (sidKimPopulated ? 1 : 0))) / 7);
+    const slots = FUND_FACTS_TRACKED_FIELDS.length + 1; // the seven fields plus SID+KIM as one slot (RV-03-41)
+    const completeness = Math.round((100 * (populated + (sidKimPopulated ? 1 : 0))) / slots);
 
     const fieldSources: Record<string, FundFactsSource> = {};
     for (const [key, field] of Object.entries(fields)) fieldSources[key] = field.source;
@@ -16315,8 +16502,8 @@ root `package.json` (modify — append under `scripts`):
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/api test -- publish-gate
-pnpm --filter=@sanchay/api test:int -- fund-facts-provider
+pnpm --filter=@sanchay/api test publish-gate
+pnpm --filter=@sanchay/api test:int fund-facts-provider
 pnpm --filter=@sanchay/api typecheck
 ```
 
@@ -16326,8 +16513,8 @@ Expected: all `evaluatePublishGate`/`businessDaysAge` unit cases and all `FundFa
 
 ```
 pnpm exec biome check --write apps/api/src/modules/catalogue/fund-facts.provider.ts apps/api/src/modules/catalogue/publish-gate.ts apps/api/src/modules/catalogue/publish-gate.test.ts apps/api/src/cli/ops-facts-import.ts apps/api/test/int/fund-facts-provider.int.test.ts apps/api/package.json package.json
-pnpm --filter=@sanchay/api test -- publish-gate
-pnpm --filter=@sanchay/api test:int -- fund-facts-provider
+pnpm --filter=@sanchay/api test publish-gate
+pnpm --filter=@sanchay/api test:int fund-facts-provider
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add apps/api/src/modules/catalogue/fund-facts.provider.ts apps/api/src/modules/catalogue/publish-gate.ts apps/api/src/modules/catalogue/publish-gate.test.ts apps/api/src/cli/ops-facts-import.ts apps/api/test/int/fund-facts-provider.int.test.ts apps/api/package.json package.json
@@ -16651,8 +16838,8 @@ describe('runComputeSchemeReturns', () => {
 
 ```
 pnpm --filter=@sanchay/test-fixtures test
-pnpm --filter=@sanchay/domain test -- returns
-pnpm --filter=@sanchay/api test -- returns.job
+pnpm --filter=@sanchay/domain test
+pnpm --filter=@sanchay/api test returns.job
 ```
 
 Expected failure: `@sanchay/test-fixtures` does not resolve (package does not exist), so all three suites fail to boot; once the package files exist, `packages/domain/src/rules/returns.js` and `apps/api/src/modules/catalogue/returns.job.js` still do not exist.
@@ -16842,8 +17029,9 @@ import { ReturnsComputeJob } from './returns.job.js';
 
 ```
 pnpm --filter=@sanchay/test-fixtures test
-pnpm --filter=@sanchay/domain test -- returns
-pnpm --filter=@sanchay/api test -- returns.job
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test returns.job
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
 ```
@@ -16855,8 +17043,9 @@ Expected: all 6 golden `computeSchemeReturns` cases, the 4 direct helper cases a
 ```
 pnpm exec biome check --write packages/domain/src/rules/returns.ts packages/domain/test/returns.test.ts packages/domain/src/index.ts packages/domain/package.json packages/test-fixtures apps/api/src/modules/catalogue/returns.job.ts apps/api/src/modules/catalogue/returns.job.test.ts apps/api/src/modules/catalogue/catalogue.module.ts
 pnpm --filter=@sanchay/test-fixtures test
-pnpm --filter=@sanchay/domain test -- returns
-pnpm --filter=@sanchay/api test -- returns.job
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test returns.job
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
@@ -16944,7 +17133,7 @@ describe('RiskometerBadge', () => {
   it('shows the level and benchmark when both are known', () => {
     render(<RiskometerBadge level="VERY_HIGH" benchmarkLevel="HIGH" />);
     expect(screen.getByText(/Very High/)).toBeTruthy();
-    expect(screen.getByText(/High/)).toBeTruthy();
+    expect(screen.getByText('Benchmark: High')).toBeTruthy(); // /High/ also matched 'Very High' (RV-03-40)
   });
 
   it('shows a dash when the level is unknown', () => {
@@ -17104,10 +17293,13 @@ describe('FundScreen', () => {
     server.use(http.get(`${TEST_API}/catalogue/schemes/parag-parikh-flexi-cap`, () => HttpResponse.json(schemeDetail())));
     renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
     expect(await screen.findByRole('heading', { name: 'Parag Parikh Flexi Cap Fund - Regular - Growth' })).toBeTruthy();
-    expect(screen.getByText('₹500.00')).toBeTruthy();
+    // Both minimums are ₹500.00; E12's ListRow labels itself "<label>: <value>" (RV-03-40).
+    expect(screen.getByLabelText('Minimum lumpsum: ₹500.00')).toBeTruthy();
+    expect(screen.getByLabelText('Minimum SIP: ₹500.00')).toBeTruthy();
     expect(screen.getByText('2% if redeemed within 1 year')).toBeTruthy();
     expect(screen.getByText(/subject to market risks/)).toBeTruthy();
-    expect(screen.getByText(/Sanchay receives a commission|earns a commission/)).toBeTruthy();
+    // DSC-03 also "earns a commission": match the scheme's own commission line (RV-03-40).
+    expect(screen.getByText(/^Sanchay receives a commission from Parag Parikh Mutual Fund/)).toBeTruthy();
   });
 
   it('renders a dash for a null return figure', async () => {
@@ -17158,7 +17350,7 @@ test.describe('@smoke explore -> fund page', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/features test -- explore
+pnpm --filter=@sanchay/features test explore
 pnpm --filter=@sanchay/web exec playwright test explore.smoke --project=chromium
 ```
 
@@ -17395,15 +17587,15 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
         <AppText variant="heading">Returns</AppText>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <AppText>1Y</AppText>
-          <AppText>{scheme.returns.cagr1y ? `${scheme.returns.cagr1y}%` : DASH}</AppText>
+          <AppText>{formatPct(scheme.returns.cagr1y, { signed: false })}</AppText>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <AppText>3Y</AppText>
-          <AppText>{scheme.returns.cagr3y ? `${scheme.returns.cagr3y}%` : DASH}</AppText>
+          <AppText>{formatPct(scheme.returns.cagr3y, { signed: false })}</AppText>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <AppText>5Y</AppText>
-          <AppText>{scheme.returns.cagr5y ? `${scheme.returns.cagr5y}%` : DASH}</AppText>
+          <AppText>{formatPct(scheme.returns.cagr5y, { signed: false })}</AppText>
         </View>
         <ReturnCaveat />
       </Card>
@@ -17414,7 +17606,7 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
         <ListRow label="Minimum SIP" value={scheme.sipAllowed && t?.sipMin ? formatInr(Money.parse(t.sipMin)) : DASH} />
         <ListRow label="Exit load" value={scheme.exitLoadText ?? DASH} />
         <ListRow label="Lock-in" value={scheme.lockInMonths ? `${scheme.lockInMonths} months` : 'None'} />
-        <ListRow label="Total expense ratio" value={scheme.expenseRatioPct ? formatPct(scheme.expenseRatioPct) : DASH} />
+        <ListRow label="Total expense ratio" value={formatPct(scheme.expenseRatioPct, { signed: false })} />
       </Card>
 
       <Card>
@@ -18820,7 +19012,8 @@ export class PurchaseAdvanceJob {
     if (order.status !== 'UNDER_REVIEW' && order.status !== 'CONFIRMING') return;
 
     const purchase = toFpPurchaseView(await this.fpRead.purchase(order.fpOrderId));
-    if (purchase.state === 'failed' || purchase.state === 'review_failed') {
+    // RV-03-53: FP expiring an unconfirmed purchase ends it too (F5's REVIEW_TERMINAL does the same).
+    if (purchase.state === 'failed' || purchase.state === 'review_failed' || purchase.state === 'expired') {
       await moveOrder(db, order, 'REJECTED', 'fp_review_failed', { fpState: purchase.state, failureCode: purchase.failureCode, finalAt: new Date() });
       return;
     }
@@ -18844,6 +19037,11 @@ export class PurchaseAdvanceJob {
     } catch (err) {
       if (err instanceof AppError && err.code === 'CONSENT_EXPIRED' && order.status === 'UNDER_REVIEW') {
         await moveOrder(db, order, 'CONSENT_EXPIRED', 'saga_expired_under_review', { finalAt: new Date() });
+        return;
+      }
+      if (err instanceof AppError && err.code === 'CONSENT_EXPIRED' && order.status === 'CONFIRMING') {
+        // RV-03-53: the window closed before `confirmed` was sent; FP expires the unconfirmed purchase,
+        // and the next re-fetch (Plan 04 F7's backstop re-enqueues this job) moves it REJECTED.
         return;
       }
       throw err;
@@ -19266,9 +19464,10 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
   - `PaymentsService.createAttempt(consent, order) → {attemptId, returnRef}` (inside `useConsumed` only), `resolveReturn(ref) → redirect path`, `get(investorId, attemptId)`.
   - `PurchaseAdvanceJob.checkout` (E20's extension point): PATCH consent → `createAttempt` → PATCH `state: 'confirmed'` → returns `true` (order → `AWAITING_PAYMENT`).
   - Raw route `GET|POST /api/v1/pg/return/{ref}` (`@InfraRoute('API_HOST')`): single-use, 30-minute ref (hash stored, never the ref); marks the attempt `PENDING`, the order `PAYMENT_PENDING`, enqueues `payments.poll`, and returns 303 to `/app/r/payment?ref=<attemptId>` (APP) or `https://app.sanchay.in/r/payment?ref=<attemptId>` (WEB). The postback body is never read (research fp-api §4.1: never trust a postback).
-  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, 2 m, 5 m, 15 m while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends, at most 15 minutes later.
+  - Job `payments.poll` (worker): re-fetches the payment and applies it; reschedules itself at 30 s, 1 m, then every 2 m through UPI's 30-minute window, then every 15 m, while pending. Its queue is `stately`, keyed by the attempt id (R-32, RV-03-24). The return route's and the `payment` event's immediate enqueue is therefore refused while a delayed poll is queued, and that poll applies the result when its delay ends: at most 2 minutes later inside the payment window (RV-03-44; it was 15).
   - FP event handlers `payment` and `mf_purchase` registered in E1's `FP_EVENT_HANDLERS` at `payments.module.ts` load (they re-fetch and apply the same transitions; idempotent).
   - `payments.get` GET `/payments/{attemptId}`.
+  - FP failing or expiring an unpaid purchase (AWAITING_PAYMENT or PAYMENT_PENDING) ends the order FAILED/EXPIRED with FP's `failure_code` (Plan 02 D5 RV-02-78). P-07: FP fails an ONDC purchase whose payment URL was never used with `fp_payment_url_unused` at 23:00 IST on the order day, a simulated payment does not prevent it, and nothing was paid; E24's result screen shows "Payment not completed" for that code (RV-03-43). Cybrilla has not yet confirmed in writing that no money can be taken on such an order (open item).
   - Emails via `Notify.enqueue`: `ORDER_PLACED` when an attempt succeeds, `ORDER_FAILED` on FP `failed`, `REFUND_IN_PROGRESS` when a payment fails after success (late auth reversal).
 - Review fix: the draft wrote a second FP client (`fp-pay.ts`) over an invented `FpGateway`, used `@JobHandler(…, {retryBackoffSeconds})`, a `fakeConsumedConsent()` test helper and FakeFp scripts that do not exist, and several tests asserted nothing. This version fills D3's `createPayment` and follows the custom-checkout order (payment created before `confirmed`). Its tests drive the real saga end to end on FakeFp.
 - Review fix (RV-03-6, RV-03-7): the suite's `beforeAll` upserts `app_config` `orders.enabled = true` (the default is `false`, so `checkedOut()` failed with ORDERS_DISABLED), and `checkout` normalises the consent mobile with `.replace(/\D/g, '').slice(-10)`, as E20 does.
@@ -19444,6 +19643,19 @@ describe('mf_purchase events', () => {
     });
     expect((await orderOf(orderId))?.status).toMatch(/^(SETTLED|UNITS_PENDING)$/);
   });
+
+  it('FP fails an unpaid purchase with fp_payment_url_unused: FAILED and final, the attempt untouched (RV-03-43)', async () => {
+    const { orderId, attemptId } = await checkedOut();
+    const fpOrderId = (await orderOf(orderId))?.fpOrderId as string;
+    // P-07: FP fails an ONDC purchase whose payment URL was never used, at 23:00 IST on the order day.
+    t.fakeFp.advance(fpOrderId, 'failed');
+    const fpRead = t.app.get(FpRead);
+    const raw = await fpRead.purchase(fpOrderId); // FakeFp has no failure_code; the spy adds FP's
+    vi.spyOn(fpRead, 'purchase').mockResolvedValueOnce({ ...raw, failure_code: 'fp_payment_url_unused' });
+    await handleMfPurchaseEvent({ db: t.db.db, fpRead, event: { objectType: 'mf_purchase', objectId: fpOrderId } as never });
+    expect(await orderOf(orderId)).toMatchObject({ status: 'FAILED', failureCode: 'fp_payment_url_unused' });
+    expect((await attemptOf(attemptId))?.status).toBe('REDIRECTED');
+  });
 });
 
 describe('payments.get', () => {
@@ -19457,7 +19669,7 @@ describe('payments.get', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test:int -- payments
+pnpm --filter=@sanchay/api test:int payments
 ```
 Expected: `Cannot find module '../../src/modules/payments/payments.schema.js'`.
 
@@ -19711,7 +19923,16 @@ import { toFpPaymentView } from './fp-payment.js';
 import { PaymentsService } from './payments.service.js';
 import { paymentAttempts } from './payments.schema.js';
 
-const BACKOFF_SECONDS = [30, 60, 120, 300, 900];
+/**
+ * 30 s, 1 m, then every 2 m through UPI's 30-minute window, then 15 m. R-32: the stately queue refuses
+ * the return route's and the webhook's nudge while a poll is queued, so this gap is how long an investor
+ * back from the PG waits for the result (RV-03-44; it was up to 15 minutes from the fourth poll on).
+ */
+function pollDelaySeconds(pollAttempts: number): number {
+  if (pollAttempts === 0) return 30;
+  if (pollAttempts === 1) return 60;
+  return pollAttempts < 16 ? 120 : 900;
+}
 
 /** Worker only. Re-fetches the payment (never trusts a postback) and applies it; reschedules while pending. */
 @Injectable()
@@ -19758,7 +19979,7 @@ export class PaymentsPollJob {
         return; // the order stays put: "Try again" is a new order with a new consent
       }
       if (payment.status !== 'SUCCESS') {
-        const delay = BACKOFF_SECONDS[Math.min(attempt.pollAttempts, BACKOFF_SECONDS.length - 1)] ?? 900;
+        const delay = pollDelaySeconds(attempt.pollAttempts);
         await tx.update(paymentAttempts).set({ pollAttempts: attempt.pollAttempts + 1 }).where(eq(paymentAttempts.id, attempt.id));
         await this.jobs.enqueue(tx, 'payments.poll', { attemptId }, { startAfter: delay, singletonKey: attemptId });
       }
@@ -19783,19 +20004,25 @@ import { moveOrder } from '../orders/order-transitions.js';
 import { orders } from '../orders/orders.schema.js';
 
 const FP_ORDER_STATES: readonly string[] = ['under_review', 'pending', 'submitted', 'successful', 'failed', 'expired', 'reversed'];
+const UNPAID: readonly string[] = ['AWAITING_PAYMENT', 'PAYMENT_PENDING'];
 
 /**
  * E1 handler for `mf_purchase.*`: re-fetches the purchase (never trusts the payload) and applies the one
- * transition it implies from PROCESSING/UNITS_PENDING; everything earlier belongs to the saga jobs.
+ * transition it implies from PROCESSING/UNITS_PENDING, or FP failing or expiring an unpaid purchase
+ * (RV-03-43); everything else earlier belongs to the saga jobs.
  */
 export async function handleMfPurchaseEvent({ db, event, fpRead }: FpEventHandlerContext): Promise<void> {
   if (event.objectId === null) return;
   const [order] = await db.select().from(orders).where(eq(orders.fpOrderId, event.objectId));
-  if (order === undefined || !['PROCESSING', 'UNITS_PENDING', 'SETTLED'].includes(order.status)) return;
+  if (order === undefined || ![...UNPAID, 'PROCESSING', 'UNITS_PENDING', 'SETTLED'].includes(order.status)) return;
   const purchase = toFpPurchaseView(await fpRead.purchase(event.objectId));
   if (!FP_ORDER_STATES.includes(purchase.state)) return;
   const to = fpStateToOrderStatus(purchase.state as FpOrderState, { unitsAllotted: purchase.allottedUnits !== null });
   if (to === order.status) return;
+  // P-07: FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day
+  // (`fp_payment_url_unused`); nothing was paid, so the order ends FAILED with no refund. A payment
+  // success on an unpaid order belongs to payments.poll, not to this handler.
+  if (UNPAID.includes(order.status) && to !== 'FAILED' && to !== 'EXPIRED') return;
   const trigger = { SETTLED: 'fp_successful_with_units', UNITS_PENDING: 'fp_successful_units_null', FAILED: 'fp_failed', EXPIRED: 'fp_expired', REVERSED: 'fp_reversed' }[to as string];
   if (trigger === undefined) return;
   await moveOrder(db, order, to, trigger, {
@@ -19969,20 +20196,22 @@ Key-level edits: `job-registry.ts` append `'payments.poll': 'stately', // key: t
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=payment_attempts
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- payments orders infra-routes fp-webhooks
+pnpm --filter=@sanchay/api test:int payments orders infra-routes fp-webhooks
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 ```
-Expected: `payments.int.test.ts` 9/9; E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
+Expected: `payments.int.test.ts` 10/10 (RV-03-43's unpaid-failure case included); E20's `orders.int.test.ts` still 19/19 (RV-03-16's two wire cases and RV-03-27's adoption case included; its `pending -> CONFIRMING` test now ends at `AWAITING_PAYMENT` — update that one assertion to `AWAITING_PAYMENT` in this task, since `checkout` now completes the H-2 steps); `infra-routes` and `fp-webhooks` green; `openapi.json` clean.
 
 - [ ] **Step 5: Commit**
 
 ```
 pnpm exec biome check --write apps/api/src/modules/payments apps/api/src/modules/orders apps/api/src/integrations/fp apps/api/src/modules/platform apps/api/src/app.module.ts apps/api/test/int packages/contract/src
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- payments orders
+pnpm --filter=@sanchay/api test:int payments orders infra-routes fp-webhooks
 pnpm lint
 git add apps/api/src/modules/payments apps/api/src/modules/orders apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/ids.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/app.module.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/payments.int.test.ts apps/api/test/int/orders.int.test.ts apps/api/test/int/infra-routes.ts apps/api/test/int/infra-routes.int.test.ts packages/contract/src
 git commit -m "feat(payments): H-2 payment before confirm, single-use return route, polling, FP events, order emails (E21)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -22078,6 +22307,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/mobile/src/app/pay/[orderId].tsx`
   - `apps/mobile/src/app/result/[orderId].tsx`
   - `apps/mobile/src/app/r/[kind].tsx`
+  - `apps/mobile/src/app/update-required.tsx` (RV-03-46: the route SYS-01 renders in)
   - `apps/mobile/src/native-intent.tsx`
   - `apps/mobile/src/native-intent.test.ts`
   - `apps/mobile/src/app/(tabs)/portfolio/orders/index.tsx`
@@ -22093,6 +22323,8 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `apps/web/src/lib/routing.test.ts` (append 1 regression case)
   - `apps/web/src/client/routes.tsx` (RV-03-17: append `PayRoute`, `ResultRoute`, `OrdersListRoute`, `OrderDetailRoute`; key-level only)
   - `apps/web/e2e/support/otp.ts` (RV-03-18: append `smsInbox`, `newestMessageId` and `readNextOtp`; Plan 01's `readLatestOtp` stays unchanged)
+  - `packages/features/src/test-utils.tsx`, `apps/web/src/client/WebAppProviders.tsx`, `apps/mobile/src/native/AppProviders.tsx` (RV-03-46: each supplies `androidStoreUrl`; the mobile client routes a 426 to SYS-01; key-level)
+  - `apps/mobile/src/app/_layout.tsx` (RV-03-47: Plan 03's root routes join the signed-in `Stack.Protected`; key-level)
 
 **Interfaces:**
 - Prerequisites: **E21** (`payments.get`, the raw `GET|POST /api/v1/pg/return/{ref}` route, `PAY_ATTEMPT` states). **E20** (`orders.get`, `orders.list`, `orders.cancel` [K]; the wire's `status`, `schemeName`, `cancellable` and `next`, RV-03-16). **E23** (`ConsentStatusScreen` pushes here on `next: 'PAYMENT' | 'DONE'`; INV-02 opens CNF-01 and goes to `/confirm/{challengeId}?orderId={orderId}`). **E17** (FUND-01's "Invest" link, RV-03-8) for the smoke. Plan 01 **B18/C10** (`@InfraRoute`, HostGuard) for context only — this task adds no server route.
@@ -22104,7 +22336,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   - `PAYMENT_METHODS`, `type PaymentMethod` (`@sanchay/domain`, Plan 01).
 - Produces:
   - `packages/api-client/src/errors.ts`: `VERSION_ERROR_CODES = new Set(['APP_VERSION_UNSUPPORTED'])`; `isVersionUnsupportedError(error): boolean`.
-  - `packages/api-client/src/client.ts`: `BuildOptions.onVersionUnsupported: () => void`; both `WebApiClientOptions` and `NativeApiClientOptions` gain the same field; the `interceptors` array gains `onError((error) => { if (isVersionUnsupportedError(error)) options.onVersionUnsupported(); })`.
+  - `packages/api-client/src/client.ts`: `BuildOptions.onVersionUnsupported?: (() => void) | undefined` (optional, RV-03-46); both `WebApiClientOptions` and `NativeApiClientOptions` gain the same field; the `interceptors` array gains `onError((error) => { if (isVersionUnsupportedError(error)) options.onVersionUnsupported(); })`.
   - `PlatformAdapters.androidStoreUrl: string` (the Play Store listing URL SYS-01 links to).
   - `PayScreen({ orderId }: { orderId: string })` (PAY-01): the target is the TPV line ("Pay only from A/c ••1234 (HDFC)…, shows as Cybrilla") and, per platform, a same-tab redirect on web (mobile-web gets a UPI intent link, desktop a QR) or `WebBrowser.openAuthSessionAsync` on Android with `Linking.openURL(upiUri)` as the UPI fallback, polling `payments.get` on `AppState` resume. **Open item (RV-03-16):** no procedure returns the attempt's payment link (E21 stores `token_url` and `upi_uri` encrypted and exposes neither) or the TPV bank's last 4 digits, so this task's PAY-01 shows the order and the TPV copy, follows `orders.get`'s `next` to the result, and offers no pay action until the owner adds that read.
   - `ResultScreen({ orderId }: { orderId: string })`: polls `orders.get` until its `status` has result copy and renders SETTLED/REJECTED/PROCESSING copy.
@@ -22183,9 +22415,11 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   `packages/features/src/system/UpdateRequiredScreen.test.tsx`
   ```tsx
   import { screen } from '@testing-library/react';
+  import userEvent from '@testing-library/user-event';
   import { HttpResponse, http } from 'msw';
   import { setupServer } from 'msw/node';
-  import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+  import { Linking } from 'react-native';
+  import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
   import { renderWithProviders, TEST_API } from '../test-utils';
   import { UpdateRequiredScreen } from './UpdateRequiredScreen';
 
@@ -22195,10 +22429,11 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   afterAll(() => server.close());
 
   describe('UpdateRequiredScreen (SYS-01, R-18)', () => {
-    it('renders the store link from PlatformAdapters', () => {
+    it('opens the store listing from PlatformAdapters', async () => {
+      const open = vi.spyOn(Linking, 'openURL').mockResolvedValue(true);
       renderWithProviders(<UpdateRequiredScreen />);
-      const link = screen.getByRole('link', { name: 'Update on Play Store' });
-      expect(link.getAttribute('href')).toBe('https://play.google.com/store/apps/details?id=in.sanchay.app');
+      await userEvent.click(screen.getByRole('button', { name: 'Update on Play Store' }));
+      expect(open).toHaveBeenCalledWith('https://play.google.com/store/apps/details?id=in.sanchay.app');
     });
   });
   ```
@@ -22270,17 +22505,18 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
     credentials: RequestCredentials;
     fetchImpl: FetchLike | undefined;
     onUnauthenticated: () => void;
-    onVersionUnsupported: () => void;
+    /** R-18: Android only; the web build always matches the API (RV-03-46). */
+    onVersionUnsupported?: (() => void) | undefined;
   }
   // ... inside buildClient, interceptors:
     interceptors: [
       onError((error) => {
         if (isSessionError(error)) options.onUnauthenticated();
-        if (isVersionUnsupportedError(error)) options.onVersionUnsupported();
+        if (isVersionUnsupportedError(error)) options.onVersionUnsupported?.();
       }),
     ],
   // ... WebApiClientOptions and NativeApiClientOptions each gain:
-    onVersionUnsupported: () => void;
+    onVersionUnsupported?: (() => void) | undefined;
   // ... and both createWebApiClient/createNativeApiClient pass it through to buildClient({ ..., onVersionUnsupported: options.onVersionUnsupported }).
   ```
 
@@ -22289,11 +22525,41 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   androidStoreUrl: string;
   ```
 
+  RV-03-46: every `PlatformAdapters` value now supplies it (key-level, after `privacyNoticeUrl`). `packages/features/src/test-utils.tsx` (`makePlatform`), `apps/web/src/client/WebAppProviders.tsx` (the `platform` memo) and `apps/mobile/src/native/AppProviders.tsx` (the `platform` memo) each add:
+  ```ts
+      androidStoreUrl: 'https://play.google.com/store/apps/details?id=in.sanchay.app',
+  ```
+  `apps/mobile/src/native/AppProviders.tsx` also passes the 426 callback to `createNativeApiClient` (key-level, after `onUnauthenticated`); `router` is already imported there:
+  ```ts
+        onVersionUnsupported: () => router.replace('/update-required' as Href),
+  ```
+
+  `apps/mobile/src/app/update-required.tsx` (new; outside both `Stack.Protected` groups, so it renders signed in or out):
+  ```tsx
+  import { UpdateRequiredScreen } from '@sanchay/features';
+
+  export default function UpdateRequiredRoute() {
+    return <UpdateRequiredScreen />;
+  }
+  ```
+
+  `apps/mobile/src/app/_layout.tsx` (Plan 01's file; key-level, RV-03-47). Inside `<Stack.Protected guard={signedIn}>`, after `<Stack.Screen name="(tabs)" />`, so a signed-out deep link never renders an investor screen (Plan 04 F12 and F16 add theirs after the same anchor):
+  ```tsx
+          <Stack.Screen name="onboarding/index" />
+          <Stack.Screen name="onboarding/[step]" />
+          <Stack.Screen name="invest/[schemeId]/lumpsum" />
+          <Stack.Screen name="invest/[schemeId]/review" />
+          <Stack.Screen name="confirm/[challengeId]" />
+          <Stack.Screen name="pay/[orderId]" />
+          <Stack.Screen name="result/[orderId]" />
+          <Stack.Screen name="r/[kind]" />
+  ```
+
   `packages/features/src/system/UpdateRequiredScreen.tsx`
   ```tsx
   import { space } from '@sanchay/tokens';
   import { AppText, Button, Screen } from '@sanchay/ui';
-  import { StyleSheet, View } from 'react-native';
+  import { Linking, StyleSheet, View } from 'react-native';
   import { usePlatform } from '../platform/PlatformContext';
 
   /** SYS-01 (R-18): shown for any 426 APP_VERSION_UNSUPPORTED, wired via onVersionUnsupported. */
@@ -22308,9 +22574,10 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
           </AppText>
           <Button
             label="Update on Play Store"
-            role="link"
-            href={platform.androidStoreUrl}
-            onPress={() => undefined}
+            onPress={() => {
+              // Plan 01's Button has no role or href (RV-03-46); LoginScreen opens its link the same way.
+              void Linking.openURL(platform.androidStoreUrl);
+            }}
           />
         </View>
       </Screen>
@@ -22487,9 +22754,15 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   const TERMINAL_COPY: Record<string, string> = {
     SETTLED: 'Your investment is confirmed.',
     REJECTED: "This order couldn't go through. Try again.",
+    FAILED: "This order couldn't go through. Try again.",
+    EXPIRED: "This order couldn't go through. Try again.",
     PROCESSING: 'Sent to the fund house for allotment.',
   };
   const TERMINAL_STATES = new Set(Object.keys(TERMINAL_COPY));
+  /** E21 (RV-03-43, P-07): FP fails an unpaid ONDC purchase at 23:00 IST with this code; nothing was paid. */
+  const FAILURE_COPY: Record<string, string> = {
+    fp_payment_url_unused: 'Payment not completed. This order is closed and no money was taken. Start a new order to invest.',
+  };
 
   /** Polls `orders.get` until its `status` has result copy (RV-03-16: the wire field is `status`). */
   export function ResultScreen({ orderId }: ResultScreenProps) {
@@ -22500,8 +22773,9 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
       refetchInterval: (query) =>
         TERMINAL_STATES.has(query.state.data?.status ?? '') ? false : 2000,
     });
+    const failure = order.data?.failureCode ? FAILURE_COPY[order.data.failureCode] : undefined;
     const copy = order.data
-      ? (TERMINAL_COPY[order.data.status] ?? 'Confirming your investment…')
+      ? (failure ?? TERMINAL_COPY[order.data.status] ?? 'Confirming your investment…')
       : 'Loading…';
     return (
       <Screen testID="result-screen">
@@ -22937,7 +23211,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   One script per line (RV-03-19): `pnpm --filter=X test typecheck` runs `vitest run "typecheck"`, finds no test file and exits 1. The `(app)` and `(tabs)` paths are quoted, so the lines work in PowerShell 5.1 and Git Bash alike.
   ```
   pnpm exec turbo run build --filter=@sanchay/web^... --filter=@sanchay/mobile^...
-  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src
+  pnpm exec biome check --write packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio/orders" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
   pnpm --filter=@sanchay/web test
   pnpm --filter=@sanchay/web typecheck
   pnpm --filter=@sanchay/mobile test
@@ -22947,7 +23221,7 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
   pnpm --filter=@sanchay/api-client test
   pnpm --filter=@sanchay/api-client typecheck
   pnpm lint
-  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml
+  git add packages/api-client packages/features/src/pay packages/features/src/orders packages/features/src/system packages/features/src/platform packages/features/src/index.ts apps/web/src/client/routes.tsx "apps/web/src/app/(app)/pay" "apps/web/src/app/(app)/result" "apps/web/src/app/(app)/r" "apps/web/src/app/(app)/portfolio" apps/web/src/lib/routing.test.ts apps/web/e2e/lumpsum.smoke.spec.ts apps/web/e2e/support/otp.ts apps/mobile/src/app/pay apps/mobile/src/app/result apps/mobile/src/app/r "apps/mobile/src/app/(tabs)/portfolio" apps/mobile/src/native-intent.tsx apps/mobile/src/native-intent.test.ts apps/mobile/.maestro/lumpsum-return.yaml packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx apps/mobile/src/native/AppProviders.tsx apps/mobile/src/app/_layout.tsx apps/mobile/src/app/update-required.tsx
   git commit -m "feat(pay): add PAY-01, result, ORD-01/02 and SYS-01 with 426 interceptor (E24, R-18)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
   Expected: all eight test and typecheck commands exit 0 and `pnpm lint` exits 0. If a gitleaks false positive fires on the Maestro fixture ref, add a narrow regex to `.gitleaks.toml` in this same commit (never a path wildcard); none is expected here since `maestro-local-ref` matches no secret pattern.

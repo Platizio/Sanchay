@@ -161,6 +161,7 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F7-3 (2026-10-05): `ops-cli.md` has one deployed environment (R-31; minor).** The deployed form said "for dev use `sanchay-dev`, `sanchay-dev-ops`, `SanchayMvpStack-dev` …"; prod is the only deployed environment, so that sentence is gone and the commands, already prod's, are unchanged. The "When to use which" row now says the PO's invitees come only after the GO-1 decision (R-31: no invite before GO-1 but the founders' test accounts). The `'/sanchay/dev/invites/…'` refusal case and the `'dev'` app-env cases in `ops-inputs.test.ts` stay: they pin the prefix rule and the code value, not a dev stack.
 - **RV-04-F18-1 (2026-10-05): every Play build talks to prod (R-31; major).** F18 pointed the "sandbox chains" internal build at `app.dev.sanchay.in` and set the retriever hash on GitHub environments `dev` and `prod`. With no dev stack or dev domain, the runbook has one target row (prod, reachable from E25's paused deploy), the hash goes on `prod` only and replaces the owner's interim value, the curl, adb and Maestro lines use `app.sanchay.in`, and §4's payment-return and mandate items come from the founders' canary legs (F20), as F25 already ticks them. The intent-filter host still follows `EXPO_PUBLIC_SANCHAY_APP_ORIGIN` (a local http origin gets no App Link); its test now uses the test origin `https://app.sanchay.test/`. Verified: `appConfig.test.ts` 10/10 under Vitest 5.0.1 in a scratch copy with E24's `native-intent.tsx` and Plan 01's `config.ts`, and `biome check` clean.
 - **RV-04-F19-3 (2026-10-05): the local pilot-list check no longer waits for a dev stack (R-31; minor).** Step 3a said R3/R7 failures are expected "until the dev stack has run `catalogue.fp.sync` and NAV sync"; R3 (`fpActive && purchaseAllowed`) and R7 (commission and NAV age) pass once those jobs have run against the database being checked. The deployed run on prod belongs to R-33.
+- **RV-04-F19-4: F19 finds E15's completeness and E17's test fixes already made (Plan 03 RV-03-40, RV-03-41; minor).** Plan 03 now fixes E15's completeness divisor (8 slots, `toBe(25)`) and E17's three ambiguous assertions and its percent format at the source, because E15's and E17's own steps hit them in S3. F19's edits to those lines become checks: where the fixed line is already present, F19 keeps it. F19's FundScreen replacement and its appended cases are unchanged.
 - **RV-04-F20-1 (2026-10-05): the PO's list is seeded only after the GO-1 decision (R-31; major).** F20 said F27 seeds the PO's invite list on Thu 11-26, before the GO-1 meeting; R-31 allows no invite before GO-1 except the founders' test accounts. The four sentences now say F27 checks on Thu 11-26 that orders are off and seeds the list only after the GO-1 decision; until then the invite list holds only the founders' own numbers. The canary legs and their switch pairs are unchanged.
 - **RV-04-F21-1 (2026-10-05): G-E3's checklist names prod, not a dev stack (R-31; minor).** E25's CDK assertions now run on its prod stack (no "dev" qualifier on row 10), row 12's pass criterion is "all three prod hosts scanned" (F22 fills the same cell), and the F1 fixtures note no longer cites `DEV_INPUTS`. `g-e3-prod.test.ts`'s header comment says E25's own tests assert the same items (a comment only), and the Android PII scan names the dev-client build, because the Play-internal build talks to prod and cannot run Plan 01's Mailpit sign-up flows. Row 9 still quotes E25's test title verbatim; if Plan 02 renames it under R-31, row 9 follows.
 - **RV-04-F22-1 (2026-10-05): the ZAP baseline scans the paused prod stack before GO-1 (R-31; major).** F22 scanned `www`, `app` and `api.dev.sanchay.in` and never prod; R-31 leaves no dev stack and names this scan. `DEV_TARGETS` becomes `PROD_TARGETS` (`www`, `app` and `api.sanchay.in`), the CLI takes `--env=prod`, Step 6 records the gate commit prod runs and checks both switches are off instead of deploying, and the scan stays passive (GETs only, no AJAX spider, no sign-in, no active scan). Verified in a scratch copy: `node --test scripts/zap-baseline.test.ts` 17/17, `tsc` (repo strict base, NodeNext) exits 0, `biome check` clean; the new tests fail against the old script (no `PROD_TARGETS` export).
@@ -176,7 +177,25 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F1-10 (2026-10-05): R-33's NAV history runbook follows D9's month-by-month backfill (F1 `db-access.md`; follows Plan 02 RV-02-73; major).** D9 now fetches one calendar month per AMFI request inside a run, waits up to 5 minutes for AMFI, inserts 1,000 rows per statement and reports the rows it inserted, so the runbook drops the 7-day windows and the 260 weekly runs: prod's history is six runs, one per calendar year, newest first, back to 2021-11-01, about half an hour to an hour in all. It also gives each run's log lines and pass line, the resume line a failed run prints, the 10-minute limit of `aws ecs wait tasks-stopped` (run it again), and a read-only `--check` run that lists rows and NAV dates per month. Measured on 2026-10-05 with D9's built CLI against AMFI and PostgreSQL 18.6: a month took 21 to 29 s (download, parse and inserts), a re-run wrote 0, the heap peaked at 166 MB under `--max-old-space-size=256` (173 MB without it), and AMFI's report for a month with no NAVs yet is an HTML page, on which the run stops with the resume line.
 - **RV-04-F1-11 (2026-10-05): F1 follows D0's pino-http redaction (Plan 02 RV-02-75; minor).** D0's `logging.test.ts` now imports `buildPinoHttpOptions` and has a second EF-B4 case that logs through pino-http, so F1's key-level import keeps `buildPinoHttpOptions`, that case passes `SANCHAY_APP_ROLE: 'api'` once `LogEnv` needs the role, and the file has 9 cases (Step 2: 2 failed, 7 passed; Step 4: 9). Open question 6 is resolved.
 - **RV-04-F7-4 (2026-10-05): F7's `adoptPurchase` keeps E20's hand-off to `orders.purchase.advance` (follows Plan 03 RV-03-27; major).** F7's full-content rewrite of `fp.reconcile.nonfinal` moved an adopted purchase to UNDER_REVIEW and enqueued nothing, unlike its own `adoptRedemption`, so the H-2 checkout never ran for it: F4's `mf_purchase` handler leaves orders before PROCESSING to the saga jobs. `adoptPurchase` now moves the order and enqueues `orders.purchase.advance` `{orderId, challengeId}` (`singletonKey` = order id) in one transaction, as E20 does. `recon-fp.int.test.ts` gains the matching case (19/19), Consumes and Produces name the job, and Step 4's last line, which runs E20's `orders` suite with its own adoption case, now says what that suite guards. Checked in the scratch prototype: `tsc` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) and `biome ci` are clean on F7's job and on `recon-fp.int.test.ts` as written, and the purchase branch, run on PostgreSQL 18.6 with pg-boss 12.34.0 and D2's `Jobs`, commits the move with its job and rolls both back when the enqueue fails (the original text left no job).
-- **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
+- **RV-04-F7-5: `ops:nav-release` keeps the row R-35's sync reads (Plan 02 RV-02-76, R-35; major).** D9's release now lets the next feed value through once: `runNavSync` takes a released ISIN's value without the 25% check when its latest `NAV_RELEASE`/`NAV_RELEASE_APPLIED` audit row is a `NAV_RELEASE` for `scheme_navs`. F7's rewritten command already writes exactly that row and refuses a NAV that is not quarantined, so its code is unchanged; its doc comment, the runbook's command table and its "after checking it on the AMC site" row now say what the release does, and the `ops:nav-release` case asserts that D9's `pendingNavReleases` sees the release (one more assertion, no new case). D9's `releaseNav` stays as D9's tested helper; after F7 the CLI no longer calls it.
+- **RV-04-F1-12: F1's infra totals count E25's new retention case (Plan 02 RV-02-77; minor).** E25's document bucket and NAT EIP now use `RETAIN_ON_UPDATE_OR_DELETE`, with one new case, so E25's file has 26 tests. F1's Step 2 now expects `sanchay-mvp-stack.test.ts` 25 passed, 1 failed, and Step 4 expects 56 infra tests (E25's 26). F1's `NatEipAddress` output check is unchanged: the EIP keeps the logical id `NatEip`.
+- **RV-04-F1-13: F1's legal seed keeps `effective_from` on a re-seed (Plan 03 RV-03-29; minor).** E3's `LegalDocs.current` now picks the PUBLISHED version in force by `effective_from`, so a re-seed that publishes a version with a date must store that date. F1's replacement `ops-legal-seed.ts` set only the body, sha256 and status on conflict; it now sets `effectiveFrom` too. Nothing else in F1 changes.
+- **RV-04-F12-2: Plan 03's mobile routes are already protected when F12 adds its own (Plan 03 RV-03-47; minor).** E24 now registers the onboarding, lumpsum, confirm, pay, result and `r/[kind]` routes inside the signed-in `Stack.Protected` after `(tabs)`. F12's review note that listed them as unprotected now says so; F12's two SIP lines still go after the same anchor.
+- **RV-04-F1-14: the migrate task loads E9's risk questionnaire (Plan 03 RV-03-52, R-36; major).** `seedReferenceData` gains a fourth idempotent step, E9's `seedRiskQuestionnaire`, which loads v1.0.0 as DRAFT until compliance signs the file off and publishes it on the deploy after. `reference-data.int.test.ts` counts `risk_questionnaires: 1`; its case count is unchanged.
+- **RV-04-F2-6: F2's consent-first cases move the clock (Plan 03 RV-03-51; owner decision 2026-10-06; major).** `draftSip` moves the FakeClock 1 ms before `createSip` and `approve` moves it 1 ms after `engine.approve`, so `expectNoPmWritesBeforeConsumed` sees a real window in "mandates.submit" and "reused mandate within headroom" (both passed for nothing before). Not run.
+- **RV-04-F5-2: F5's consent-first case moves the clock (Plan 03 RV-03-51; owner decision 2026-10-06; minor).** `draft` moves the FakeClock 1 ms before `createRedemption` and `approve` 1 ms after `engine.approve`. F5's explicit `redemption.create` counts already covered it; the window now does too. Not run.
+- **RV-04-F1-15: F1 says where the G-E5 results go (backlog, F20–F23 review; minor).** The PITR restore test, the alarm drill and the go-live checklist said to record results "in the G-E5 evidence" without naming a place. They now go in a dated **Result** line at the end of each `credential-rotation.md` section, which F23's G-E5 row already links.
+- **RV-04-HDR-2: Step 5's prose matches its commands (F5, F10, F11, F28; backlog round 2; minor).** These four tasks once ran `openapi` and `git diff --exit-code apps/api/openapi.json` after `git add`; their commands now run the B10 drift test (`test … openapi`) before `git add`, behind a build, but the paragraph under each Step 5 and three Interfaces bullets still described the old order. The prose now says what the commands do; no command changed.
+- **RV-04-F5-3: a CONFIRMING redemption whose window closed stops retrying (backlog, F7 review; minor).** When the saga window passed after the consent PATCH but before the confirm, `useConsumed` threw `CONSENT_EXPIRED`, and the advance job rethrew it on every re-enqueue by F7's backstop, failing the job each time. It now returns: FP never processes an unconfirmed redemption and expires it, and the next re-fetch moves the order REJECTED and releases the reservation (D5 allows CONFIRMING to REJECTED). Not run.
+- **RV-04-F6-1: F6 builds before its api checks (backlog round 1, stale dist; minor).** F6 changes `@sanchay/domain` and `@sanchay/contract`, which export only `dist`, but its Steps 4 and 5 ran `db:generate` and the api typecheck without the build line; both start with `pnpm exec turbo run build --filter=@sanchay/api^...` now. A scan of Plan 04 finds no other task that changes a `dist` package and checks the api without a build first.
+- **RV-04-F4-5: `orders.units.reconcile` resolves its own breaks (backlog, F24–F27 review; major).** Once an order's units arrived, its `UNITS_PENDING_T3`/`T5` breaks stayed open, and an open T5 kept `sanchay-prod-money-invariant-breach` in ALARM until two founders ran `ops:resolve-break`. The job now resolves the order's two SLA breaks when the order leaves UNITS_PENDING, as F7's invariant sweep resolves its own; the SLA case asserts both RESOLVED after settlement (no new case). Not run.
+- **RV-04-F5-4: `payout.watch` resolves its overdue break when the payout lands (backlog, F24–F27 review; minor).** `REDEMPTION_PAYOUT_OVERDUE` stayed open after CREDITED. `credit` now resolves it in the same transaction, and the payout case asserts it (no new case). Not run.
+- **RV-04-F7-6: the backstop restarts a stalled purchase too (backlog, ADOPT follow-up; major).** D2 retries a failed job three times without a delay, so a short FP outage ended a purchase's `orders.purchase.advance` chain and left it in UNDER_REVIEW or CONFIRMING; `fp.reconcile.nonfinal` resumed redemptions and plans only. `resumePurchases` re-enqueues the advance job for such purchases (stately, keyed by the order id), and Plan 03 RV-03-53 makes that job end an expired one. Not run; no new case.
+- **RV-04-HDR-3: the header says where Step 5's build line goes (backlog round 2; minor).** F5, F7, F10–F14, F16 and F28 start Step 5 with the workspace build, before biome, because the re-run checks read `dist`; the header's Commands rule said every Step 5 follows AGENTS.md's order without saying so. It now does; no command changed.
+- **RV-04-F16-1: a paused withdrawal says so (backlog round 2, F16 UX; minor).** RED-02 showed E20's ORDERS_DISABLED copy, "New investments are paused right now", on a withdrawal. `RedeemReviewScreen` now shows "Withdrawals are paused right now. Please try again later." for that code, and its refusal case expects it. F16's Prerequisites also credit E13, not E23, with `ApiContextValue.consents` (Plan 03 RV-03-9). Not run.
+- **RV-04-F19-5: F19's seed check sits before F1's reference step (backlog round 2; minor).** F1 moved D8's first four CSV loops into `seedCatalogueReference`, which `seedCatalogue` calls first, so F19's "before the `amcs.csv` loop" anchor now names that call; the validation stays first, so an invalid list writes nothing.
+- **RV-04-F2-7: F2's FakeFp case passes `biome ci` (sweep; minor).** `this.state.purchasePlans.get(params.id!)` was the one non-null assertion left in Plan 04's code; it is `params.id ?? ''`, as Plan 02 RV-02-47 wrote D4's (an unknown id finds no plan either way).
+- **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit); where a task needs the workspace build, that line comes first, before biome, because the re-run reads `dist` (RV-04-HDR-3). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
 
@@ -272,7 +291,7 @@ Sandbox probe run 1 (2026-10-01, `docs/probes/`) settled several of these; the r
   - No new stack and no second environment (R-31): F1 changes the `SanchayMvpStack-prod` that E25 deployed paused in S2. Its Multi-AZ, PITR 14 days, deletion protection, `db.t4g.medium`, 2 tasks of **`sanchay-app`**, R-11 listener rules, health checks and web container, `rds.force_ssl` + `verify-full` (R-15), ECS Exec logging (R-16) and least-privilege deploy role are E25's and stay as they are.
   - **D6 logins:** RDS master `sanchay_master` (E25; secret `sanchay/{env}/db-master`, migrate only); `sanchay_app_login` (secret `sanchay/{env}/db-app`; api, worker, ops; member of `sanchay_app` WITH INHERIT, SET); `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`; people over SSM; member of `sanchay_readonly`; `default_transaction_read_only = on`, `statement_timeout = 60s`). The two login secrets are generated JSON `{username, password}` with 40 letters and digits.
   - `apps/api/src/db/db-logins.ts`: `ensureDbLogins(db, {app, readonly}) → string[]`, `DB_LOGINS`, `DbLoginPasswords`, `scramSha256Verifier(password, salt?)`, `DbLoginError`.
-  - **Reference data (FR-3):** `apps/api/src/cli/reference-data.ts`: `seedReferenceData(db, dirs = REFERENCE_DATA_DIRS) → summary`, `REFERENCE_DATA_DIRS`, `ReferenceDataDirs`. Its three idempotent steps: `seedLegalDocumentFiles(db, dir = LEGAL_DOCUMENTS_DIR) → count`, `LEGAL_DOCUMENTS_DIR`, `LegalSeedError` (`ops-legal-seed.ts`; a version that is no longer DRAFT keeps its text); `seedRefTables(db, dataDir = REF_DATA_DIR) → {pincodes, ifsc}`, `REF_DATA_DIR` (`ops-ref-seed.ts`); `seedCatalogueReference(db, dataDir)` (`ops-catalogue-seed.ts`: AMCs, SEBI categories, aliases, market holidays; never schemes, fund facts or commission lines). `pnpm ops:legal:seed` and `pnpm ops:ref:seed` run the compiled modules. The api image holds `/repo/docs/legal` and `/repo/data`.
+  - **Reference data (FR-3):** `apps/api/src/cli/reference-data.ts`: `seedReferenceData(db, dirs = REFERENCE_DATA_DIRS) → summary`, `REFERENCE_DATA_DIRS`, `ReferenceDataDirs`. Its four idempotent steps (the fourth is E9's `seedRiskQuestionnaire`, DRAFT until signed off, R-36): `seedLegalDocumentFiles(db, dir = LEGAL_DOCUMENTS_DIR) → count`, `LEGAL_DOCUMENTS_DIR`, `LegalSeedError` (`ops-legal-seed.ts`; a version that is no longer DRAFT keeps its text); `seedRefTables(db, dataDir = REF_DATA_DIR) → {pincodes, ifsc}`, `REF_DATA_DIR` (`ops-ref-seed.ts`); `seedCatalogueReference(db, dataDir)` (`ops-catalogue-seed.ts`: AMCs, SEBI categories, aliases, market holidays; never schemes, fund facts or commission lines). `pnpm ops:legal:seed` and `pnpm ops:ref:seed` run the compiled modules. The api image holds `/repo/docs/legal` and `/repo/data`.
   - `apps/api/src/cli/migrate.ts`: with `SANCHAY_APP_ROLE=migrate` it also syncs the logins (both passwords set) and seeds the reference data; its pino lines (`service` `migrate`, R-34) are `migrations applied`, `db logins synced: sanchay_app_login, sanchay_readonly_login` and `reference data seeded: <n> legal documents, <n> pincodes, <n> IFSC codes, catalogue reference tables`. A developer's `pnpm db:migrate` (role `api`) only migrates.
   - Env (B2 schema): `SANCHAY_DB_APP_PASSWORD`, `SANCHAY_DB_READONLY_PASSWORD` (migrate container only); boot invariant **14** (outside local/test, `SANCHAY_APP_ROLE=migrate` requires both).
   - ECS: task families `sanchay-{env}-migrate` (container `migrate`, command `node dist/cli/migrate.js`, login `sanchay_master`, E25's task role) and `sanchay-{env}-ops` (container `ops`, `SANCHAY_APP_ROLE=ops`, login `sanchay_app_login`, secrets `SANCHAY_DB_PASSWORD` and `SANCHAY_KEYRING_JSON` only, default command `node dist/main.js`, task role `OpsTaskRole` whose only statement is `ReadOpsInviteParameters`: `ssm:GetParameter` on `arn:aws:ssm:<region>:<account>:parameter/sanchay/{env}/invites/*`).
@@ -1323,7 +1342,7 @@ async function count(table: string): Promise<number> {
 
 async function counts(): Promise<Record<string, number>> {
   const tables = ['legal_documents', 'ref_pincodes', 'ref_ifsc', 'amcs', 'sebi_categories'];
-  const all = [...tables, 'category_aliases', 'market_holidays'];
+  const all = [...tables, 'category_aliases', 'market_holidays', 'risk_questionnaires'];
   return Object.fromEntries(await Promise.all(all.map(async (n) => [n, await count(n)] as const)));
 }
 
@@ -1357,6 +1376,7 @@ describe('seedReferenceData: what the migrate task loads on every deploy (F1, FR
       sebi_categories: await csvRows('sebi-categories.csv'),
       category_aliases: await csvRows('category-aliases.csv'),
       market_holidays: await csvRows('market-holidays-2026-2027.csv'),
+      risk_questionnaires: 1, // E9's v1.0.0, DRAFT until compliance signs it off (R-36)
     });
     expect(summary).toContain(`${legalFiles.length} legal documents`);
   });
@@ -2095,7 +2115,7 @@ pnpm --filter=@sanchay/api test ops-gauges db-logins env logging log-lines
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics db-logins reference-data
 ```
 Expected:
-- infra: `alarms.test.ts`, `log-masking.test.ts` and `log-proof.test.ts` fail to load (`../lib/alarms.js`, `../lib/log-masking.js` and `../lib/log-proof.js` do not exist yet); `prod-stack.test.ts` 10 failed (no alarm-recipient check, D6 login secrets, ops task definition, task families, F1 outputs or `ProveMetricFilters` yet); E25's `sanchay-mvp-stack.test.ts` 24 passed, 1 failed (the migrate task's secrets).
+- infra: `alarms.test.ts`, `log-masking.test.ts` and `log-proof.test.ts` fail to load (`../lib/alarms.js`, `../lib/log-masking.js` and `../lib/log-proof.js` do not exist yet); `prod-stack.test.ts` 10 failed (no alarm-recipient check, D6 login secrets, ops task definition, task families, F1 outputs or `ProveMetricFilters` yet); E25's `sanchay-mvp-stack.test.ts` 25 passed, 1 failed (the migrate task's secrets).
 - api unit: `db-logins.test.ts` and `ops-gauges.job.test.ts` cannot load their modules; `env-roles.test.ts` 2 failed, 6 passed (the migrate boot reads `SANCHAY_DB_APP_PASSWORD`, and invariant 14); `env.test.ts` 1 failed (the pin list names the two new keys); `logging.test.ts` 2 failed, 7 passed (every line still says `sanchay-api`); `log-lines.test.ts` cannot load `./ops-gauges.job.js`.
 - api int: `db-logins.int.test.ts`, `ops-gauges.int.test.ts` and `reference-data.int.test.ts` cannot load their modules (`db-logins.js`, `ops-gauges.job.js`, `reference-data.js` and E3's file has no `LegalSeedError`); `otp-send-metrics.int.test.ts` 2 failed, 1 passed (no `otp.sent` / `otp.send_failed` line yet; the cooldown case passes).
 
@@ -3305,7 +3325,12 @@ export async function seedLegalDocumentFiles(
         })
         .onConflictDoUpdate({
           target: [legalDocuments.key, legalDocuments.version],
-          set: { bodyMarkdown: doc.markdown, sha256: doc.sha256, status: doc.status },
+          set: {
+            bodyMarkdown: doc.markdown,
+            sha256: doc.sha256,
+            status: doc.status,
+            effectiveFrom: doc.effectiveFrom, // Plan 03 RV-03-29
+          },
         });
     }
   });
@@ -3416,6 +3441,7 @@ import type { Database } from '../db/client.js';
 import { DEFAULT_DATA_DIR, seedCatalogueReference } from './ops-catalogue-seed.js';
 import { LEGAL_DOCUMENTS_DIR, seedLegalDocumentFiles } from './ops-legal-seed.js';
 import { seedRefTables } from './ops-ref-seed.js';
+import { seedRiskQuestionnaire } from '../modules/onboarding/risk-profile.service.js';
 
 /** Where the files are: the repo checkout locally, /repo in the api image (apps/api/Dockerfile). */
 export interface ReferenceDataDirs {
@@ -3433,7 +3459,8 @@ export const REFERENCE_DATA_DIRS: ReferenceDataDirs = {
  * D6 logins on every deploy. Each step is an idempotent upsert:
  * - E3's legal documents (docs/legal/documents; a version that is no longer DRAFT keeps its text);
  * - E6/E7's ref_pincodes and ref_ifsc (data/ref-pincodes.csv, data/ref-ifsc.csv);
- * - D8's catalogue reference tables: AMCs, SEBI categories and their aliases, market holidays.
+ * - D8's catalogue reference tables: AMCs, SEBI categories and their aliases, market holidays;
+ * - E9's risk questionnaire, DRAFT until its file names the compliance sign-off (R-36).
  * Never the curated scheme list, its fund facts or its commission lines: F19's ops command
  * `ops:catalogue:seed --pilot-list` loads those, with the G-B10 checks.
  */
@@ -3444,6 +3471,7 @@ export async function seedReferenceData(
   const legal = await seedLegalDocumentFiles(db, dirs.legalDocuments);
   const ref = await seedRefTables(db, dirs.data);
   await seedCatalogueReference(db, dirs.data);
+  await seedRiskQuestionnaire(db);
   const counts = `${legal} legal documents, ${ref.pincodes} pincodes, ${ref.ifsc} IFSC codes`;
   return `${counts}, catalogue reference tables`;
 }
@@ -3829,7 +3857,7 @@ aws rds describe-db-instances --db-instance-identifier sanchay-prod-restore-test
 
 3. Write `restore-overrides.json` as `{"containerOverrides": [{"name": "migrate", "environment": [{"name": "SANCHAY_DB_HOST", "value": "<restored endpoint>"}]}]}` and run the migrate task against the copy with the run-task command in [database access](db-access.md) plus `--overrides file://restore-overrides.json`. It logs in as `sanchay_master` with `sslmode=verify-full`, reads the migration journal, applies only migrations newer than the restore point, re-sets the two login passwords to their current values and re-runs the idempotent reference-data upserts, all harmless on the copy.
 4. Pass = exit code `0`, then `migrations applied`, `db logins synced` and `reference data seeded` in the task's log stream.
-5. Record the date, `LatestRestorableTime` and the restore duration in the G-E5 evidence.
+5. Record the date, `LatestRestorableTime` and the restore duration in a dated **Result** line at the end of this section (F23's G-E5 row links the section).
 6. Delete the scratch instance only (check the identifier twice):
 
 ```
@@ -3860,7 +3888,7 @@ pnpm --filter=@sanchay/infra prove:filters
 ```
 
 3. Trigger one alarm at a time, in the table's order, and wait until it is OK again before the next. For
-   each, record in the G-E5 evidence the trigger and the time it started (IST), the ALARM and OK
+   each, record in a dated **Result** line at the end of this section (F23's G-E5 row links the section) the trigger and the time it started (IST), the ALARM and OK
    transitions from the line below, and when the ALARM and the OK email and SMS reached each developer:
 
 ```
@@ -4207,7 +4235,7 @@ pnpm --filter=@sanchay/api test ops-gauges db-logins env logging log-lines
 pnpm --filter=@sanchay/api test:int ops-gauges otp-send-metrics otp-issue db-logins reference-data
 ```
 Expected:
-- infra typecheck exits 0; infra test: 55 passed (E25's 25, `prod-stack.test.ts` 10, `alarms.test.ts` 10, `log-masking.test.ts` 4, `log-proof.test.ts` 6).
+- infra typecheck exits 0; infra test: 56 passed (E25's 26, `prod-stack.test.ts` 10, `alarms.test.ts` 10, `log-masking.test.ts` 4, `log-proof.test.ts` 6).
 - api typecheck exits 0; unit: `ops-gauges.job.test.ts` 3, `db-logins.test.ts` 4, `env-roles.test.ts` 8, `logging.test.ts` 9, `log-lines.test.ts` 2 (against the fixture 3.16 wrote); `env.test.ts` (B2, D3, D6, D7, E1, E2, E20 and E25 cases plus the pin) and `dotenv.test.ts` green.
 - api int: `ops-gauges.int.test.ts` 8, `otp-send-metrics.int.test.ts` 3, `otp-issue.int.test.ts` 14 (unchanged), `db-logins.int.test.ts` 8, `reference-data.int.test.ts` 6.
 
@@ -4242,7 +4270,7 @@ aws cloudwatch describe-alarms --alarm-names sanchay-prod-worker-heartbeat-stale
 3. `curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config` shows `"ordersEnabled":false` and `"sipEnabled":false` (R-06, R-31: nothing has written `app_config`; GO-1 and GO-2 flip them with F7's ops CLIs, never in CDK). Before GO-1 only the founders' test accounts are invited (F7's `ops:invite`, SSM form).
 4. Once G-C1's docs commit (`status: PUBLISHED`) has been deployed, `curl.exe -s -i -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/legal/documents/TPL_PURCHASE` starts with a `200` status line (`404` while the version is DRAFT).
 5. R-33, once F19 is deployed and before GO-1 (Fri 11-27): load the curated list, then the NAV history (`docs/runbooks/db-access.md`, "After the migrate task: the curated list, then the NAV history"). The backfill is six yearly runs, about half an hour to an hour in all (RV-04-F1-10); start it at least two days before GO-1.
-6. Run the PITR restore test and the alarm drill (credential-rotation runbook: all ten alarms and the masking check, before GO-1, R-34); record both in the G-E5 evidence.
+6. Run the PITR restore test and the alarm drill (credential-rotation runbook: all ten alarms and the masking check, before GO-1, R-34); record both as dated **Result** lines in those two runbook sections, which F23's G-E5 row links.
 
 - [ ] **Step 5: Commit**
 
@@ -4581,6 +4609,7 @@ type SipInvestor = Awaited<ReturnType<typeof seedSipInvestor>>;
 async function draftSip(opts: { amount?: string; day?: number; investor?: SipInvestor } = {}) {
   const investor = opts.investor ?? (await seedSipInvestor(t));
   const scheme = await seedSipScheme(t);
+  t.clock.advance(1); // consent-first window (Plan 03 RV-03-51): earlier writes fall before the create
   const created = await t.app.get(SipService).createSip({
     investorId: investor.investorId,
     schemeId: scheme.id,
@@ -4606,6 +4635,7 @@ async function approve(draft: { challengeId: string; investor: SipInvestor }, jo
     smsCode: t.sms.latestCode(draft.investor.mobile) ?? '',
     ...(needsEmail ? { emailCode: t.email.latestCode(draft.investor.email) ?? '' } : {}),
   });
+  t.clock.advance(1); // the job consumes, and writes to FP, after the window (Plan 03 RV-03-51)
   const job = lastJob(jobName);
   expect(job, `approve enqueues ${jobName}`).toBeDefined();
   return job?.data as ConsentApprovedJobData;
@@ -6242,7 +6272,7 @@ const fpError = (statusCode: number, code: string, message: string): FakeReply =
         return { statusCode: 200, data: planPayload(plan) };
       }
       case 'purchasePlan.get': {
-        const plan = this.state.purchasePlans.get(params.id!);
+        const plan = this.state.purchasePlans.get(params.id ?? '');
         return plan === undefined ? fpError(404, 'NOT_FOUND', `mf_purchase_plan ${params.id} not found`) : { statusCode: 200, data: planPayload(plan) };
       }
       case 'purchasePlan.list': {
@@ -8439,6 +8469,9 @@ describe('orders.units.reconcile', () => {
     allot(t, fpOrderId, ALLOTMENT);
     await reconcileAt('2026-11-11T06:30:00.000Z');
     expect(await statusOf(orderId)).toBe('SETTLED');
+    // RV-04-F4-5: once the units arrive, both SLA breaks resolve without an ops:resolve-break.
+    const after = await t.db.db.select().from(reconBreaks).where(eq(reconBreaks.entityId, orderId));
+    expect(after.map((b) => b.status)).toEqual(['RESOLVED', 'RESOLVED']);
   });
 
   it('a failed re-fetch still evaluates the SLA', async () => {
@@ -9913,6 +9946,7 @@ import { toFpPurchaseView } from '../orders/fp-purchase.js';
 import { orders } from '../orders/orders.schema.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
+import { reconBreaks } from '../platform/kernel.schema.js';
 import { ReconBreaks } from '../platform/runtime-config.js';
 import { PurchaseSettlement } from './purchase-settlement.js';
 
@@ -9977,7 +10011,23 @@ export class UnitsReconcileJob {
           `orders.units_reconcile_failed: order ${order.id} (${err instanceof Error ? err.message : String(err)})`,
         );
       }
-      if (status !== 'UNITS_PENDING' || pendingSince === null) continue;
+      if (status !== 'UNITS_PENDING') {
+        // RV-04-F4-5: the units arrived, so this job's own SLA breaks for the order resolve themselves
+        // (as F7's invariant sweep does); an open UNITS_PENDING_T5 kept the money-invariant alarm red.
+        await db
+          .update(reconBreaks)
+          .set({ status: 'RESOLVED', resolvedAt: now })
+          .where(
+            and(
+              eq(reconBreaks.entityType, 'orders'),
+              eq(reconBreaks.entityId, order.id),
+              inArray(reconBreaks.kind, ['UNITS_PENDING_T3', 'UNITS_PENDING_T5']),
+              eq(reconBreaks.status, 'OPEN'),
+            ),
+          );
+        continue;
+      }
+      if (pendingSince === null) continue;
       const elapsed = businessDaysAfter(istIsoDate(pendingSince), istIsoDate(now), holidays);
       if (elapsed > CRITICAL_AFTER_BUSINESS_DAYS) {
         await ReconBreaks.open(db, {
@@ -12234,8 +12284,9 @@ async function fresh(options: HoldingOptions = {}) {
 const service = () => t.app.get(RedemptionService);
 const quote = (investor: Investor, holding: Holding) =>
   service().quote(investor.investorId, { folioId: holding.folioId, isin: holding.scheme.isin });
-const draft = (investor: Investor, holding: Holding, mode: 'AMOUNT' | 'ALL', amount?: string) =>
-  service().createRedemption({
+const draft = (investor: Investor, holding: Holding, mode: 'AMOUNT' | 'ALL', amount?: string) => {
+  t.clock.advance(1); // consent-first window (Plan 03 RV-03-51): earlier writes fall before the create
+  return service().createRedemption({
     investorId: investor.investorId,
     folioId: holding.folioId,
     isin: holding.scheme.isin,
@@ -12244,6 +12295,7 @@ const draft = (investor: Investor, holding: Holding, mode: 'AMOUNT' | 'ALL', amo
     userIp: '203.0.113.10',
     initiatedVia: 'web',
   });
+};
 const orderOf = async (id: string) => {
   const [row] = await t.db.db.select().from(orders).where(eq(orders.id, id));
   if (row === undefined) throw new Error(`no order ${id}`);
@@ -12277,6 +12329,7 @@ async function approve(investor: Investor, challengeId: string): Promise<Consent
     smsCode: t.sms.latestCode(investor.mobile),
     emailCode: t.email.latestCode(investor.email),
   });
+  t.clock.advance(1); // the job consumes, and writes to FP, after the window (Plan 03 RV-03-51)
   const job = enqueued.find(
     (j) =>
       j.name === 'orders.redemption.submit' &&
@@ -12840,6 +12893,9 @@ describe('payout.watch (10:00)', () => {
       payoutRef: 'UTR0001',
     });
     expect(await auditOf(run.orderId)).toContain('REDEMPTION_PAYOUT_CREDITED');
+    // RV-04-F5-4: the overdue break resolves with the payout.
+    const after = await t.db.db.select().from(reconBreaks).where(eq(reconBreaks.entityId, run.orderId));
+    expect(after.map((b) => b.status)).toEqual(['RESOLVED']);
   });
 });
 ```
@@ -14484,6 +14540,16 @@ export class RedemptionAdvanceJob {
         });
         return;
       }
+      if (
+        err instanceof AppError &&
+        err.code === 'CONSENT_EXPIRED' &&
+        order.status === 'CONFIRMING'
+      ) {
+        // RV-04-F5-3: the window closed before the confirm was sent. FP never processes an unconfirmed
+        // redemption and expires it; the next re-fetch (F7's backstop) then moves the order REJECTED and
+        // releases it. Rethrowing only failed this job again on every re-enqueue.
+        return;
+      }
       const [after] = await db.select().from(orders).where(eq(orders.id, orderId));
       if (after?.status === 'CONFIRMING' && err instanceof FpAmbiguousError) {
         // Spec §4.1: the confirm may have landed; nothing is released while RECONCILING.
@@ -14564,6 +14630,7 @@ import { Notify } from '../notifications/notify.service.js';
 import { AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
+import { reconBreaks } from '../platform/kernel.schema.js';
 import { ReconBreaks } from '../platform/runtime-config.js';
 import { toFpRedemptionView } from './fp-redemption.js';
 import { ORDER_AUDIT_ACTIONS, orders } from './orders.schema.js';
@@ -14647,6 +14714,17 @@ export class PayoutWatchJob {
         entityId: order.id,
         data: { status: 'CREDITED' },
       });
+      // RV-04-F5-4: the payout arrived, so this job's own overdue break resolves itself.
+      await tx
+        .update(reconBreaks)
+        .set({ status: 'RESOLVED', resolvedAt: now })
+        .where(
+          and(
+            eq(reconBreaks.kind, 'REDEMPTION_PAYOUT_OVERDUE'),
+            eq(reconBreaks.entityId, order.id),
+            eq(reconBreaks.status, 'OPEN'),
+          ),
+        );
     });
   }
 
@@ -15192,7 +15270,7 @@ pnpm lint
 git add packages/domain/src/rules/business-days.ts packages/domain/src/rules/redemption-buffer.ts packages/domain/src/rules/redemption-availability.ts packages/domain/src/rules/index.ts packages/domain/test/redemption-availability.test.ts packages/test-fixtures/src/golden/redemption-availability.json apps/api/src/modules/orders apps/api/src/modules/portfolio apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake/fake-fp.state.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/redemption-seed.ts apps/api/test/int/redemption.int.test.ts packages/contract/src/orders.ts
 git commit -m "feat(orders): redemption by amount and all with reservations, consent-first submit with a live holdings re-check, FIFO settlement and payout.watch (F5)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists the two new paths and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands before committing again.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test commands before committing again.
 
 **How part 2 was checked (written 2026-10-01; re-checked after the assembly review the same day).** Plans 02–04 are not implemented in the repo, so the API half could not run end to end; what ran, and what was only checked by reading:
 - **Ran after the review fixes** (an isolated worktree of `main` after `pnpm install --frozen-lockfile --offline`; Vitest 5.0.1, drizzle-orm 0.45.3, drizzle-kit 0.31.11, PostgreSQL 18.6 in Docker; part 1's and F4's rule files staged beside the domain sources):
@@ -16433,6 +16511,7 @@ P-09 is due with the S1 probes (business checklist PB-12, by Fri 10-16; Cybrilla
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=redemption_units
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/domain test
@@ -16454,6 +16533,7 @@ Expected:
 ```
 pnpm exec biome check --write packages/domain/src/rules/redemption-units.ts packages/domain/src/rules/index.ts packages/domain/test/redemption-units.test.ts apps/api/src/modules/orders apps/api/src/modules/portfolio/redemption-settlement.ts apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake apps/api/test/int/redemption.int.test.ts packages/contract/src/orders.ts
 pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/api test redemption-request
 pnpm --filter=@sanchay/api test:int redemption
@@ -16499,7 +16579,7 @@ git commit -m "docs(probes): record redeem-by-units as a PO-2 escalation pending
 **Interfaces:**
 - **Prerequisites:** in BRIEF D2 order, F1, F2, F3, F4 and F5 (both parts) have run: F1 for the alarm names, the `sanchay-app` service, its stack outputs, D6's logins, the ops task definition `sanchay-{env}-ops` and its task role's `ssm:GetParameter` on `/sanchay/{env}/invites/*`; F4 for RV-04-F4-2's `NEST_APP_OPTIONS`. Plan 03 E1, E3/E4 **with RV-03-1** (`useConsumed` stamps `consent_records.first_attempt_at` before the first P/M write and refuses a CONSUMED_UNUSED challenge; `consent.expiry.sweep` sweeps only records with `first_attempt_at IS NULL`; `ConsentEngine.markUnused` is called only when no P/M write happened), E11, E20, E21; Plan 02 D1–D5, D7 (pilot invites) and D9 (NAV release).
 - **Consumes (Plan 01):** `Env`, `EnvSchema`, `parseEnv`, `loadDotEnvFile` (config); `AppConfig` (`config/app-config.ts`; `opsContextOf` reads `SANCHAY_APP_ENV` from it); `createDb`, `DB`, `DbHandle`, `Database`, `DbExecutor` (`db/client.ts`); `AuditService.record`, `AUDIT_DATA_ALLOWLIST` (`audit.service.ts`); `auditEvents` (`platform.schema.ts`); `Crypto.blindIndex` (`crypto.ts`); `CLOCK`, `Clock`, `MINUTE`, `HOUR`, `DAY` (`clock.ts`); `newId`, `UUID_RE` (`ids.ts`); `pgErrorCodeOf` (`pg-errors.ts`); `NEST_APP_OPTIONS` (`bootstrap.ts`, added by F4's RV-04-F4-2); the roles `sanchay_app` and `sanchay_readonly` (0000_bootstrap, 0003_grants); `createTestDatabase` (`test/int/db.ts`); `ConsentSubjectType`, `OrderStatus`, `PlanStatus` (`@sanchay/domain`, D5's state unions).
-- **Consumes (Plan 02, as written):** `appConfig`, `reconBreaks` (D1 `kernel.schema.ts`); `RuntimeConfig.get`, `ReconBreaks.open` (D1, static; F4's `ON CONFLICT` fix) and the keys `orders.enabled`, `plans.sip.enabled`; `Jobs.enqueue`, `JobHandler`, `Job`, `JOB_NAMES`, `registerSchedules`, `AppModule.forRoot(env)`, the D2 `main.ts` worker branch and D2's `pgboss` grants to `sanchay_app` (D2); `FpRead.purchases({mfInvestmentAccount, sourceRefId})`, `FpRead.purchasePlans/redemptions/folios({mfInvestmentAccount})` (D3, E20's `sourceRefId`); `FakeFp.state` (`purchases`, `purchasesByOldId`, `nextId`, `nextOldId`), `FakeFp.script`, `FakeFp.advance`, `bootFpTestApp`, `FpTestApp` (D4); `PilotInvites.add(exec, {mobileBidx, invitedBy, note, ttlDays})`, `pilotInvites`, `AUDIT_ACTIONS.PILOT_INVITE_ADDED` (D7); `schemeNavs` (D8 `catalogue.schema.ts`) and D9's `NAV_RELEASE` audit action; E25's cluster `sanchay-{env}`, app log group `/sanchay/{env}/app` (awslogs stream prefix `{env}`) and `docker-entrypoint.sh`.
+- **Consumes (Plan 02, as written):** `appConfig`, `reconBreaks` (D1 `kernel.schema.ts`); `RuntimeConfig.get`, `ReconBreaks.open` (D1, static; F4's `ON CONFLICT` fix) and the keys `orders.enabled`, `plans.sip.enabled`; `Jobs.enqueue`, `JobHandler`, `Job`, `JOB_NAMES`, `registerSchedules`, `AppModule.forRoot(env)`, the D2 `main.ts` worker branch and D2's `pgboss` grants to `sanchay_app` (D2); `FpRead.purchases({mfInvestmentAccount, sourceRefId})`, `FpRead.purchasePlans/redemptions/folios({mfInvestmentAccount})` (D3, E20's `sourceRefId`); `FakeFp.state` (`purchases`, `purchasesByOldId`, `nextId`, `nextOldId`), `FakeFp.script`, `FakeFp.advance`, `bootFpTestApp`, `FpTestApp` (D4); `PilotInvites.add(exec, {mobileBidx, invitedBy, note, ttlDays})`, `pilotInvites`, `AUDIT_ACTIONS.PILOT_INVITE_ADDED` (D7); `schemeNavs` (D8 `catalogue.schema.ts`) and D9's `NAV_RELEASE` audit action and `pendingNavReleases` (R-35: the next `nav.sync.daily` reads that row to take the released ISIN's feed value once, RV-04-F7-5); E25's cluster `sanchay-{env}`, app log group `/sanchay/{env}/app` (awslogs stream prefix `{env}`) and `docker-entrypoint.sh`.
 - **Consumes (Plan 03, as written):** `inboundWebhookEvents`, `FpEventJob` (`fp.event.process`, `{eventRowId}`), `jobOf` (E1); `consentChallenges`, `consentRecords` (`kind`, `subjectType`, `subjectIds`, `consumedAt`, `executeBefore`, `sagaExpiresAt`, `firstAttemptAt`), `consentSubjects` (E3); `ConsentApprovedJobData = {challengeId, recordId, investorId, subjectType, subjectIds}` (E4); `investors.fpMfInvestmentAccountId` (E11); `orders`, `orderEvents`, `moveOrder`, `toFpPurchaseView`, `ReconcileNonfinalJob`, `orders.purchase.advance` with `{orderId, challengeId}` (`singletonKey` = order id; RV-04-F7-4), `seedInvestableInvestor`, `seedScheme` (E20); `paymentAttempts` (E21).
 - **Consumes (Plan 04):** `ops.gauges.emit` with its gauges `criticalBreaksOpen` and `reconcilingOverSla`, the alarms `sanchay-prod-money-invariant-breach`, `sanchay-prod-reconciling-sla` and `sanchay-prod-nav-age`, the ECS service `sanchay-app`, the stack outputs `AppSubnetIds` and `ServiceSecurityGroupId`, and under D6 the logins `sanchay_app_login` (secret `sanchay/{env}/db-app`) and `sanchay_readonly_login` (secret `sanchay/{env}/db-readonly`) and the one-off ops task definition (family `sanchay-{env}-ops`, container `ops` with `SANCHAY_APP_ROLE=ops` in its environment, output `OpsTaskDefinitionArn`), whose task role may `ssm:GetParameter` on `/sanchay/{env}/invites/*` (see "For F1" below) (F1); `plans`, `mandates`, the `MANDATE_CREATE_AMBIGUOUS` break kind, `plans.sip.advance` with `SipAdvanceData = {planId, challengeId}`, FakeFp `state.purchasePlans`/`StoredPurchasePlan` (F2); `folios`, `lots`, `lotConsumptions`, `redemptionReservations`, `Ledger.applyExit`/`reverseAllotment`, `FP_ORDER_STATE_UNEXPECTED` (reused), FakeFp `state.folios`, the `mf_purchase` handler through `PurchaseSettlement`, and `ledger-seed.ts` (`seedProcessingPurchase`, `settledPurchase`, `seedRedemption`, `allot`, `Investor`, `Scheme`) (F4); `releaseReservation(tx, audit, {orderId, evidence, now})` (`portfolio/reservations.ts`), `orders.redemption.submit` (`ConsentApprovedJobData`, enqueued by approve with `singletonKey` = challenge id) and its CONSENT_EXPIRED path (`execute_before_missed`, evidence `consent_expired`), `orders.redemption.advance` with `{orderId, challengeId}` (`singletonKey` = order id), `PayoutWatchJob` (`payout.watch`), the `mf_redemption` event handler, `orders.payoutRef`/`payoutUpdatedAt`/`payoutExpectedOn`/`payoutDueBy`, FakeFp `state.redemptions`/`StoredRedemption` and its `redemption.list` route, F5's purchases-only filter in `reconcile-nonfinal.job.ts`, and F5's `redemption.int.test.ts` helpers (`fresh`, `draft`, `approve`, `submit`, `quote`, `orderOf`, `reservationOf`, `enqueued`) (F5).
 - **Produces:**
@@ -18199,6 +18279,7 @@ import { OPS_SYNC_EVENT_TYPE, opsSync } from '../../src/cli/ops-sync.js';
 import { createDb } from '../../src/db/client.js';
 import { FpEventJob } from '../../src/integrations/fp/webhooks/fp-event.job.js';
 import { schemeNavs } from '../../src/modules/catalogue/catalogue.schema.js';
+import { pendingNavReleases } from '../../src/modules/catalogue/nav/nav-release.js';
 import { inboundWebhookEvents } from '../../src/modules/fp-webhooks/inbound-webhook.schema.js';
 import { pilotInvites } from '../../src/modules/identity/pilot-invites.schema.js';
 import { orders } from '../../src/modules/orders/orders.schema.js';
@@ -18782,6 +18863,8 @@ describe('ops:nav-release (D9 through the ops runner; two founders)', () => {
     );
     const [row] = await t.db.db.select().from(schemeNavs).where(eq(schemeNavs.isin, ISIN));
     expect(row?.quarantined).toBe(false);
+    // R-35: the next nav.sync.daily takes this ISIN's feed value once (D9 reads the NAV_RELEASE row).
+    expect((await pendingNavReleases(t.db.db)).has(ISIN)).toBe(true);
     await expect(opsNavRelease(ctx, argv(ISIN, 'f.one', 'f.two'))).rejects.toThrow(
       /is not quarantined/,
     );
@@ -20138,8 +20221,10 @@ const ISIN_RE = /^INF[A-Z0-9]{9}$/;
 
 /**
  * `pnpm ops:nav-release --isin <isin> --approver1 <a> --approver2 <b>` (D9, through the ops runner): lifts
- * a NAV quarantine once two founders have checked the AMFI file (NAV-09). `scheme_navs.quarantined` and
- * one audit row are the only writes; a NAV that is not quarantined is refused.
+ * a NAV quarantine once two founders have checked the NAV on the AMC site (NAV-09). `scheme_navs.quarantined`
+ * and one `NAV_RELEASE` audit row are the only writes; a NAV that is not quarantined is refused. R-35: the
+ * next `nav.sync.daily` finds that row (D9's `pendingNavReleases`) and takes the ISIN's feed value once,
+ * without the 25% check.
  */
 export const opsNavRelease: OpsCommand = async (ctx, argv) => {
   const flags = parseFlags(argv, { values: ['isin', 'approver1', 'approver2'] });
@@ -21115,6 +21200,7 @@ export class ReconcileNonfinalJob {
 
   async handle(_job: Job<'fp.reconcile.nonfinal'>): Promise<void> {
     await this.resumeRedemptions();
+    await this.resumePurchases();
     const stuck = await this.dbh.db.select().from(orders).where(eq(orders.status, 'RECONCILING'));
     for (const order of stuck) {
       try {
@@ -21129,6 +21215,35 @@ export class ReconcileNonfinalJob {
     }
     await this.nudgePlans();
     await this.keepMandateBreaksOpen();
+  }
+
+  /**
+   * RV-04-F7-6: hands a purchase whose `orders.purchase.advance` chain died back to E20's job. D2 retries
+   * a failed job three times without a delay, so a short FP outage ended the chain and left the order in
+   * UNDER_REVIEW or CONFIRMING for good. The queue is `stately`, keyed by the order id (R-32): a null
+   * return means a chain is still queued, which is fine.
+   */
+  private async resumePurchases(): Promise<void> {
+    const db = this.dbh.db;
+    const stalled = await db
+      .select({ id: orders.id, challengeId: orders.consentChallengeId })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.type, 'PURCHASE'),
+          inArray(orders.status, ['UNDER_REVIEW', 'CONFIRMING']),
+          isNotNull(orders.consentChallengeId),
+        ),
+      );
+    for (const order of stalled) {
+      if (order.challengeId === null) continue;
+      await this.jobs.enqueue(
+        db,
+        'orders.purchase.advance',
+        { orderId: order.id, challengeId: order.challengeId },
+        { singletonKey: order.id },
+      );
+    }
   }
 
   /** Hands every redemption F5's saga left mid-way back to F5's own jobs, or ends it (see the class note). */
@@ -21470,7 +21585,7 @@ run (see "Inviting pilot investors" below).
 | `ops:refund-utr --order <order-id> --utr <utr> --approver1 <handle> --approver2 <handle>` | two founders | the payment attempt's `refund_status = 'REFUNDED'`, `refund_ref`, `refund_recorded_at` |
 | `ops:payout-ref --order <order-id> --ref <bank-ref> --approver1 <handle> --approver2 <handle>` | two founders | the settled redemption's `payout_ref` and `payout_updated_at` (evidence only: `payout.watch` marks it CREDITED at 10:00 IST) |
 | `ops:invite --mobiles-param /sanchay/{env}/invites/<name> --by <handle> [--note <text>]` (deployed) or `ops:invite --mobiles-file <path> --by <handle> [--note <text>]` (local) | one founder | one 30-day `pilot_invites` row (blind index only) per listed mobile, all or none; prints each mobile as `******` and its last 4 digits |
-| `ops:nav-release --isin <isin> --approver1 <handle> --approver2 <handle>` | two founders | `scheme_navs.quarantined = false` for a quarantined NAV |
+| `ops:nav-release --isin <isin> --approver1 <handle> --approver2 <handle>` | two founders | `scheme_navs.quarantined = false` for a quarantined NAV; the next NAV sync takes the ISIN's feed value once, without the 25% check (R-35) |
 | `ops:resolve-break --id <break-id> --note <text> --approver1 <handle> --approver2 <handle>` | two founders | the recon break's `status = 'RESOLVED'`; refused for `INVARIANT_*` breaks and for `MANDATE_CREATE_AMBIGUOUS` while its mandate is RECONCILING |
 
 Handles are lower-case operator ids (for example `f.anita`), never names or emails: they land in
@@ -21504,7 +21619,7 @@ The `actor_id` is `--by`, or `--approver1` for a two-founder command.
 | `RECON_ORDER_OUTCOME_DIFFERS` or `FP_ORDER_STATE_UNEXPECTED` from `recon.fp.daily` | `ops:sync --order <id> --by <handle>`; if the break stays, escalate. |
 | Refund confirmed by the AMC with a UTR | `ops:refund-utr` with two founders. |
 | Investor or AMC confirms a redemption payout reached the bank (FP has no `bank_credit_reference`) | `ops:payout-ref` with two founders; `payout.watch` credits it on its next run. |
-| A quarantined NAV, after checking the AMFI file | `ops:nav-release` with two founders. |
+| A quarantined NAV, after checking it on the AMC site | `ops:nav-release` with two founders; the next NAV sync accepts the feed value once (R-35). |
 | GO-2 decided, or SIPs must pause | `ops:sip-switch --on` (two founders) or `ops:sip-switch --off` (one operator). |
 | Pilot invitees from the PO's list (G-B11; only after the GO-1 decision, R-31), or the founders' own numbers before the canary | "Inviting pilot investors" below: put the list in an SSM SecureString, run `ops:invite --mobiles-param /sanchay/{env}/invites/<name> --by <handle> --note <list name>`, then delete the parameter. |
 
@@ -24331,7 +24446,7 @@ pnpm lint
 git add packages/test-fixtures/src/golden/sip-first-instalment.json packages/domain/src/rules/sip-counts.ts packages/domain/src/rules/index.ts packages/domain/test/sip-counts.test.ts packages/domain/test/sip-first-instalment.test.ts packages/contract/src/plans.ts packages/contract/src/plans-quote.test.ts apps/api/src/modules/plans/sip-quote.ts apps/api/src/modules/plans/sip-quote.test.ts apps/api/src/modules/plans/sip-quote.service.ts apps/api/src/modules/plans/sip.service.ts apps/api/src/modules/plans/plans.router.ts apps/api/src/modules/plans/plans.module.ts apps/api/test/int/sip-quote.int.test.ts apps/api/openapi.json
 git commit -m "feat(plans): plans.quoteSip preview, first-instalment golden vectors and sipCounts (F10)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists this task's own new path and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage before committing. Never `--no-verify`.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook reports `stage_fixed`, re-run the Step 4 commands and re-stage before committing. Never `--no-verify`.
 
 **How this task was checked while it was written (2026-10-01).** Plans 02–04 are not implemented in the repo, so the code was run in a scratch worktree at `main`, next to verbatim copies of the F2, D5 and E22 code it builds on:
 - **Domain:** F2's `sip-dates.ts`, D5's `PLAN_STATUSES` and E22's `CutoffHolidays` were copied in, and the golden file, `sip-counts.ts` and both domain tests were run with Vitest 5.0.1 and `@sanchay/money` from `main`. Result: 19/19 pass, `sip-counts.ts` has 100% statement and branch coverage, and `tsc -p packages/domain` is clean. Every SIPD date was also checked by hand against the weekday calendar.
@@ -24350,7 +24465,7 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
 - **FR-8.** The `createSip` call in `sip-quote.int.test.ts` passes `rail: 'UPI_AUTOPAY'`, because F3 (earlier in D2 order) makes `CreateSipInput.rail` required. Without it the API typecheck fails with TS2345, since `apps/api`'s `tsconfig` includes `test/`. F12 and F28 carry the same line and comment.
 - **FR-6/FR-7.**
   - The build line is now the first line of Steps 4 and 5. Step 3's regeneration and Step 5's drift check each run right after a build.
-  - The drift check is the repo's: `openapi`, then `git diff --exit-code apps/api/openapi.json`. It runs after `git add`, the only place it can exit 0 for a task that adds a path.
+  - The drift check is the B10 test: `openapi`, then `pnpm --filter=@sanchay/api test … openapi`, before `git add`, behind a build (RV-04-HDR-2; a bare `git diff --exit-code` fails on a real, unstaged regeneration).
   - The domain pass checks stay unfiltered.
 - **What ran** (a worktree of `main`, after `pnpm install --frozen-lockfile --offline`):
   - The build line rebuilt `money`, `validation`, `domain` and `contract` (4 turbo tasks).
@@ -26776,7 +26891,7 @@ pnpm lint
 git add packages/domain/src/rules/xirr.ts packages/domain/src/rules/holding-valuation.ts packages/domain/src/rules/index.ts packages/domain/test/xirr.test.ts packages/domain/test/holding-valuation.test.ts packages/test-fixtures/src/golden/xirr.json packages/test-fixtures/src/golden/holdings-valuation.json packages/contract/src/portfolio.ts packages/contract/src/index.ts apps/api/src/modules/portfolio/portfolio.queries.ts apps/api/src/modules/portfolio/portfolio.router.ts apps/api/src/modules/portfolio/portfolio.module.ts apps/api/test/int/portfolio.int.test.ts apps/api/openapi.json docs/specs/money/xirr.md
 git commit -m "feat(portfolio): XIRR engine port with golden vectors, holdings valuation and portfolio.summary/holdings/holding/allocation (F11)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists the four new paths and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. Never `--no-verify`.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands. Never `--no-verify`.
 
 **How this task was checked while it was written (2026-10-01).** Plans 02–03 and F2/F4 are not implemented yet, so the code above ran in a scratch worktree on top of Plan 01's `main`:
 - **Domain (run).** `xirr.ts`, `holding-valuation.ts`, both test files and both golden files ran with Vitest 5.0.1 in `packages/domain` against Plan 01's real `@sanchay/money`, with F4's `business-days.ts` and `isLotUnlocked` copied in from this plan: **45/45 pass** (31 + 14); coverage `xirr.ts` 83/84 statements and 57/58 branches, `holding-valuation.ts` 100%. `tsc -p packages/domain/tsconfig.json --resolveJsonModule` is clean.
@@ -26818,7 +26933,7 @@ What was run:
   - The regeneration moved to the end of Step 3, right after a build.
   - Steps 4 and 5 now start with `pnpm exec turbo run build --filter=@sanchay/api^...`. The domain pass checks stay unfiltered.
   - Step 5 re-runs the contract typecheck and tests, which it had skipped although Step 4 runs them.
-  - The repo's drift check (`openapi`, then `git diff --exit-code apps/api/openapi.json`) runs after `git add`, behind its own build. That is the only place it can exit 0 for a task that adds paths.
+  - The drift check is the B10 test (`openapi`, then `pnpm --filter=@sanchay/api test openapi`), before `git add`, behind its own build (RV-04-HDR-2).
 - **Why the build matters.** In a worktree of `main`, a route added to the contract source without a build left `openapi` silently omitting the path. The drift test passed 2/2 and `git diff --exit-code` exited 0, so all three checks were fooled by the stale `dist`. After the build line the path appeared, and the diff exited 1 while unstaged and 0 after `git add` plus a rebuild and regeneration. A filtered domain run (`test enums`) exited 1 on the coverage gate, while the unfiltered run exited 0 (131/131 on `main`).
 - **No code changed in this round.**
 
@@ -28852,7 +28967,7 @@ If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands before c
 - **Review notes (errata seen while writing F12/F13; not fixed here, for the owning task):**
   - **E12/E13 and RV-03-9:** RV-03-9 fixes E13's `useApi().consents` facade and E12's component props, so F12 uses `ConsentOtpSheet`, `AmountInput` and `MoneyText` as documented. Two E12 errata are not props, so check that RV-03-9 also covers them. First, `AmountInput`'s `const [whole, fraction] = withOneDot.split('.')` is `string | undefined` under `noUncheckedIndexedAccess`, so `packages/ui` fails `tsc` with TS2322 (fix: `const [whole = '', fraction] = …`). Second, `MoneyText` imports `@sanchay/money`, which `packages/ui/package.json` does not list (F12 adds it to `packages/features` if absent).
   - **E23** calls `AmountInput` with `onChangeText` (E12's prop is `onChangeValue`), `MoneyText` with `amount=` (E12's prop is `value: Money | null`) and `ListRow` with a ReactNode `value` (E12's is `string`); its web `page.tsx` files import `@sanchay/features` into server components instead of going through `client/routes.tsx`; `createPurchase` is called without an `Idempotency-Key`.
-  - **E23/E24 mobile routes outside `Stack.Protected`:** `invest/[schemeId]/lumpsum`, `invest/[schemeId]/review`, `confirm/[challengeId]`, `pay/[orderId]`, `result/[orderId]` and `r/[kind]` sit at the app root but are not registered in the signed-in group, so a signed-out deep link renders them. F12 (SIP setup) and F16 (redeem) register theirs.
+  - **E23/E24 mobile routes outside `Stack.Protected`:** fixed at the source by Plan 03 E24 (RV-03-47), which registers the onboarding, lumpsum, confirm, pay, result and `r/[kind]` routes in the signed-in group after `(tabs)`. F12 (SIP setup) and F16 (redeem) register theirs after the same anchor.
   - **E24** creates `apps/mobile/src/app/(tabs)/portfolio/orders/*` next to the `(tabs)/portfolio.tsx` tab: Expo Router's `Tabs` will show extra tab entries until F14's Portfolio stack layout absorbs them.
   - **E13 `onboarding.smoke`** fills `123456` into both CNF-01 fields. Plan 01 has no fixed OTP, so its attest step cannot pass against the real consent engine; it should read both codes from Mailpit, as F12's `readNextOtp` does (the SMS inbox and `smoke.onboarding@example.com`). F12's smoke needs the investor that smoke creates: E11's `seedReadyInvestor` is an integration-test helper and cannot seed the local stack.
   - **Plan 01 `readLatestOtp`:** its 10 s clock-skew window assumes the previous code to the same inbox is at least 30 s older (the login resend cooldown). A consent OTP right after a login breaks that, and it returns the login code. Checked against Mailpit v1.31.2: a login SMS, then a consent SMS 1.5 s later, gives back the login code. F12 adds `readNextOtp` (message-id baseline) for second codes; login-only smokes (F14, F16) are unaffected.
@@ -32880,7 +32995,7 @@ git commit -m "feat(portfolio): allocation bar chart above the allocation list (
 - **Not modified:** `ERROR_CATALOGUE` and `messageForError` (every code shown is Plan 01's or E20's), E13's `ConsentOtpSheet`/`useConsentChallenge`, `ApiContext.tsx` (E13/E23 own the `consents` key), `apps/web/src/lib/nav.ts` (Plan 01 already highlights Portfolio for `/redeem/**`), the order state machine and every F5 service.
 
 **Interfaces:**
-- **Prerequisites:** F5 (both parts) and therefore the Plan 03 consent fixes (BRIEF D9): RV-03-1 (committed), RV-03-2 (E4's destination resolver decrypts, so the consent OTPs reach the investor) and RV-03-9 (E13's consent facade and E12's component props, used here as documented). D2 runs F16 after F5 and F14. Plan 03 E12 (`@sanchay/ui` batch 2), E13 (CNF-01), E20 (orders contract, router, `orders.cancel`), E23 (adds `consents: ConsentApi` to `ApiContextValue`), E24 (ORD-02 route `/portfolio/orders/[orderId]` on web and in the mobile Portfolio tab). F14 is the caller: its PORT-02 "Redeem" button pushes `/redeem/${h.folioId}/${h.isin}` (`p4tasks/F14-F15.md`; folio uuid and ISIN, the key F11's `portfolio.holding` uses), and both tasks add `@sanchay/money` to `packages/features/package.json` only if it is absent.
+- **Prerequisites:** F5 (both parts) and therefore the Plan 03 consent fixes (BRIEF D9): RV-03-1 (committed), RV-03-2 (E4's destination resolver decrypts, so the consent OTPs reach the investor) and RV-03-9 (E13's consent facade and E12's component props, used here as documented). D2 runs F16 after F5 and F14. Plan 03 E12 (`@sanchay/ui` batch 2), E13 (CNF-01), E20 (orders contract, router, `orders.cancel`), E13 (adds `consents: ConsentApi` to `ApiContextValue`, Plan 03 RV-03-9), E24 (ORD-02 route `/portfolio/orders/[orderId]` on web and in the mobile Portfolio tab). F14 is the caller: its PORT-02 "Redeem" button pushes `/redeem/${h.folioId}/${h.isin}` (`p4tasks/F14-F15.md`; folio uuid and ISIN, the key F11's `portfolio.holding` uses), and both tasks add `@sanchay/money` to `packages/features/package.json` only if it is absent.
 - **Consumes (F5, `p4tasks/F5.md`, exact):** `orders.quoteRedemption` POST `/orders/redemptions/quote`, input `RedemptionTargetSchema {folioId, isin}`, output `RedemptionQuoteSchema` (`REFRESHING {folioId, isin}` or `READY {schemeName, heldUnits, lockedUnits, unlockedUnits, reservedUnits, availableUnits, providerShort, reconciliation, nav, navDate, navGrade, buffer, exitNavDate, displayCutoff, maxAmount, all, payoutBank, snapshotAsOf}`; `all` is `FULL {units}`, `AMOUNT_WITH_RESIDUAL {amount}` or `REFUSED {code}` with `REDEMPTION_CONFLICT_PENDING | FOLIO_RECONCILIATION_REQUIRED | INSUFFICIENT_REDEEMABLE | NAV_UNAVAILABLE`); `orders.createRedemption` POST `/orders/redemptions` [K], input `CreateRedemptionInputSchema {folioId, isin, mode: AMOUNT | ALL, amount?}`, output `RedemptionCreatedSchema {orderId, challengeId, expiresAt, mode, amount, unitsReserved}`, errors `NOT_FOUND, EXIT_BLOCKED, ORDERS_DISABLED, SCHEME_NOT_ORDERABLE, FOLIO_RECONCILIATION_REQUIRED, REDEMPTION_CONFLICT_PENDING, INSUFFICIENT_REDEEMABLE, NAV_UNAVAILABLE, CONSENT_DESTINATION_UNAVAILABLE` and the three idempotency codes; the `orders` columns `redeemed_units`, `redeemed_amount`, `payout_expected_on`, `payout_due_by`; `payout_status` values `NONE | EXPECTED | DELAYED | CREDITED` (E20's `ORDER_PAYOUT_STATUSES`); F5's REDEMPTION challenge is SMS + EMAIL (H-21); `PurchaseService.cancel` releases a redemption draft's reservation (F5's edit). Integration helpers (`redemption.int.test.ts`, `redemption-seed.ts`): `processing()` (→ `{investor, holding, orderId, challengeId, …, fpOrderId}`), `orderOf(id)`, `SETTLED_FIELDS`, `advanceRedemption`, `deliverRedemptionEvent`, `t`.
 - **Consumes (Plan 03, as written):** `AmountInput`, `SegmentedControl`, `ListRow`, `Sheet` (E12; `SegmentedControl` renders `role="radio"` per option); `ConsentOtpSheet({challengeId, onApproved, onClose})` with the labels "SMS code", "Email code", "Confirm" and the Sheet's "Close" (E13); `useApi().consents` (E13/E23); `consents.getChallenge/sendOtp/approve` routes `/consents/challenges/{id}[/otp|/approve]` (E4); `orders.get` GET `/orders/{id}`, `orders.cancel` POST `/orders/{id}/cancel` [K], `OrderSchema`, the router's `toWire`, `ORDER_MODES` column `orders.mode` (E20); `webHeaders` (`test/int/http.ts`, Plan 01) and `ReadyInvestor.cookies` (E11).
 - **Consumes (Plan 01, real code):** `useApi`, `useNav`, `renderWithProviders`, `TEST_API` (`packages/features`); `AppText`, `Banner`, `Button`, `Card`, `Screen`, `TextField` (`@sanchay/ui`); `messageForError`, `ERROR_COPY` (`@sanchay/app-core`); `toApiError`, `newIdempotencyKey`, `ApiClient` (`@sanchay/api-client`; `client.x.y(input, {context: {idempotencyKey}})` sets the `idempotency-key` header); `Money`, `Units`, `Nav`, `Dec`, `Rounding`, `marketValue`, `formatInr`, `formatUnits`, `formatNav`, `formatPct`, `formatIsoDate` (`@sanchay/money`); `ORDER_MODES`, `PAYOUT_STATUSES` (`@sanchay/domain`); `unitsWireSchema`, `nullableMoneyWireSchema` (`@sanchay/validation`); `RedeemRoute` pattern from `apps/web/src/client/routes.tsx`; `NativeScreen`, `usePreventScreenCapture` (C13/C14).
@@ -33533,7 +33648,7 @@ describe('RedeemReviewScreen (RED-02 + CNF-01)', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Confirm & get OTP' }));
     expect(
-      await screen.findByText('New investments are paused right now. Please try again later.'),
+      await screen.findByText('Withdrawals are paused right now. Please try again later.'),
     ).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Confirm & get OTP' }));
     expect(await screen.findByLabelText('SMS code')).toBeTruthy();
@@ -34193,6 +34308,9 @@ export interface RedeemReviewScreenProps {
 }
 
 /** Refusals that mean the quote moved under the investor: go back to RED-01 and re-quote. */
+/** RV-04-F16-1: E20's ORDERS_DISABLED copy speaks of new investments; a withdrawal says what is paused. */
+const WITHDRAWALS_PAUSED = 'Withdrawals are paused right now. Please try again later.';
+
 const REQUOTE_CODES = new Set([
   'FOLIO_RECONCILIATION_REQUIRED',
   'REDEMPTION_CONFLICT_PENDING',
@@ -34245,7 +34363,8 @@ export function RedeemReviewScreen({ quote, draft, onBack, onPlaced }: RedeemRev
       const apiError = toApiError(err);
       if (isFinalRefusal(apiError)) idempotencyKey.current = null;
       setError({
-        message: messageForError(apiError.code),
+        message:
+          apiError.code === 'ORDERS_DISABLED' ? WITHDRAWALS_PAUSED : messageForError(apiError.code),
         requote: REQUOTE_CODES.has(apiError.code),
       });
     } finally {
@@ -36819,7 +36938,7 @@ E17's screen tests gain these cases (append inside each file's existing `describ
 
 `packages/features/src/explore/FundScreen.test.tsx`. Add `import userEvent from '@testing-library/user-event';` and `import { Linking } from 'react-native';`, and add `vi` to the vitest import (each only if absent).
 
-E17's first case, `renders facts, minimums and disclosures, always`, makes two assertions that each match two elements, so `getBy*` throws and the case fails on E17's own screen. Both minimums render `₹500.00`, and the commission regex also matches DSC-03, which "earns a commission from the fund house". Replace them, keeping the rest of the case:
+(Plan 03 RV-03-40 already makes the two replacements below at the source; where they are present, keep them and go on to the appended cases, RV-04-F19-4.) E17's first case, `renders facts, minimums and disclosures, always`, made two assertions that each match two elements, so `getBy*` throws and the case fails on E17's own screen. Both minimums render `₹500.00`, and the commission regex also matches DSC-03, which "earns a commission from the fund house". Replace them, keeping the rest of the case:
 ```tsx
     expect(screen.getByText('₹500.00')).toBeTruthy();
 ```
@@ -36898,7 +37017,7 @@ becomes
   });
 ```
 
-`packages/features/src/explore/Disclosures.test.tsx` (E17's file). In `shows the level and benchmark when both are known`, `/High/` matches both "Riskometer: Very High" and "Benchmark: High", so the case fails on E17's own component. The two assertions become exact:
+`packages/features/src/explore/Disclosures.test.tsx` (E17's file; Plan 03 RV-03-40 already fixes the `/High/` line, and the block below still applies). In `shows the level and benchmark when both are known`, `/High/` matched both "Riskometer: Very High" and "Benchmark: High", so the case fails on E17's own component. The two assertions become exact:
 ```tsx
     expect(screen.getByText('Riskometer: Very High')).toBeTruthy();
     expect(screen.getByText('Benchmark: High')).toBeTruthy();
@@ -37311,7 +37430,7 @@ export interface SeedOptions {
   pilotList: boolean;
 }
 ```
-The signature becomes `export async function seedCatalogue(db: Database, dataDir: string, options: SeedOptions = { pilotList: false }): Promise<void>`, and its body starts with (before the `amcs.csv` loop):
+The signature becomes `export async function seedCatalogue(db: Database, dataDir: string, options: SeedOptions = { pilotList: false }): Promise<void>`, and its body starts with this, before the `seedCatalogueReference` call (F1 moved D8's `amcs.csv` loop and the three after it there; RV-04-F19-5), so nothing is written on an invalid list; `cell()` and `readCsv` stay module-level helpers:
 ```ts
   const curatedTable = parseCsvTable(readFileSync(resolve(dataDir, 'curated-schemes.csv'), 'utf8'));
   const factsTable = parseCsvTable(readFileSync(resolve(dataDir, 'fund-facts.csv'), 'utf8'));
@@ -37375,7 +37494,7 @@ import { fundFactsPayloadOf } from '../modules/catalogue/curated-csv.js';
     await dbh.db.insert(fundFactsRevisions).values({ schemeId: scheme.id, source: 'ADMIN', payload: fundFactsPayloadOf(row) });
 ```
 
-`apps/api/src/modules/catalogue/fund-facts.provider.ts` (E15). `FUND_FACTS_TRACKED_FIELDS` has seven fields and SID+KIM is an eighth slot, but E15 divides by 7, so a complete record scores `round(800 / 7) = 114` and the upsert breaks `fund_facts_completeness_ck` (`BETWEEN 0 AND 100`). The line becomes:
+`apps/api/src/modules/catalogue/fund-facts.provider.ts` (E15; Plan 03 RV-03-41 already makes this change at the source, so F19 only checks that it is there, RV-04-F19-4). `FUND_FACTS_TRACKED_FIELDS` has seven fields and SID+KIM is an eighth slot, but E15 divided by 7, so a complete record scores `round(800 / 7) = 114` and the upsert breaks `fund_facts_completeness_ck` (`BETWEEN 0 AND 100`). The line becomes:
 ```ts
     const slots = FUND_FACTS_TRACKED_FIELDS.length + 1; // the seven fields plus SID+KIM as one slot
     const completeness = Math.round((100 * (populated + (sidKimPopulated ? 1 : 0))) / slots);
@@ -48257,7 +48376,7 @@ pnpm lint
 git add packages/domain/src/states/plan.ts packages/domain/test/states.test.ts docs/specs/states.md apps/api/src/modules/plans apps/api/src/integrations/fp/fp-operations.ts apps/api/src/integrations/fp/fp-operations.test.ts apps/api/src/integrations/fp/fp-transact.ts apps/api/src/integrations/fp/fake/fake-fp.state.ts apps/api/src/integrations/fp/fake/fake-fp.ts apps/api/src/modules/notifications/notifications.schema.ts apps/api/src/modules/notifications/notify.service.ts apps/api/src/modules/notifications/templates.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/modules/platform/jobs/schedules.ts apps/api/drizzle apps/api/openapi.json apps/api/test/int/sip-cancel.int.test.ts apps/api/test/int/security/bola-coverage.int.test.ts packages/contract/src/plans.ts packages/contract/src/plans.test.ts packages/contract/src/plans-wire.test.ts packages/features/src/sip/CancelSipSheet.tsx packages/features/src/sip/CancelSipSheet.test.tsx packages/features/src/sip/SipDetailScreen.tsx packages/features/src/sip/SipDetailScreen.test.tsx
 git commit -m "feat(sip): investor SIP cancel plans.cancel with consent-first FP cancel, re-read and sweep (F28, R-08)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The three lines after `git add` are the repo's OpenAPI drift check (Plans 02–04: `openapi`, then `git diff --exit-code`), run after a fresh build. They come after the staging because `git diff` compares the working tree with the index: before `git add` it lists this task's new path and fields and exits 1. Here it exits 0, which proves the staged `apps/api/openapi.json` is exactly what the built contract generates. If it exits 1, stage the regenerated file and run the three lines again. If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test and typecheck commands.
+The first line rebuilds before the re-run checks. Biome only reformats, so those checks can use that build. The OpenAPI drift test (`test … openapi`) runs before `git add`, after the build and the regeneration, so it checks what the built contract generates (RV-04-HDR-2). If lefthook re-stages files (`stage_fixed`), re-run the Step 4 test and typecheck commands.
 
 **Assembly fixes in this pass (2026-10-01, review of F28):**
 - **SIPM-02 fragment (blocker).** Rewritten against F12's real names (`plan` is the query, `p` its data, `p.schemeName`, `plan.refetch()`); `Banner tone="info"` (Plan 01's `BannerProps.tone` is `'error' | 'info'`); `useState` imported and declared before F12's `isPending`/`isError` early returns; the sheet formats the amount with `formatInr`. F12's test gains one case.
@@ -48273,7 +48392,7 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
 - Step 3's regeneration now runs right after a build.
 - The domain pass check runs the whole package (`pnpm --filter=@sanchay/domain test`). The old filtered `test states` exited 1 on the 95% coverage gate. Step 2 stays filtered.
 - Step 4 checks the regenerated file with the `openapi` drift test, plus the contract typecheck, because F28 edits contract tests.
-- The repo's drift check (`openapi`, then `git diff --exit-code apps/api/openapi.json`) runs in Step 5 after `git add`, behind its own build. Before staging, `git diff` exits 1 on this task's own new path.
+- The drift check is the B10 test (`openapi`, then `pnpm --filter=@sanchay/api test … openapi`), in Step 4 and again in Step 5 before `git add`, behind its own build (RV-04-HDR-2).
 - Step 5 now re-runs every Step 4 test and typecheck command. Before, it skipped the domain test and D6's `notifications` int test.
 - What ran: both build lines on a worktree of `main` (4 and 6 turbo tasks), the filtered-vs-unfiltered coverage-gate exit codes (1 and 0), and the stale-`dist` OpenAPI trap shown in F10's and F11's round-2 notes. No F28 code changed in this round.
 

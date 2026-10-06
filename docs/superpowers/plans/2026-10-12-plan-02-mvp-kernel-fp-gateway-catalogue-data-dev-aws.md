@@ -134,6 +134,10 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-73: D9's history backfill and daily sync fit R-33 (R-33, Plan 04 F1 open question 4; major).** Prod's NAV history is loaded by D9's CLI on F1's ops task, but `fetchHistory` gave up after 10 s while AMFI needs 8 to 31 s before the first byte of a month's history report (66 s for three months, measured 2026-10-05), and the backfill inserted one row per statement and reported parsed rows as written. `fetchHistory` now waits up to 5 minutes and retries only network errors, timeouts, 5xx, 408 and 429; `backfillNavHistory` walks its range one calendar month per AMFI request inside one run, inserts 1,000 rows per `ON CONFLICT DO NOTHING` statement and counts the rows it inserted; `ops-nav-backfill.js` logs a line per month, prints the `--from` to resume with, and gains a read-only `--check`. `nav.sync.daily` also appends its accepted NAVs to `nav_history` (never a quarantined or future-dated one), so E16's returns keep moving after the backfill instead of freezing at its last date. Verified on PostgreSQL 18.6 with undici 7.16.0: 32 parser, 5 client and 6 integration cases pass (the new client and sync cases fail on the old code, each backfill case on a one-line mutation), and the built CLI under `--max-old-space-size=256` loaded June and July 2026 live from AMFI in 21 s and 24 s (254,192 and 277,416 rows; peak heap 166 MB), re-ran July writing 0, and stopped at a month AMFI had no NAVs for with the resume line and exit code 1.
 - **RV-02-74: D9's daily sync survives AMFI's real NAVAll.txt (found while verifying R-33 against the live feed; blocker).** The feed of 2026-10-05 carries `Redeemed` (four IL&FS series) and `HDFCNIVODG` in its reinvestment-ISIN column; the parser emitted them as ISINs, and the first insert into `scheme_navs` failed `scheme_navs_isin_ck` (23514), so every sync stopped part-way with its run left `RUNNING` and never enqueued the returns. The same feed lists five matured ISINs twice, four of them with two dates, and applying both flipped `INF204KB1XN0` into quarantine, with a CRITICAL break, on every sync. The parser now skips an ISIN cell that fails `isIsin` (a new parser case), and `runNavSync` applies only the latest row per ISIN, as v1's `latestPerIsin` did (a duplicate in the sync case). With that file on PostgreSQL 18.6 the old code threw 23514 after 11,733 rows on both syncs; the new code finished `SUCCEEDED` with 17,852 rows parsed, none quarantined and 17,847 `nav_history` rows, and a second sync added none.
 - **RV-02-75: D0's `serializeErr` also redacts through pino-http (found by the R-34 review, 2026-10-05; major).** The app logs through nestjs-pino's pino-http logger, whose default `wrapSerializers` calls the `err` serializer with pino's already-serialised form, so D0's `instanceof Error` check skipped redaction: a `DrizzleQueryError` logged inside a request kept its bound mobile number in `err.message` and `err.stack`, with `"type":"Object"` (reproduced through `pinoHttp(buildPinoHttpOptions(env)).logger`; D0's test had used a bare `pino`). `serializeErr` now takes either form and redacts pino's serialised form through its documented non-enumerable `raw` Error, and D0's test logs through pino-http as well as plain pino. Verified on a clean checkout of `main` with D0 alone: api unit 134 (132 before), api integration 130 (129 before), features 23 (22 before), typechecks and `pnpm lint` clean. Plan 04 F1 follows in RV-04-F1-11.
+- **RV-02-76: D9's `ops:nav-release` lets the next feed value through once (R-35, owner decision 2026-10-05; major).** A release only cleared `quarantined`, so a genuine move over 25% was quarantined again on the next sync and never reached `nav_history`. The release now goes through `releaseNav` (new `nav-release.ts`): it refuses an ISIN that is not quarantined and writes a `NAV_RELEASE` audit row with the flag in one transaction; `runNavSync` reads the pending releases from `audit_events` once per run, takes a released ISIN's next feed value without the NAV-09 check, writes it to `scheme_navs` and `nav_history`, and audits `NAV_RELEASE_APPLIED` in the same transaction, so the following sync checks from the new NAV. D8's schema is unchanged. Two new integration cases (eight in all); verified on PostgreSQL 18.6 in a scratch worktree (the release case failed against the old sync with the break reopened, then 8/8 passed; `tsc` and `biome ci` clean). Plan 04 F7, which rewrites the CLI, keeps the `NAV_RELEASE` row the sync reads (RV-04-F7-5).
+- **RV-02-77: E25 keeps the document bucket and the NAT EIP on a teardown (backlog, R-34 and DOCS follow-ups 2026-10-05; major).** `sanchay-prod-docs` has a fixed name and used `RemovalPolicy.RETAIN`, so a failed first create left the bucket behind and the retry failed on the name, the hazard R-34 fixed for the logs and repositories. The NAT `CfnEIP` had no DeletionPolicy, so a teardown or a replacement released the address Cybrilla allowlists (PB-19). Both now use `RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `RetainExceptOnCreate`, `UpdateReplacePolicy: Retain`; aws-cdk-lib 2.216.0's `CfnResource.applyRemovalPolicy` maps it so). The bucket case now asserts both policies and one new case asserts the EIP's and that the one NAT gateway uses it: 26 infra tests (Plan 04 F1's totals follow, RV-04-F1-12). Verified with aws-cdk-lib 2.216.0 and vitest 5.0.1 in a scratch folder: both assertions failed on the old stack (`Retain`, no policy), then 24 of 26 passed, the other two only because they read `apps/api` files that the scratch folder does not have; `tsc` and `biome ci` clean.
+- **RV-02-78: D5 lets FP end an unpaid order (P-07 addendum 2026-10-05, Plan 03 E21; major).** The ORDER machine had no way out of AWAITING_PAYMENT or PAYMENT_PENDING except payment success, and D5's own test asserted that nothing in AWAITING_PAYMENT could reach FAILED. FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day (`fp_payment_url_unused`), so such an order could never become final and HOME-02 would ask the investor to "Complete your payment" forever. D5 now has `fp_failed` and `fp_expired` from both states, the FP re-fetch spec §4.2 already describes; a payment attempt's own failure still moves no order. The test now pins exactly those four transitions and refuses `provider_failed`. Verified on the real `@sanchay/domain` in a scratch worktree: the revised case failed against the old machine, then `states.test.ts` 15/15; `tsc` clean and `biome ci` clean after Step 5's `--write`.
+- **RV-02-79: ECS Exec sessions are not refused for want of a KMS key (E25; Plan 04 backlog, E25 review; major).** The cluster's exec logging set `cloudWatchEncryptionEnabled: true`, which makes ECS Exec refuse every session unless its CloudWatch log group has a KMS key, and R-34 defers a customer-managed key to Phase 2, so the first `aws ecs execute-command` (E25's own Post-deploy check, R-16's ops access) would fail. It is `false` now (CloudWatch Logs still encrypts at rest with its own key), and the ECS Exec case asserts it. Proven with aws-cdk-lib 2.216.0 in the scratch folder: the case failed against `true`, then 24 of 26 passed (the other two read `apps/api` files the folder does not have).
 
 **Verify at execution time (not changed here):**
 - **Resolved (R-32, RV-02-69): queue policies.** D2 no longer leaves every queue on pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises. `JOB_POLICIES` gives each job its policy: `stately` for per-aggregate sync, poll, reconcile and sweep jobs, `exclusive` for jobs that submit to FP, and `standard` for `notifications.send` only. `JobsService` creates each queue with that policy, and `Jobs.enqueue` returns null for a send the policy refuses. `jobs.int.test.ts` pins the stored policies and both refusals on PostgreSQL. A policy cannot change in place (`createQueue` on an existing queue keeps the old one, and `updateQueue` refuses `policy`), so `JobsService` refuses to start when a stored policy differs from the registry. D2's table "Queue policies (R-32)" lists every job in Plans 02–04.
@@ -5772,15 +5776,24 @@ describe('state machine registry', () => {
     expect(outgoing.some((e) => e.to === 'FAILED' && e.trigger === 'provider_object_absent')).toBe(true);
   });
 
-  it('PAYMENT_ATTEMPT FAILED does not move the order to FAILED (H-2)', () => {
+  it('PAYMENT_ATTEMPT FAILED does not move the order to FAILED (H-2); FP failing the purchase does', () => {
     // The attempt machine and the order machine are independent: a FAILED payment attempt has no
-    // corresponding ORDER transition out of AWAITING_PAYMENT. The order stays AWAITING_PAYMENT until
-    // the FP order itself reaches a terminal state (re-fetch), per spec §4.2's "(attempt FAILED /
-    // EXPIRED while the FP order is non-final)" row.
-    const fromAwaitingPayment = STATE_MACHINES.ORDER.transitions.filter(
-      (t) => t.from === 'AWAITING_PAYMENT',
+    // ORDER transition, and the order stays AWAITING_PAYMENT, per spec §4.2's "(attempt FAILED /
+    // EXPIRED while the FP order is non-final)" row. It ends when the FP order itself reaches a
+    // terminal state (re-fetched): FP fails an unpaid ONDC purchase at 23:00 IST with
+    // `fp_payment_url_unused` (P-07, RV-02-78).
+    const outOfUnpaid = STATE_MACHINES.ORDER.transitions.filter(
+      (t) =>
+        (t.from === 'AWAITING_PAYMENT' || t.from === 'PAYMENT_PENDING') &&
+        (t.to === 'FAILED' || t.to === 'EXPIRED'),
     );
-    expect(fromAwaitingPayment.every((t) => t.to !== 'FAILED')).toBe(true);
+    expect(outOfUnpaid.map((t) => `${t.from} ${t.to} ${t.trigger}`).sort()).toEqual([
+      'AWAITING_PAYMENT EXPIRED fp_expired',
+      'AWAITING_PAYMENT FAILED fp_failed',
+      'PAYMENT_PENDING EXPIRED fp_expired',
+      'PAYMENT_PENDING FAILED fp_failed',
+    ]);
+    expect(canTransition('ORDER', 'AWAITING_PAYMENT', 'FAILED', 'provider_failed')).toBe(false);
     expect(canTransition('PAYMENT_ATTEMPT', 'PENDING', 'FAILED', 'provider_failed')).toBe(true);
   });
 
@@ -5940,6 +5953,12 @@ export const ORDER_TRANSITIONS: readonly Transition<OrderStatus>[] = [
   { from: 'CONFIRMING', to: 'RECONCILING', trigger: 'ambiguous' },
   { from: 'AWAITING_PAYMENT', to: 'PAYMENT_PENDING', trigger: 'payment_postback_or_return' },
   { from: 'PAYMENT_PENDING', to: 'PROCESSING', trigger: 'attempt_success' },
+  // FP failed or expired the purchase while it was unpaid, re-fetched (never the attempt): it fails an
+  // unpaid ONDC purchase at 23:00 IST on the order day with `fp_payment_url_unused` (P-07, RV-02-78).
+  { from: 'AWAITING_PAYMENT', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'AWAITING_PAYMENT', to: 'EXPIRED', trigger: 'fp_expired' },
+  { from: 'PAYMENT_PENDING', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'PAYMENT_PENDING', to: 'EXPIRED', trigger: 'fp_expired' },
   { from: 'PROCESSING', to: 'SETTLED', trigger: 'fp_successful_with_units' },
   { from: 'PROCESSING', to: 'UNITS_PENDING', trigger: 'fp_successful_units_null' },
   { from: 'PROCESSING', to: 'FAILED', trigger: 'fp_failed' },
@@ -9491,7 +9510,7 @@ git commit -m "feat(catalogue): add catalogue schema, seed data and ops:catalogu
 **Files (create):**
 - `packages/test-fixtures/{package.json, tsconfig.json, tsconfig.build.json, vitest.config.ts, src/index.ts}` (the package shell; **D9 is the only task that creates these**, and later tasks add golden files and barrel exports only), `packages/test-fixtures/src/amfi/navall-daily.txt`, `packages/test-fixtures/src/amfi/navall-history.txt`
 - `apps/api/src/integrations/amfi/{amfi-nav-parser.ts, amfi-nav-parser.test.ts, amfi-client.ts, amfi-client.test.ts, nav-floors.ts}`
-- `apps/api/src/modules/catalogue/nav/{nav.service.ts, nav-sync.job.ts, nav-history-backfill.ts}`
+- `apps/api/src/modules/catalogue/nav/{nav.service.ts, nav-sync.job.ts, nav-history-backfill.ts, nav-release.ts}` (RV-02-76: `nav-release.ts` holds R-35's release)
 - `apps/api/src/modules/catalogue/catalogue.module.ts` (RV-02-5: registers `NavSyncJob`; D10 extends it)
 - `apps/api/src/cli/{ops-nav-backfill.ts, ops-nav-release.ts}`
 - `apps/api/test/int/nav-sync.int.test.ts`
@@ -9504,15 +9523,16 @@ git commit -m "feat(catalogue): add catalogue schema, seed data and ops:catalogu
 
 **Interfaces:**
 - Prerequisites: D8 (`schemeNavs`, `navHistory`, `navSyncRuns` tables, `Database` type); D1 (`ReconBreaks.open`, `RuntimeConfig`); D2 (`Jobs.enqueue`, `@JobHandler`, `JOB_NAMES`, `schedule(name, cron, {tz})`).
-- Consumes (Plan-01, verified): `@sanchay/money` — `Nav` (scale 6, `Nav.parse`), `formatIsoDate`; `@sanchay/domain` — `NAV_GRADES`, `type NavGrade`, `isIsin`, `toIsin`, `type Isin`, `isIsoDate`, `toIsoDate`, `type IsoDate`, `ISIN_REGEX`; `apps/api/src/modules/platform/clock.ts` — `CLOCK`, `Clock`, `DAY`; `apps/api/src/modules/identity/otp.service.ts` — `istDayStart` (NAV age counts IST calendar days from it, RV-02-49); `apps/api/src/db/client.ts` — `DbExecutor`. Consumes (D1/D2, outline-specified names — no real code exists yet to verify against, per Prerequisites table in the Plan 02 outline intro): `Jobs.enqueue`, `@JobHandler`, `ReconBreaks.open`.
+- Consumes (Plan-01, verified): `@sanchay/money` — `Nav` (scale 6, `Nav.parse`), `formatIsoDate`; `@sanchay/domain` — `NAV_GRADES`, `type NavGrade`, `isIsin`, `toIsin`, `type Isin`, `isIsoDate`, `toIsoDate`, `type IsoDate`, `ISIN_REGEX`; `apps/api/src/modules/platform/clock.ts` — `CLOCK`, `Clock`, `DAY`; `apps/api/src/modules/identity/otp.service.ts` — `istDayStart` (NAV age counts IST calendar days from it, RV-02-49); `apps/api/src/db/client.ts` — `DbExecutor`; `apps/api/src/modules/platform/platform.schema.ts` — `auditEvents` (R-35's release ledger). Consumes (D1/D2, outline-specified names — no real code exists yet to verify against, per Prerequisites table in the Plan 02 outline intro): `Jobs.enqueue`, `@JobHandler`, `ReconBreaks.open`.
 - Consumes (v1 port source, read-only): `C:/Users/pc/Desktop/WeathTech_v2/investor/platiziowealthtech-Back_end/src/main/java/com/platizio/wealthtech/integration/nav/AmfiNavParser.java` and `AmfiNavParserTest.java`.
-- Produces: `parseAmfiNav(body, {bound})`, `NAV_UNBOUNDED_DATE`, `type NavRow`, `type ParsedNavFeed`, `NavFeedFormatError`; `NAV_ROW_MIN_COUNT`, `NAV_MATCHED_FRACTION_FLOOR`, `NAV_JUMP_FLOOR_PCT`, `assertRunFloors`, `NavSyncFloorBreachedError`, `quarantineDecision`; `AmfiClient.fetchDaily()/fetchHistory(from, to)` (`DAILY_TIMEOUTS`, `HISTORY_TIMEOUTS`, `AmfiHttpError`; at most three attempts); `NavService.latest(exec, isin) -> {nav, navDate, grade} | null` (age in IST calendar days; a NAV dated after today IST grades `UNAVAILABLE`, D-MONEY-067) and `istToday(now)`; job `nav.sync.daily` (rejects a NAV dated after today IST at ingest, applies the latest row per ISIN, and appends its accepted NAVs to `nav_history`); `backfillNavHistory(exec, client, {from, to}, onWindow?) -> {rowsParsed, rowsWritten}` (one calendar month per AMFI request), `monthWindows`, `insertNavHistory`, `navHistoryStored`, `NAV_HISTORY_INSERT_BATCH`, `NAV_HISTORY_FLOOR_MIN_DAYS`; `pnpm ops:nav-backfill --from <date> --to <date> [--check]`; `pnpm ops:nav-release --isin <i> --approver1 <a> --approver2 <b>`.
+- Produces: `parseAmfiNav(body, {bound})`, `NAV_UNBOUNDED_DATE`, `type NavRow`, `type ParsedNavFeed`, `NavFeedFormatError`; `NAV_ROW_MIN_COUNT`, `NAV_MATCHED_FRACTION_FLOOR`, `NAV_JUMP_FLOOR_PCT`, `assertRunFloors`, `NavSyncFloorBreachedError`, `quarantineDecision`; `AmfiClient.fetchDaily()/fetchHistory(from, to)` (`DAILY_TIMEOUTS`, `HISTORY_TIMEOUTS`, `AmfiHttpError`; at most three attempts); `NavService.latest(exec, isin) -> {nav, navDate, grade} | null` (age in IST calendar days; a NAV dated after today IST grades `UNAVAILABLE`, D-MONEY-067) and `istToday(now)`; job `nav.sync.daily` (rejects a NAV dated after today IST at ingest, applies the latest row per ISIN, and appends its accepted NAVs to `nav_history`); `backfillNavHistory(exec, client, {from, to}, onWindow?) -> {rowsParsed, rowsWritten}` (one calendar month per AMFI request), `monthWindows`, `insertNavHistory`, `navHistoryStored`, `NAV_HISTORY_INSERT_BATCH`, `NAV_HISTORY_FLOOR_MIN_DAYS`; `pnpm ops:nav-backfill --from <date> --to <date> [--check]`; `pnpm ops:nav-release --isin <i> --approver1 <a> --approver2 <b>`; `releaseNav(db, {isin, approver1, approver2})`, `NavReleaseError`, `pendingNavReleases(db) -> Set<string>`, `NAV_RELEASE`, `NAV_RELEASE_APPLIED` (R-35).
 - Deviation from outline: the outline's grade names (`FRESH|AGED|UNDATED`) match the **v1 research doc** (`docs/research/rules-compliance-nav.md`), but Plan-01's real `@sanchay/domain` already ships `NAV_GRADES = ['OK', 'STALE', 'UNAVAILABLE']` (`packages/domain/src/catalogue.ts`). This task uses the real enum: `OK` (fresh, matches v1 `FRESH`), `STALE` (matches v1 `AGED`), `UNAVAILABLE` (no row, a row dated after today IST (D-MONEY-067; v1 graded it fresh), or `quarantined = true` — a quarantined row keeps its last good `nav` value per NAV-09 but is not trustworthy until `ops:nav-release`, so it reports `UNAVAILABLE` regardless of age rather than falling back to `STALE`). The "future-dated → quarantined" v2 fix in the outline's test list is expressed here as: a future-dated row from the daily feed is never applied to `scheme_navs` at all (it lands in `ParsedNavFeed.futureDated`, per the v1 parser's own design, and is never quarantine-written).
 - Deviation from outline: the outline gives one signature, `parseAmfiNav(body, {bound: IsoDate})`. The v1 parser's test suite also needs the two-argument `parse(body)` "no bound" mode, and — critically — a test that a **null** bound is refused rather than silently meaning unbounded. Rather than add a second overload (which the outline does not list), this port keeps the one exported name and adds an explicit sentinel, `NAV_UNBOUNDED_DATE = '9999-12-31' as IsoDate`, that a caller must pass on purpose; `options.bound` being `null`/`undefined` throws `TypeError`. `parseAmfiNav(body)` with `options` omitted also throws, for the same reason.
 - Review fix (RV-02-4/5): D2 is a hard prerequisite (no stub fallback). The job needs a `@JobHandler('nav.sync.daily')` class (`NavSyncJob`) registered in a module, and the four crons need distinct pg-boss `key`s, each passing its `kind` as job data; see "D9 Step 3 addendum".
 - Row/matched-fraction/plausibility floors (`NAV-06`, `NAV-09` in `docs/research/rules-compliance-nav.md`, ported from v1): `rowsParsed < 1000` or (cold start) `matched/tracked < 0.10` fails the whole run before any write; a per-ISIN day-over-day move `> 25%` quarantines that ISIN instead of writing it. These floor values are not in the outline (which only says "quarantine: `|Δ| > floor`"); the 1000/0.10/25% figures are taken from the v1 research doc and are the run's defaults, overridable later via `RuntimeConfig` — not done in this task, which hardcodes them as named constants.
 - Review fix (RV-02-73, R-33): prod gets five years of NAV history from `ops-nav-backfill.js` runs on F1's ops task (`db-access.md`), so the backfill is sized to AMFI as measured on 2026-10-05. `fetchHistory` waits up to 5 minutes for the headers (`HISTORY_TIMEOUTS`: a month needed 8 to 31 s before its first byte, three months 66 s, and 10 s failed a month three times; 5 minutes is under the 350 s idle timeout of prod's NAT gateway) and retries a network error, a timeout, a 5xx, 408 or 429 (three attempts, 2 s then 4 s apart; any other status is final, and a refused body is drained). `backfillNavHistory` walks `[from, to]` one calendar month per request inside one run, so it holds at most one month's report (about 25 MB, 200,000 to 280,000 rows), inserts 1,000 rows per `ON CONFLICT DO NOTHING` statement and returns the rows it inserted, not the rows it parsed; NAV-06's 1,000-row floor applies to each window of a week or more (a weekend or holiday has only 750 to 1,150 NAVs a day). `runNavSync` appends its accepted NAVs to `nav_history` the same way, so E16's returns follow every sync after the backfill; a quarantined or future-dated NAV never reaches the history. `--check` prints what `nav_history` holds per month without calling AMFI.
 - Review fix (RV-02-74, AMFI's live feed): `NavRow.isin` passes `isIsin`. NAVAll.txt carries `Redeemed` and `HDFCNIVODG` in its reinvestment-ISIN column, which `scheme_navs_isin_ck` refuses (23514, failing the whole sync), so the parser skips such a cell like a placeholder. The feed also lists a few matured ISINs twice with two dates, so `runNavSync` applies only the latest row per ISIN (v1's `latestPerIsin`).
+- Review fix (RV-02-76, R-35): a released NAV is accepted once. `ops:nav-release` (two approvers, after the NAV is checked on the AMC site) now goes through `releaseNav`, which clears `quarantined` and writes a `NAV_RELEASE` audit row in one transaction, and refuses an ISIN that is not quarantined, so a stray release cannot wave a later move through. `audit_events` is the release ledger, so D8's schema does not change: `runNavSync` reads `pendingNavReleases` once per run (the ISINs whose latest `NAV_RELEASE`/`NAV_RELEASE_APPLIED` row is a release; one read on `audit_events_entity_idx`), and a released ISIN's next feed value skips `quarantineDecision` (NAV-09). That value is written to `scheme_navs` and `nav_history` like any accepted NAV, and the same transaction writes `NAV_RELEASE_APPLIED` (`SYSTEM`, with the run id and both NAVs), which uses the release up; the next sync checks from the new NAV. Before this, a release only cleared the flag, so a genuine move over 25% was quarantined again on the next sync and never reached `nav_history`. A release that lands while a sync is running is taken by the next one.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9921,11 +9941,12 @@ describe('AmfiClient', () => {
 `apps/api/test/int/nav-sync.int.test.ts` (the full file):
 
 ```typescript
-import { like } from 'drizzle-orm';
+import { eq, like } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { navHistory, navSyncRuns, schemeNavs } from '../../src/db/schema.js';
+import { auditEvents, navHistory, navSyncRuns, schemeNavs } from '../../src/db/schema.js';
 import { NavSyncFloorBreachedError } from '../../src/integrations/amfi/nav-floors.js';
 import { backfillNavHistory, navHistoryStored } from '../../src/modules/catalogue/nav/nav-history-backfill.js';
+import { NavReleaseError, releaseNav } from '../../src/modules/catalogue/nav/nav-release.js';
 import { runNavSync } from '../../src/modules/catalogue/nav/nav-sync.job.js';
 import { NavService } from '../../src/modules/catalogue/nav/nav.service.js';
 import { FakeClock } from '../../src/modules/platform/clock.js';
@@ -10091,6 +10112,89 @@ describe('backfillNavHistory (R-33)', () => {
     expect(fetchHistory).not.toHaveBeenCalled();
   });
 });
+
+describe('ops:nav-release (R-35)', () => {
+  /** One nav.sync.daily over `rows`, padded with the 1,000 filler ISINs that NAV-06 needs, dated `fillerDate`. */
+  const sync = async (rows: readonly string[], at: string, fillerDate: string) => {
+    const filler = Array.from(
+      { length: 1000 },
+      (_, i) =>
+        `${2000 + i};INF999F${String(i).padStart(5, '0')};-;Filler;Direct;Growth;10.0000;${fillerDate}`,
+    );
+    const feed = [
+      'Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date',
+      ...rows,
+      ...filler,
+    ].join('\n');
+    const reconBreaks = { open: vi.fn() };
+    await runNavSync(t.db, {
+      client: { fetchDaily: vi.fn().mockResolvedValue(feed) } as never,
+      reconBreaks: reconBreaks as never,
+      jobs: { enqueue: vi.fn().mockResolvedValue('job-1') } as never,
+      clock: new FakeClock(at),
+      kind: 'DAILY_2130',
+    });
+    return reconBreaks.open;
+  };
+  const navOf = (isin: string) =>
+    t.db.query.schemeNavs.findFirst({ where: (s, { eq }) => eq(s.isin, isin) });
+  const auditOf = (isin: string) =>
+    t.db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, isin))
+      .orderBy(auditEvents.occurredAt);
+
+  it('accepts the next feed value of a released ISIN once, without the 25% check, then checks from it', async () => {
+    await t.db
+      .insert(schemeNavs)
+      .values({ isin: 'INF209KD0001', nav: '10.000000', navDate: '2026-08-21' });
+    const doubled = '1;INF209KD0001;-;E;Direct;Growth;20.0000;24-Aug-2026';
+    // A move of 100% is quarantined (NAV-09) and stays out of nav_history.
+    expect(await sync([doubled], '2026-08-24T16:00:00.000Z', '24-Aug-2026')).toHaveBeenCalledOnce();
+    expect((await navOf('INF209KD0001'))?.quarantined).toBe(true);
+
+    await releaseNav(t.db, { isin: 'INF209KD0001', approver1: 'ops-a', approver2: 'ops-b' });
+    expect((await navOf('INF209KD0001'))?.quarantined).toBe(false);
+
+    // The next sync takes the same feed value without the check, and audits that it used the release.
+    expect(await sync([doubled], '2026-08-25T05:00:00.000Z', '24-Aug-2026')).not.toHaveBeenCalled();
+    const taken = await navOf('INF209KD0001');
+    expect([taken?.nav, taken?.navDate, taken?.prevNav, taken?.quarantined]).toEqual([
+      '20.000000',
+      '2026-08-24',
+      '10.000000',
+      false,
+    ]);
+    const history = await t.db.select().from(navHistory).where(eq(navHistory.isin, 'INF209KD0001'));
+    expect(history.map((h) => [h.navDate, h.nav])).toEqual([['2026-08-24', '20.000000']]);
+    expect((await auditOf('INF209KD0001')).map((a) => a.action)).toEqual([
+      'NAV_RELEASE',
+      'NAV_RELEASE_APPLIED',
+    ]);
+
+    // Once only: checks resume from 20, so the next 100% move is quarantined again.
+    const quadrupled = '1;INF209KD0001;-;E;Direct;Growth;40.0000;25-Aug-2026';
+    expect(
+      await sync([quadrupled], '2026-08-25T16:00:00.000Z', '25-Aug-2026'),
+    ).toHaveBeenCalledOnce();
+    const again = await navOf('INF209KD0001');
+    expect([again?.nav, again?.quarantined]).toEqual(['20.000000', true]);
+  });
+
+  it('refuses one approver twice, and an ISIN that is not quarantined, without an audit row', async () => {
+    await t.db
+      .insert(schemeNavs)
+      .values({ isin: 'INF209KD0002', nav: '10.000000', navDate: '2026-08-24' });
+    const release = (isin: string, approver2: string) =>
+      releaseNav(t.db, { isin, approver1: 'ops-a', approver2 });
+    await expect(release('INF209KD0002', 'ops-a')).rejects.toThrow(NavReleaseError);
+    await expect(release('INF209KD0002', 'ops-b')).rejects.toThrow(NavReleaseError);
+    await expect(release('INF209KD0003', 'ops-b')).rejects.toThrow(NavReleaseError);
+    expect(await auditOf('INF209KD0002')).toEqual([]);
+    expect((await navOf('INF209KD0002'))?.quarantined).toBe(false);
+  });
+});
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -10100,7 +10204,7 @@ pnpm --filter=@sanchay/api test amfi-nav-parser amfi-client
 pnpm --filter=@sanchay/api test:int nav-sync
 ```
 
-Expected failure: `./amfi-nav-parser.js`, `./amfi-client.js` and `../../src/modules/catalogue/nav/nav.service.js`/`nav-sync.job.js`/`nav-history-backfill.js` do not exist, so every import fails.
+Expected failure: `./amfi-nav-parser.js`, `./amfi-client.js` and `../../src/modules/catalogue/nav/nav.service.js`/`nav-sync.job.js`/`nav-history-backfill.js`/`nav-release.js` do not exist, so every import fails.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -10462,9 +10566,11 @@ import type { AmfiClient } from '../../../integrations/amfi/amfi-client.js';
 import { assertRunFloors, NavSyncFloorBreachedError, quarantineDecision } from '../../../integrations/amfi/nav-floors.js';
 import type { Clock } from '../../platform/clock.js';
 import type { Database } from '../../../db/client.js';
+import { auditEvents } from '../../platform/platform.schema.js';
 import { navSyncRuns, schemeNavs, schemes } from '../catalogue.schema.js';
 import { eq, sql } from 'drizzle-orm';
 import { insertNavHistory } from './nav-history-backfill.js';
+import { NAV_RELEASE_APPLIED, pendingNavReleases } from './nav-release.js';
 import { istToday } from './nav.service.js';
 
 export interface NavSyncDeps {
@@ -10525,6 +10631,8 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
 
   let quarantinedCount = 0;
   const accepted: NavRow[] = [];
+  // R-35: an ISIN released by ops:nav-release takes this sync's feed value once, without the NAV-09 check.
+  const released = await pendingNavReleases(db);
   for (const row of latestPerIsin(parsed.rows)) {
     const existing = await db.query.schemeNavs.findFirst({ where: (t, { eq: eqOp }) => eqOp(t.isin, row.isin) });
     if (!existing) {
@@ -10538,7 +10646,8 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
       accepted.push(row);
       continue;
     }
-    if (quarantineDecision(existing.nav, row.nav)) {
+    const release = released.has(row.isin);
+    if (!release && quarantineDecision(existing.nav, row.nav)) {
       quarantinedCount++;
       await db.update(schemeNavs).set({ quarantined: true, updatedAt: new Date() }).where(eq(schemeNavs.isin, row.isin));
       await deps.reconBreaks.open(db, {
@@ -10550,10 +10659,23 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
       });
       continue;
     }
-    await db
-      .update(schemeNavs)
-      .set({ prevNav: existing.nav, prevNavDate: existing.navDate, nav: row.nav, navDate: row.navDate, schemeNameSnapshot: row.schemeName, quarantined: false, updatedAt: new Date() })
-      .where(eq(schemeNavs.isin, row.isin));
+    const apply = { prevNav: existing.nav, prevNavDate: existing.navDate, nav: row.nav, navDate: row.navDate, schemeNameSnapshot: row.schemeName, quarantined: false, updatedAt: new Date() };
+    if (!release) {
+      await db.update(schemeNavs).set(apply).where(eq(schemeNavs.isin, row.isin));
+    } else {
+      // The release is used up with the value it let through, so the next sync checks from this NAV.
+      await db.transaction(async (tx) => {
+        await tx.update(schemeNavs).set(apply).where(eq(schemeNavs.isin, row.isin));
+        await tx.insert(auditEvents).values({
+          actorType: 'SYSTEM',
+          actorId: 'nav.sync.daily',
+          action: NAV_RELEASE_APPLIED,
+          entityType: 'scheme_navs',
+          entityId: row.isin,
+          data: { runId, prevNav: existing.nav, prevNavDate: existing.navDate, nav: row.nav, navDate: row.navDate },
+        });
+      });
+    }
     accepted.push(row);
   }
 
@@ -10705,6 +10827,85 @@ export async function navHistoryStored(
 }
 ```
 
+`apps/api/src/modules/catalogue/nav/nav-release.ts` (full file; RV-02-76, R-35):
+
+```typescript
+import { and, desc, eq, inArray } from 'drizzle-orm';
+import type { Database } from '../../../db/client.js';
+import { auditEvents } from '../../platform/platform.schema.js';
+import { schemeNavs } from '../catalogue.schema.js';
+
+/** R-35: `ops:nav-release` audits NAV_RELEASE; the sync that then takes the ISIN's feed value audits NAV_RELEASE_APPLIED. */
+export const NAV_RELEASE = 'NAV_RELEASE';
+export const NAV_RELEASE_APPLIED = 'NAV_RELEASE_APPLIED';
+
+export class NavReleaseError extends Error {
+  override readonly name = 'NavReleaseError';
+}
+
+export interface NavRelease {
+  isin: string;
+  approver1: string;
+  approver2: string;
+}
+
+/**
+ * R-35: releases a quarantined ISIN once an operator has checked its NAV on the AMC site with a second
+ * approver. The last good NAV grades by age again, and the next `nav.sync.daily` takes the ISIN's feed
+ * value once without the NAV-09 move check. An ISIN that is not quarantined is refused, so a stray
+ * release cannot wave a later move through.
+ */
+export async function releaseNav(db: Database, input: NavRelease): Promise<void> {
+  if (input.approver1 === input.approver2) {
+    throw new NavReleaseError(
+      'ops-nav-release: --approver1 and --approver2 must be two distinct approvers',
+    );
+  }
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(schemeNavs)
+      .set({ quarantined: false, updatedAt: new Date() })
+      .where(and(eq(schemeNavs.isin, input.isin), eq(schemeNavs.quarantined, true)))
+      .returning({ nav: schemeNavs.nav, navDate: schemeNavs.navDate });
+    if (row === undefined) {
+      throw new NavReleaseError(
+        `ops-nav-release: ${input.isin} has no quarantined scheme_navs row`,
+      );
+    }
+    await tx.insert(auditEvents).values({
+      actorType: 'SYSTEM',
+      actorId: input.approver1,
+      action: NAV_RELEASE,
+      entityType: 'scheme_navs',
+      entityId: input.isin,
+      data: { ...input, lastGoodNav: row.nav, lastGoodNavDate: row.navDate },
+    });
+  });
+}
+
+/** R-35: the ISINs whose latest release no sync has taken yet (one read on audit_events_entity_idx per sync). */
+export async function pendingNavReleases(db: Database): Promise<Set<string>> {
+  const latest = await db
+    .selectDistinctOn([auditEvents.entityId], {
+      isin: auditEvents.entityId,
+      action: auditEvents.action,
+    })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.entityType, 'scheme_navs'),
+        inArray(auditEvents.action, [NAV_RELEASE, NAV_RELEASE_APPLIED]),
+      ),
+    )
+    .orderBy(auditEvents.entityId, desc(auditEvents.occurredAt), desc(auditEvents.id));
+  const pending = new Set<string>();
+  for (const r of latest) {
+    if (r.action === NAV_RELEASE && r.isin !== null) pending.add(r.isin);
+  }
+  return pending;
+}
+```
+
 `apps/api/src/cli/ops-nav-backfill.ts` (full file):
 
 ```typescript
@@ -10764,15 +10965,13 @@ try {
 }
 ```
 
-`apps/api/src/cli/ops-nav-release.ts` (full file):
+`apps/api/src/cli/ops-nav-release.ts` (full file; RV-02-76: the release goes through `releaseNav`):
 
 ```typescript
-import { eq } from 'drizzle-orm';
 import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
-import { auditEvents } from '../modules/platform/platform.schema.js';
-import { schemeNavs } from '../modules/catalogue/catalogue.schema.js';
+import { releaseNav } from '../modules/catalogue/nav/nav-release.js';
 
 function arg(name: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -10783,25 +10982,12 @@ function arg(name: string): string {
 
 loadDotEnvFile();
 const env = parseEnv(process.env);
-const isin = arg('isin');
-const approver1 = arg('approver1');
-const approver2 = arg('approver2');
-if (approver1 === approver2) {
-  throw new Error('ops-nav-release: --approver1 and --approver2 must be two distinct approvers');
-}
+const release = { isin: arg('isin'), approver1: arg('approver1'), approver2: arg('approver2') };
 const dbh = createDb(env.DATABASE_URL, 2);
 try {
-  const [row] = await dbh.db.update(schemeNavs).set({ quarantined: false, updatedAt: new Date() }).where(eq(schemeNavs.isin, isin)).returning();
-  if (!row) throw new Error(`ops-nav-release: no scheme_navs row for ${isin}`);
-  await dbh.db.insert(auditEvents).values({
-    actorType: 'SYSTEM',
-    actorId: approver1,
-    action: 'NAV_RELEASE',
-    entityType: 'scheme_navs',
-    entityId: isin,
-    data: { isin, approver1, approver2 },
-  });
-  console.log(`nav released: ${isin}`);
+  // R-35: the next nav.sync.daily takes this ISIN's feed value once, without the 25% move check.
+  await releaseNav(dbh.db, release);
+  console.log(`nav released: ${release.isin}; the next NAV sync accepts its feed value once`);
 } finally {
   await dbh.close();
 }
@@ -10883,7 +11069,7 @@ pnpm --filter=@sanchay/api test:int nav-sync
 pnpm --filter=@sanchay/api typecheck
 ```
 
-Expected: all 32 parser cases, the 5 `AmfiClient` cases and the six NAV integration cases (two grading, one sync, three backfill) pass; `typecheck` is clean.
+Expected: all 32 parser cases, the 5 `AmfiClient` cases and the eight NAV integration cases (two grading, one sync, two release, three backfill) pass; `typecheck` is clean.
 
 - [ ] **Step 5: Commit**
 
@@ -11531,6 +11717,8 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
 
 > **Amended 2026-10-05 for R-34 (RV-02-72).** RV-02-64's one log group and two image repositories are the owner's decision (R-34). Both log groups and both repositories use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE`, and the infra test file has 25 tests.
 
+> **Amended 2026-10-06 (RV-02-77).** The document bucket `sanchay-prod-docs` (a fixed name) and the NAT `CfnEIP` that Cybrilla allowlists (PB-19) use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE` too, each with an assertion, and the infra test file has 26 tests.
+
 **Files:**
 - Create: `infra/package.json`, `infra/tsconfig.json`, `infra/cdk.json`, `infra/vitest.config.ts`, `infra/bin/sanchay.ts`, `infra/lib/config.ts`, `infra/lib/sanchay-mvp-stack.ts`, `infra/test/sanchay-mvp-stack.test.ts`
 - Create (fetched asset, Step 3): `infra/certs/rds-global-bundle.pem`
@@ -11552,12 +11740,12 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   - `infra/lib/config.ts`: `loadStackConfig(envName: SanchayEnvName, source: DeployInputSource = process.env): SanchayStackConfig`, `SanchayEnvName` (`'prod'` only: R-31), `SanchayStackConfig` (`envName`, `rootDomain`, `multiAz`, `deletionProtection`, `backupRetentionDays`, `desiredCount`, `githubRepo: string | undefined` read from the deploy input `SANCHAY_GITHUB_REPOSITORY` (RV-02-33), `dbInstanceSize: 'MICRO' | 'MEDIUM'`, `fpProviderMode`, `fpBaseUrl`, `sesFrom`, `platformArn`, `smsRetrieverHash`), `DeployInputSource`, `StackConfigError`, `assertDeployInputs(config)`. One static config, `PROD_CONFIG`: Multi-AZ, 14-day backups, deletion protection, 2 tasks, `db.t4g.medium`, FP `production` at `https://api.fintechprimitives.com` (no dev config and no dev subdomain, RV-02-70). It refuses to synthesise without the deploy inputs `SANCHAY_PLATFORM_ARN` (`ARN-<digits>`) and `SANCHAY_SMS_RETRIEVER_HASH` (11 characters of `[A-Za-z0-9+/]`) and refuses a `SANCHAY_GITHUB_REPOSITORY` that is not `<owner>/<repo>`; `assertDeployInputs` refuses a missing one (a real synth or deploy, never the tests).
   - `infra/bin/sanchay.ts`: `SanchayMvpStack-prod` (R-31: the only stack), region pinned to `ap-south-1`; it calls `assertDeployInputs(config)` before building the stack (RV-02-33).
   - CDK context flag `-c noTasks=true`: the service is created, or kept, at 0 tasks (ADR-0014 "First deploy"; Plan 04 F1 uses it to move the running stack onto its D6 logins). It is not R-31's pause: paused prod runs its tasks and keeps investors out with D7's invite gate and RuntimeConfig.
-  - VPC (2 AZs, 1 NAT with a stable EIP, output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`; no ingress allow-list (R-31): port 443 is open to the internet.
+  - VPC (2 AZs, 1 NAT with a stable EIP that a teardown or replacement keeps, `RETAIN_ON_UPDATE_OR_DELETE` (PB-19, RV-02-77), output for Cybrilla allowlisting); ALB with TLS policy `ELBSecurityPolicy-TLS13-1-2-2021-06` and `routing.http.xff_header_processing.mode=append`; no ingress allow-list (R-31): port 443 is open to the internet.
   - Listener rules (R-11): host `api.sanchay.in` (any path) → api target group (3000); host `app.sanchay.in` + path `/api/v1/*` → api target group; default action (`www.sanchay.in` and the rest of `app.sanchay.in`) → web target group (3001); host `sanchay.in` (the apex) → 301 to `https://www.sanchay.in`, path and query kept (rule `ApexToWww`; spec §2.4 and H-1, RV-02-63). The one `ecs.FargateService` `sanchay-app` registers both target groups. Both target groups' health check is `/api/v1/health` on port 3000, the task's api container (R-12).
   - One ECS Fargate ARM64 service, containers `web`, `api`, `worker`, plus the one-off `MigrateTaskDef` (container `migrate`, run with `aws ecs run-task`). `SANCHAY_FP_CREDENTIALS_JSON` goes only into `worker`; `SANCHAY_FP_WEBHOOK_SECRET` and `SANCHAY_SMS_RETRIEVER_HASH` only into `api`; `SANCHAY_KEYRING_JSON` into `api`, `worker` and `migrate` (the boot guard's keyring check runs in every role).
   - RDS PostgreSQL 18.6 with `rds.force_ssl=1`, `StorageEncrypted: true`, reachable only from the ECS service security group; Multi-AZ, 14-day backups (PITR), deletion protection, `db.t4g.medium` (spec §2.4); master login `sanchay_master`, secret `sanchay/{env}/db-master` (BRIEF D6). The migrate task logs in as the master; api and worker share that login until F1 adds `sanchay_app_login` (secret `sanchay/{env}/db-app`) and moves `appDbLogin` to it.
   - Task role statement `SesSendFromSanchayDomain` (`ses:SendEmail`, `ses:SendRawEmail`, condition `ses:FromAddress` = `SANCHAY_SES_FROM`).
-  - S3 document bucket `sanchay-prod-docs` (public access blocked, SSE, versioning; spec §2.4, RV-02-62), ECR repos (`sanchay-prod-api`, `sanchay-prod-web`, the last 20 images each), Secrets Manager secrets (`sanchay/prod/keyring`, `sanchay/prod/fp`, `sanchay/prod/fp-webhook`, `sanchay/prod/msg91`, `sanchay/prod/db-master`), CloudWatch log groups `/sanchay/prod/app` and `/sanchay/prod/ecs-exec` at 400-day retention (both log groups and both repositories with `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE`, R-34), ECS Exec logging (R-16) on cluster `sanchay-prod`, and, in the `sanchay.in` hosted zone (it must exist in the prod account before the first deploy, R-31), the A-alias records `www`, `app`, `api` and the apex (RV-02-63) and the DNS validation of one ACM certificate for `*.sanchay.in` and `sanchay.in`.
+  - S3 document bucket `sanchay-prod-docs` (public access blocked, SSE, versioning, `RETAIN_ON_UPDATE_OR_DELETE`; spec §2.4, RV-02-62, RV-02-77), ECR repos (`sanchay-prod-api`, `sanchay-prod-web`, the last 20 images each), Secrets Manager secrets (`sanchay/prod/keyring`, `sanchay/prod/fp`, `sanchay/prod/fp-webhook`, `sanchay/prod/msg91`, `sanchay/prod/db-master`), CloudWatch log groups `/sanchay/prod/app` and `/sanchay/prod/ecs-exec` at 400-day retention (both log groups and both repositories with `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE`, R-34), ECS Exec logging (R-16) on cluster `sanchay-prod`, and, in the `sanchay.in` hosted zone (it must exist in the prod account before the first deploy, R-31), the A-alias records `www`, `app`, `api` and the apex (RV-02-63) and the DNS validation of one ACM certificate for `*.sanchay.in` and `sanchay.in`.
   - **One log group and two image repositories per env (spec §2.4 as amended by R-34; RV-02-64, RV-02-72).** Every container logs to `/sanchay/{env}/app` (400 days) with the awslogs stream prefix `{env}`, so each container has its own streams (`{env}/web/…`, `{env}/api/…`, `{env}/worker/…`, `{env}/migrate/…`; F1 adds `{env}/ops/…`): F1's metric filters tell the containers apart by each line's `service` field (R-34), and the F7, F20, F23, F24 and F27 runbook lines read the streams by prefix. The two images go to `sanchay-{env}-api` and `sanchay-{env}-web`, each keeping its last 20 (`deploy.yml`, ADR-0014's first deploy and the deploy role's `grantPullPush` on both). Both log groups and both repositories use `RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `DeletionPolicy: RetainExceptOnCreate`, `UpdateReplacePolicy: Retain`): a stack teardown or rename never deletes the 400-day logs (CERT-In needs 180 days) or the images, while a failed first create still removes them, so the retry can create the same names. The ECS Exec group gets the same policy because it holds the same kind of record. Deferred to Phase 2 (R-34): a customer-managed KMS key and any split of the log group.
   - No CloudWatch alarm. R-12's NAV-age alarm needs a published metric, and no task before F1 publishes one; F1 owns the gauges and the alarm names (BRIEF D5) and adds the alarm with its metric source.
   - The account's GitHub OIDC provider and the deploy role `sanchay-prod-github-deploy` (output `GithubDeployRoleArn`), built only when the deploy input `SANCHAY_GITHUB_REPOSITORY` is set (RV-02-33). It trusts exactly `repo:<SANCHAY_GITHUB_REPOSITORY>:environment:prod` (`StringEquals`: jobs of the GitHub `prod` environment, whose required reviewers are both founders) and may do only what `deploy.yml` does: assume the CDK bootstrap roles, log in to ECR and push both repositories, read the stack's outputs, run the migrate task (`ecs:RunTask` and `iam:PassRole` through `grantRun`) and read its tasks, and force a new deployment of `sanchay-app` (statements `AssumeCdkBootstrapRoles`, `EcrLogin`, `ReadStackOutputs`, `WaitForMigrateTask`, `ForceNewDeployment`; no `AdministratorAccess`; moved here from Plan 04 F1, RV-02-70). It is consumed by `.github/workflows/deploy.yml` (manual dispatch, `prod` its only environment), which reads the GitHub `prod` environment variables `SANCHAY_DEPLOY_ROLE_ARN`, `SANCHAY_AWS_ACCOUNT_ID`, `SANCHAY_PLATFORM_ARN`, `SANCHAY_PLATFORM_ARN_VALID_TILL` and `SANCHAY_SMS_RETRIEVER_HASH`, passes `SANCHAY_GITHUB_REPOSITORY` from `github.repository`, builds linux/arm64 images (the web image with the `/site` build arguments), runs the one-off migrate task and stops unless it exits 0 (spec §2.4), runs `cdk deploy`, forces a new deployment of `sanchay-app` and fails unless that deployment's rollout completes (RV-02-61).
@@ -11567,7 +11755,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   - **Deviation from outline: the RDS connection string is not injected as one Secrets-Manager-composed `DATABASE_URL` value.** CDK/Secrets Manager cannot concatenate a generated-secret field with plain strings into one ECS secret at deploy time without a custom resource. Instead the containers get plain env `SANCHAY_DB_HOST`/`SANCHAY_DB_PORT`/`SANCHAY_DB_NAME`/`SANCHAY_DB_USER` plus one ECS secret `SANCHAY_DB_PASSWORD` (the login secret's `password` field), and `apps/api/docker-entrypoint.sh` composes `DATABASE_URL` with `?sslmode=verify-full` before `exec`ing the container command. `EnvSchema.DATABASE_URL` is unaffected.
   - **Deviation from outline: `apps/api/Dockerfile` does not `COPY docs/legal/`.** That directory does not exist until Plan 03 E3, and a `COPY` of a missing path fails the build (`"/docs/legal": not found`), so the Dockerfile omits the line and a comment names F1 (Plan 04), whose migrate task seeds it. It does copy `data/`, which D8 creates before E25 (RV-02-59).
   - **Deviation from outline: `.github/workflows/deploy.yml` authenticates to AWS by scripting the OIDC token exchange (`aws sts assume-role-with-web-identity`) and pushes to ECR with the AWS CLI and `docker build`, instead of the `aws-actions/configure-aws-credentials` / `aws-actions/amazon-ecr-login` marketplace actions.** It reuses only the three action pins `ci.yml` already carries; the arm64 emulation installer (`tonistiigi/binfmt`) is a container image pinned by digest, not an action.
-- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rules: api host (any path) and app host + /api/v1/* → api target group (R-11)`, `the apex sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log groups: 400 days, kept on a teardown or rename, removed after a failed first create (R-34)`, `image repositories sanchay-prod-api and sanchay-prod-web keep 20 images each and survive a teardown (R-34)`, `S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned (spec §2.4)`, `ECS Exec logging configured on cluster sanchay-prod`, `DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service sanchay-app: 2 tasks, never below 100 % healthy, rollback circuit breaker; -c noTasks=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `prod database: Multi-AZ, 14-day backups, deletion protection, db.t4g.medium (spec §2.4)`, `closed to investors until GO-1 (R-31): invite-only, no orders or SIP override, no ingress allow-list`, `the GitHub deploy role trusts only the prod environment of SANCHAY_GITHUB_REPOSITORY, is no administrator, and exists only with it`, `the deploy role can do exactly what deploy.yml does, the migrate run included`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
+- **Tests (run without any AWS credentials):** `FP secret only in worker container`, `RDS StorageEncrypted and force_ssl`, `ALB TLS policy`, `listener rules: api host (any path) and app host + /api/v1/* → api target group (R-11)`, `the apex sanchay.in answers 301 to www (spec §2.4, H-1)`, `health check path /api/v1/health on the api port, for both target groups (R-12)`, `SG: RDS reachable only from service`, `log groups: 400 days, kept on a teardown or rename, removed after a failed first create (R-34)`, `image repositories sanchay-prod-api and sanchay-prod-web keep 20 images each and survive a teardown (R-34)`, `S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned, survives a teardown (spec §2.4)`, `the NAT EIP that Cybrilla allowlists survives a teardown or replacement (PB-19)`, `ECS Exec logging configured on cluster sanchay-prod`, `DATABASE_URL in prod carries sslmode=verify-full and the CA file exists in the image`, `the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)`, `RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)`, `api, worker and migrate carry every key parseEnv and the boot guard need (R-19 owners)`, `web listens on 3001 and knows the www and app hosts (apps/web/src/proxy.ts)`, `one service sanchay-app: 2 tasks, never below 100 % healthy, rollback circuit breaker; -c noTasks=true creates it with no tasks`, `the tasks may send SES email only from SANCHAY_SES_FROM (D6)`, `prod database: Multi-AZ, 14-day backups, deletion protection, db.t4g.medium (spec §2.4)`, `closed to investors until GO-1 (R-31): invite-only, no orders or SIP override, no ingress allow-list`, `the GitHub deploy role trusts only the prod environment of SANCHAY_GITHUB_REPOSITORY, is no administrator, and exists only with it`, `the deploy role can do exactly what deploy.yml does, the migrate run included`, `loadStackConfig` (3); in `env.test.ts`, `binds the retriever hash (invariant 7) to the api role only` and `refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1)`.
 - **Post-deploy verification (manual, needs a real deploy):** the first-deploy runbook in ADR-0014, then `deploy to prod: /api/v1/health 200 on app.sanchay.in and api.sanchay.in`; `https://www.sanchay.in/ serves the public site (200)`; `POST /api/v1/webhooks/fp reaches the api container from the internet`; `https://app.sanchay.in/.well-known/assetlinks.json returns 200 application/json without auth`; `https://sanchay.in/ answers 301 to https://www.sanchay.in/` (RV-02-63); an ECS Exec session (R-16). These are listed as a checklist at the end of Step 4.
 
 ---
@@ -11867,21 +12055,44 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       }
     });
 
-    it('S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned (spec §2.4)', () => {
-      synthProdTemplate().hasResourceProperties('AWS::S3::Bucket', {
-        BucketName: 'sanchay-prod-docs',
-        BucketEncryption: {
-          ServerSideEncryptionConfiguration: [
-            { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
-          ],
-        },
-        PublicAccessBlockConfiguration: {
-          BlockPublicAcls: true,
-          BlockPublicPolicy: true,
-          IgnorePublicAcls: true,
-          RestrictPublicBuckets: true,
-        },
-        VersioningConfiguration: { Status: 'Enabled' },
+    it('S3 document bucket sanchay-prod-docs: SSE, public access blocked, versioned, survives a teardown (spec §2.4)', () => {
+      const template = synthProdTemplate();
+      template.resourceCountIs('AWS::S3::Bucket', 1);
+      template.hasResource('AWS::S3::Bucket', {
+        Properties: Match.objectLike({
+          BucketName: 'sanchay-prod-docs',
+          BucketEncryption: {
+            ServerSideEncryptionConfiguration: [
+              { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
+            ],
+          },
+          PublicAccessBlockConfiguration: {
+            BlockPublicAcls: true,
+            BlockPublicPolicy: true,
+            IgnorePublicAcls: true,
+            RestrictPublicBuckets: true,
+          },
+          VersioningConfiguration: { Status: 'Enabled' },
+        }),
+        // A fixed name: a teardown or rename keeps it, a failed first create removes it so the retry works.
+        DeletionPolicy: 'RetainExceptOnCreate',
+        UpdateReplacePolicy: 'Retain',
+      });
+    });
+
+    it('the NAT EIP that Cybrilla allowlists survives a teardown or replacement (PB-19)', () => {
+      const template = synthProdTemplate();
+      template.resourceCountIs('AWS::EC2::EIP', 1);
+      const eips = template.findResources('AWS::EC2::EIP', {
+        Properties: { Domain: 'vpc' },
+        DeletionPolicy: 'RetainExceptOnCreate',
+        UpdateReplacePolicy: 'Retain',
+      });
+      const [eipId] = Object.keys(eips);
+      expect(eipId).toBeDefined();
+      template.resourceCountIs('AWS::EC2::NatGateway', 1);
+      template.hasResourceProperties('AWS::EC2::NatGateway', {
+        AllocationId: { 'Fn::GetAtt': [eipId, 'AllocationId'] },
       });
     });
 
@@ -11889,7 +12100,11 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       synthProdTemplate().hasResourceProperties('AWS::ECS::Cluster', {
         ClusterName: 'sanchay-prod',
         Configuration: {
-          ExecuteCommandConfiguration: Match.objectLike({ Logging: 'OVERRIDE' }),
+          ExecuteCommandConfiguration: Match.objectLike({
+            Logging: 'OVERRIDE',
+            // No KMS key on the exec log group (R-34 defers one), so session encryption stays off.
+            LogConfiguration: Match.objectLike({ CloudWatchEncryptionEnabled: false }),
+          }),
         },
       });
     });
@@ -12396,7 +12611,10 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       const apiOrigin = `https://api.${domain}`;
 
       // --- Network -----------------------------------------------------------------------
+      // PB-19: Cybrilla allowlists this address. A teardown or a replacement keeps it (to re-attach, not
+      // re-allowlist); a failed first create removes it, so the retry allocates one again.
       const natEip = new ec2.CfnEIP(this, 'NatEip', { domain: 'vpc' });
+      natEip.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE);
       const vpc = new ec2.Vpc(this, 'Vpc', {
         maxAzs: 2,
         natGateways: 1,
@@ -12409,14 +12627,16 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       });
 
       // --- S3, ECR -------------------------------------------------------------------------
-      // Spec §2.4: sanchay-{env}-docs with public access blocked, SSE and versioning.
+      // Spec §2.4: sanchay-{env}-docs with public access blocked, SSE and versioning. Its name is fixed, so,
+      // as for the logs and repositories (R-34), a teardown or rename keeps it and a failed first create
+      // removes it, so the retry can create the name again.
       const documentsBucket = new s3.Bucket(this, 'DocumentsBucket', {
         bucketName: `sanchay-${envName}-docs`,
         encryption: s3.BucketEncryption.S3_MANAGED,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         enforceSSL: true,
         versioned: true,
-        removalPolicy: config.deletionProtection ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+        removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
       });
       // R-34: two repositories, one per image, each keeping its own last 20. A stack teardown or rename
       // keeps them; a failed first create removes them, so the retry can create the names again.
@@ -12516,7 +12736,9 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         containerInsightsV2: ecs.ContainerInsights.ENABLED,
         executeCommandConfiguration: {
           logging: ecs.ExecuteCommandLogging.OVERRIDE,
-          logConfiguration: { cloudWatchLogGroup: execLogGroup, cloudWatchEncryptionEnabled: true },
+          // false: with true, ECS Exec refuses every session unless the log group has a KMS key, and
+          // R-34 defers a customer-managed key to Phase 2 (CloudWatch Logs still encrypts at rest).
+          logConfiguration: { cloudWatchLogGroup: execLogGroup, cloudWatchEncryptionEnabled: false },
         },
       });
 
@@ -13326,7 +13548,7 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
   pnpm --filter=@sanchay/api typecheck
   pnpm --filter=@sanchay/web typecheck
   ```
-  Expected: `tsc` exits 0; the 25 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
+  Expected: `tsc` exits 0; the 26 tests in `infra/test/sanchay-mvp-stack.test.ts` pass; `env.test.ts` is green, including the two new cases; both typechecks exit 0.
 
   Then the two images (Docker; not part of `pnpm test`), from the repo root:
   ```

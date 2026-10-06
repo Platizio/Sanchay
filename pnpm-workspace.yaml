@@ -99,6 +99,7 @@ minimumReleaseAgeExclude:
   - 'expo-modules-core@57.0.19'
   - 'expo-modules-jsi@57.1.1'
   - 'expo-router@57.0.23'
+  - 'source-map-js@1.2.2'
 
 # pnpm 11 strictDepBuilds: every dependency with an install script needs an explicit entry (replaces onlyBuiltDependencies, X-08).
 allowBuilds:
