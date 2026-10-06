@@ -179,6 +179,13 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-29: `LegalDocs.current` finds the PUBLISHED version in force, and E3's seed loads (E3; backlog round 2; major).** `current` ordered by `effective_from DESC`, where PostgreSQL puts NULLs first, and checked the status after `LIMIT 1`: an undated DRAFT v2 hid the PUBLISHED v1 and broke every consent for that key. It now filters `status = 'PUBLISHED'` and `effective_from` NULL or not after now, and orders `DESC NULLS LAST` (the query shape type-checks with drizzle-orm on `main`; not run on PostgreSQL). The seed's upsert now also sets `effective_from` on conflict (Plan 04 F1's replacement too, RV-04-F1-13). E3's seed and its sha256 test resolved `docs/legal/documents` five directories up, outside the repo; four is right from `src/cli` and `test/int`. The CLI's `match[1]`/`match[2]` failed `typecheck` under `noUncheckedIndexedAccess` and a missing `key` or `version` is now refused, and the root script builds and runs `dist`, because Node's type stripping cannot load `.js` specifiers from `src`. F1 still replaces the CLI and its scripts.
 - **RV-03-30: E4's tests type-check, and only `consents.cancel` takes an Idempotency-Key (E3, E4; backlog round 1; minor).** Four E4 assertions and one E3 query read a destructured row without a guard, which `typecheck` (it includes `test/`) refuses under `noUncheckedIndexedAccess`; they now use `?.`, or a guard where the row feeds a query. E4's Produces marked `sendOtp` and `approve` `[K]`, but its router, its contract and R-20 require the key on `cancel` only, which is right: an OTP verifies once and a resend is cooldown-bound.
 - **RV-03-31: E3's commands (E3; BRIEF D8 backlog; minor).** `@sanchay/domain` runs unfiltered (a filtered run fails its 95% coverage gate), `test:int` filters drop the literal `--` (pnpm 11 passes it through and runs every suite), and Steps 4 and 5 build the api's workspace dependencies before the api checks, because `@sanchay/domain` exports only `dist`.
+- **RV-03-32: the reference-data seed runs and type-checks (E6, E7, E3; backlog round 2; major).** `ops-ref-seed.ts` wrote `createdBy`/`updatedBy` into `ref_pincodes` and `ref_ifsc`, which have `stdColumns()` only (an excess-property error in `typecheck`), and its root script ran `src/cli/*.ts` under Node's type stripping, which cannot load the `.js` specifiers, so E6's and E7's Step 4 `pnpm ops:ref:seed` could not run. The inserts drop the two keys, the script builds and runs `dist` (as E3's now does), and both seed CLIs load `apps/api/.env` first, as Plan 01's `migrate.ts` does. Plan 04 F1 still replaces both CLIs and their scripts.
+- **RV-03-33: E8's and E9's BOLA checks run, and E9's and E10's public reads use a real harness (E8, E9, E10; backlog round 1; major).** `await expectBola(...)` sat directly in a `describe` body, so it ran at collection time and never as a test; each call is now its own `it`, which keeps the stated counts (E8 10, E9 6). `app.request.get(...)` does not exist on `TestApp`; the two public GETs now go through E8's `signedInInvestor` helper. E10's Step 4 count is 5, the number of its cases (it said 4).
+- **RV-03-34: one top-level `riskProfile` contract key (E9; backlog round 1; major).** E9's tests, E13's `RiskProfileScreen` and Plan 04 F9 call `riskProfile.questionnaire`, `riskProfile.get` and `riskProfile.submit`, but E9's contract appended flat `riskProfileQuestionnaire`/`riskProfileGet`/`riskProfileSubmit` keys to `onboardingContract`, so none of those names existed. E9 now declares `riskProfileContract` beside `onboardingContract` and adds the `riskProfile` key to the contract index; the routes and paths are unchanged.
+- **RV-03-35: E10 adds the `legal` key to the contract (E10; found in this round; major).** E10's fragment `export { legalContract as legal } from './legal.js'` only re-exported a name, so neither the server nor the client had any `legal.*` procedure. It is now a key-level edit like RV-03-28's.
+- **RV-03-36: a runbook stub for a failed provisioning (E11; backlog round 1; minor).** The sprint Definition of Done asks for a runbook stub per new failure mode, and Plan 04 F24 leaves `provisioning-failed.md` out because it is not a G-E8 item, so nobody wrote it. E11 now creates `docs/runbooks/provisioning-failed.md` from its own saga rules: the two failure reasons, the re-attest path (R-17) and what never to do by hand.
+- **RV-03-37: E10 calls E3's `LegalDocs` as E3 defines it (E10, E3, E13; found in this round; blocker).** E10 imported a `LegalDocsService` that E3 never exports (E3's class is `LegalDocs`), called `current(key)` where E3 takes `current(exec, key)`, and compared a `number` version with E3's text version (TS2367); `legal.getDocument` also returned E3's `{key, version, sha256}` without the `bodyMarkdown` its output schema requires. E10 now injects `LegalDocs` and `DB`, passes the transaction or the pool, and takes the version as a string, and E3's `current` also returns the body. E13's `acceptPending` fragment uses E10's `this.dbh.db` (it named a `this.db` that E10 never injected).
+- **RV-03-38: E5–E11 commands (E5–E11; BRIEF D8 backlog; minor).** As RV-03-31 for E3: 28 `--` filters dropped, `@sanchay/domain` unfiltered (duplicate domain lines merged), a build of the api's workspace dependencies before the first api or contract check in every Step 4 and Step 5, and E11's `git diff --exit-code apps/api/openapi.json` replaced by the drift test `pnpm --filter=@sanchay/api test openapi`.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -2428,6 +2435,8 @@ export interface CurrentLegalDocument {
   key: LegalDocumentKey;
   version: string;
   sha256: string;
+  /** E10's `legal.getDocument` serves it (RV-03-37). */
+  bodyMarkdown: string;
 }
 
 export interface RecordAcceptanceInput {
@@ -2467,7 +2476,12 @@ export class LegalDocs {
     if (row === undefined) {
       throw new AppError('INTERNAL', { message: `no PUBLISHED legal_documents row for ${key}` });
     }
-    return { key: row.key as LegalDocumentKey, version: row.version, sha256: row.sha256.toString('hex') };
+    return {
+      key: row.key as LegalDocumentKey,
+      version: row.version,
+      sha256: row.sha256.toString('hex'),
+      bodyMarkdown: row.bodyMarkdown,
+    };
   }
 
   /**
@@ -2564,6 +2578,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
 import { legalDocuments } from '../modules/legal-consent/legal-consent.schema.js';
@@ -2584,6 +2599,7 @@ function parseFrontMatter(body: string): { meta: Record<string, string>; markdow
 }
 
 async function main(): Promise<void> {
+  loadDotEnvFile(); // apps/api/.env, as Plan 01's migrate.ts
   const env = parseEnv(process.env);
   const db = createDb(env.DATABASE_URL);
   const dir = path.resolve(fileURLToPath(new URL('../../../../docs/legal/documents', import.meta.url)));
@@ -5120,7 +5136,7 @@ describe('deriveOnboardingStage (ONB-00 hub order)', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- onboarding-stage
+pnpm --filter=@sanchay/domain test
 ```
 Expected failure: `Cannot find module '../src/rules/onboarding-stage.js'` — the file does not exist yet.
 
@@ -5853,8 +5869,9 @@ describe('GET /me', () => {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/domain test -- onboarding-stage
+pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/domain typecheck
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=onboarding_core
 pnpm --filter=@sanchay/api test:int onboarding-get
 pnpm --filter=@sanchay/api typecheck
@@ -5867,7 +5884,8 @@ Expected: 12/12 in `onboarding-stage.test.ts`; a new `apps/api/drizzle/000X_onbo
 
 ```
 pnpm exec biome check --write packages/domain/src/rules packages/domain/test/onboarding-stage.test.ts packages/domain/src/investor.ts packages/domain/src/index.ts apps/api/src/modules/onboarding apps/api/src/modules/platform/ids.ts apps/api/src/app.module.ts apps/api/test/int/onboarding-get.int.test.ts packages/contract/src/onboarding.ts packages/contract/src/me.ts packages/contract/src/index.ts
-pnpm --filter=@sanchay/domain test -- onboarding-stage
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int onboarding-get
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
@@ -6655,6 +6673,7 @@ pincode,city,state
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
 import { refPincodes } from '../modules/onboarding/ref.schema.js';
@@ -6669,6 +6688,7 @@ function parseCsv(raw: string): string[][] {
 }
 
 async function main(): Promise<void> {
+  loadDotEnvFile(); // apps/api/.env, as Plan 01's migrate.ts
   const env = parseEnv(process.env);
   const db = createDb(env.DATABASE_URL);
   const dataDir = path.resolve(fileURLToPath(new URL('../../../../data', import.meta.url)));
@@ -6678,7 +6698,7 @@ async function main(): Promise<void> {
     if (!pincode || !city || !state) continue;
     await db.db
       .insert(refPincodes)
-      .values({ id: newId('ref_pincodes'), createdBy: 'ops:ref:seed', updatedBy: 'ops:ref:seed', pincode, city, state })
+      .values({ id: newId('ref_pincodes'), pincode, city, state }) // ref_pincodes has stdColumns() only (RV-03-32)
       .onConflictDoUpdate({ target: refPincodes.pincode, set: { city, state } });
     upserted += 1;
   }
@@ -6693,7 +6713,7 @@ main().catch((error: unknown) => {
 });
 ```
 
-Modify `package.json` — add one script line: `"ops:ref:seed": "pnpm --filter=@sanchay/api exec node --experimental-strip-types src/cli/ops-ref-seed.ts"`.
+Modify `package.json` — add one script line (RV-03-32, as E3's: Node's type stripping cannot load `src/cli/*.ts`; Plan 04 F1 later moves the build into an `apps/api` script): `"ops:ref:seed": "pnpm --filter=@sanchay/api build && pnpm --filter=@sanchay/api exec node dist/cli/ops-ref-seed.js"`.
 
 `packages/contract/src/ref.ts`:
 ```ts
@@ -6832,6 +6852,7 @@ Modify `apps/api/src/modules/platform/ids.ts` — add `'ref_pincodes'` to the `T
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=ref_pincodes
 pnpm --filter=@sanchay/api test:int onboarding-identity
 pnpm --filter=@sanchay/api typecheck
@@ -6844,6 +6865,7 @@ Expected: a new `apps/api/drizzle/000X_ref_pincodes.sql`; `onboarding-identity.i
 
 ```
 pnpm exec biome check --write apps/api/src/integrations/fp/pre-verification.ts apps/api/src/integrations/fp/pre-verification.test.ts apps/api/src/modules/onboarding apps/api/src/app.module.ts apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/cli/ops-ref-seed.ts apps/api/test/int/onboarding-identity.int.test.ts packages/contract/src/onboarding.ts packages/contract/src/ref.ts packages/contract/src/index.ts apps/api/src/modules/platform/ids.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int onboarding-identity
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
@@ -7124,7 +7146,7 @@ describe('POST /onboarding/bank-accounts', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/domain test -- name-match
+pnpm --filter=@sanchay/domain test
 ```
 Expected: `packages/domain` fails with `Cannot find module '../src/rules/name-match.js'`; `apps/api` fails to resolve `../../src/modules/onboarding/bank.schema.js` (or, if `pnpm install` has not yet linked the freshly created `@sanchay/test-fixtures` workspace package, run `pnpm install` first).
 
@@ -7606,7 +7628,7 @@ import { refIfsc } from '../modules/onboarding/ref.schema.js';
     if (!ifsc || !bankName || !branchName) continue;
     await db.db
       .insert(refIfsc)
-      .values({ id: newId('ref_ifsc'), createdBy: 'ops:ref:seed', updatedBy: 'ops:ref:seed', ifsc, bankName, branchName })
+      .values({ id: newId('ref_ifsc'), ifsc, bankName, branchName }) // stdColumns() only (RV-03-32)
       .onConflictDoUpdate({ target: refIfsc.ifsc, set: { bankName, branchName } });
     ifscUpserted += 1;
   }
@@ -7690,8 +7712,9 @@ Modify `apps/api/src/modules/platform/ids.ts` — add `'bank_accounts'` and `'re
 
 ```
 pnpm install
-pnpm --filter=@sanchay/domain test -- name-match
+pnpm --filter=@sanchay/domain test
 pnpm --filter=@sanchay/domain typecheck
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=bank_accounts_ref_ifsc
 pnpm --filter=@sanchay/api test:int onboarding-bank
 pnpm --filter=@sanchay/api typecheck
@@ -7704,7 +7727,8 @@ Expected: `name-match.test.ts` 25/25 (12 score assertions + 12 threshold asserti
 
 ```
 pnpm exec biome check --write packages/domain/src/rules packages/domain/test/name-match.test.ts packages/domain/src/investor.ts packages/domain/tsconfig.json packages/test-fixtures apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/src/cli/ops-ref-seed.ts apps/api/test/int/onboarding-bank.int.test.ts packages/contract/src/onboarding.ts packages/contract/src/ref.ts apps/api/src/modules/platform/ids.ts
-pnpm --filter=@sanchay/domain test -- name-match
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api test:int onboarding-bank
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
@@ -8040,15 +8064,20 @@ describe('onboarding.putNomination / getNomination', () => {
     expect(decision?.displayPreference).toBeNull();
   });
 
-  await expectBola(app, 'onboarding.getNomination', {});
-  await expectBola(app, 'onboarding.putNomination', {});
+  it('BOLA: onboarding.getNomination (RV-03-33)', async () => {
+    await expectBola(app, 'onboarding.getNomination', {});
+  });
+
+  it('BOLA: onboarding.putNomination (RV-03-33)', async () => {
+    await expectBola(app, 'onboarding.putNomination', {});
+  });
 });
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
 ```
-pnpm --filter=@sanchay/domain test -- nominee-split
-pnpm --filter=@sanchay/api test:int -- nomination
+pnpm --filter=@sanchay/domain test
+pnpm --filter=@sanchay/api test:int nomination
 ```
 Expected: `packages/domain` fails with `Cannot find module '../src/rules/nominee-split.js'`; `apps/api` fails to boot the test app because `onboarding.getNomination`/`putNomination` are not on the contract (or, if `@sanchay/test-fixtures` was not yet created by E7's worktree, `pnpm install` first fails to resolve the workspace package — run `pnpm install` before Step 2 in that case).
 
@@ -8491,10 +8520,11 @@ export const NominationViewSchema = z.object({
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
-pnpm --filter=@sanchay/domain test -- nominee-split
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=nominees
 pnpm --filter=@sanchay/api db:generate --custom --name=nominees_set_sum
-pnpm --filter=@sanchay/api test:int -- nomination
+pnpm --filter=@sanchay/api test:int nomination
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
 ```
@@ -8503,8 +8533,9 @@ Expected: 6/6 golden-vector cases and the 3 extra `nominee-split.test.ts` cases 
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write packages/domain/src/rules/nominee-split.ts packages/domain/test/nominee-split.test.ts packages/test-fixtures apps/api/src/modules/onboarding/nomination.service.ts apps/api/src/modules/onboarding/nomination.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/nomination.int.test.ts packages/contract/src/onboarding.ts
-pnpm --filter=@sanchay/domain test -- nominee-split
-pnpm --filter=@sanchay/api test:int -- nomination
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int nomination
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add packages/domain/src/rules/nominee-split.ts packages/domain/test/nominee-split.test.ts packages/test-fixtures apps/api/src/modules/onboarding/nomination.service.ts apps/api/src/modules/onboarding/nomination.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/nomination.int.test.ts apps/api/drizzle packages/contract/src/onboarding.ts
@@ -8534,7 +8565,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/src/modules/identity/identity.schema.ts` (add `investors.current_risk_profile_id`)
   - `apps/api/src/modules/onboarding/onboarding.router.ts` (append `riskProfile.*` handlers)
   - `apps/api/src/modules/onboarding/onboarding.module.ts` (register `RiskProfileService`, `SuitabilityService`)
-  - `packages/contract/src/onboarding.ts` (append `riskProfile.questionnaire/get/submit`)
+  - `packages/contract/src/onboarding.ts` (append `riskProfileContract` with `questionnaire`/`get`/`submit`), `packages/contract/src/index.ts` (one `riskProfile` key, RV-03-34)
   - `apps/api/src/modules/platform/ids.ts` (append the four new table names)
   - `apps/api/src/modules/platform/audit.service.ts` (append `ONBOARDING_RISK_PROFILE_SUBMITTED`)
 - Generated: `apps/api/drizzle/<n>_risk_suitability.sql` (`db:generate --name=risk_suitability`: the four tables and `investors.current_risk_profile_id`) and `apps/api/drizzle/<n+1>_risk_suitability_guards.sql` (`db:generate --custom --name=risk_suitability_guards`: the FK and the append-only REVOKE). Also modify `packages/domain/src/rules/index.ts` (append `export * from './risk-scoring.js';` and `export * from './suitability.js';`); `@sanchay/domain` exports only `.`, so the API imports these from `@sanchay/domain`.
@@ -8572,7 +8603,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `SuitabilityService` (`Suitability.check`), the **E4 `SuitabilityHook`** implementation:
     - `export type SuitabilityHook = (tx: Tx, args: { investorId: string; schemeId: string; schemeRiskometer: Riskometer; fundFactsAsOf: Date }) => Promise<{ outcome: 'MATCH' | 'MISMATCH'; level: RiskLevel; maxRiskometer: Riskometer; riskProfileId: string }>` exported from `suitability.service.ts`. **Deviation from outline:** E4 (`consent-engine.ts`) does not exist in the current codebase (it is a Plan-03 sibling task, not yet implemented), so this task cannot wire a registry the way the outline's "registered as the E4 SuitabilityHook" phrasing implies. This task only produces the hook with the exact signature E4 will import; no file outside this task's own list is touched.
     - `Suitability.check(tx, { investorId, schemeId, schemeRiskometer, fundFactsAsOf })`: reads the investor's `ACTIVE` `risk_profiles` row (throwing `RISK_PROFILE_EXPIRED`/`RISK_PROFILE_STALE`/`ONBOARDING_INCOMPLETE` — reusing the existing `ERROR_CATALOGUE` codes, no new code needed — when missing/expired/stale), calls `compareRiskometer`, inserts a `suitability_checks` row (MATCH rows too, per the outline), and returns the hook result.
-  - Procedures (append to `onboardingContract`): `riskProfile.questionnaire` GET `/risk-profile/questionnaire` (P); `riskProfile.get` GET `/risk-profile` (I); `riskProfile.submit` PUT `/risk-profile` [K] (I).
+  - Procedures (a top-level `riskProfile` contract key, RV-03-34; the tests, E13's screens and Plan 04 F9 call these names): `riskProfile.questionnaire` GET `/risk-profile/questionnaire` (P); `riskProfile.get` GET `/risk-profile` (I); `riskProfile.submit` PUT `/risk-profile` [K] (I).
   - No new `ERROR_CATALOGUE` entries: `RISK_PROFILE_EXPIRED`, `RISK_PROFILE_STALE` and `SUITABILITY_CHANGED` are already declared in `packages/contract/src/errors.ts` (Plan-01 B5).
 
 - [ ] **Step 1: Write the failing tests**
@@ -8781,7 +8812,8 @@ afterAll(async () => {
 
 describe('riskProfile.questionnaire / get / submit', () => {
   it('publishes the sha-pinned questionnaire', async () => {
-    const res = await app.request.get('/api/v1/risk-profile/questionnaire');
+    const { req } = await signedInInvestor(app); // TestApp has no `request` (RV-03-33)
+    const res = await req.get('/api/v1/risk-profile/questionnaire');
     expect(res.status).toBe(200);
     expect(res.body.version).toBe('1.0.0');
     expect(res.body.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -8823,16 +8855,20 @@ describe('riskProfile.questionnaire / get / submit', () => {
     expect(res.body.status).toBe('EXPIRED');
   });
 
-  await expectBola(app, 'riskProfile.get', {});
-  await expectBola(app, 'riskProfile.submit', {});
+  it('BOLA: riskProfile.get (RV-03-33)', async () => {
+    await expectBola(app, 'riskProfile.get', {});
+  });
+
+  it('BOLA: riskProfile.submit (RV-03-33)', async () => {
+    await expectBola(app, 'riskProfile.submit', {});
+  });
 });
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
 ```
-pnpm --filter=@sanchay/domain test -- risk-scoring
-pnpm --filter=@sanchay/domain test -- suitability
-pnpm --filter=@sanchay/api test:int -- risk-profile
+pnpm --filter=@sanchay/domain test
+pnpm --filter=@sanchay/api test:int risk-profile
 ```
 Expected: both domain suites fail with "Cannot find module"; the API suite fails to boot (`seedRiskQuestionnaire` and `riskProfile.*` procedures do not exist).
 
@@ -9365,32 +9401,42 @@ export const RiskProfileViewSchema = z.object({
   questionnaireVersion: z.string(),
 });
 
-// append to `onboardingContract`:
-  riskProfileQuestionnaire: oc
+// a sibling of `onboardingContract`, mounted as the top-level `riskProfile` key (RV-03-34):
+export const riskProfileContract = {
+  questionnaire: oc
     .route({ method: 'GET', path: '/risk-profile/questionnaire', tags: ['onboarding'] })
     .errors(errorMap(...COMMON_ERRORS))
     .output(z.object({ version: z.string(), sha256: z.string(), questions: z.array(z.unknown()) })),
-  riskProfileGet: oc
+  get: oc
     .route({ method: 'GET', path: '/risk-profile', tags: ['onboarding'] })
     .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
     .output(RiskProfileViewSchema.nullable()),
-  riskProfileSubmit: oc
+  submit: oc
     .route({ method: 'PUT', path: '/risk-profile', tags: ['onboarding'] })
     .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, ...IDEMPOTENCY_ERRORS))
     .input(RiskAnswersSchema)
     .output(RiskProfileViewSchema),
+};
 ```
-(exposed on the client as `riskProfile.questionnaire` / `riskProfile.get` / `riskProfile.submit` via a nested `riskProfile` key the same way `me.ts` nests under `me`; if E5 declared `onboardingContract` as a flat object rather than nesting sub-namespaces, this task instead adds a sibling `riskProfileContract` object and a `riskProfile` entry beside `onboarding` in `packages/contract/src/index.ts`'s top-level `contract` export — a one-line addition, consistent with "one appended router key per area", §0.1).
 
-`apps/api/src/modules/onboarding/onboarding.router.ts` and `onboarding.module.ts` (fragments; same `@Implement`/provider pattern as E8, wiring `riskProfileQuestionnaire/Get/Submit` to `RiskProfileService`, and registering `SuitabilityService`).
+`packages/contract/src/index.ts` (key-level; `riskProfileContract` is re-exported through the existing `export * from './onboarding.js'`):
+```ts
+// with the other imports
+import { onboardingContract, riskProfileContract } from './onboarding.js';
+// one new key in the `contract` object; every existing key stays
+  riskProfile: riskProfileContract,
+```
+(RV-03-34: one top-level `riskProfile` key, so the client calls `riskProfile.questionnaire` / `riskProfile.get` / `riskProfile.submit`, the names E9's `expectBola` cases, E13's `RiskProfileScreen` and Plan 04 F9's registry check use. The earlier text appended flat `riskProfileGet`-style keys to `onboardingContract`, which made those names `onboarding.riskProfileGet` and left the tests and screens calling procedures that did not exist.)
+
+`apps/api/src/modules/onboarding/onboarding.router.ts` and `onboarding.module.ts` (fragments; same `@Implement`/provider pattern as E8, wiring `contract.riskProfile.questionnaire/get/submit` to `RiskProfileService`, and registering `SuitabilityService`).
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
-pnpm --filter=@sanchay/domain test -- risk-scoring
-pnpm --filter=@sanchay/domain test -- suitability
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=risk_suitability
 pnpm --filter=@sanchay/api db:generate --custom --name=risk_suitability_guards
-pnpm --filter=@sanchay/api test:int -- risk-profile
+pnpm --filter=@sanchay/api test:int risk-profile
 pnpm --filter=@sanchay/api typecheck
 ```
 Expected: 12/12 `RP-001..RP-012` vectors green, 7/7 `SUIT-01..07` vectors green, `risk-profile.int.test.ts` green (6 cases incl. the two `expectBola` assertions); typecheck clean.
@@ -9398,8 +9444,9 @@ Expected: 12/12 `RP-001..RP-012` vectors green, 7/7 `SUIT-01..07` vectors green,
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write packages/domain/src/catalogue.ts packages/domain/src/rules/risk-scoring.ts packages/domain/src/rules/suitability.ts packages/domain/test/risk-scoring.test.ts packages/domain/test/suitability.test.ts packages/test-fixtures/src/golden/risk-profile.json packages/test-fixtures/src/golden/suitability-rp.json apps/api/src/modules/onboarding/risk-profile.schema.ts apps/api/src/modules/onboarding/risk-profile.service.ts apps/api/src/modules/onboarding/suitability.service.ts apps/api/src/modules/identity/identity.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/risk-profile.int.test.ts packages/contract/src/onboarding.ts data/risk-questionnaire-v1.0.0.json
-pnpm --filter=@sanchay/domain test -- risk-scoring suitability
-pnpm --filter=@sanchay/api test:int -- risk-profile
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int risk-profile
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add packages/domain/src/catalogue.ts packages/domain/src/rules/risk-scoring.ts packages/domain/src/rules/suitability.ts packages/domain/test/risk-scoring.test.ts packages/domain/test/suitability.test.ts packages/test-fixtures/src/golden/risk-profile.json packages/test-fixtures/src/golden/suitability-rp.json apps/api/src/modules/onboarding/risk-profile.schema.ts apps/api/src/modules/onboarding/risk-profile.service.ts apps/api/src/modules/onboarding/suitability.service.ts apps/api/src/modules/identity/identity.schema.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/risk-profile.int.test.ts apps/api/drizzle packages/contract/src/onboarding.ts data/risk-questionnaire-v1.0.0.json
@@ -9574,7 +9621,8 @@ describe('onboarding.stageDeclarations', () => {
 
 describe('legal.commissionRates', () => {
   it('resolves without the Plan-02 catalogue table (empty until D9 binds the real source)', async () => {
-    const res = await app.request.get('/api/v1/legal/commission-rates');
+    const { req } = await signedInInvestor(app); // TestApp has no `request` (RV-03-33)
+    const res = await req.get('/api/v1/legal/commission-rates');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
@@ -9583,7 +9631,7 @@ describe('legal.commissionRates', () => {
 
 - [ ] **Step 2: Run it to confirm it fails**
 ```
-pnpm --filter=@sanchay/api test:int -- declarations
+pnpm --filter=@sanchay/api test:int declarations
 ```
 Expected: fails to boot — `declaration_stagings` has no schema, `legal.pending`/`legal.getDocument`/`legal.commissionRates`/`onboarding.stageDeclarations` are not on the contract.
 
@@ -9636,7 +9684,7 @@ import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
 import type { AuthContext } from '../platform/request-context.js';
-import { LegalDocsService } from '../legal-consent/legal-docs.service.js';
+import { LegalDocs } from '../legal-consent/legal-docs.service.js';
 import { DECLARATION_KEYS, declarationStagings } from '../legal-consent/legal-consent.schema.js';
 import { nominationDecisions } from './nomination.schema.js';
 import { onboardingApplications } from './onboarding.schema.js';
@@ -9651,14 +9699,14 @@ const ALWAYS_REQUIRED = [
 ] as const;
 
 export interface StageDeclarationsInput {
-  accept: Array<{ key: (typeof DECLARATION_KEYS)[number]; version: number }>;
+  accept: Array<{ key: (typeof DECLARATION_KEYS)[number]; version: string }>; // legal_documents.version is text
 }
 
 @Injectable()
 export class DeclarationsService {
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
-    @Inject(LegalDocsService) private readonly legalDocs: LegalDocsService,
+    @Inject(LegalDocs) private readonly legalDocs: LegalDocs,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -9701,7 +9749,7 @@ export class DeclarationsService {
 
     return this.dbh.db.transaction(async (tx) => {
       for (const entry of input.accept) {
-        const current = await this.legalDocs.current(entry.key);
+        const current = await this.legalDocs.current(tx, entry.key);
         if (entry.version !== current.version) throw new AppError('DECLARATION_OUTDATED');
         await tx
           .update(declarationStagings)
@@ -9739,7 +9787,7 @@ export class DeclarationsService {
     investorId: string,
     key: (typeof DECLARATION_KEYS)[number],
   ): Promise<boolean> {
-    const current = await this.legalDocs.current(key);
+    const current = await this.legalDocs.current(this.dbh.db, key);
     const [row] = await this.dbh.db
       .select()
       .from(declarationStagings)
@@ -9765,7 +9813,8 @@ import type { SanchayClsStore } from '../platform/request-context.js';
 import { requireAuth } from '../identity/request-auth.js';
 import { AppError } from '../platform/errors.js';
 import { DeclarationsService } from '../onboarding/declarations.service.js';
-import { LegalDocsService } from './legal-docs.service.js';
+import { DB, type DbHandle } from '../../db/client.js';
+import { LegalDocs } from './legal-docs.service.js';
 
 export interface CommissionRatesSource {
   list(): Promise<Array<{ amcId: string | null; schemeId: string | null; minBps: number; maxBps: number; kind: 'EXACT' | 'RANGE' }>>;
@@ -9781,7 +9830,8 @@ export class InMemoryCommissionRatesSource implements CommissionRatesSource {
 @Controller()
 export class LegalRouter {
   constructor(
-    @Inject(LegalDocsService) private readonly legalDocs: LegalDocsService,
+    @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(LegalDocs) private readonly legalDocs: LegalDocs,
     @Inject(DeclarationsService) private readonly declarations: DeclarationsService,
     @Inject(InMemoryCommissionRatesSource) private readonly commissionRates: CommissionRatesSource,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
@@ -9790,7 +9840,7 @@ export class LegalRouter {
   @Implement(contract.legal.getDocument)
   getDocument() {
     return implement(contract.legal.getDocument).handler(async ({ input }) => {
-      const doc = await this.legalDocs.current(input.key).catch(() => null);
+      const doc = await this.legalDocs.current(this.dbh.db, input.key).catch(() => null);
       if (!doc) throw new AppError('NOT_FOUND');
       return doc;
     });
@@ -9880,11 +9930,15 @@ export const StageDeclarationsInputSchema = z.strictObject({
     .output(OkSchema),
 ```
 
-`packages/contract/src/index.ts` (fragment; one appended key, per §0.1):
+`packages/contract/src/index.ts` (key-level, per §0.1; RV-03-35: a bare `export { legalContract as legal }` re-exported a name and never added the key, so the client and the server had no `legal.*` procedures):
 ```ts
-export { legalContract as legal } from './legal.js';
+// with the other imports
+import { legalContract } from './legal.js';
+// with the other re-exports
+export * from './legal.js';
+// one new key in the `contract` object; every existing key stays
+  legal: legalContract,
 ```
-(add alongside the existing router keys in the top-level `contract` object, matching how `me`/`auth`/`health` are already assembled there).
 
 `apps/api/src/modules/legal-consent/legal-consent.module.ts` (fragment): add `LegalRouter`, `DeclarationsService`, `InMemoryCommissionRatesSource` to `controllers`/`providers`, and export `DeclarationsService` so `OnboardingModule` (E5) can import it rather than re-registering it — `apps/api/src/modules/onboarding/onboarding.module.ts`'s fragment for this task is therefore only `imports: [LegalConsentModule]` (if not already imported for E6's `LegalDocs.recordAcceptance`) plus wiring `onboarding.stageDeclarations` in `onboarding.router.ts` to the imported `DeclarationsService`.
 
@@ -9902,17 +9956,19 @@ export { legalContract as legal } from './legal.js';
 
 - [ ] **Step 4: Run tests to confirm they pass**
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --name=declaration_stagings
-pnpm --filter=@sanchay/api test:int -- declarations
+pnpm --filter=@sanchay/api test:int declarations
 pnpm --filter=@sanchay/api typecheck
 pnpm --filter=@sanchay/contract typecheck
 ```
-Expected: 4/4 cases in `declarations.int.test.ts` green (`legal.pending` before/after, stale-version rejection, Annexure-B conditional requirement, KYC_CONSENT not restaged, commission-rates empty array); typechecks clean.
+Expected: 5/5 cases in `declarations.int.test.ts` green (`legal.pending` before/after, stale-version rejection, Annexure-B conditional requirement, KYC_CONSENT not restaged, commission-rates empty array); typechecks clean.
 
 - [ ] **Step 5: Commit**
 ```
 pnpm exec biome check --write apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts
-pnpm --filter=@sanchay/api test:int -- declarations
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test:int declarations
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add apps/api/src/modules/legal-consent/legal.router.ts apps/api/src/modules/legal-consent/legal-consent.schema.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/onboarding/declarations.service.ts apps/api/src/modules/onboarding/onboarding.router.ts apps/api/src/modules/onboarding/onboarding.module.ts apps/api/src/modules/platform/audit.service.ts apps/api/src/modules/platform/ids.ts apps/api/test/int/declarations.int.test.ts apps/api/drizzle packages/contract/src/legal.ts packages/contract/src/onboarding.ts packages/contract/src/index.ts
@@ -9936,6 +9992,7 @@ If lefthook reports `stage_fixed`, re-run the Step 4 commands before re-committi
   - `apps/api/test/int/onboarding-seed.ts` (test helper: a fully onboarded, not-yet-attested investor)
   - `apps/api/test/int/onboarding-provision.int.test.ts`
   - `apps/api/test/int/onboarding-readiness.int.test.ts`
+  - `docs/runbooks/provisioning-failed.md` (runbook stub, the sprint Definition of Done; RV-03-36)
 - Modify:
   - `apps/api/src/integrations/fp/fp-operations.ts` (D3; append seven class-R list operations)
   - `apps/api/src/integrations/fp/fp-provision.ts` (D3; replace the stub bodies, add the lookups)
@@ -10595,8 +10652,8 @@ describe('trg_investor_readiness', () => {
 - [ ] **Step 2: Run them to confirm they fail**
 
 ```
-pnpm --filter=@sanchay/api test -- readiness.test fp-profile-mapping
-pnpm --filter=@sanchay/api test:int -- onboarding-provision onboarding-readiness
+pnpm --filter=@sanchay/api test readiness.test fp-profile-mapping
+pnpm --filter=@sanchay/api test:int onboarding-provision onboarding-readiness
 ```
 Expected: `Cannot find module './readiness.js'` / `'./fp-profile-mapping.js'`; the integration suites fail to import `provision.job.js` and `onboarding-seed.ts`'s dependencies.
 
@@ -11506,15 +11563,41 @@ CONSENT_SUBJECT_JOBS.ONBOARDING_ATTEST = 'onboarding.provision';
 
 `apps/api/src/modules/platform/jobs/job-registry.ts`: append `'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)` to `JOB_POLICIES` (R-32, RV-03-24).
 
+`docs/runbooks/provisioning-failed.md` (new; a stub per the sprint Definition of Done, `docs/delivery/mvp-sprint-plans.md` item 10; RV-03-36):
+
+```markdown
+# Runbook: onboarding provisioning failed (stub)
+
+> **Status: stub (S3 Definition of Done).** It describes Task E11 as built. Plan 04 F24 does not cover it (it is not a G-E8 item); update it when the pilot shows a real case.
+
+## Symptoms
+- The investor's onboarding stage is `PROVISIONING_FAILED`, or it stays at provisioning for more than an hour.
+- `app.v_onboarding_blocked` lists the investor; for an FP rejection, a CRITICAL `ONBOARDING_PROVISIONING_REJECTED` recon break is open.
+
+## What the code already does (no action needed)
+- `onboarding.provision` resumes from `onboarding_applications.provisioning_step`, and every step looks the resource up on FP first (LOOKUP-ADOPT), so a retry never creates a second profile, account or bank.
+- FP 5xx, timeouts and ambiguous answers are retried by pg-boss; the next attempt adopts what FP already created.
+
+## Triage (in order)
+1. Read `provisioning_failed_reason` on the investor's `onboarding_applications` row.
+2. `SAGA_WINDOW_EXPIRED_NEW_RESOURCE_REQUIRED`: the attest consent expired before the next FP write. Ask the investor to attest again (R-17); the new job resumes the same step and adopts the FP ids already created.
+3. `FP_REJECTED:<op>`: FP refused the data (4xx), with no retry. Compare the investor's data with the FP error code (`provider_calls.error_code` for that operation), fix the cause with the investor, then ask for a re-attest. Resolve the recon break with `ops:resolve-break` (two founders; Plan 04 F7) once the re-attest succeeds.
+4. Stuck without a reason: check the worker heartbeat and the `onboarding.provision` queue before anything else.
+
+## Never
+- Never create or patch an FP resource by hand for the investor: the next job would not know about it.
+```
+
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api db:generate --custom --name=readiness_trigger
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test -- readiness.test fp-profile-mapping fake-fp
-pnpm --filter=@sanchay/api test:int -- onboarding-provision onboarding-readiness fake-fp
+pnpm --filter=@sanchay/api test readiness.test fp-profile-mapping fake-fp
+pnpm --filter=@sanchay/api test:int onboarding-provision onboarding-readiness fake-fp
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 ```
 Expected: 8/8 readiness rows and 3/3 mapping tests green; D4's own `fake-fp` suites stay green; `onboarding-provision.int.test.ts` 10/10 and `onboarding-readiness.int.test.ts` 8/8 green; `openapi.json` regenerates with `POST /onboarding/attest` and then diffs clean once committed (B10).
 
@@ -11522,10 +11605,11 @@ Expected: 8/8 readiness rows and 3/3 mapping tests green; D4's own `fake-fp` sui
 
 ```
 pnpm exec biome check --write apps/api/src/integrations/fp apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/test/int/onboarding-seed.ts apps/api/test/int/onboarding-provision.int.test.ts apps/api/test/int/onboarding-readiness.int.test.ts packages/contract/src/onboarding.ts
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/api typecheck
-pnpm --filter=@sanchay/api test:int -- onboarding-provision onboarding-readiness
+pnpm --filter=@sanchay/api test:int onboarding-provision onboarding-readiness
 pnpm lint
-git add apps/api/src/integrations/fp apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/drizzle apps/api/test/int/onboarding-seed.ts apps/api/test/int/onboarding-provision.int.test.ts apps/api/test/int/onboarding-readiness.int.test.ts packages/contract/src/onboarding.ts apps/api/openapi.json
+git add apps/api/src/integrations/fp apps/api/src/modules/onboarding apps/api/src/modules/platform/jobs/job-registry.ts apps/api/drizzle apps/api/test/int/onboarding-seed.ts apps/api/test/int/onboarding-provision.int.test.ts apps/api/test/int/onboarding-readiness.int.test.ts packages/contract/src/onboarding.ts apps/api/openapi.json docs/runbooks/provisioning-failed.md
 git commit -m "feat(onboarding): attest, FP provisioning saga with LOOKUP-ADOPT, readiness trigger (E11)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 If lefthook reports `stage_fixed`, re-run the Step 4 commands and `git add` again before committing.
@@ -14175,7 +14259,7 @@ export type AcceptPendingInput = z.infer<typeof AcceptPendingInputSchema>;
     return implement(contract.legal.acceptPending).handler(async ({ input, context }) => {
       const auth = requireAuth(this.cls);
       for (const key of input.keys) {
-        await this.legalDocs.recordAcceptance(this.db, {
+        await this.legalDocs.recordAcceptance(this.dbh.db, {
           investorId: auth.investorId,
           key,
           channel: 'APP',
@@ -14188,7 +14272,7 @@ export type AcceptPendingInput = z.infer<typeof AcceptPendingInputSchema>;
     });
   }
 ```
-(`this.legalDocs` and `this.db` are the `LegalDocsService`/`DbExecutor` already injected by E10's constructor; no constructor change is needed.)
+(`this.legalDocs` and `this.dbh` are the `LegalDocs`/`DbHandle` E10's constructor injects (RV-03-37); no constructor change is needed.)
 
 `packages/features/src/consent/useConsentChallenge.ts`:
 ```ts
