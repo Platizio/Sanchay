@@ -186,6 +186,10 @@ Later errata (found while writing Plan 04; already applied below):
 - **RV-03-36: a runbook stub for a failed provisioning (E11; backlog round 1; minor).** The sprint Definition of Done asks for a runbook stub per new failure mode, and Plan 04 F24 leaves `provisioning-failed.md` out because it is not a G-E8 item, so nobody wrote it. E11 now creates `docs/runbooks/provisioning-failed.md` from its own saga rules: the two failure reasons, the re-attest path (R-17) and what never to do by hand.
 - **RV-03-37: E10 calls E3's `LegalDocs` as E3 defines it (E10, E3, E13; found in this round; blocker).** E10 imported a `LegalDocsService` that E3 never exports (E3's class is `LegalDocs`), called `current(key)` where E3 takes `current(exec, key)`, and compared a `number` version with E3's text version (TS2367); `legal.getDocument` also returned E3's `{key, version, sha256}` without the `bodyMarkdown` its output schema requires. E10 now injects `LegalDocs` and `DB`, passes the transaction or the pool, and takes the version as a string, and E3's `current` also returns the body. E13's `acceptPending` fragment uses E10's `this.dbh.db` (it named a `this.db` that E10 never injected).
 - **RV-03-38: E5–E11 commands (E5–E11; BRIEF D8 backlog; minor).** As RV-03-31 for E3: 28 `--` filters dropped, `@sanchay/domain` unfiltered (duplicate domain lines merged), a build of the api's workspace dependencies before the first api or contract check in every Step 4 and Step 5, and E11's `git diff --exit-code apps/api/openapi.json` replaced by the drift test `pnpm --filter=@sanchay/api test openapi`.
+- **RV-03-39: E14's catalogue router reaches the database and its commission line prefers the scheme row (E14; backlog round 2 and the CAT review; blocker).** E14's full replacement of D10's router injected `DB` as a Drizzle `Database` again, so every catalogue call would answer 500 (Plan 02 RV-02-36); it now injects the `DbHandle` and passes `this.dbh.db`. `listSchemes` takes the contract's `ListSchemesInput` (its `{ q?: string }` parameter failed `typecheck` with TS2379), the cursor condition drops its `!`, and `resolveCommissionLine` sorts `coalesce(scheme_id = x, false)`, because an AMC row's `NULL = x` is NULL and DESC put it first, so the fund page showed the AMC range. The test drops an unused `eq` import, and its "requires a session" case sends the web client headers, without which Plan 01's client guard answers 403 before auth runs. Not run (E14 is not built); the shapes follow D10 as verified in RV-02-36.
+- **RV-03-40: E17's own tests pass on E17's own screens (E17; backlog round 1, seen when run; major).** `getByText('₹500.00')` matched both minimums, the commission regex also matched DSC-03, and `/High/` matched "Very High"; each threw "Found multiple elements". They now use the `ListRow` labels, the scheme's own commission line and `'Benchmark: High'`, as Plan 04 F19 found by running them. The fund page printed returns as `12.3400%` against its test's `12.34%`, and the TER through a signed `formatPct` (`+1.00%`); both now use `formatPct(value, { signed: false })`, which also prints the dash for a null. F19 keeps these (RV-04-F19-4).
+- **RV-03-41: E15's completeness stays within 100, and its seed helper passes `biome ci` (E15; backlog round 1 and the CAT review; major).** Seven tracked fields plus the SID+KIM slot were divided by 7, so a complete record scored 114 and broke `fund_facts_completeness_ck` on every fully populated scheme from S3 on; it divides by 8 now (`toBe(25)` for two fields), as F19 would have done in S4. `amc!.id` and `cat!.code` become a guard.
+- **RV-03-42: E14–E17 commands (E14–E17; BRIEF D8 backlog; minor).** As RV-03-31: 19 `--` filters dropped, a build of the api's workspace dependencies before the checks in E14's and E16's Steps 4 and 5 (E15 and E17 change no `dist` package), and E14's `git diff --exit-code apps/api/openapi.json` replaced by the drift test. E22's commands were already right (RV-03-19).
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 
@@ -15238,7 +15242,6 @@ import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 `apps/api/test/int/catalogue-get-scheme.int.test.ts` (full file):
 
 ```typescript
-import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   amcs,
@@ -15448,7 +15451,8 @@ describe('catalogue.getScheme', () => {
 
   it('requires a session', async () => {
     const { scheme } = await seedScheme('PUBLISHED');
-    const res = await t.app.inject({ method: 'GET', url: `/api/v1/catalogue/schemes/${scheme.slug}` });
+    // Plan 01's client guard refuses a request without x-sanchay-client (403) before auth runs (RV-03-39).
+    const res = await t.app.inject({ method: 'GET', url: `/api/v1/catalogue/schemes/${scheme.slug}`, headers: webHeaders() });
     expect(res.statusCode).toBe(401);
   });
 });
@@ -15497,8 +15501,8 @@ describe('catalogue.amcs', () => {
 
 ```
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test:int -- catalogue-get-scheme
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test:int catalogue-get-scheme
+pnpm --filter=@sanchay/api test:int catalogue-router
 ```
 
 Expected failure: `contract.catalogue.getScheme`/`contract.catalogue.amcs` do not exist (TypeScript compile error in the test file), so both integration suites fail to boot; `/api/v1/catalogue/schemes/{slug}` and `/api/v1/catalogue/amcs` 404 against the still-unextended D10 router.
@@ -15635,6 +15639,7 @@ export const catalogueContract = {
 `apps/api/src/modules/catalogue/catalogue.queries.ts` (full file — replaces D10's):
 
 ```typescript
+import type { ListSchemesInput } from '@sanchay/contract';
 import { LAUNCH_SCHEME_OPTIONS } from '@sanchay/domain';
 import { and, asc, desc, eq, gt, inArray, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client.js';
@@ -15674,7 +15679,7 @@ function decodeCursor(raw: string): NameCursor {
 }
 
 /** Default and only sort today (spec: "sort (default A–Z…)"); E18 [T2] would add return-based sorts. */
-export async function listSchemes(db: Database, input: { q?: string; category?: string; sort?: 'name'; cursor?: string }) {
+export async function listSchemes(db: Database, input: ListSchemesInput) {
   const conditions = [
     eq(schemes.status, 'PUBLISHED'),
     eq(schemes.curated, true),
@@ -15685,7 +15690,8 @@ export async function listSchemes(db: Database, input: { q?: string; category?: 
   if (input.q) conditions.push(sql`${schemes.name} % ${input.q}`);
   if (input.cursor) {
     const c = decodeCursor(input.cursor);
-    conditions.push(or(sql`${schemes.name} > ${c.name}`, and(eq(schemes.name, c.name), gt(schemes.id, c.id)))!);
+    const after = or(sql`${schemes.name} > ${c.name}`, and(eq(schemes.name, c.name), gt(schemes.id, c.id)));
+    if (after !== undefined) conditions.push(after);
   }
 
   const rows = await db
@@ -15729,7 +15735,8 @@ async function resolveCommissionLine(db: Database, schemeId: string, amcId: stri
       ),
     )
     .orderBy(
-      desc(sql`(${commissionDisclosures.schemeId} = ${schemeId})`),
+      // An AMC row has scheme_id NULL, and `NULL = x` is NULL, which DESC sorts first: coalesce it (RV-03-39).
+      desc(sql`coalesce(${commissionDisclosures.schemeId} = ${schemeId}, false)`),
       desc(sql`(${commissionDisclosures.kind} = 'EXACT')`),
       desc(commissionDisclosures.effectiveFrom),
     )
@@ -15833,8 +15840,7 @@ import { Controller, Inject } from '@nestjs/common';
 import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { ClsService } from 'nestjs-cls';
-import type { Database } from '../../db/client.js';
-import { DB } from '../../db/client.js';
+import { DB, type DbHandle } from '../../db/client.js';
 import { requireAuth } from '../identity/request-auth.js';
 import { AppError } from '../platform/errors.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
@@ -15843,7 +15849,8 @@ import { getSchemeDetail, listAmcs, listCategories, listSchemes } from './catalo
 @Controller()
 export class CatalogueRouter {
   constructor(
-    @Inject(DB) private readonly db: Database,
+    // DB is PlatformModule's DbHandle (Plan 02 RV-02-36); the queries take its Drizzle db.
+    @Inject(DB) private readonly dbh: DbHandle,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
@@ -15851,7 +15858,7 @@ export class CatalogueRouter {
   categories() {
     return implement(contract.catalogue.categories).handler(() => {
       requireAuth(this.cls);
-      return listCategories(this.db);
+      return listCategories(this.dbh.db);
     });
   }
 
@@ -15859,7 +15866,7 @@ export class CatalogueRouter {
   listSchemes() {
     return implement(contract.catalogue.listSchemes).handler(({ input }) => {
       requireAuth(this.cls);
-      return listSchemes(this.db, input);
+      return listSchemes(this.dbh.db, input);
     });
   }
 
@@ -15867,7 +15874,7 @@ export class CatalogueRouter {
   getScheme() {
     return implement(contract.catalogue.getScheme).handler(async ({ input }) => {
       requireAuth(this.cls);
-      const detail = await getSchemeDetail(this.db, input.slug);
+      const detail = await getSchemeDetail(this.dbh.db, input.slug);
       if (!detail) throw new AppError('NOT_FOUND');
       return detail;
     });
@@ -15877,7 +15884,7 @@ export class CatalogueRouter {
   amcs() {
     return implement(contract.catalogue.amcs).handler(() => {
       requireAuth(this.cls);
-      return listAmcs(this.db);
+      return listAmcs(this.dbh.db);
     });
   }
 }
@@ -15886,11 +15893,12 @@ export class CatalogueRouter {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test:int -- catalogue-get-scheme
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test:int catalogue-get-scheme
+pnpm --filter=@sanchay/api test:int catalogue-router
 pnpm --filter=@sanchay/api openapi
-git diff --exit-code apps/api/openapi.json
+pnpm --filter=@sanchay/api test openapi
 pnpm --filter=@sanchay/api typecheck
 ```
 
@@ -15900,9 +15908,10 @@ Expected: every catalogue test passes; `openapi` shows a diff for the two new pa
 
 ```
 pnpm exec biome check --write packages/contract/src/catalogue.ts apps/api/src/modules/catalogue/catalogue.router.ts apps/api/src/modules/catalogue/catalogue.queries.ts apps/api/test/int/catalogue-get-scheme.int.test.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
+pnpm exec turbo run build --filter=@sanchay/api^...
 pnpm --filter=@sanchay/contract test
-pnpm --filter=@sanchay/api test:int -- catalogue-get-scheme
-pnpm --filter=@sanchay/api test:int -- catalogue-router
+pnpm --filter=@sanchay/api test:int catalogue-get-scheme
+pnpm --filter=@sanchay/api test:int catalogue-router
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add packages/contract/src/catalogue.ts apps/api/src/modules/catalogue/catalogue.router.ts apps/api/src/modules/catalogue/catalogue.queries.ts apps/api/test/int/catalogue-get-scheme.int.test.ts apps/api/test/int/catalogue-router.int.test.ts apps/api/openapi.json
@@ -15931,7 +15940,7 @@ git commit -m "feat(catalogue): add catalogue.getScheme, catalogue.amcs and name
 - Produces:
   - `apps/api/src/modules/catalogue/fund-facts.provider.ts`:
     - `interface FundFactsFieldValue<T> { value: T; source: FundFactsSource }`
-    - `FUND_FACTS_TRACKED_FIELDS` (the 8 fields the completeness percentage is computed over: `expenseRatioPct`, `expenseRatioAsOf`, `riskometer`, `riskometerAsOf`, `benchmarkName`, `benchmarkRiskometer`, `exitLoadText`, `sidUrl`/`kimUrl` counted together as one field since neither is useful alone — 7 tracked slots).
+    - `FUND_FACTS_TRACKED_FIELDS` (the 8 fields the completeness percentage is computed over: `expenseRatioPct`, `expenseRatioAsOf`, `riskometer`, `riskometerAsOf`, `benchmarkName`, `benchmarkRiskometer`, `exitLoadText`, `sidUrl`/`kimUrl` counted together as one field since neither is useful alone — 8 slots, so a complete record scores 100, RV-03-41).
     - `@Injectable() class FundFactsProvider { resolve(schemeId: string): Promise<FundFactsResolution> }`, where `FundFactsResolution = { fields: Record<string, FundFactsFieldValue<unknown>>; completeness: number }`. It reads every `fundFactsRevisions` row for `schemeId` ordered oldest→newest, folds them field-by-field so that, for each of the 7 tracked JSON keys present in a revision's `payload`, a later `ADMIN` revision always wins over an earlier or later `CYBRILLA`/`AMFI` one, and a `CYBRILLA` value wins over `AMFI`, but a *later* revision from the same source always overwrites an earlier one from that same source (precedence is per-field, recency is per-source). It then upserts `fund_facts` (`ON CONFLICT (scheme_id) DO UPDATE`) with the resolved values, `field_sources` (a `Record<string, FundFactsSource>` snapshot) and `completeness` (`round(100 * populated / 7)`).
   - `apps/api/src/modules/catalogue/publish-gate.ts`:
     - `type PublishGateRule = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7'`.
@@ -16063,9 +16072,10 @@ async function seedScheme() {
     .insert(sebiCategories)
     .values({ code: `CAT_${Date.now()}_${Math.random()}`, assetClass: 'EQUITY', name: 'Cat', slug: `cat-${Date.now()}-${Math.random()}`, cutoffClass: 'STANDARD', volatilityClass: 'V_EQUITY' })
     .returning();
+  if (amc === undefined || cat === undefined) throw new Error('seedScheme: no amc or category row returned'); // biome ci refuses `!` (RV-03-41)
   const [scheme] = await t.db.db
     .insert(schemes)
-    .values({ isin: `INF${String(Date.now()).slice(-9)}`, amcId: amc!.id, name: 'Test Scheme', slug: `scheme-${Date.now()}-${Math.random()}`, categoryCode: cat!.code })
+    .values({ isin: `INF${String(Date.now()).slice(-9)}`, amcId: amc.id, name: 'Test Scheme', slug: `scheme-${Date.now()}-${Math.random()}`, categoryCode: cat.code })
     .returning();
   if (!scheme) throw new Error('seedScheme: no row returned');
   return scheme;
@@ -16090,7 +16100,7 @@ describe('FundFactsProvider.resolve', () => {
     expect(row?.fieldSources).toMatchObject({ expenseRatioPct: 'ADMIN', riskometer: 'CYBRILLA' });
   });
 
-  it('computes completeness out of the 7 tracked fields', async () => {
+  it('computes completeness out of 8 slots (7 tracked fields and SID+KIM)', async () => {
     const scheme = await seedScheme();
     await t.db.db.insert(fundFactsRevisions).values({
       schemeId: scheme.id,
@@ -16098,7 +16108,7 @@ describe('FundFactsProvider.resolve', () => {
       payload: { expenseRatioPct: '1.00', riskometer: 'LOW' },
     });
     const resolution = await provider.resolve(scheme.id);
-    expect(resolution.completeness).toBe(29); // round(100 * 2/7)
+    expect(resolution.completeness).toBe(25); // round(100 * 2/8)
   });
 
   it('is idempotent: resolving twice keeps the same merged values', async () => {
@@ -16114,8 +16124,8 @@ describe('FundFactsProvider.resolve', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/api test -- publish-gate
-pnpm --filter=@sanchay/api test:int -- fund-facts-provider
+pnpm --filter=@sanchay/api test publish-gate
+pnpm --filter=@sanchay/api test:int fund-facts-provider
 ```
 
 Expected failure: `./publish-gate.js` and `./fund-facts.provider.js` do not exist, so both files fail at import time (module not found).
@@ -16213,7 +16223,7 @@ import { fundFacts, fundFactsRevisions, type FundFactsSource } from './catalogue
 
 export const FUND_FACTS_SOURCE_RANK: Record<FundFactsSource, number> = { ADMIN: 3, CYBRILLA: 2, AMFI: 1 };
 
-/** The 7 slots `completeness` is computed over; sidUrl/kimUrl are tracked together as one slot. */
+/** The 7 tracked fields; with sidUrl/kimUrl together as one more slot, `completeness` is out of 8. */
 export const FUND_FACTS_TRACKED_FIELDS = [
   'expenseRatioPct',
   'expenseRatioAsOf',
@@ -16260,7 +16270,8 @@ export class FundFactsProvider {
 
     const populated = FUND_FACTS_TRACKED_FIELDS.filter((key) => fields[key] !== undefined).length;
     const sidKimPopulated = fields.sidUrl !== undefined && fields.kimUrl !== undefined;
-    const completeness = Math.round((100 * (populated + (sidKimPopulated ? 1 : 0))) / 7);
+    const slots = FUND_FACTS_TRACKED_FIELDS.length + 1; // the seven fields plus SID+KIM as one slot (RV-03-41)
+    const completeness = Math.round((100 * (populated + (sidKimPopulated ? 1 : 0))) / slots);
 
     const fieldSources: Record<string, FundFactsSource> = {};
     for (const [key, field] of Object.entries(fields)) fieldSources[key] = field.source;
@@ -16388,8 +16399,8 @@ root `package.json` (modify — append under `scripts`):
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```
-pnpm --filter=@sanchay/api test -- publish-gate
-pnpm --filter=@sanchay/api test:int -- fund-facts-provider
+pnpm --filter=@sanchay/api test publish-gate
+pnpm --filter=@sanchay/api test:int fund-facts-provider
 pnpm --filter=@sanchay/api typecheck
 ```
 
@@ -16399,8 +16410,8 @@ Expected: all `evaluatePublishGate`/`businessDaysAge` unit cases and all `FundFa
 
 ```
 pnpm exec biome check --write apps/api/src/modules/catalogue/fund-facts.provider.ts apps/api/src/modules/catalogue/publish-gate.ts apps/api/src/modules/catalogue/publish-gate.test.ts apps/api/src/cli/ops-facts-import.ts apps/api/test/int/fund-facts-provider.int.test.ts apps/api/package.json package.json
-pnpm --filter=@sanchay/api test -- publish-gate
-pnpm --filter=@sanchay/api test:int -- fund-facts-provider
+pnpm --filter=@sanchay/api test publish-gate
+pnpm --filter=@sanchay/api test:int fund-facts-provider
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
 git add apps/api/src/modules/catalogue/fund-facts.provider.ts apps/api/src/modules/catalogue/publish-gate.ts apps/api/src/modules/catalogue/publish-gate.test.ts apps/api/src/cli/ops-facts-import.ts apps/api/test/int/fund-facts-provider.int.test.ts apps/api/package.json package.json
@@ -16724,8 +16735,8 @@ describe('runComputeSchemeReturns', () => {
 
 ```
 pnpm --filter=@sanchay/test-fixtures test
-pnpm --filter=@sanchay/domain test -- returns
-pnpm --filter=@sanchay/api test -- returns.job
+pnpm --filter=@sanchay/domain test
+pnpm --filter=@sanchay/api test returns.job
 ```
 
 Expected failure: `@sanchay/test-fixtures` does not resolve (package does not exist), so all three suites fail to boot; once the package files exist, `packages/domain/src/rules/returns.js` and `apps/api/src/modules/catalogue/returns.job.js` still do not exist.
@@ -16915,8 +16926,9 @@ import { ReturnsComputeJob } from './returns.job.js';
 
 ```
 pnpm --filter=@sanchay/test-fixtures test
-pnpm --filter=@sanchay/domain test -- returns
-pnpm --filter=@sanchay/api test -- returns.job
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test returns.job
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
 ```
@@ -16928,8 +16940,9 @@ Expected: all 6 golden `computeSchemeReturns` cases, the 4 direct helper cases a
 ```
 pnpm exec biome check --write packages/domain/src/rules/returns.ts packages/domain/test/returns.test.ts packages/domain/src/index.ts packages/domain/package.json packages/test-fixtures apps/api/src/modules/catalogue/returns.job.ts apps/api/src/modules/catalogue/returns.job.test.ts apps/api/src/modules/catalogue/catalogue.module.ts
 pnpm --filter=@sanchay/test-fixtures test
-pnpm --filter=@sanchay/domain test -- returns
-pnpm --filter=@sanchay/api test -- returns.job
+pnpm --filter=@sanchay/domain test
+pnpm exec turbo run build --filter=@sanchay/api^...
+pnpm --filter=@sanchay/api test returns.job
 pnpm --filter=@sanchay/domain typecheck
 pnpm --filter=@sanchay/api typecheck
 pnpm lint
@@ -17017,7 +17030,7 @@ describe('RiskometerBadge', () => {
   it('shows the level and benchmark when both are known', () => {
     render(<RiskometerBadge level="VERY_HIGH" benchmarkLevel="HIGH" />);
     expect(screen.getByText(/Very High/)).toBeTruthy();
-    expect(screen.getByText(/High/)).toBeTruthy();
+    expect(screen.getByText('Benchmark: High')).toBeTruthy(); // /High/ also matched 'Very High' (RV-03-40)
   });
 
   it('shows a dash when the level is unknown', () => {
@@ -17177,10 +17190,13 @@ describe('FundScreen', () => {
     server.use(http.get(`${TEST_API}/catalogue/schemes/parag-parikh-flexi-cap`, () => HttpResponse.json(schemeDetail())));
     renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
     expect(await screen.findByRole('heading', { name: 'Parag Parikh Flexi Cap Fund - Regular - Growth' })).toBeTruthy();
-    expect(screen.getByText('₹500.00')).toBeTruthy();
+    // Both minimums are ₹500.00; E12's ListRow labels itself "<label>: <value>" (RV-03-40).
+    expect(screen.getByLabelText('Minimum lumpsum: ₹500.00')).toBeTruthy();
+    expect(screen.getByLabelText('Minimum SIP: ₹500.00')).toBeTruthy();
     expect(screen.getByText('2% if redeemed within 1 year')).toBeTruthy();
     expect(screen.getByText(/subject to market risks/)).toBeTruthy();
-    expect(screen.getByText(/Sanchay receives a commission|earns a commission/)).toBeTruthy();
+    // DSC-03 also "earns a commission": match the scheme's own commission line (RV-03-40).
+    expect(screen.getByText(/^Sanchay receives a commission from Parag Parikh Mutual Fund/)).toBeTruthy();
   });
 
   it('renders a dash for a null return figure', async () => {
@@ -17231,7 +17247,7 @@ test.describe('@smoke explore -> fund page', () => {
 - [ ] **Step 2: Run it to confirm it fails**
 
 ```
-pnpm --filter=@sanchay/features test -- explore
+pnpm --filter=@sanchay/features test explore
 pnpm --filter=@sanchay/web exec playwright test explore.smoke --project=chromium
 ```
 
@@ -17468,15 +17484,15 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
         <AppText variant="heading">Returns</AppText>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <AppText>1Y</AppText>
-          <AppText>{scheme.returns.cagr1y ? `${scheme.returns.cagr1y}%` : DASH}</AppText>
+          <AppText>{formatPct(scheme.returns.cagr1y, { signed: false })}</AppText>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <AppText>3Y</AppText>
-          <AppText>{scheme.returns.cagr3y ? `${scheme.returns.cagr3y}%` : DASH}</AppText>
+          <AppText>{formatPct(scheme.returns.cagr3y, { signed: false })}</AppText>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <AppText>5Y</AppText>
-          <AppText>{scheme.returns.cagr5y ? `${scheme.returns.cagr5y}%` : DASH}</AppText>
+          <AppText>{formatPct(scheme.returns.cagr5y, { signed: false })}</AppText>
         </View>
         <ReturnCaveat />
       </Card>
@@ -17487,7 +17503,7 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
         <ListRow label="Minimum SIP" value={scheme.sipAllowed && t?.sipMin ? formatInr(Money.parse(t.sipMin)) : DASH} />
         <ListRow label="Exit load" value={scheme.exitLoadText ?? DASH} />
         <ListRow label="Lock-in" value={scheme.lockInMonths ? `${scheme.lockInMonths} months` : 'None'} />
-        <ListRow label="Total expense ratio" value={scheme.expenseRatioPct ? formatPct(scheme.expenseRatioPct) : DASH} />
+        <ListRow label="Total expense ratio" value={formatPct(scheme.expenseRatioPct, { signed: false })} />
       </Card>
 
       <Card>
