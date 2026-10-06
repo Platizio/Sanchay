@@ -191,7 +191,10 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F4-5: `orders.units.reconcile` resolves its own breaks (backlog, F24–F27 review; major).** Once an order's units arrived, its `UNITS_PENDING_T3`/`T5` breaks stayed open, and an open T5 kept `sanchay-prod-money-invariant-breach` in ALARM until two founders ran `ops:resolve-break`. The job now resolves the order's two SLA breaks when the order leaves UNITS_PENDING, as F7's invariant sweep resolves its own; the SLA case asserts both RESOLVED after settlement (no new case). Not run.
 - **RV-04-F5-4: `payout.watch` resolves its overdue break when the payout lands (backlog, F24–F27 review; minor).** `REDEMPTION_PAYOUT_OVERDUE` stayed open after CREDITED. `credit` now resolves it in the same transaction, and the payout case asserts it (no new case). Not run.
 - **RV-04-F7-6: the backstop restarts a stalled purchase too (backlog, ADOPT follow-up; major).** D2 retries a failed job three times without a delay, so a short FP outage ended a purchase's `orders.purchase.advance` chain and left it in UNDER_REVIEW or CONFIRMING; `fp.reconcile.nonfinal` resumed redemptions and plans only. `resumePurchases` re-enqueues the advance job for such purchases (stately, keyed by the order id), and Plan 03 RV-03-53 makes that job end an expired one. Not run; no new case.
-- **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
+- **RV-04-HDR-3: the header says where Step 5's build line goes (backlog round 2; minor).** F5, F7, F10–F14, F16 and F28 start Step 5 with the workspace build, before biome, because the re-run checks read `dist`; the header's Commands rule said every Step 5 follows AGENTS.md's order without saying so. It now does; no command changed.
+- **RV-04-F16-1: a paused withdrawal says so (backlog round 2, F16 UX; minor).** RED-02 showed E20's ORDERS_DISABLED copy, "New investments are paused right now", on a withdrawal. `RedeemReviewScreen` now shows "Withdrawals are paused right now. Please try again later." for that code, and its refusal case expects it. F16's Prerequisites also credit E13, not E23, with `ApiContextValue.consents` (Plan 03 RV-03-9). Not run.
+- **RV-04-F19-5: F19's seed check sits before F1's reference step (backlog round 2; minor).** F1 moved D8's first four CSV loops into `seedCatalogueReference`, which `seedCatalogue` calls first, so F19's "before the `amcs.csv` loop" anchor now names that call; the validation stays first, so an invalid list writes nothing.
+- **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit); where a task needs the workspace build, that line comes first, before biome, because the re-run reads `dist` (RV-04-HDR-3). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
 
@@ -32991,7 +32994,7 @@ git commit -m "feat(portfolio): allocation bar chart above the allocation list (
 - **Not modified:** `ERROR_CATALOGUE` and `messageForError` (every code shown is Plan 01's or E20's), E13's `ConsentOtpSheet`/`useConsentChallenge`, `ApiContext.tsx` (E13/E23 own the `consents` key), `apps/web/src/lib/nav.ts` (Plan 01 already highlights Portfolio for `/redeem/**`), the order state machine and every F5 service.
 
 **Interfaces:**
-- **Prerequisites:** F5 (both parts) and therefore the Plan 03 consent fixes (BRIEF D9): RV-03-1 (committed), RV-03-2 (E4's destination resolver decrypts, so the consent OTPs reach the investor) and RV-03-9 (E13's consent facade and E12's component props, used here as documented). D2 runs F16 after F5 and F14. Plan 03 E12 (`@sanchay/ui` batch 2), E13 (CNF-01), E20 (orders contract, router, `orders.cancel`), E23 (adds `consents: ConsentApi` to `ApiContextValue`), E24 (ORD-02 route `/portfolio/orders/[orderId]` on web and in the mobile Portfolio tab). F14 is the caller: its PORT-02 "Redeem" button pushes `/redeem/${h.folioId}/${h.isin}` (`p4tasks/F14-F15.md`; folio uuid and ISIN, the key F11's `portfolio.holding` uses), and both tasks add `@sanchay/money` to `packages/features/package.json` only if it is absent.
+- **Prerequisites:** F5 (both parts) and therefore the Plan 03 consent fixes (BRIEF D9): RV-03-1 (committed), RV-03-2 (E4's destination resolver decrypts, so the consent OTPs reach the investor) and RV-03-9 (E13's consent facade and E12's component props, used here as documented). D2 runs F16 after F5 and F14. Plan 03 E12 (`@sanchay/ui` batch 2), E13 (CNF-01), E20 (orders contract, router, `orders.cancel`), E13 (adds `consents: ConsentApi` to `ApiContextValue`, Plan 03 RV-03-9), E24 (ORD-02 route `/portfolio/orders/[orderId]` on web and in the mobile Portfolio tab). F14 is the caller: its PORT-02 "Redeem" button pushes `/redeem/${h.folioId}/${h.isin}` (`p4tasks/F14-F15.md`; folio uuid and ISIN, the key F11's `portfolio.holding` uses), and both tasks add `@sanchay/money` to `packages/features/package.json` only if it is absent.
 - **Consumes (F5, `p4tasks/F5.md`, exact):** `orders.quoteRedemption` POST `/orders/redemptions/quote`, input `RedemptionTargetSchema {folioId, isin}`, output `RedemptionQuoteSchema` (`REFRESHING {folioId, isin}` or `READY {schemeName, heldUnits, lockedUnits, unlockedUnits, reservedUnits, availableUnits, providerShort, reconciliation, nav, navDate, navGrade, buffer, exitNavDate, displayCutoff, maxAmount, all, payoutBank, snapshotAsOf}`; `all` is `FULL {units}`, `AMOUNT_WITH_RESIDUAL {amount}` or `REFUSED {code}` with `REDEMPTION_CONFLICT_PENDING | FOLIO_RECONCILIATION_REQUIRED | INSUFFICIENT_REDEEMABLE | NAV_UNAVAILABLE`); `orders.createRedemption` POST `/orders/redemptions` [K], input `CreateRedemptionInputSchema {folioId, isin, mode: AMOUNT | ALL, amount?}`, output `RedemptionCreatedSchema {orderId, challengeId, expiresAt, mode, amount, unitsReserved}`, errors `NOT_FOUND, EXIT_BLOCKED, ORDERS_DISABLED, SCHEME_NOT_ORDERABLE, FOLIO_RECONCILIATION_REQUIRED, REDEMPTION_CONFLICT_PENDING, INSUFFICIENT_REDEEMABLE, NAV_UNAVAILABLE, CONSENT_DESTINATION_UNAVAILABLE` and the three idempotency codes; the `orders` columns `redeemed_units`, `redeemed_amount`, `payout_expected_on`, `payout_due_by`; `payout_status` values `NONE | EXPECTED | DELAYED | CREDITED` (E20's `ORDER_PAYOUT_STATUSES`); F5's REDEMPTION challenge is SMS + EMAIL (H-21); `PurchaseService.cancel` releases a redemption draft's reservation (F5's edit). Integration helpers (`redemption.int.test.ts`, `redemption-seed.ts`): `processing()` (→ `{investor, holding, orderId, challengeId, …, fpOrderId}`), `orderOf(id)`, `SETTLED_FIELDS`, `advanceRedemption`, `deliverRedemptionEvent`, `t`.
 - **Consumes (Plan 03, as written):** `AmountInput`, `SegmentedControl`, `ListRow`, `Sheet` (E12; `SegmentedControl` renders `role="radio"` per option); `ConsentOtpSheet({challengeId, onApproved, onClose})` with the labels "SMS code", "Email code", "Confirm" and the Sheet's "Close" (E13); `useApi().consents` (E13/E23); `consents.getChallenge/sendOtp/approve` routes `/consents/challenges/{id}[/otp|/approve]` (E4); `orders.get` GET `/orders/{id}`, `orders.cancel` POST `/orders/{id}/cancel` [K], `OrderSchema`, the router's `toWire`, `ORDER_MODES` column `orders.mode` (E20); `webHeaders` (`test/int/http.ts`, Plan 01) and `ReadyInvestor.cookies` (E11).
 - **Consumes (Plan 01, real code):** `useApi`, `useNav`, `renderWithProviders`, `TEST_API` (`packages/features`); `AppText`, `Banner`, `Button`, `Card`, `Screen`, `TextField` (`@sanchay/ui`); `messageForError`, `ERROR_COPY` (`@sanchay/app-core`); `toApiError`, `newIdempotencyKey`, `ApiClient` (`@sanchay/api-client`; `client.x.y(input, {context: {idempotencyKey}})` sets the `idempotency-key` header); `Money`, `Units`, `Nav`, `Dec`, `Rounding`, `marketValue`, `formatInr`, `formatUnits`, `formatNav`, `formatPct`, `formatIsoDate` (`@sanchay/money`); `ORDER_MODES`, `PAYOUT_STATUSES` (`@sanchay/domain`); `unitsWireSchema`, `nullableMoneyWireSchema` (`@sanchay/validation`); `RedeemRoute` pattern from `apps/web/src/client/routes.tsx`; `NativeScreen`, `usePreventScreenCapture` (C13/C14).
@@ -33644,7 +33647,7 @@ describe('RedeemReviewScreen (RED-02 + CNF-01)', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Confirm & get OTP' }));
     expect(
-      await screen.findByText('New investments are paused right now. Please try again later.'),
+      await screen.findByText('Withdrawals are paused right now. Please try again later.'),
     ).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Confirm & get OTP' }));
     expect(await screen.findByLabelText('SMS code')).toBeTruthy();
@@ -34304,6 +34307,9 @@ export interface RedeemReviewScreenProps {
 }
 
 /** Refusals that mean the quote moved under the investor: go back to RED-01 and re-quote. */
+/** RV-04-F16-1: E20's ORDERS_DISABLED copy speaks of new investments; a withdrawal says what is paused. */
+const WITHDRAWALS_PAUSED = 'Withdrawals are paused right now. Please try again later.';
+
 const REQUOTE_CODES = new Set([
   'FOLIO_RECONCILIATION_REQUIRED',
   'REDEMPTION_CONFLICT_PENDING',
@@ -34356,7 +34362,8 @@ export function RedeemReviewScreen({ quote, draft, onBack, onPlaced }: RedeemRev
       const apiError = toApiError(err);
       if (isFinalRefusal(apiError)) idempotencyKey.current = null;
       setError({
-        message: messageForError(apiError.code),
+        message:
+          apiError.code === 'ORDERS_DISABLED' ? WITHDRAWALS_PAUSED : messageForError(apiError.code),
         requote: REQUOTE_CODES.has(apiError.code),
       });
     } finally {
@@ -37422,7 +37429,7 @@ export interface SeedOptions {
   pilotList: boolean;
 }
 ```
-The signature becomes `export async function seedCatalogue(db: Database, dataDir: string, options: SeedOptions = { pilotList: false }): Promise<void>`, and its body starts with (before the `amcs.csv` loop):
+The signature becomes `export async function seedCatalogue(db: Database, dataDir: string, options: SeedOptions = { pilotList: false }): Promise<void>`, and its body starts with this, before the `seedCatalogueReference` call (F1 moved D8's `amcs.csv` loop and the three after it there; RV-04-F19-5), so nothing is written on an invalid list; `cell()` and `readCsv` stay module-level helpers:
 ```ts
   const curatedTable = parseCsvTable(readFileSync(resolve(dataDir, 'curated-schemes.csv'), 'utf8'));
   const factsTable = parseCsvTable(readFileSync(resolve(dataDir, 'fund-facts.csv'), 'utf8'));
