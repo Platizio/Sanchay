@@ -184,6 +184,7 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-F1-14: the migrate task loads E9's risk questionnaire (Plan 03 RV-03-52, R-36; major).** `seedReferenceData` gains a fourth idempotent step, E9's `seedRiskQuestionnaire`, which loads v1.0.0 as DRAFT until compliance signs the file off and publishes it on the deploy after. `reference-data.int.test.ts` counts `risk_questionnaires: 1`; its case count is unchanged.
 - **RV-04-F2-6: F2's consent-first cases move the clock (Plan 03 RV-03-51; owner decision 2026-10-06; major).** `draftSip` moves the FakeClock 1 ms before `createSip` and `approve` moves it 1 ms after `engine.approve`, so `expectNoPmWritesBeforeConsumed` sees a real window in "mandates.submit" and "reused mandate within headroom" (both passed for nothing before). Not run.
 - **RV-04-F5-2: F5's consent-first case moves the clock (Plan 03 RV-03-51; owner decision 2026-10-06; minor).** `draft` moves the FakeClock 1 ms before `createRedemption` and `approve` 1 ms after `engine.approve`. F5's explicit `redemption.create` counts already covered it; the window now does too. Not run.
+- **RV-04-F1-15: F1 says where the G-E5 results go (backlog, F20–F23 review; minor).** The PITR restore test, the alarm drill and the go-live checklist said to record results "in the G-E5 evidence" without naming a place. They now go in a dated **Result** line at the end of each `credential-rotation.md` section, which F23's G-E5 row already links.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -3846,7 +3847,7 @@ aws rds describe-db-instances --db-instance-identifier sanchay-prod-restore-test
 
 3. Write `restore-overrides.json` as `{"containerOverrides": [{"name": "migrate", "environment": [{"name": "SANCHAY_DB_HOST", "value": "<restored endpoint>"}]}]}` and run the migrate task against the copy with the run-task command in [database access](db-access.md) plus `--overrides file://restore-overrides.json`. It logs in as `sanchay_master` with `sslmode=verify-full`, reads the migration journal, applies only migrations newer than the restore point, re-sets the two login passwords to their current values and re-runs the idempotent reference-data upserts, all harmless on the copy.
 4. Pass = exit code `0`, then `migrations applied`, `db logins synced` and `reference data seeded` in the task's log stream.
-5. Record the date, `LatestRestorableTime` and the restore duration in the G-E5 evidence.
+5. Record the date, `LatestRestorableTime` and the restore duration in a dated **Result** line at the end of this section (F23's G-E5 row links the section).
 6. Delete the scratch instance only (check the identifier twice):
 
 ```
@@ -3877,7 +3878,7 @@ pnpm --filter=@sanchay/infra prove:filters
 ```
 
 3. Trigger one alarm at a time, in the table's order, and wait until it is OK again before the next. For
-   each, record in the G-E5 evidence the trigger and the time it started (IST), the ALARM and OK
+   each, record in a dated **Result** line at the end of this section (F23's G-E5 row links the section) the trigger and the time it started (IST), the ALARM and OK
    transitions from the line below, and when the ALARM and the OK email and SMS reached each developer:
 
 ```
@@ -4259,7 +4260,7 @@ aws cloudwatch describe-alarms --alarm-names sanchay-prod-worker-heartbeat-stale
 3. `curl.exe -s -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/app/config` shows `"ordersEnabled":false` and `"sipEnabled":false` (R-06, R-31: nothing has written `app_config`; GO-1 and GO-2 flip them with F7's ops CLIs, never in CDK). Before GO-1 only the founders' test accounts are invited (F7's `ops:invite`, SSM form).
 4. Once G-C1's docs commit (`status: PUBLISHED`) has been deployed, `curl.exe -s -i -H "x-sanchay-client: web" https://app.sanchay.in/api/v1/legal/documents/TPL_PURCHASE` starts with a `200` status line (`404` while the version is DRAFT).
 5. R-33, once F19 is deployed and before GO-1 (Fri 11-27): load the curated list, then the NAV history (`docs/runbooks/db-access.md`, "After the migrate task: the curated list, then the NAV history"). The backfill is six yearly runs, about half an hour to an hour in all (RV-04-F1-10); start it at least two days before GO-1.
-6. Run the PITR restore test and the alarm drill (credential-rotation runbook: all ten alarms and the masking check, before GO-1, R-34); record both in the G-E5 evidence.
+6. Run the PITR restore test and the alarm drill (credential-rotation runbook: all ten alarms and the masking check, before GO-1, R-34); record both as dated **Result** lines in those two runbook sections, which F23's G-E5 row links.
 
 - [ ] **Step 5: Commit**
 

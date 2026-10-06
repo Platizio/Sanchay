@@ -137,6 +137,7 @@ This plan adds new `catalog:` keys only; no existing pin changes. `pg-boss 12.34
 - **RV-02-76: D9's `ops:nav-release` lets the next feed value through once (R-35, owner decision 2026-10-05; major).** A release only cleared `quarantined`, so a genuine move over 25% was quarantined again on the next sync and never reached `nav_history`. The release now goes through `releaseNav` (new `nav-release.ts`): it refuses an ISIN that is not quarantined and writes a `NAV_RELEASE` audit row with the flag in one transaction; `runNavSync` reads the pending releases from `audit_events` once per run, takes a released ISIN's next feed value without the NAV-09 check, writes it to `scheme_navs` and `nav_history`, and audits `NAV_RELEASE_APPLIED` in the same transaction, so the following sync checks from the new NAV. D8's schema is unchanged. Two new integration cases (eight in all); verified on PostgreSQL 18.6 in a scratch worktree (the release case failed against the old sync with the break reopened, then 8/8 passed; `tsc` and `biome ci` clean). Plan 04 F7, which rewrites the CLI, keeps the `NAV_RELEASE` row the sync reads (RV-04-F7-5).
 - **RV-02-77: E25 keeps the document bucket and the NAT EIP on a teardown (backlog, R-34 and DOCS follow-ups 2026-10-05; major).** `sanchay-prod-docs` has a fixed name and used `RemovalPolicy.RETAIN`, so a failed first create left the bucket behind and the retry failed on the name, the hazard R-34 fixed for the logs and repositories. The NAT `CfnEIP` had no DeletionPolicy, so a teardown or a replacement released the address Cybrilla allowlists (PB-19). Both now use `RETAIN_ON_UPDATE_OR_DELETE` (CloudFormation `RetainExceptOnCreate`, `UpdateReplacePolicy: Retain`; aws-cdk-lib 2.216.0's `CfnResource.applyRemovalPolicy` maps it so). The bucket case now asserts both policies and one new case asserts the EIP's and that the one NAT gateway uses it: 26 infra tests (Plan 04 F1's totals follow, RV-04-F1-12). Verified with aws-cdk-lib 2.216.0 and vitest 5.0.1 in a scratch folder: both assertions failed on the old stack (`Retain`, no policy), then 24 of 26 passed, the other two only because they read `apps/api` files that the scratch folder does not have; `tsc` and `biome ci` clean.
 - **RV-02-78: D5 lets FP end an unpaid order (P-07 addendum 2026-10-05, Plan 03 E21; major).** The ORDER machine had no way out of AWAITING_PAYMENT or PAYMENT_PENDING except payment success, and D5's own test asserted that nothing in AWAITING_PAYMENT could reach FAILED. FP fails an ONDC purchase whose payment URL was never used at 23:00 IST on the order day (`fp_payment_url_unused`), so such an order could never become final and HOME-02 would ask the investor to "Complete your payment" forever. D5 now has `fp_failed` and `fp_expired` from both states, the FP re-fetch spec §4.2 already describes; a payment attempt's own failure still moves no order. The test now pins exactly those four transitions and refuses `provider_failed`. Verified on the real `@sanchay/domain` in a scratch worktree: the revised case failed against the old machine, then `states.test.ts` 15/15; `tsc` clean and `biome ci` clean after Step 5's `--write`.
+- **RV-02-79: ECS Exec sessions are not refused for want of a KMS key (E25; Plan 04 backlog, E25 review; major).** The cluster's exec logging set `cloudWatchEncryptionEnabled: true`, which makes ECS Exec refuse every session unless its CloudWatch log group has a KMS key, and R-34 defers a customer-managed key to Phase 2, so the first `aws ecs execute-command` (E25's own Post-deploy check, R-16's ops access) would fail. It is `false` now (CloudWatch Logs still encrypts at rest with its own key), and the ECS Exec case asserts it. Proven with aws-cdk-lib 2.216.0 in the scratch folder: the case failed against `true`, then 24 of 26 passed (the other two read `apps/api` files the folder does not have).
 
 **Verify at execution time (not changed here):**
 - **Resolved (R-32, RV-02-69): queue policies.** D2 no longer leaves every queue on pg-boss's default `standard` policy, under which `singletonKey` neither dedupes nor serialises. `JOB_POLICIES` gives each job its policy: `stately` for per-aggregate sync, poll, reconcile and sweep jobs, `exclusive` for jobs that submit to FP, and `standard` for `notifications.send` only. `JobsService` creates each queue with that policy, and `Jobs.enqueue` returns null for a send the policy refuses. `jobs.int.test.ts` pins the stored policies and both refusals on PostgreSQL. A policy cannot change in place (`createQueue` on an existing queue keeps the old one, and `updateQueue` refuses `policy`), so `JobsService` refuses to start when a stored policy differs from the registry. D2's table "Queue policies (R-32)" lists every job in Plans 02–04.
@@ -12099,7 +12100,11 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
       synthProdTemplate().hasResourceProperties('AWS::ECS::Cluster', {
         ClusterName: 'sanchay-prod',
         Configuration: {
-          ExecuteCommandConfiguration: Match.objectLike({ Logging: 'OVERRIDE' }),
+          ExecuteCommandConfiguration: Match.objectLike({
+            Logging: 'OVERRIDE',
+            // No KMS key on the exec log group (R-34 defers one), so session encryption stays off.
+            LogConfiguration: Match.objectLike({ CloudWatchEncryptionEnabled: false }),
+          }),
         },
       });
     });
@@ -12731,7 +12736,9 @@ git commit -m "feat(catalogue): add catalogue.fp.sync, catalogue.categories and 
         containerInsightsV2: ecs.ContainerInsights.ENABLED,
         executeCommandConfiguration: {
           logging: ecs.ExecuteCommandLogging.OVERRIDE,
-          logConfiguration: { cloudWatchLogGroup: execLogGroup, cloudWatchEncryptionEnabled: true },
+          // false: with true, ECS Exec refuses every session unless the log group has a KMS key, and
+          // R-34 defers a customer-managed key to Phase 2 (CloudWatch Logs still encrypts at rest).
+          logConfiguration: { cloudWatchLogGroup: execLogGroup, cloudWatchEncryptionEnabled: false },
         },
       });
 
