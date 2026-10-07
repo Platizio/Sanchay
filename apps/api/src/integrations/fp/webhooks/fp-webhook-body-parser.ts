@@ -8,10 +8,15 @@ const RAW_BODY_LIMIT = 102_400;
  * Replaces Fastify's built-in `application/json` content-type parser (bootstrap.ts sets
  * `bodyParser: false`, which only disables Nest's own parser registration — Fastify's default JSON
  * parser is still active for every other route) so the FP webhook route alone gets the raw bytes,
- * needed to verify FP-Signature over the exact wire body. Every other application/json route keeps
- * the same JSON.parse behaviour as before.
+ * needed to verify FP-Signature over the exact wire body. Every other application/json route is
+ * delegated to Fastify's own default parser, so it keeps its empty-body 400 and its prototype
+ * poisoning guard.
  */
 export function installFpWebhookRawBodyParser(instance: FastifyInstance): void {
+  // Fastify's own default parser for every other route: the empty-body 400
+  // (FST_ERR_CTP_EMPTY_JSON_BODY) and the __proto__/constructor poisoning guard ('error' is
+  // Fastify's default for both, which `buildFastifyAdapter` does not override).
+  const defaultJsonParser = instance.getDefaultJsonParser('error', 'error');
   instance.removeContentTypeParser('application/json');
   instance.addContentTypeParser(
     'application/json',
@@ -21,15 +26,7 @@ export function installFpWebhookRawBodyParser(instance: FastifyInstance): void {
         done(null, body);
         return;
       }
-      if (body.length === 0) {
-        done(null, undefined);
-        return;
-      }
-      try {
-        done(null, JSON.parse(body.toString('utf8')));
-      } catch (cause) {
-        done(cause as Error);
-      }
+      defaultJsonParser(request, body.toString('utf8'), done);
     },
   );
 }

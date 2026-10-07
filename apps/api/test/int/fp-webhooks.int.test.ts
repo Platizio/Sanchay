@@ -91,6 +91,30 @@ describe('POST /api/v1/webhooks/fp (api role)', () => {
     expect([res.statusCode, res.json().code]).toEqual([400, 'VALIDATION_FAILED']);
   });
 
+  describe('the raw-body parser keeps the default JSON guards on every other route', () => {
+    const jsonPost = (payload: string) =>
+      t.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/otp',
+        headers: { ...webHeaders(), 'content-type': 'application/json' },
+        payload,
+      });
+
+    // Rejected by Fastify's default parser before any controller or Zod schema runs, so the
+    // 400 carries no per-field `data.fields` (a controller-level validation failure does).
+    it('an empty JSON body -> 400 from the parser (FST_ERR_CTP_EMPTY_JSON_BODY)', async () => {
+      const res = await jsonPost('');
+      expect([res.statusCode, res.json().code]).toEqual([400, 'VALIDATION_FAILED']);
+      expect(res.json().data.fields).toBeUndefined();
+    });
+
+    it('a {"__proto__":{}} body -> 400 from the parser (prototype poisoning refused)', async () => {
+      const res = await jsonPost('{"__proto__":{}}');
+      expect([res.statusCode, res.json().code]).toEqual([400, 'VALIDATION_FAILED']);
+      expect(res.json().data.fields).toBeUndefined();
+    });
+  });
+
   it('responds under 100ms (no provider call in the request)', async () => {
     const body = fpEvent('mf_purchase', 'pur_fast', 'evt_fast_1');
     const started = performance.now();
