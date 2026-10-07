@@ -94,4 +94,14 @@ describe('catalogue.categories / catalogue.listSchemes', () => {
       for (const item of page2.items) expect(isins1.has(item.isin)).toBe(false);
     }
   });
+
+  it('sorts by name ascending by default, with a stable compound cursor', async () => {
+    await seedOneScheme('PUBLISHED', true); // 'Parag Parikh Flexi Cap Fund - Regular - Growth' (see the shared factory)
+    // D10's file-level `get` and `cookies` (Plan 01's signInWeb); `signIn`/`httpGet` never existed (RV-03-23).
+    const page1 = JSON.parse((await get('/catalogue/schemes', cookies)).body) as {
+      items: { name: string }[];
+    };
+    const names = page1.items.map((i) => i.name);
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
+  });
 });
