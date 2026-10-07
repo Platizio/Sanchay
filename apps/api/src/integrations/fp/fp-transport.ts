@@ -181,6 +181,11 @@ export class FpTransport {
     const startedAt = Date.now();
 
     let response: Awaited<ReturnType<typeof request>>;
+    let text: string;
+    // undici resolves request() on the response headers, so a body timeout or a socket reset
+    // surfaces only while the body is read. FP has already received the request either way: both
+    // failures are the ambiguous case, and each records exactly one TRANSPORT_ERROR row.
+    let statusSeen: number | null = null;
     try {
       response = await request(url, {
         method: definition.method,
@@ -192,26 +197,31 @@ export class FpTransport {
         },
         ...(requestBody === undefined ? {} : { body: requestBody }),
       });
+      statusSeen = response.statusCode;
+      text = await response.body.text();
     } catch (error) {
       await this.recordCall({
         operation: op,
         audience: definition.audience,
         aggregateType,
         aggregateId,
-        httpStatus: null,
+        httpStatus: statusSeen,
         durationMs: Date.now() - startedAt,
         errorCode: 'TRANSPORT_ERROR',
         requestMeta,
         responseMeta: null,
         rawForBodyEnc: JSON.stringify({
           request: { method: definition.method, path, body: args.body },
+          ...(statusSeen === null ? {} : { response: { status: statusSeen } }),
           error: String(error),
         }),
       });
-      throw new FpAmbiguousError(op, { cause: error });
+      throw new FpAmbiguousError(op, {
+        ...(statusSeen === null ? {} : { status: statusSeen }),
+        cause: error,
+      });
     }
 
-    const text = await response.body.text();
     const durationMs = Date.now() - startedAt;
     const rawForBodyEnc = JSON.stringify({
       request: { method: definition.method, path, body: args.body },

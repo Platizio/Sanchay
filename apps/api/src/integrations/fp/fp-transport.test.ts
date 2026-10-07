@@ -1,5 +1,5 @@
 import type { ClsService } from 'nestjs-cls';
-import { MockAgent } from 'undici';
+import { type Dispatcher, MockAgent } from 'undici';
 import { describe, expect, it, vi } from 'vitest';
 import type { SanchayClsStore } from '../../modules/platform/request-context.js';
 import type { ConsumedConsent } from './consumed-consent.js';
@@ -47,6 +47,28 @@ function agentWithToken(): MockAgent {
     .reply(200, { access_token: 'tok', expires_in: 1800 })
     .persist();
   return agent;
+}
+
+/**
+ * undici resolves request() on the response headers, so a body timeout or socket reset surfaces
+ * only while the body is read. This agent lets the headers through and then fails the body for the
+ * purchase endpoint, as a real socket reset would.
+ */
+class BodyFailingAgent extends MockAgent {
+  override dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) {
+    if (options.path !== '/v2/mf_purchases') return super.dispatch(options, handler);
+    const inner = handler as unknown as {
+      onError: (error: Error) => void;
+      onData: (chunk: Buffer) => boolean;
+      onComplete: (trailers: string[] | null) => void;
+    };
+    const wrapped = Object.create(handler as object) as typeof inner;
+    wrapped.onData = () => true;
+    wrapped.onComplete = () => {
+      setImmediate(() => wrapped.onError(new Error('simulated body reset')));
+    };
+    return super.dispatch(options, wrapped as unknown as Dispatcher.DispatchHandler);
+  }
 }
 
 function consent(): ConsumedConsent {
@@ -108,6 +130,39 @@ describe('FpTransport.call', () => {
       transport.call('purchase.create', { body: { source_ref_id: 'o-1' }, consent: consent() }),
     ).rejects.toBeInstanceOf(FpAmbiguousError);
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'TRANSPORT_ERROR' }));
+  });
+
+  it('maps a body read failure after the headers arrive to FpAmbiguousError and records one row', async () => {
+    const agent = new BodyFailingAgent();
+    agent.disableNetConnect();
+    agent
+      .get('https://fp.fake.local')
+      .intercept({ path: '/v2/auth/sanchay/token', method: 'POST' })
+      .reply(200, { access_token: 'tok', expires_in: 1800 })
+      .persist();
+    agent
+      .get('https://fp.fake.local')
+      .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+      .reply(200, { id: 'pur-1', status: 'pending' });
+    const { record, entries } = recorder();
+    const transport = new FpTransport(
+      BASE_URLS,
+      new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+      agent,
+      clsWith(false),
+      record,
+    );
+    const failure = await transport
+      .call('purchase.create', { body: { source_ref_id: 'o-1' }, consent: consent() })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(FpAmbiguousError);
+    expect((failure as FpAmbiguousError).httpStatus).toBe(200);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      errorCode: 'TRANSPORT_ERROR',
+      httpStatus: 200,
+      operation: 'purchase.create',
+    });
   });
 
   it('maps a 409 duplicate source_ref_id to FpAmbiguousError', async () => {
