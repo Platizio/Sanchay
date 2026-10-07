@@ -71,6 +71,56 @@ export function stripQuery(url: unknown): string | undefined {
   return url.split('?')[0] ?? url;
 }
 
+/**
+ * The "params: <values>" texts of every DrizzleQueryError in an error's cause chain. drizzle's message
+ * is "Failed query: <sql>", a newline, then "params: " + String(params), so the same String(params)
+ * finds them exactly in the message and the stack (EF-B4: a value bound to a failing query may be PII).
+ */
+function boundParamsTexts(err: Error): string[] {
+  const texts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; current instanceof Error && depth < MAX_DEPTH; depth++) {
+    const params: unknown = (current as { params?: unknown }).params;
+    if (Array.isArray(params) && params.length > 0) texts.push(`params: ${String(params)}`);
+    current = current.cause;
+  }
+  return texts;
+}
+
+export function redactBoundParams(text: string, err: Error): string {
+  let out = text;
+  for (const found of boundParamsTexts(err)) out = out.split(found).join(`params: ${REDACTED}`);
+  return out;
+}
+
+type SerializedErr = ReturnType<typeof stdSerializers.err>;
+
+function redactSerialized(out: SerializedErr, original: Error): SerializedErr {
+  if (out.params !== undefined) out.params = REDACTED;
+  out.message = redactBoundParams(out.message, original);
+  if (typeof out.stack === 'string') out.stack = redactBoundParams(out.stack, original);
+  return out;
+}
+
+/**
+ * pino's standard error serializer, minus bound query parameters (EF-B4). pino-http wraps the err
+ * serializer by default (`wrapSerializers`), so in the app this receives pino's serialized form, whose
+ * non-enumerable `raw` is the original Error; plain pino passes the Error itself.
+ */
+export function serializeErr(value: unknown): unknown {
+  if (value instanceof Error) return redactSerialized(stdSerializers.err(value), value);
+  const raw: unknown = (value as { raw?: unknown } | null | undefined)?.raw;
+  if (raw instanceof Error) return redactSerialized(value as SerializedErr, raw);
+  return value;
+}
+
+function errorOf(value: unknown): Error | undefined {
+  if (value instanceof Error) return value;
+  if (isPlainObject(value) && value.err instanceof Error && value.msg === undefined)
+    return value.err;
+  return undefined;
+}
+
 interface SerializableReq {
   id?: unknown;
   method?: unknown;
@@ -96,7 +146,17 @@ export function buildPinoOptions(env: Pick<Env, 'SANCHAY_LOG_LEVEL'>): LoggerOpt
     serializers: {
       req: (req: SerializableReq) => ({ id: req.id, method: req.method, url: stripQuery(req.url) }),
       res: (res: SerializableRes) => ({ statusCode: res.statusCode }),
-      err: stdSerializers.err,
+      err: serializeErr,
+    },
+    hooks: {
+      // With no message, pino copies err.message into the line's msg; redact it there too (EF-B4).
+      logMethod(args, method) {
+        const err = args.length === 1 ? errorOf(args[0]) : undefined;
+        if (err === undefined) return method.apply(this, args);
+        return method.apply(this, [args[0], redactBoundParams(err.message, err)] as Parameters<
+          typeof method
+        >);
+      },
     },
   };
 }

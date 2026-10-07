@@ -1,7 +1,7 @@
 import { color, space } from '@sanchay/tokens';
 import { AppText, Button } from '@sanchay/ui';
-import type { ReactNode } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { type ReactNode, useSyncExternalStore } from 'react';
+import { Dimensions, StyleSheet, View } from 'react-native';
 import { useSignOut } from '../auth/useSignOut';
 import { AppNav, type AppTabKey, navLayoutFor } from './AppNav';
 
@@ -11,9 +11,23 @@ export interface AppShellProps {
   navigation?: { active: AppTabKey | null };
 }
 
+function subscribeToWindow(onChange: () => void): () => void {
+  const subscription = Dimensions.addEventListener('change', onChange);
+  return () => subscription.remove();
+}
+
+const windowWidth = (): number => Dimensions.get('window').width;
+
+/**
+ * The server has no window (react-native-web reports width 0), so hydration renders with 0 like the
+ * server HTML and React re-renders with the real width straight after; a client-only mount reads the
+ * real width at once (C9 hydration fix).
+ */
+const serverWidth = (): number => 0;
+
 export function AppShell({ children, navigation }: AppShellProps) {
   const signOut = useSignOut();
-  const { width } = useWindowDimensions();
+  const width = useSyncExternalStore(subscribeToWindow, windowWidth, serverWidth);
   const layout = navLayoutFor(width);
   const nav = navigation ? <AppNav active={navigation.active} layout={layout} /> : null;
   return (

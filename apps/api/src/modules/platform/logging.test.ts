@@ -1,7 +1,15 @@
 import { Writable } from 'node:stream';
+import { DrizzleQueryError } from 'drizzle-orm';
 import { pino } from 'pino';
+import { pinoHttp } from 'pino-http';
 import { describe, expect, it } from 'vitest';
-import { buildPinoOptions, isRedactedKey, REDACTED, scrub } from './logging.js';
+import {
+  buildPinoHttpOptions,
+  buildPinoOptions,
+  isRedactedKey,
+  REDACTED,
+  scrub,
+} from './logging.js';
 
 function capture() {
   const lines: string[] = [];
@@ -161,6 +169,50 @@ describe('logging', () => {
     expect(line.err.type).toBe('Error');
     expect(line.err.message).toBe('boom');
     expect(line.err.stack).toContain('Error: boom');
+  });
+
+  const failedQuery = () =>
+    new DrizzleQueryError(
+      'update "app"."investors" set "mobile" = $1 where "id" = $2',
+      ['9876543210', 'inv-1'],
+      new Error('duplicate key value violates unique constraint "investors_mobile_bidx_uq"'),
+    );
+
+  const expectRedacted = (lines: string[]) => {
+    for (const raw of lines) {
+      expect(raw).not.toContain('9876543210');
+      const line = JSON.parse(raw);
+      expect(line.err.type).toBe('DrizzleQueryError');
+      expect(line.err.message).toContain('Failed query: update "app"."investors"');
+      expect(line.err.message).toContain(`params: ${REDACTED}`);
+      expect(line.err.message).toContain('duplicate key value violates unique constraint');
+      expect(line.err.stack).toContain(`params: ${REDACTED}`);
+      expect(line.err.params).toBe(REDACTED);
+    }
+  };
+
+  it('never logs the bound parameters of a failed query (EF-B4)', () => {
+    const { logger, lines } = capture();
+    logger.error({ err: failedQuery() });
+    logger.error(failedQuery());
+    logger.error({ err: failedQuery() }, 'orpc');
+    expect(lines).toHaveLength(3);
+    expectRedacted(lines);
+  });
+
+  it("redacts them through pino-http too, the app's logger, which wraps the err serializer (EF-B4)", () => {
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _encoding, callback) {
+        lines.push(String(chunk));
+        callback();
+      },
+    });
+    const { logger } = pinoHttp(buildPinoHttpOptions({ SANCHAY_LOG_LEVEL: 'info' }), stream);
+    logger.error({ err: failedQuery() });
+    logger.error({ err: failedQuery() }, 'ApiExceptionFilter');
+    expect(lines).toHaveLength(2);
+    expectRedacted(lines);
   });
 
   it('leaves non-plain objects untouched and bounds depth', () => {
