@@ -10,7 +10,7 @@ Sanchay is an investor-led B2C mutual-fund app for India. Phase 1 is a closed re
 
 ## Scope
 - Execute one plan task at a time, exactly as written. Touch only the files in its **Files** list.
-- Work on branch `feat/plan-02-mvp-kernel`. Never push; the owner authorises every push.
+- Work on branch `feat/plan-03-mvp-onboarding-lumpsum`. Never push; the owner authorises every push.
 - Never commit secrets, real PII or `.env` files. Never touch `.claude-flow/` or `.superpowers/`.
 
 ## Commands
