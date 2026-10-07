@@ -1,0 +1,129 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target stack'
+        required: true
+        default: prod
+        type: choice
+        # R-31: prod is the only AWS environment (development runs locally).
+        options: [prod]
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # The GitHub `prod` environment: both founders are its required reviewers, and the deploy role
+    # trusts only its jobs (OIDC sub repo:<owner>/<repo>:environment:prod).
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-south-1
+      ENV_NAME: ${{ inputs.environment }}
+      TURBO_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Deviation from outline: OIDC token exchange is scripted with the AWS CLI instead of
+      # aws-actions/configure-aws-credentials, so no new third-party action SHA needs pinning.
+      - name: Assume the GitHub deploy role via OIDC
+        run: |
+          ID_TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          CREDS=$(aws sts assume-role-with-web-identity \
+            --role-arn "${{ vars.SANCHAY_DEPLOY_ROLE_ARN }}" \
+            --role-session-name "gha-deploy-${{ github.run_id }}" \
+            --web-identity-token "$ID_TOKEN" \
+            --duration-seconds 3600 \
+            --query 'Credentials' --output json)
+          echo "AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.AccessKeyId')" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.SecretAccessKey')" >> "$GITHUB_ENV"
+          echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.SessionToken')" >> "$GITHUB_ENV"
+
+      # The task definition is ARM64 (spec §2.4) and ubuntu-24.04 runners are x86_64, so the image
+      # build runs under QEMU. The binfmt installer is pinned by digest, like the action SHAs above.
+      - name: Register arm64 emulation
+        run: docker run --privileged --rm tonistiigi/binfmt:qemu-v10.0.4@sha256:8f58e6214f4cc9dc83ce8f5acad1ece508eb6b20e696a8c1e9f274481982c541 --install arm64
+
+      - name: Build and push images to ECR
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+          docker build --platform linux/arm64 -f apps/api/Dockerfile -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-api:latest" .
+          DOMAIN=sanchay.in
+          docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg SANCHAY_PLATFORM_ARN="${{ vars.SANCHAY_PLATFORM_ARN }}" --build-arg SANCHAY_PLATFORM_ARN_VALID_TILL="${{ vars.SANCHAY_PLATFORM_ARN_VALID_TILL }}" --build-arg SANCHAY_APP_ORIGIN="https://app.$DOMAIN" --build-arg SANCHAY_WWW_ORIGIN="https://www.$DOMAIN" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:${{ github.sha }}" -t "$REGISTRY/sanchay-${{ inputs.environment }}-web:latest" .
+          docker push "$REGISTRY/sanchay-${{ inputs.environment }}-api" --all-tags
+          docker push "$REGISTRY/sanchay-${{ inputs.environment }}-web" --all-tags
+
+      # Spec §2.4: the one-off migrate task runs before each deploy, on the api image just pushed
+      # (its task definition reads :latest) and before any new api or worker task starts. It runs the
+      # task definition of the stack as deployed now; a non-zero exit stops the deploy.
+      - name: Run the migrate task
+        run: |
+          set -euo pipefail
+          output() {
+            aws cloudformation describe-stacks --stack-name "SanchayMvpStack-$ENV_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue | [0]" --output text
+          }
+          TASK_DEF=$(output MigrateTaskDefinitionArn)
+          SUBNETS=$(output AppSubnetIds)
+          SECURITY_GROUP=$(output ServiceSecurityGroupId)
+          TASK=$(aws ecs run-task --cluster "sanchay-$ENV_NAME" --launch-type FARGATE \
+            --task-definition "$TASK_DEF" \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUP],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migrate task: $TASK"
+          aws ecs wait tasks-stopped --cluster "sanchay-$ENV_NAME" --tasks "$TASK"
+          CODE=$(aws ecs describe-tasks --cluster "sanchay-$ENV_NAME" --tasks "$TASK" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migrate exit code: $CODE (log group /sanchay/$ENV_NAME/app, stream prefix $ENV_NAME/migrate)"
+          test "$CODE" = "0"
+
+      - name: cdk deploy
+        run: pnpm --filter=@sanchay/infra exec cdk deploy --require-approval never
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ vars.SANCHAY_AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ap-south-1
+          # Deploy inputs: infra/lib/config.ts refuses to synthesise without them.
+          SANCHAY_PLATFORM_ARN: ${{ vars.SANCHAY_PLATFORM_ARN }}
+          SANCHAY_SMS_RETRIEVER_HASH: ${{ vars.SANCHAY_SMS_RETRIEVER_HASH }}
+          # The repository the deploy role trusts (bin/sanchay.ts refuses a deploy without it), in
+          # the exact owner/repo case that IAM compares.
+          SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}
+
+      # Wait for this rollout and fail unless it completed: `services-stable` alone also succeeds once
+      # the circuit breaker has rolled the new deployment back; the deployment's rolloutState does not.
+      - name: Force a new deployment (pick up the :latest images) and wait for it
+        run: |
+          set -euo pipefail
+          DEPLOYMENT=$(aws ecs update-service --cluster "sanchay-$ENV_NAME" --service sanchay-app \
+            --force-new-deployment --query "service.deployments[?status=='PRIMARY'].id | [0]" --output text)
+          aws ecs wait services-stable --cluster "sanchay-$ENV_NAME" --services sanchay-app
+          STATE=$(aws ecs describe-services --cluster "sanchay-$ENV_NAME" --services sanchay-app \
+            --query "services[0].deployments[?id=='$DEPLOYMENT'].rolloutState | [0]" --output text)
+          echo "deployment $DEPLOYMENT: $STATE"
+          test "$STATE" = "COMPLETED"

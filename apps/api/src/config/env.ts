@@ -176,10 +176,15 @@ export function assertBootInvariants(env: Env): void {
   const problems: string[] = [];
   const localOrTest = env.SANCHAY_APP_ENV === 'local' || env.SANCHAY_APP_ENV === 'test';
   const stagingOrProd = env.SANCHAY_APP_ENV === 'staging' || env.SANCHAY_APP_ENV === 'prod';
+  // R-19 owning containers (E25): api and worker send SMS and email; only api sends OTPs (the
+  // retriever hash) and, from E1 on, receives the FP webhook. migrate sends nothing.
+  const role = env.SANCHAY_APP_ROLE;
+  const sends = role === 'api' || role === 'worker';
 
   // 1
   if (
     stagingOrProd &&
+    sends &&
     (FAKE_PROVIDER_MODES.has(env.SANCHAY_PROVIDER_MODE_SMS) ||
       FAKE_PROVIDER_MODES.has(env.SANCHAY_PROVIDER_MODE_EMAIL))
   ) {
@@ -223,7 +228,7 @@ export function assertBootInvariants(env: Env): void {
     );
   }
   // 7 (R-10): every registered DLT OTP template has three lines, so the hash line must always be filled.
-  if (!localOrTest && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
+  if (!localOrTest && role === 'api' && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
     problems.push(
       'SANCHAY_SMS_RETRIEVER_HASH is required outside local/test (every DLT OTP template has three lines, R-10)',
     );
