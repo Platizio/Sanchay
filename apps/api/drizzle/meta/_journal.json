@@ -29,6 +29,48 @@
       "when": 1790572370462,
       "tag": "0003_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791352075461,
+      "tag": "0004_platform_kernel",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791352789435,
+      "tag": "0005_worker_heartbeats",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791353739523,
+      "tag": "0009_catalogue",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791355015500,
+      "tag": "0010_provider_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791356081451,
+      "tag": "0011_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791356627702,
+      "tag": "0012_pilot_invites",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { investorContacts, investors } from '../../src/db/schema.js';
+import { investorContacts, investors, otpCodes } from '../../src/db/schema.js';
 import { HOUR, MINUTE } from '../../src/modules/platform/clock.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
@@ -19,8 +20,14 @@ beforeEach(() => {
   t.clock.advance(HOUR + MINUTE);
 });
 
+/** Every /me/email/* POST is [K] since D1, and each call here is its own intent: a fresh key per call. */
 const post = (url: string, headers: Record<string, string>, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url: `/api/v1${url}`, headers, payload });
+  t.app.inject({
+    method: 'POST',
+    url: `/api/v1${url}`,
+    headers: { ...headers, 'idempotency-key': randomUUID() },
+    payload,
+  });
 
 async function signedIn(mobile: string) {
   const s = await signInNative(t, mobile);
@@ -102,5 +109,25 @@ describe('/me/email', () => {
     expect(bRow?.emailVerifiedAt).toBeNull();
     const own = await post('/me/email/verify', a.h, { challengeId, code });
     expect([own.statusCode, own.json().emailMasked]).toEqual([200, 'b•••@example.com']);
+  });
+
+  it("never lets another investor's wrong codes lock a challenge (EF8-5)", async () => {
+    const a = await signedIn('9844400007');
+    const b = await signedIn('9844400008');
+    const sent = await post('/me/email/otp', a.h, { email: 'ef85.a@example.com' });
+    const challengeId = sent.json().challengeId as string;
+    const code = t.email.latestCode('ef85.a@example.com');
+    const wrong = code === '000000' ? '111111' : '000000';
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const res = await post('/me/email/verify', b.h, { challengeId, code: wrong });
+      expect([res.statusCode, res.json().code]).toEqual([401, 'OTP_INVALID']);
+    }
+    const [row] = await t.db.db
+      .select({ attempts: otpCodes.attempts, consumedAt: otpCodes.consumedAt })
+      .from(otpCodes)
+      .where(eq(otpCodes.id, challengeId));
+    expect(row).toEqual({ attempts: 0, consumedAt: null });
+    const own = await post('/me/email/verify', a.h, { challengeId, code });
+    expect(own.statusCode).toBe(200);
   });
 });

@@ -10,6 +10,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "gen:states": "pnpm --filter=@sanchay/domain build && node scripts/gen-states.ts",
     "lint": "biome ci .",
     "format": "biome check --write .",
     "verify": "pnpm lint && pnpm build && pnpm typecheck && pnpm test",
@@ -17,7 +18,11 @@
     "db:up": "docker compose up -d postgres mailpit",
     "db:migrate": "pnpm --filter=@sanchay/api db:migrate",
     "e2e:web": "turbo run e2e:web --filter=@sanchay/web",
-    "check-brand": "node scripts/check-brand.ts"
+    "check-brand": "node scripts/check-brand.ts",
+    "ops:invite": "pnpm --filter=@sanchay/api ops:invite",
+    "ops:catalogue:seed": "pnpm --filter=@sanchay/api ops:catalogue:seed",
+    "ops:nav-backfill": "pnpm --filter=@sanchay/api ops:nav-backfill",
+    "ops:nav-release": "pnpm --filter=@sanchay/api ops:nav-release"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

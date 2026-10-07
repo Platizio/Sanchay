@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { ClsService } from 'nestjs-cls';
 import { DB, type DbHandle } from '../../db/client.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
+import { UUID_RE } from '../platform/ids.js';
 import type { AuthContext, SanchayClsStore } from '../platform/request-context.js';
 import { otpCodes } from './identity.schema.js';
 import { InvestorAccounts } from './investor-accounts.service.js';
@@ -48,6 +49,11 @@ export class ContactEmailService {
     challengeId: string,
     code: string,
   ): Promise<{ emailMasked: string; emailVerifiedAt: string }> {
+    // EF8-5: OtpService.verify commits its attempt bump on its own pool before it compares the code, so a
+    // challenge that is not this investor's is refused here, untouched. Another investor's wrong codes
+    // would otherwise lock the owner's code, and three locked codes in 60 min lock the owner's email.
+    if (!(await this.isOwnChallenge(auth.investorId, challengeId)))
+      throw new AppError('OTP_INVALID');
     const result = await this.dbh.db.transaction(
       async (tx) => {
         const verified = await this.otp.verify(tx, { challengeId, purpose: 'VERIFY_EMAIL', code });
@@ -80,5 +86,15 @@ export class ContactEmailService {
       emailMasked: result.emailMasked,
       emailVerifiedAt: result.emailVerifiedAt.toISOString(),
     };
+  }
+
+  private async isOwnChallenge(investorId: string, challengeId: string): Promise<boolean> {
+    if (!UUID_RE.test(challengeId)) return false;
+    const [row] = await this.dbh.db
+      .select({ referenceId: otpCodes.referenceId })
+      .from(otpCodes)
+      .where(and(eq(otpCodes.id, challengeId), eq(otpCodes.purpose, 'VERIFY_EMAIL')))
+      .limit(1);
+    return row?.referenceId === investorId;
   }
 }

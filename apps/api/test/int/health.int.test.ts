@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MINUTE } from '../../src/modules/platform/clock.js';
+import { workerHeartbeats } from '../../src/modules/platform/jobs/jobs.schema.js';
 import { bootTestApp, type TestApp } from './app.js';
 
 let t: TestApp;
@@ -32,10 +34,29 @@ describe('health', () => {
     expect(res.headers['x-request-id']).toBe(id);
   });
 
-  it('GET /api/v1/health/ready checks the database', async () => {
+  it('GET /api/v1/health/ready checks the database, pg-boss and a worker heartbeat, never NAV age (R-12)', async () => {
+    await t.db.db
+      .insert(workerHeartbeats)
+      .values({ taskId: 'health-fresh', lastBeatAt: t.clock.now() });
     const res = await t.app.inject({ method: 'GET', url: '/api/v1/health/ready' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ status: 'ok', checks: [{ name: 'database', ok: true }] });
+    expect(res.json()).toMatchObject({
+      status: 'ok',
+      checks: [
+        { name: 'database', ok: true },
+        { name: 'pgboss', ok: true },
+        { name: 'heartbeat', ok: true },
+      ],
+    });
+  });
+
+  it('GET /api/v1/health/ready is 500 INTERNAL (retryable) when the newest heartbeat is older than 2 minutes', async () => {
+    await t.db.pool.query('DELETE FROM app.worker_heartbeats');
+    const stale = new Date(t.clock.now().getTime() - 3 * MINUTE);
+    await t.db.db.insert(workerHeartbeats).values({ taskId: 'health-stale', lastBeatAt: stale });
+    const res = await t.app.inject({ method: 'GET', url: '/api/v1/health/ready' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ code: 'INTERNAL', data: { retryable: true } });
   });
 
   it('returns the error envelope for unknown routes', async () => {

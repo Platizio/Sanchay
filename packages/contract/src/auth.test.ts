@@ -37,8 +37,8 @@ describe('lean auth and me contract (MVP delta sheet §5.5)', () => {
     expect(route).toMatchObject({ method, path });
   });
 
-  it('exposes exactly the 9 MVP procedures', () => {
-    expect(Object.keys(contract).sort()).toEqual(['auth', 'health', 'me']);
+  it('keeps the 9 MVP procedures (later plans add contract keys and me.get)', () => {
+    expect(Object.keys(contract)).toEqual(expect.arrayContaining(['auth', 'health', 'me']));
     expect(Object.keys(contract.health).sort()).toEqual(['live', 'ready']);
     expect(Object.keys(a).sort()).toEqual([
       'logout',
@@ -47,7 +47,7 @@ describe('lean auth and me contract (MVP delta sheet §5.5)', () => {
       'session',
       'verifyOtp',
     ]);
-    expect(Object.keys(m).sort()).toEqual(['requestEmailOtp', 'verifyEmail']);
+    expect(Object.keys(m)).toEqual(expect.arrayContaining(['requestEmailOtp', 'verifyEmail']));
   });
 
   it.each([

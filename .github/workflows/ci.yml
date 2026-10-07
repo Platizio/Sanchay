@@ -71,6 +71,10 @@ jobs:
         run: pnpm test:int
       - name: DB drift
         run: pnpm --filter=@sanchay/api db:check
+      - name: States drift
+        run: |
+          pnpm gen:states
+          git diff --exit-code docs/specs/states.md
 
       - name: Secret scan (gitleaks)
         run: >-

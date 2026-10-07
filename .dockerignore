@@ -1,0 +1,12 @@
+# Build context for apps/api/Dockerfile and apps/web/Dockerfile (E25). Images build from source.
+.git
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/.expo
+**/coverage
+**/*.tsbuildinfo
+infra/cdk.out
+**/.env
+**/.env.*

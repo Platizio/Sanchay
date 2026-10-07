@@ -1,0 +1,10 @@
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date
+
+Open Ended Schemes(Equity Scheme - Flexi Cap Fund)
+Aditya Birla Sun Life Mutual Fund
+119551;INF209KA1K47;-;ABSL Flexi Cap Fund - Direct - Growth;Direct;Growth;25.3631;24-Aug-2026
+119552;INF209KB12S4;-;ABSL Frontline Equity Fund - Direct - Growth;Direct;Growth;12.9456;24-Aug-2026
+
+Open Ended Schemes(Debt Scheme - Liquid Fund)
+Aditya Birla Sun Life Mutual Fund
+119553;INF209K01819;INF209K01DH6;ABSL Liquid Fund - Regular - IDCW;Regular;IDCW;10.7917;24-Aug-2026

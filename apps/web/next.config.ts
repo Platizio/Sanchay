@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   cacheComponents: false,
   typedRoutes: true,
   poweredByHeader: false,
+  output: 'standalone',
   transpilePackages: ['@sanchay/ui', '@sanchay/features', '@sanchay/app-core'],
   turbopack: {
     resolveAlias: { 'react-native': 'react-native-web' },

@@ -18,5 +18,5 @@ Later tasks append rows or update the Status and "Written by" cells only.
 | 0011 | CAS Lambda | Reserved (P2) | Phase 2 |
 | 0012 | Retention | Planned | Lead assigns |
 | 0013 | MVP scope and deferrals (closed real-money pilot) | Planned | Lead, with `docs/specs/mvp/MVP-SPEC.md` |
-| 0014 | Minimal AWS topology: single ECS service, ALB only | Planned | Lead |
+| 0014 | Minimal AWS topology: single ECS service, ALB only | Accepted | Plan 02 Task E25 |
 | 0015 | Lumpsum FP flow: custom checkout, consent before payment (H-2) | Planned | Lead |

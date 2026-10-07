@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { EnvError, EnvSchema, parseEnv, parseKeyringJson } from './env.js';
+import {
+  EnvError,
+  EnvSchema,
+  parseEnv,
+  parseKeyringJson,
+  parseMsg91CredentialsJson,
+} from './env.js';
 
 const key = (fill: number) => Buffer.alloc(32, fill).toString('base64');
 
@@ -43,7 +49,23 @@ const devSecrets: Record<string, string> = {
   SANCHAY_KEYRING_JSON: keyringJson(),
   SANCHAY_CLIENT_IP_SOURCE: 'alb',
   SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
+  SANCHAY_PROVIDER_MODE_FP: 'sandbox',
 };
+
+function msg91Json(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    authKey: 'super-secret-auth-key',
+    senderId: 'SNCHAY',
+    peId: '1701000000000000001',
+    templateIds: {
+      LOGIN: '1707000000000000001',
+      CONSENT: '1707000000000000002',
+      CONSENT_UNITS: '1707000000000000003',
+      ATTEST: '1707000000000000004',
+    },
+    ...overrides,
+  });
+}
 
 function errorMessage(fn: () => unknown): string {
   try {
@@ -82,7 +104,7 @@ describe('parseEnv', () => {
     ).toContain('SANCHAY_CLIENT_IP_SOURCE');
   });
 
-  it('declares exactly the Plan-01 variables of the H-8 addendum (R-19); FP, MSG91 and SES arrive with Plan 02', () => {
+  it('declares exactly the Plan-01 variables of the H-8 addendum (R-19); MSG91 and SES arrive with D6', () => {
     expect(Object.keys(EnvSchema.shape).sort()).toEqual([
       'DATABASE_URL',
       'HOST',
@@ -93,19 +115,47 @@ describe('parseEnv', () => {
       'SANCHAY_AUTH_TOKEN_KEY',
       'SANCHAY_CLIENT_IP_SOURCE',
       'SANCHAY_DB_POOL_MAX',
+      'SANCHAY_FP_BASE_URL',
+      'SANCHAY_FP_CREDENTIALS_JSON',
       'SANCHAY_KEYRING_JSON',
       'SANCHAY_KEY_SERVICE',
       'SANCHAY_LOCAL_BIDX_KEY',
       'SANCHAY_LOCAL_PII_KEY',
       'SANCHAY_LOG_LEVEL',
       'SANCHAY_MAILPIT_URL',
+      'SANCHAY_MSG91_CREDENTIALS_JSON',
       'SANCHAY_OTP_PEPPER',
       'SANCHAY_OTP_PER_IP_PER_HOUR',
+      'SANCHAY_PILOT_INVITE_ONLY',
       'SANCHAY_PROVIDER_MODE_EMAIL',
+      'SANCHAY_PROVIDER_MODE_FP',
       'SANCHAY_PROVIDER_MODE_SMS',
+      'SANCHAY_SES_FROM',
       'SANCHAY_SMS_RETRIEVER_HASH',
       'SANCHAY_THROTTLE_PER_MINUTE',
     ]);
+  });
+
+  it('refuses SANCHAY_PROVIDER_MODE_FP=fake outside local/test (invariant 8)', () => {
+    for (const appEnv of ['dev', 'staging', 'prod']) {
+      expect(
+        errorMessage(() =>
+          parseEnv({ ...devSecrets, SANCHAY_APP_ENV: appEnv, SANCHAY_PROVIDER_MODE_FP: 'fake' }),
+        ),
+      ).toMatch(/SANCHAY_PROVIDER_MODE_FP=fake is refused outside local\/test/);
+    }
+  });
+
+  it('refuses SANCHAY_PROVIDER_MODE_FP=production outside SANCHAY_APP_ENV=prod (invariant 9)', () => {
+    expect(
+      errorMessage(() =>
+        parseEnv({
+          ...devSecrets,
+          SANCHAY_APP_ENV: 'staging',
+          SANCHAY_PROVIDER_MODE_FP: 'production',
+        }),
+      ),
+    ).toMatch(/SANCHAY_PROVIDER_MODE_FP=production requires SANCHAY_APP_ENV=prod/);
   });
 
   it('requires SANCHAY_SMS_RETRIEVER_HASH outside local/test (invariant 7, R-10)', () => {
@@ -127,6 +177,33 @@ describe('parseEnv', () => {
       parseEnv({ ...base, SANCHAY_APP_ENV: 'test' }).SANCHAY_SMS_RETRIEVER_HASH,
     ).toBeUndefined();
     expect(parseEnv(devSecrets).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
+  });
+
+  it('binds the retriever hash (invariant 7) to the api role only (R-19 owning containers, E25)', () => {
+    const noHash = {
+      ...omit(devSecrets, 'SANCHAY_SMS_RETRIEVER_HASH'),
+      SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+    };
+    expect(errorMessage(() => parseEnv({ ...noHash, SANCHAY_APP_ROLE: 'api' }))).toMatch(
+      /SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/,
+    );
+    for (const role of ['worker', 'migrate']) {
+      expect(parseEnv({ ...noHash, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
+    }
+  });
+
+  it('refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1, E25)', () => {
+    const prod = { ...devSecrets, SANCHAY_APP_ENV: 'prod', SANCHAY_PROVIDER_MODE_FP: 'production' };
+    for (const role of ['api', 'worker']) {
+      expect(errorMessage(() => parseEnv({ ...prod, SANCHAY_APP_ROLE: role }))).toMatch(
+        /fake SMS\/email providers \(capture, mailpit\) are refused in staging\/prod/,
+      );
+    }
+    const migrate = parseEnv({
+      ...omit(prod, 'SANCHAY_SMS_RETRIEVER_HASH'),
+      SANCHAY_APP_ROLE: 'migrate',
+    });
+    expect(migrate.SANCHAY_PROVIDER_MODE_SMS).toBe('capture');
   });
 
   it('no longer knows SANCHAY_TRUST_EDGE_HEADERS (replaced by SANCHAY_CLIENT_IP_SOURCE)', () => {
@@ -176,6 +253,53 @@ describe('parseEnv', () => {
     expect(parseEnv(devSecrets).SANCHAY_PROVIDER_MODE_SMS).toBe('capture');
   });
 
+  it('boot invariant 11: msg91 mode without SANCHAY_MSG91_CREDENTIALS_JSON is refused', () => {
+    expect(() => parseEnv({ ...base, SANCHAY_PROVIDER_MODE_SMS: 'msg91' })).toThrow(
+      /SANCHAY_MSG91_CREDENTIALS_JSON/,
+    );
+  });
+
+  it('boot invariant 12: ses mode without SANCHAY_SES_FROM is refused', () => {
+    expect(() => parseEnv({ ...base, SANCHAY_PROVIDER_MODE_EMAIL: 'ses' })).toThrow(
+      /SANCHAY_SES_FROM/,
+    );
+  });
+
+  it('boots in prod with the msg91 and ses adapters configured', () => {
+    expect(
+      parseEnv({
+        ...devSecrets,
+        SANCHAY_APP_ENV: 'prod',
+        SANCHAY_PROVIDER_MODE_SMS: 'msg91',
+        SANCHAY_PROVIDER_MODE_EMAIL: 'ses',
+        SANCHAY_MSG91_CREDENTIALS_JSON: msg91Json(),
+        SANCHAY_SES_FROM: 'noreply@sanchay.in',
+      }),
+    ).toMatchObject({ SANCHAY_PROVIDER_MODE_SMS: 'msg91', SANCHAY_PROVIDER_MODE_EMAIL: 'ses' });
+  });
+
+  it('refuses malformed MSG91 credentials with a fixed message that never echoes the auth key', () => {
+    const cases: Array<[string, RegExp]> = [
+      ['{"authKey":"super-secret-auth-key"', /\(not valid JSON\)/],
+      [msg91Json({ senderId: '' }), /\(wrong shape\)/],
+      [msg91Json({ extra: 'x' }), /\(wrong shape\)/],
+      [msg91Json({ templateIds: { LOGIN: 'a' } }), /\(wrong shape\)/],
+    ];
+    for (const [raw, reason] of cases) {
+      const message = errorMessage(() =>
+        parseEnv({
+          ...base,
+          SANCHAY_PROVIDER_MODE_SMS: 'msg91',
+          SANCHAY_MSG91_CREDENTIALS_JSON: raw,
+        }),
+      );
+      expect(message).toMatch(reason);
+      expect(message).not.toContain('super-secret-auth-key');
+    }
+    expect(() => parseMsg91CredentialsJson(undefined)).toThrow(EnvError);
+    expect(parseMsg91CredentialsJson(msg91Json()).templateIds.ATTEST).toBe('1707000000000000004');
+  });
+
   it('refuses SANCHAY_KEY_SERVICE=kms (KMS envelope encryption is phase 2)', () => {
     expect(errorMessage(() => parseEnv({ ...base, SANCHAY_KEY_SERVICE: 'kms' }))).toMatch(
       /SANCHAY_KEY_SERVICE=kms is not available in this build/,
@@ -189,6 +313,15 @@ describe('parseEnv', () => {
     expect(
       errorMessage(() => parseEnv({ ...devSecrets, SANCHAY_OTP_PER_IP_PER_HOUR: '1000' })),
     ).toMatch(/SANCHAY_OTP_PER_IP_PER_HOUR must be 20 outside local\/test/);
+  });
+
+  it('refuses SANCHAY_PILOT_INVITE_ONLY=false in prod (invariant 10)', () => {
+    expect(
+      errorMessage(() =>
+        parseEnv({ ...devSecrets, SANCHAY_APP_ENV: 'prod', SANCHAY_PILOT_INVITE_ONLY: 'false' }),
+      ),
+    ).toMatch(/SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2/);
+    expect(parseEnv(base).SANCHAY_PILOT_INVITE_ONLY).toBe(true);
   });
 
   it('requires the ALB client-IP source outside local/test', () => {

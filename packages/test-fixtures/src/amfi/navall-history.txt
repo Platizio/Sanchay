@@ -1,0 +1,4 @@
+Scheme Code;NAV Name;Plan;Option;ISIN Div Payout/ISIN Growth;ISIN Div Reinvestment;Net Asset Value;Date
+
+119551;ABSL Flexi Cap Fund - Direct - Growth;Direct;Growth;INF209KA1K47;-;25.3631;24-Aug-2026
+119552;ABSL Frontline Equity Fund - Direct - Growth;Direct;Growth;INF209KB12S4;-;12.9456;24-Aug-2026

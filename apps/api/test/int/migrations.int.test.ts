@@ -55,6 +55,26 @@ describe('baseline migrations', () => {
     expect(r.rows[0]?.t).toBe('app.audit_events');
   });
 
+  it('creates app.idempotency_keys, app.app_config and app.recon_breaks', async () => {
+    for (const name of ['idempotency_keys', 'app_config', 'recon_breaks']) {
+      const r = await t.pool.query<{ t: string | null }>(
+        `SELECT to_regclass('app.${name}')::text AS t`,
+      );
+      expect(r.rows[0]?.t).toBe(`app.${name}`);
+    }
+  });
+
+  it('creates app.worker_heartbeats and schema pgboss with pgboss.job', async () => {
+    const app = await t.pool.query<{ t: string | null }>(
+      `SELECT to_regclass('app.worker_heartbeats')::text AS t`,
+    );
+    expect(app.rows[0]?.t).toBe('app.worker_heartbeats');
+    const boss = await t.pool.query<{ t: string | null }>(
+      `SELECT to_regclass('pgboss.job')::text AS t`,
+    );
+    expect(boss.rows[0]?.t).toBe('pgboss.job');
+  });
+
   it('uses timestamptz for every timestamp column in schema app', async () => {
     const r = await t.pool.query(
       `SELECT table_name, column_name FROM information_schema.columns

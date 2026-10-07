@@ -99,6 +99,7 @@ and `pnpm install` would have refused on the real platform package for this mach
 
 | Package | Version | Source |
 |---|---|---|
+| @aws-sdk/client-sesv2 | 3.1143.0 | outside §A.2 (new in Plan 02 D6: SES v2 email adapter; R-42; published 2026-09-29, past the 7-day release age, so no exclusion row) |
 | @biomejs/biome | 2.5.14 | design §A.2 |
 | @hookform/resolvers | 5.9.1 | design §A.2 |
 | @nestjs/cli | 11.0.24 | outside §A.2 (Nest 11 CLI line, PO-1) |
@@ -140,11 +141,13 @@ and `pnpm install` would have refused on the real platform package for this mach
 | jsdom | 30.1.1 | outside §A.2 (ui tests) |
 | lefthook | 2.1.14 | design §A.2 |
 | light-my-request | 6.6.0 | outside §A.2 (Fastify inject in API tests) |
+| lossless-json | 4.1.1 | outside §A.2 (new in Plan 02 D3: `apps/api/src/integrations/fp/fp-json.ts` parses FP response bodies without float precision loss on large amounts and high-precision unit quantities; R-42; published 2025-06-23, past the 7-day release age, so no exclusion row) |
 | msw | 2.15.0 | design §A.2 |
 | nestjs-cls | 7.0.1 | design §A.2 |
 | nestjs-pino | 5.2.0 | design §A.2 |
 | next | 16.3.6 | design §A.2 |
 | pg | 8.23.0 | design §A.2 |
+| pg-boss | 12.34.0 | outside §A.2 (new in Plan 02 D2: JobsModule queues, R-32; R-42; published 2026-09-23, past the 7-day release age, so no exclusion row) |
 | pino | 10.3.1 | design §A.2 |
 | pino-http | 11.0.0 | design §A.2 |
 | react | 19.2.3 | design §A.2 (one version; Expo 57 bundled) |
@@ -156,7 +159,9 @@ and `pnpm install` would have refused on the real platform package for this mach
 | rxjs | 7.8.2 | outside §A.2 (Nest peer) |
 | tailwindcss | 4.3.3 | design §A.2 |
 | turbo | 2.11.4 | design §A.2 |
+| tsx | 4.23.15 | outside §A.2 (new in Plan 02 D4: `tools/fp-probes` runs the smoke harness TypeScript source directly, the way `nest start -b swc` runs the API in dev, without a build step for a tool this small; R-42; published 2026-09-20, past the 7-day release age, so no exclusion row) |
 | typescript | 6.0.3 | design §A.2 |
+| undici | 7.30.0 | outside §A.2 (new in Plan 02: FpGateway HTTP client, `apps/api/src/integrations/fp/fp-transport.ts` (D3), and the AMFI NAV feed client (D9); chosen for its `Agent`/`MockAgent` pair, with real per-request timeouts and deterministic interception for D4 FakeFp and the unit tests; R-42; 7.x only per R-43; published 2026-09-25, past the 7-day release age, so no exclusion row) |
 | unplugin-swc | 2.0.0 | outside §A.2 (decorator metadata in Vitest for the API) |
 | uuid | 14.0.2 | design §A.2 |
 | vite | 7.3.6 | outside §A.2 (Vitest 5 peer; single pin, review X-06) |
@@ -233,3 +238,8 @@ Expo modules are not in the catalog. They are pinned directly in `apps/mobile/pa
 | 2026-10-05 | CI fix (PR #4) | `pnpm-workspace.yaml` gains `auditConfig.ignoreGhsas` with exactly two advisories that have **no patched version**: GHSA-86w9-cpqp-85rv (node-forge ≤1.4.0, high; via `expo` → `@expo/cli` and `@expo/code-signing-certificates`) and GHSA-vfj7-8cjw-p6xm (braces ≤3.0.3, high; via `react-native`/`expo` → `metro` → `micromatch`). The two moderate advisories CI still lists (below `--audit-level=high`) are untouched. | CI `pnpm audit --prod --audit-level=high` failed on these two new advisories, which no upgrade can fix. Both reach the tree only through the mobile toolchain, which runs on developer machines and CI: the api and web images install `--filter=@sanchay/api...` / `--filter=@sanchay/web...` only, and the MVP uses no Expo code signing (`expo-updates` is not a dependency). Re-check on 2026-11-02 and on every Expo SDK or Metro bump; remove each entry as soon as a fixed version exists. |
 | 2026-10-06 | CI fix (PR #5) | `minimumReleaseAgeExclude` gains `'source-map-js@1.2.2'`, and the lockfile moves every `source-map-js` reference from 1.2.1 to **1.2.2** (`pnpm update source-map-js -r --depth Infinity`). No `overrides` or `catalog:` change: every dependent (`postcss@8.5.23`, `postcss@8.5.28`, `@tailwindcss/node@4.3.3`, `css-tree@3.2.1`, `magicast@0.5.5`) already accepts `^1.2.1`. | CI `pnpm audit --prod --audit-level=high` failed on the new high advisory GHSA-68fv-2mgg-jv7q (source-map-js >=1.0.0 <1.2.2; via `expo` → `@expo/metro-config` → `postcss` and 40 other paths), fixed in 1.2.2. 1.2.2 was published 2026-09-30T14:08:09Z, inside the 7-day `minimumReleaseAge` window; expires 2026-10-07 |
 | 2026-10-07 | CI fix (PR #7) | Lockfile only: `shell-quote` 1.10.0 → **1.11.0** and `sharp` 0.35.4 → **0.35.5**, with its `@img/sharp-*` 0.35.5 and `@img/sharp-libvips-*` 1.3.4 binaries (`pnpm update shell-quote sharp -r --depth Infinity`). No `overrides`, `catalog:` or `minimumReleaseAgeExclude` change: every dependent's range already admits them, and both were published more than 7 days earlier (1.11.0 on 2026-09-29, 0.35.5 on 2026-09-27). | CI `pnpm audit --prod --audit-level=high` failed on two new advisories: GHSA-pqg4-j6r4-53mv (critical; `shell-quote` >=1.8.4 <1.11.0, via `expo` → `react-native` → `react-devtools-core`, mobile toolchain) and GHSA-wq5f-xc86-pv6w (high; `sharp` <0.35.5, via `next`, in the web image). |
+| 2026-10-07 | D6 | `catalog:` gains `'@aws-sdk/client-sesv2': 3.1143.0`; `apps/api/package.json` adds it as a dependency (`"@aws-sdk/client-sesv2": "catalog:"`) | SES v2 adapter (`SesEmailSender`) needs an AWS SDK client; MSG91 uses plain `fetch` (no new dependency, matching the existing `MailpitSmsSender` pattern), so this is the only new catalog entry D6 needs (R-42). 3.1143.0 is the newest release past the 7-day `minimumReleaseAge` on 2026-10-07 (3.1144.0 published 2026-09-30, 3.1146.0 2026-10-02, 3.1147.0 2026-10-06); `pnpm install` accepted it and its transitive tree, so no `minimumReleaseAgeExclude` entry |
+| 2026-10-07 | D4 | `catalog:` gains `tsx: 4.23.15`; the new workspace package `tools/fp-probes` (`@sanchay/fp-probes`) depends on it (`"tsx": "catalog:"`) | The sandbox contract-smoke harness (`pnpm --filter=@sanchay/fp-probes smoke`) runs TypeScript directly (R-42). The plan text named 4.19.2; the plan header says to pin the newest exact version past the 7-day `minimumReleaseAge`, which on 2026-10-07 is 4.23.15 (published 2026-09-20; 4.23.14 was 2026-09-20 as well, and no later release exists). `pnpm install` accepted it with no `minimumReleaseAgeExclude`, `allowBuilds` or `trustPolicy` change (its `esbuild` dependency already has an `allowBuilds` entry) |
+| 2026-10-07 | E25 | `catalog:` gains `aws-cdk-lib: 2.271.0` | CDK construct library for `infra` (`SanchayMvpStack-prod`, R-31, R-42). The plan text named 2.216.0; the plan header says to pin the newest exact version past the 7-day `minimumReleaseAge`, which on 2026-10-07 is 2.271.0 (published 2026-09-25; 2.272.0 was published 2026-09-30T14:18Z, inside the window). `pnpm install` accepted it with no `minimumReleaseAgeExclude`, `allowBuilds` or `trustPolicy` change |
+| 2026-10-07 | E25 | `catalog:` gains `constructs: 10.8.1` | Peer of `aws-cdk-lib` (R-42). The plan text named 10.4.2; 10.8.1 (published 2026-08-03) is the newest release and passes the 7-day `minimumReleaseAge` |
+| 2026-10-07 | E25 | `catalog:` gains `aws-cdk: 2.1143.0` (the CDK CLI, versioned 2.1xxx since 2025-02) | `cdk synth` and `cdk deploy` for `infra` (R-42). 2.1143.0 (published 2026-09-23) is the newest CLI past the 7-day `minimumReleaseAge` on 2026-10-07 (2.1144.0 was published 2026-10-01); a newer CLI always reads an older library's cloud assembly |

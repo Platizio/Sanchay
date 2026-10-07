@@ -1,0 +1,10 @@
+{
+  "extends": "@sanchay/config/tsconfig/node-lib.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["bin", "lib", "test"]
+}

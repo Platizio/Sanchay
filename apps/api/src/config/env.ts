@@ -56,6 +56,70 @@ export function parseKeyringJson(raw: string | undefined): Keyring {
   return result.data;
 }
 
+const FpAudienceCredentialsSchema = z.strictObject({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+});
+
+export const FpCredentialsSchema = z.strictObject({
+  tenantId: z.string().min(1),
+  fp: FpAudienceCredentialsSchema,
+  poa: FpAudienceCredentialsSchema,
+  pg: FpAudienceCredentialsSchema,
+});
+export type FpCredentials = z.infer<typeof FpCredentialsSchema>;
+
+const FP_CREDENTIALS_PROBLEM =
+  'SANCHAY_FP_CREDENTIALS_JSON is required and must be well-formed outside fake mode';
+
+/** Parses the FP OAuth credentials. Fixed messages only, so a secret can never reach a log line. */
+export function parseFpCredentialsJson(raw: string | undefined): FpCredentials {
+  if (raw === undefined || raw === '') {
+    throw new EnvError(`${FP_CREDENTIALS_PROBLEM} (missing)`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new EnvError(`${FP_CREDENTIALS_PROBLEM} (not valid JSON)`);
+  }
+  const result = FpCredentialsSchema.safeParse(json);
+  if (!result.success) {
+    throw new EnvError(`${FP_CREDENTIALS_PROBLEM} (wrong shape)`);
+  }
+  return result.data;
+}
+
+export const Msg91CredentialsSchema = z.strictObject({
+  authKey: z.string().min(1),
+  senderId: z.string().min(1),
+  peId: z.string().min(1),
+  templateIds: z.strictObject({
+    LOGIN: z.string().min(1),
+    CONSENT: z.string().min(1),
+    CONSENT_UNITS: z.string().min(1),
+    ATTEST: z.string().min(1),
+  }),
+});
+export type Msg91Credentials = z.infer<typeof Msg91CredentialsSchema>;
+
+const MSG91_PROBLEM =
+  'SANCHAY_PROVIDER_MODE_SMS=msg91 requires a valid SANCHAY_MSG91_CREDENTIALS_JSON';
+
+/** Parses the MSG91 credentials secret. Messages are fixed strings: no key material can reach a log line. */
+export function parseMsg91CredentialsJson(raw: string | undefined): Msg91Credentials {
+  if (raw === undefined || raw === '') throw new EnvError(`${MSG91_PROBLEM} (missing)`);
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new EnvError(`${MSG91_PROBLEM} (not valid JSON)`);
+  }
+  const result = Msg91CredentialsSchema.safeParse(json);
+  if (!result.success) throw new EnvError(`${MSG91_PROBLEM} (wrong shape)`);
+  return result.data;
+}
+
 export const EnvSchema = z.object({
   SANCHAY_APP_ENV: z.enum(['local', 'test', 'dev', 'staging', 'prod']),
   SANCHAY_APP_ROLE: z.enum(['api', 'worker', 'migrate']).default('api'),
@@ -74,15 +138,21 @@ export const EnvSchema = z.object({
   SANCHAY_OTP_PEPPER: key32.optional(),
   SANCHAY_AUTH_TOKEN_KEY: key32.optional(),
   SANCHAY_KEYRING_JSON: z.string().optional(),
-  SANCHAY_PROVIDER_MODE_SMS: z.enum(['capture', 'mailpit']).default('capture'),
-  SANCHAY_PROVIDER_MODE_EMAIL: z.enum(['capture', 'mailpit']).default('capture'),
+  SANCHAY_PROVIDER_MODE_SMS: z.enum(['capture', 'mailpit', 'msg91']).default('capture'),
+  SANCHAY_PROVIDER_MODE_EMAIL: z.enum(['capture', 'mailpit', 'ses']).default('capture'),
   SANCHAY_MAILPIT_URL: z.url({ protocol: /^https?$/ }).default('http://localhost:8025'),
+  SANCHAY_MSG91_CREDENTIALS_JSON: z.string().optional(),
+  SANCHAY_SES_FROM: z.email().optional(),
   SANCHAY_SMS_RETRIEVER_HASH: z
     .string()
     .regex(/^[A-Za-z0-9+/]{11}$/)
     .optional(),
   SANCHAY_THROTTLE_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(120),
   SANCHAY_OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
+  SANCHAY_PILOT_INVITE_ONLY: z.stringbool().default(true),
+  SANCHAY_PROVIDER_MODE_FP: z.enum(['fake', 'sandbox', 'production']).default('fake'),
+  SANCHAY_FP_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
+  SANCHAY_FP_CREDENTIALS_JSON: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -100,17 +170,21 @@ const PROD_OTP_PER_IP_PER_HOUR = 20;
 
 /**
  * Fail-closed boot guard (design §K; delta sheet §5.2 invariants 1–6; invariant 7 from ruling R-10).
- * Every violation is reported at once. staging and prod cannot boot until plan-02-mvp-kernel adds
- * the msg91/ses provider modes.
+ * Every violation is reported at once. staging and prod boot only with the msg91 and ses provider modes (D6).
  */
 export function assertBootInvariants(env: Env): void {
   const problems: string[] = [];
   const localOrTest = env.SANCHAY_APP_ENV === 'local' || env.SANCHAY_APP_ENV === 'test';
   const stagingOrProd = env.SANCHAY_APP_ENV === 'staging' || env.SANCHAY_APP_ENV === 'prod';
+  // R-19 owning containers (E25): api and worker send SMS and email; only api sends OTPs (the
+  // retriever hash) and, from E1 on, receives the FP webhook. migrate sends nothing.
+  const role = env.SANCHAY_APP_ROLE;
+  const sends = role === 'api' || role === 'worker';
 
   // 1
   if (
     stagingOrProd &&
+    sends &&
     (FAKE_PROVIDER_MODES.has(env.SANCHAY_PROVIDER_MODE_SMS) ||
       FAKE_PROVIDER_MODES.has(env.SANCHAY_PROVIDER_MODE_EMAIL))
   ) {
@@ -154,10 +228,34 @@ export function assertBootInvariants(env: Env): void {
     );
   }
   // 7 (R-10): every registered DLT OTP template has three lines, so the hash line must always be filled.
-  if (!localOrTest && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
+  if (!localOrTest && role === 'api' && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
     problems.push(
       'SANCHAY_SMS_RETRIEVER_HASH is required outside local/test (every DLT OTP template has three lines, R-10)',
     );
+  }
+  // 8 (plan-02-mvp-kernel D3): the fake FP transport must never run outside local/test.
+  if (!localOrTest && env.SANCHAY_PROVIDER_MODE_FP === 'fake') {
+    problems.push('SANCHAY_PROVIDER_MODE_FP=fake is refused outside local/test');
+  }
+  // 9 (plan-02-mvp-kernel D3): the live production FP transport must only run in the prod app env.
+  if (env.SANCHAY_PROVIDER_MODE_FP === 'production' && env.SANCHAY_APP_ENV !== 'prod') {
+    problems.push('SANCHAY_PROVIDER_MODE_FP=production requires SANCHAY_APP_ENV=prod');
+  }
+  // 11 (D6; numbered provisionally, the numbers are documentation labels only)
+  if (env.SANCHAY_PROVIDER_MODE_SMS === 'msg91') {
+    try {
+      parseMsg91CredentialsJson(env.SANCHAY_MSG91_CREDENTIALS_JSON);
+    } catch (error) {
+      problems.push(error instanceof EnvError ? error.message : MSG91_PROBLEM);
+    }
+  }
+  // 12 (D6; numbered provisionally)
+  if (env.SANCHAY_PROVIDER_MODE_EMAIL === 'ses' && env.SANCHAY_SES_FROM === undefined) {
+    problems.push('SANCHAY_PROVIDER_MODE_EMAIL=ses requires SANCHAY_SES_FROM');
+  }
+  // 10 (R-06 gate; H-8 addendum; D7: the outline fixes this number, D6's 11 and 12 are provisional)
+  if (env.SANCHAY_APP_ENV === 'prod' && !env.SANCHAY_PILOT_INVITE_ONLY) {
+    problems.push('SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2');
   }
 
   if (problems.length > 0) {

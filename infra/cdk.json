@@ -1,0 +1,3 @@
+{
+  "app": "tsc -p tsconfig.json && node dist/bin/sanchay.js"
+}

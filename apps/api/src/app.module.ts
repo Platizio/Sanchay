@@ -8,12 +8,16 @@ import { ClsModule, ClsService } from 'nestjs-cls';
 import { Logger, LoggerModule } from 'nestjs-pino';
 import { v7 as uuidv7 } from 'uuid';
 import type { Env } from './config/env.js';
+import { FpModule } from './integrations/fp/fp.module.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
+import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { SessionGuard } from './modules/identity/session.guard.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
 import { ClientGuard } from './modules/platform/client.guard.js';
 import { HealthRouter } from './modules/platform/health.router.js';
+import { JobsModule } from './modules/platform/jobs/jobs.module.js';
 import { buildPinoHttpOptions } from './modules/platform/logging.js';
 import { buildOrpcConfig } from './modules/platform/orpc.js';
 import { PlatformModule } from './modules/platform/platform.module.js';
@@ -46,6 +50,7 @@ export class AppModule {
               cls.set('userAgent', headerValue(req.headers['user-agent'])?.slice(0, 512) ?? null);
               cls.set('client', null);
               cls.set('auth', null);
+              cls.set('dbInTx', false);
             },
           },
         }),
@@ -60,8 +65,13 @@ export class AppModule {
             buildOrpcConfig(cls, logger),
         }),
         PlatformModule.forRoot(env),
+        JobsModule,
         IntegrationsModule.forRoot(env),
+        NotificationsModule,
         IdentityModule,
+        // "Providers are called only from worker jobs": FpModule is never imported in the api role.
+        ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
+        CatalogueModule.forRoot(env),
       ],
       controllers: [HealthRouter],
       providers: [
