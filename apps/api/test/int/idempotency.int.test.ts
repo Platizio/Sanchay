@@ -1,7 +1,12 @@
-import { and, eq } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { appConfig, idempotencyKeys, reconBreaks } from '../../src/db/schema.js';
 import { HOUR, SECOND } from '../../src/modules/platform/clock.js';
+import {
+  IdempotencyKeyReused,
+  IdempotencyService,
+} from '../../src/modules/platform/idempotency.service.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
 import { nativeHeaders } from './http.js';
@@ -141,6 +146,71 @@ describe('idempotency (/me/email/*, D-8 superseded)', () => {
       },
     });
     expect([res.statusCode, res.json().code]).toEqual([428, 'IDEMPOTENCY_KEY_REQUIRED']);
+  });
+});
+
+describe('IdempotencyService (fix round 1)', () => {
+  const sha = (s: string) => createHash('sha256').update(s).digest();
+  const svc = () => new IdempotencyService(t.db, t.clock);
+
+  it('refuses a key reused on a different route like a different payload, never replays it', async () => {
+    const idem = svc();
+    const ref = { actorId: 'actor-route', key: '0199a000-0000-7000-8000-0000000000a1' };
+    const hash = sha('same-input');
+    await idem.begin({ ...ref, route: 'me.requestEmailOtp', requestSha256: hash });
+    await idem.complete({ ...ref, status: 200, body: { ok: true } });
+    await expect(
+      idem.begin({ ...ref, route: 'me.verifyEmail', requestSha256: hash }),
+    ).rejects.toBeInstanceOf(IdempotencyKeyReused);
+    // The same route and hash still replays.
+    await expect(
+      idem.begin({ ...ref, route: 'me.requestEmailOtp', requestSha256: hash }),
+    ).resolves.toEqual({ kind: 'replay', status: 200, body: { ok: true } });
+  });
+
+  it('completes a void/null handler output as JSON null and replays null', async () => {
+    const idem = svc();
+    const ref = { actorId: 'actor-void', key: '0199a000-0000-7000-8000-0000000000a2' };
+    const input = { ...ref, route: 'x.void', requestSha256: sha('void') };
+    await idem.begin(input);
+    await idem.complete({ ...ref, status: 200, body: undefined });
+    const [row] = await t.db.db
+      .select({
+        status: idempotencyKeys.status,
+        isJsonNull: sql<boolean>`${idempotencyKeys.responseBody} = 'null'::jsonb`,
+      })
+      .from(idempotencyKeys)
+      .where(and(eq(idempotencyKeys.actorId, ref.actorId), eq(idempotencyKeys.key, ref.key)));
+    expect(row).toEqual({ status: 'COMPLETED', isJsonNull: true });
+    await expect(idem.begin(input)).resolves.toEqual({
+      kind: 'replay',
+      status: 200,
+      body: null,
+    });
+  });
+
+  it('lets sanchay_app insert, update and delete an idempotency_keys row (grants)', async () => {
+    const client = await t.db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SET LOCAL ROLE sanchay_app');
+      await client.query(
+        `INSERT INTO app.idempotency_keys (actor_id, key, route, request_sha256, expires_at)
+         VALUES ('grant-actor', '0199a000-0000-7000-8000-0000000000a3', 'r', '\\x00', now())`,
+      );
+      const upd = await client.query(
+        `UPDATE app.idempotency_keys SET status = 'COMPLETED', response_status = 200, response_body = 'null'::jsonb
+         WHERE actor_id = 'grant-actor'`,
+      );
+      expect(upd.rowCount).toBe(1);
+      const del = await client.query(
+        `DELETE FROM app.idempotency_keys WHERE actor_id = 'grant-actor'`,
+      );
+      expect(del.rowCount).toBe(1);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
   });
 });
 

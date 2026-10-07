@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
 import { CLOCK, type Clock, DAY } from './clock.js';
 import { idempotencyKeys } from './kernel.schema.js';
@@ -70,7 +70,8 @@ export class IdempotencyService {
     if (row.status === 'IN_PROGRESS') {
       return Promise.reject(new IdempotencyInProgress());
     }
-    if (!row.requestSha256.equals(input.requestSha256)) {
+    // A key reused on another route is refused exactly like a different payload, never replayed.
+    if (row.route !== input.route || !row.requestSha256.equals(input.requestSha256)) {
       return Promise.reject(new IdempotencyKeyReused());
     }
     return { kind: 'replay', status: row.responseStatus ?? 200, body: row.responseBody };
@@ -79,7 +80,13 @@ export class IdempotencyService {
   async complete(input: IdempotencyCompleteInput): Promise<void> {
     await this.dbh.db
       .update(idempotencyKeys)
-      .set({ status: 'COMPLETED', responseStatus: input.status, responseBody: input.body })
+      .set({
+        status: 'COMPLETED',
+        responseStatus: input.status,
+        // A void/null output is stored as JSON null (jsonb 'null'), never SQL NULL, so
+        // idempotency_keys_response_pair_ck holds and a replay returns null.
+        responseBody: input.body ?? sql`'null'::jsonb`,
+      })
       .where(and(eq(idempotencyKeys.actorId, input.actorId), eq(idempotencyKeys.key, input.key)));
   }
 
