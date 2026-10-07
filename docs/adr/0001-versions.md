@@ -140,6 +140,7 @@ and `pnpm install` would have refused on the real platform package for this mach
 | jsdom | 30.1.1 | outside §A.2 (ui tests) |
 | lefthook | 2.1.14 | design §A.2 |
 | light-my-request | 6.6.0 | outside §A.2 (Fastify inject in API tests) |
+| lossless-json | 4.1.1 | outside §A.2 (new in Plan 02 D3: `apps/api/src/integrations/fp/fp-json.ts` parses FP response bodies without float precision loss on large amounts and high-precision unit quantities; R-42; published 2025-06-23, past the 7-day release age, so no exclusion row) |
 | msw | 2.15.0 | design §A.2 |
 | nestjs-cls | 7.0.1 | design §A.2 |
 | nestjs-pino | 5.2.0 | design §A.2 |
@@ -158,6 +159,7 @@ and `pnpm install` would have refused on the real platform package for this mach
 | tailwindcss | 4.3.3 | design §A.2 |
 | turbo | 2.11.4 | design §A.2 |
 | typescript | 6.0.3 | design §A.2 |
+| undici | 7.30.0 | outside §A.2 (new in Plan 02 D3: FpGateway HTTP client, `apps/api/src/integrations/fp/fp-transport.ts`; chosen for its `Agent`/`MockAgent` pair, with real per-request timeouts and deterministic interception for D4 FakeFp and the unit tests; R-42; 7.x only per R-43; published 2026-09-25, past the 7-day release age, so no exclusion row) |
 | unplugin-swc | 2.0.0 | outside §A.2 (decorator metadata in Vitest for the API) |
 | uuid | 14.0.2 | design §A.2 |
 | vite | 7.3.6 | outside §A.2 (Vitest 5 peer; single pin, review X-06) |

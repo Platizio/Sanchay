@@ -31,6 +31,12 @@ export interface SanchayClsStore extends ClsStore {
   userAgent: string | null;
   client: ClientInfo | null;
   auth: AuthContext | null;
+  /**
+   * Set by `runInTx` (db/client.ts, plan-02-mvp-kernel D3) for the lifetime of a DB transaction, so
+   * `FpTransport.call` can refuse to run inside one. Always initialised to `false` per request by
+   * `AppModule.forRoot` ClsModule setup callback.
+   */
+  dbInTx: boolean;
 }
 
 const REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

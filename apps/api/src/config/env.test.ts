@@ -43,6 +43,7 @@ const devSecrets: Record<string, string> = {
   SANCHAY_KEYRING_JSON: keyringJson(),
   SANCHAY_CLIENT_IP_SOURCE: 'alb',
   SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
+  SANCHAY_PROVIDER_MODE_FP: 'sandbox',
 };
 
 function errorMessage(fn: () => unknown): string {
@@ -82,7 +83,7 @@ describe('parseEnv', () => {
     ).toContain('SANCHAY_CLIENT_IP_SOURCE');
   });
 
-  it('declares exactly the Plan-01 variables of the H-8 addendum (R-19); FP, MSG91 and SES arrive with Plan 02', () => {
+  it('declares exactly the Plan-01 variables of the H-8 addendum (R-19); MSG91 and SES arrive with D6', () => {
     expect(Object.keys(EnvSchema.shape).sort()).toEqual([
       'DATABASE_URL',
       'HOST',
@@ -93,6 +94,8 @@ describe('parseEnv', () => {
       'SANCHAY_AUTH_TOKEN_KEY',
       'SANCHAY_CLIENT_IP_SOURCE',
       'SANCHAY_DB_POOL_MAX',
+      'SANCHAY_FP_BASE_URL',
+      'SANCHAY_FP_CREDENTIALS_JSON',
       'SANCHAY_KEYRING_JSON',
       'SANCHAY_KEY_SERVICE',
       'SANCHAY_LOCAL_BIDX_KEY',
@@ -102,10 +105,33 @@ describe('parseEnv', () => {
       'SANCHAY_OTP_PEPPER',
       'SANCHAY_OTP_PER_IP_PER_HOUR',
       'SANCHAY_PROVIDER_MODE_EMAIL',
+      'SANCHAY_PROVIDER_MODE_FP',
       'SANCHAY_PROVIDER_MODE_SMS',
       'SANCHAY_SMS_RETRIEVER_HASH',
       'SANCHAY_THROTTLE_PER_MINUTE',
     ]);
+  });
+
+  it('refuses SANCHAY_PROVIDER_MODE_FP=fake outside local/test (invariant 8)', () => {
+    for (const appEnv of ['dev', 'staging', 'prod']) {
+      expect(
+        errorMessage(() =>
+          parseEnv({ ...devSecrets, SANCHAY_APP_ENV: appEnv, SANCHAY_PROVIDER_MODE_FP: 'fake' }),
+        ),
+      ).toMatch(/SANCHAY_PROVIDER_MODE_FP=fake is refused outside local\/test/);
+    }
+  });
+
+  it('refuses SANCHAY_PROVIDER_MODE_FP=production outside SANCHAY_APP_ENV=prod (invariant 9)', () => {
+    expect(
+      errorMessage(() =>
+        parseEnv({
+          ...devSecrets,
+          SANCHAY_APP_ENV: 'staging',
+          SANCHAY_PROVIDER_MODE_FP: 'production',
+        }),
+      ),
+    ).toMatch(/SANCHAY_PROVIDER_MODE_FP=production requires SANCHAY_APP_ENV=prod/);
   });
 
   it('requires SANCHAY_SMS_RETRIEVER_HASH outside local/test (invariant 7, R-10)', () => {

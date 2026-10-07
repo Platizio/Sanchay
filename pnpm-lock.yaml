@@ -126,6 +126,9 @@ catalogs:
     light-my-request:
       specifier: 6.6.0
       version: 6.6.0
+    lossless-json:
+      specifier: 4.1.1
+      version: 4.1.1
     msw:
       specifier: 2.15.0
       version: 2.15.0
@@ -180,6 +183,9 @@ catalogs:
     typescript:
       specifier: 6.0.3
       version: 6.0.3
+    undici:
+      specifier: 7.30.0
+      version: 7.30.0
     unplugin-swc:
       specifier: 2.0.0
       version: 2.0.0
@@ -252,12 +258,18 @@ importers:
       '@sanchay/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@sanchay/money':
+        specifier: workspace:*
+        version: link:../../packages/money
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
       fastify:
         specifier: 5.12.5
         version: 5.12.5
+      lossless-json:
+        specifier: 'catalog:'
+        version: 4.1.1
       nestjs-cls:
         specifier: 'catalog:'
         version: 7.0.1(@nestjs/common@11.2.6(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@11.2.6(@nestjs/common@11.2.6(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -282,6 +294,9 @@ importers:
       rxjs:
         specifier: 'catalog:'
         version: 7.8.2
+      undici:
+        specifier: 'catalog:'
+        version: 7.30.0
       uuid:
         specifier: 'catalog:'
         version: 14.0.2
@@ -5702,6 +5717,9 @@ packages:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
     hasBin: true
 
+  lossless-json@4.1.1:
+    resolution: {integrity: sha512-HusN80C0ohtT9kOHQH7EuUaqzRQsnekpa+2ot8OzvW0iC08dq/YtM/7uKwwajldQsCrHyC8q9fz3t3L+TmDltA==}
+
   lowercase-keys@3.0.0:
     resolution: {integrity: sha512-ozCC6gdQ+glXOQsveKD0YsDy8DSQFjDTz4zyzEHNV5+JP5D62LmfDZ6o1cycFx9ouG940M5dE8C8CTewdj2YWQ==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
@@ -7334,6 +7352,10 @@ packages:
 
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
+
+  undici@7.30.0:
+    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
+    engines: {node: '>=20.18.1'}
 
   undici@8.10.2:
     resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
@@ -12641,6 +12663,8 @@ snapshots:
     dependencies:
       js-tokens: 4.0.0
 
+  lossless-json@4.1.1: {}
+
   lowercase-keys@3.0.0: {}
 
   lru-cache@10.4.3: {}
@@ -14716,6 +14740,8 @@ snapshots:
   undici-types@7.18.2: {}
 
   undici-types@8.9.0: {}
+
+  undici@7.30.0: {}
 
   undici@8.10.2: {}
 
