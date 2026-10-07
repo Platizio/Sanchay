@@ -56,6 +56,36 @@ export function parseKeyringJson(raw: string | undefined): Keyring {
   return result.data;
 }
 
+export const Msg91CredentialsSchema = z.strictObject({
+  authKey: z.string().min(1),
+  senderId: z.string().min(1),
+  peId: z.string().min(1),
+  templateIds: z.strictObject({
+    LOGIN: z.string().min(1),
+    CONSENT: z.string().min(1),
+    CONSENT_UNITS: z.string().min(1),
+    ATTEST: z.string().min(1),
+  }),
+});
+export type Msg91Credentials = z.infer<typeof Msg91CredentialsSchema>;
+
+const MSG91_PROBLEM =
+  'SANCHAY_PROVIDER_MODE_SMS=msg91 requires a valid SANCHAY_MSG91_CREDENTIALS_JSON';
+
+/** Parses the MSG91 credentials secret. Messages are fixed strings: no key material can reach a log line. */
+export function parseMsg91CredentialsJson(raw: string | undefined): Msg91Credentials {
+  if (raw === undefined || raw === '') throw new EnvError(`${MSG91_PROBLEM} (missing)`);
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new EnvError(`${MSG91_PROBLEM} (not valid JSON)`);
+  }
+  const result = Msg91CredentialsSchema.safeParse(json);
+  if (!result.success) throw new EnvError(`${MSG91_PROBLEM} (wrong shape)`);
+  return result.data;
+}
+
 export const EnvSchema = z.object({
   SANCHAY_APP_ENV: z.enum(['local', 'test', 'dev', 'staging', 'prod']),
   SANCHAY_APP_ROLE: z.enum(['api', 'worker', 'migrate']).default('api'),
@@ -74,9 +104,11 @@ export const EnvSchema = z.object({
   SANCHAY_OTP_PEPPER: key32.optional(),
   SANCHAY_AUTH_TOKEN_KEY: key32.optional(),
   SANCHAY_KEYRING_JSON: z.string().optional(),
-  SANCHAY_PROVIDER_MODE_SMS: z.enum(['capture', 'mailpit']).default('capture'),
-  SANCHAY_PROVIDER_MODE_EMAIL: z.enum(['capture', 'mailpit']).default('capture'),
+  SANCHAY_PROVIDER_MODE_SMS: z.enum(['capture', 'mailpit', 'msg91']).default('capture'),
+  SANCHAY_PROVIDER_MODE_EMAIL: z.enum(['capture', 'mailpit', 'ses']).default('capture'),
   SANCHAY_MAILPIT_URL: z.url({ protocol: /^https?$/ }).default('http://localhost:8025'),
+  SANCHAY_MSG91_CREDENTIALS_JSON: z.string().optional(),
+  SANCHAY_SES_FROM: z.email().optional(),
   SANCHAY_SMS_RETRIEVER_HASH: z
     .string()
     .regex(/^[A-Za-z0-9+/]{11}$/)
@@ -100,8 +132,7 @@ const PROD_OTP_PER_IP_PER_HOUR = 20;
 
 /**
  * Fail-closed boot guard (design §K; delta sheet §5.2 invariants 1–6; invariant 7 from ruling R-10).
- * Every violation is reported at once. staging and prod cannot boot until plan-02-mvp-kernel adds
- * the msg91/ses provider modes.
+ * Every violation is reported at once. staging and prod boot only with the msg91 and ses provider modes (D6).
  */
 export function assertBootInvariants(env: Env): void {
   const problems: string[] = [];
@@ -158,6 +189,18 @@ export function assertBootInvariants(env: Env): void {
     problems.push(
       'SANCHAY_SMS_RETRIEVER_HASH is required outside local/test (every DLT OTP template has three lines, R-10)',
     );
+  }
+  // 11 (D6; numbered provisionally, the numbers are documentation labels only)
+  if (env.SANCHAY_PROVIDER_MODE_SMS === 'msg91') {
+    try {
+      parseMsg91CredentialsJson(env.SANCHAY_MSG91_CREDENTIALS_JSON);
+    } catch (error) {
+      problems.push(error instanceof EnvError ? error.message : MSG91_PROBLEM);
+    }
+  }
+  // 12 (D6; numbered provisionally)
+  if (env.SANCHAY_PROVIDER_MODE_EMAIL === 'ses' && env.SANCHAY_SES_FROM === undefined) {
+    problems.push('SANCHAY_PROVIDER_MODE_EMAIL=ses requires SANCHAY_SES_FROM');
   }
 
   if (problems.length > 0) {

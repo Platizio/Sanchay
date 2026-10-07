@@ -2,6 +2,7 @@ import { Inject, Injectable, Module, type OnApplicationShutdown } from '@nestjs/
 import { and, eq, lt } from 'drizzle-orm';
 import { AppConfig } from '../../config/app-config.js';
 import { createDb, DB, type DbHandle } from '../../db/client.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 import { CLOCK, type Clock, DAY } from '../platform/clock.js';
 import { type Job, JobHandler } from '../platform/jobs/job-registry.js';
 import { AccountSessions } from './account-sessions.service.js';
@@ -66,6 +67,7 @@ class IdentityCleanupJob {
 }
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [LoginRouter, SessionRouter, MeRouter],
   providers: [
     OtpService,

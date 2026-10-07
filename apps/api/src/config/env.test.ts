@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { EnvError, EnvSchema, parseEnv, parseKeyringJson } from './env.js';
+import {
+  EnvError,
+  EnvSchema,
+  parseEnv,
+  parseKeyringJson,
+  parseMsg91CredentialsJson,
+} from './env.js';
 
 const key = (fill: number) => Buffer.alloc(32, fill).toString('base64');
 
@@ -44,6 +50,21 @@ const devSecrets: Record<string, string> = {
   SANCHAY_CLIENT_IP_SOURCE: 'alb',
   SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
 };
+
+function msg91Json(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    authKey: 'super-secret-auth-key',
+    senderId: 'SNCHAY',
+    peId: '1701000000000000001',
+    templateIds: {
+      LOGIN: '1707000000000000001',
+      CONSENT: '1707000000000000002',
+      CONSENT_UNITS: '1707000000000000003',
+      ATTEST: '1707000000000000004',
+    },
+    ...overrides,
+  });
+}
 
 function errorMessage(fn: () => unknown): string {
   try {
@@ -99,10 +120,12 @@ describe('parseEnv', () => {
       'SANCHAY_LOCAL_PII_KEY',
       'SANCHAY_LOG_LEVEL',
       'SANCHAY_MAILPIT_URL',
+      'SANCHAY_MSG91_CREDENTIALS_JSON',
       'SANCHAY_OTP_PEPPER',
       'SANCHAY_OTP_PER_IP_PER_HOUR',
       'SANCHAY_PROVIDER_MODE_EMAIL',
       'SANCHAY_PROVIDER_MODE_SMS',
+      'SANCHAY_SES_FROM',
       'SANCHAY_SMS_RETRIEVER_HASH',
       'SANCHAY_THROTTLE_PER_MINUTE',
     ]);
@@ -174,6 +197,53 @@ describe('parseEnv', () => {
       );
     }
     expect(parseEnv(devSecrets).SANCHAY_PROVIDER_MODE_SMS).toBe('capture');
+  });
+
+  it('boot invariant 11: msg91 mode without SANCHAY_MSG91_CREDENTIALS_JSON is refused', () => {
+    expect(() => parseEnv({ ...base, SANCHAY_PROVIDER_MODE_SMS: 'msg91' })).toThrow(
+      /SANCHAY_MSG91_CREDENTIALS_JSON/,
+    );
+  });
+
+  it('boot invariant 12: ses mode without SANCHAY_SES_FROM is refused', () => {
+    expect(() => parseEnv({ ...base, SANCHAY_PROVIDER_MODE_EMAIL: 'ses' })).toThrow(
+      /SANCHAY_SES_FROM/,
+    );
+  });
+
+  it('boots in prod with the msg91 and ses adapters configured', () => {
+    expect(
+      parseEnv({
+        ...devSecrets,
+        SANCHAY_APP_ENV: 'prod',
+        SANCHAY_PROVIDER_MODE_SMS: 'msg91',
+        SANCHAY_PROVIDER_MODE_EMAIL: 'ses',
+        SANCHAY_MSG91_CREDENTIALS_JSON: msg91Json(),
+        SANCHAY_SES_FROM: 'noreply@sanchay.in',
+      }),
+    ).toMatchObject({ SANCHAY_PROVIDER_MODE_SMS: 'msg91', SANCHAY_PROVIDER_MODE_EMAIL: 'ses' });
+  });
+
+  it('refuses malformed MSG91 credentials with a fixed message that never echoes the auth key', () => {
+    const cases: Array<[string, RegExp]> = [
+      ['{"authKey":"super-secret-auth-key"', /\(not valid JSON\)/],
+      [msg91Json({ senderId: '' }), /\(wrong shape\)/],
+      [msg91Json({ extra: 'x' }), /\(wrong shape\)/],
+      [msg91Json({ templateIds: { LOGIN: 'a' } }), /\(wrong shape\)/],
+    ];
+    for (const [raw, reason] of cases) {
+      const message = errorMessage(() =>
+        parseEnv({
+          ...base,
+          SANCHAY_PROVIDER_MODE_SMS: 'msg91',
+          SANCHAY_MSG91_CREDENTIALS_JSON: raw,
+        }),
+      );
+      expect(message).toMatch(reason);
+      expect(message).not.toContain('super-secret-auth-key');
+    }
+    expect(() => parseMsg91CredentialsJson(undefined)).toThrow(EnvError);
+    expect(parseMsg91CredentialsJson(msg91Json()).templateIds.ATTEST).toBe('1707000000000000004');
   });
 
   it('refuses SANCHAY_KEY_SERVICE=kms (KMS envelope encryption is phase 2)', () => {

@@ -20,6 +20,8 @@ export type TableName =
   | 'market_holidays'
   | 'nav_history'
   | 'nav_sync_runs'
+  | 'notification_deliveries'
+  | 'notifications'
   | 'otp_codes'
   | 'recon_breaks'
   | 'scheme_navs'

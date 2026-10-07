@@ -17,6 +17,7 @@
     "ops:catalogue:seed": "nest build -b swc && node dist/cli/ops-catalogue-seed.js"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "catalog:",
     "@nestjs/common": "catalog:",
     "@nestjs/config": "catalog:",
     "@nestjs/core": "catalog:",

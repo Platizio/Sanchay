@@ -11,6 +11,7 @@ import type { Env } from './config/env.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { SessionGuard } from './modules/identity/session.guard.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
 import { ClientGuard } from './modules/platform/client.guard.js';
 import { HealthRouter } from './modules/platform/health.router.js';
@@ -63,6 +64,7 @@ export class AppModule {
         PlatformModule.forRoot(env),
         JobsModule,
         IntegrationsModule.forRoot(env),
+        NotificationsModule,
         IdentityModule,
       ],
       controllers: [HealthRouter],
