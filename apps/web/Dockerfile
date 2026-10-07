@@ -26,6 +26,12 @@ RUN pnpm --filter=@sanchay/web... build
 
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
+# The (app) and (auth) layouts read the DSC-02 ARN and its validity date on every request (site-config.ts), so the
+# runtime needs them as well as the build; deploy.yml passes both as build arguments.
+ARG SANCHAY_PLATFORM_ARN
+ARG SANCHAY_PLATFORM_ARN_VALID_TILL
+ENV SANCHAY_PLATFORM_ARN=${SANCHAY_PLATFORM_ARN}
+ENV SANCHAY_PLATFORM_ARN_VALID_TILL=${SANCHAY_PLATFORM_ARN_VALID_TILL}
 ENV NODE_ENV=production
 # Next.js standalone reads PORT and HOSTNAME; 3000 is the api's port in the shared task network.
 ENV PORT=3001

@@ -269,6 +269,13 @@ describe('SanchayMvpStack-prod (E25, R-31)', () => {
     expect(existsSync(path.join(repoRoot, 'infra/certs/rds-global-bundle.pem'))).toBe(true);
   });
 
+  it('the web runtime stage carries the platform ARN and its validity date, which the (app) and (auth) layouts read per request (final review MF-7)', () => {
+    const dockerfile = readFileSync(path.join(repoRoot, 'apps/web/Dockerfile'), 'utf8');
+    const runtime = dockerfile.slice(dockerfile.indexOf('AS runtime'));
+    expect(runtime).toContain('ENV SANCHAY_PLATFORM_ARN=');
+    expect(runtime).toContain('ENV SANCHAY_PLATFORM_ARN_VALID_TILL=');
+  });
+
   it('the api image carries data/ and keeps JSON import attributes (Plan 03 E9 loads its questionnaire at boot)', () => {
     const dockerfile = readFileSync(path.join(repoRoot, 'apps/api/Dockerfile'), 'utf8');
     expect(dockerfile).toContain('COPY data /repo/data');
