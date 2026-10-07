@@ -10,6 +10,7 @@ import { v7 as uuidv7 } from 'uuid';
 import type { Env } from './config/env.js';
 import { FpModule } from './integrations/fp/fp.module.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
+import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { SessionGuard } from './modules/identity/session.guard.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
@@ -70,6 +71,7 @@ export class AppModule {
         IdentityModule,
         // "Providers are called only from worker jobs": FpModule is never imported in the api role.
         ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
+        CatalogueModule,
       ],
       controllers: [HealthRouter],
       providers: [

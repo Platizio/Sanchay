@@ -160,7 +160,7 @@ and `pnpm install` would have refused on the real platform package for this mach
 | tailwindcss | 4.3.3 | design §A.2 |
 | turbo | 2.11.4 | design §A.2 |
 | typescript | 6.0.3 | design §A.2 |
-| undici | 7.30.0 | outside §A.2 (new in Plan 02 D3: FpGateway HTTP client, `apps/api/src/integrations/fp/fp-transport.ts`; chosen for its `Agent`/`MockAgent` pair, with real per-request timeouts and deterministic interception for D4 FakeFp and the unit tests; R-42; 7.x only per R-43; published 2026-09-25, past the 7-day release age, so no exclusion row) |
+| undici | 7.30.0 | outside §A.2 (new in Plan 02: FpGateway HTTP client, `apps/api/src/integrations/fp/fp-transport.ts` (D3), and the AMFI NAV feed client (D9); chosen for its `Agent`/`MockAgent` pair, with real per-request timeouts and deterministic interception for D4 FakeFp and the unit tests; R-42; 7.x only per R-43; published 2026-09-25, past the 7-day release age, so no exclusion row) |
 | unplugin-swc | 2.0.0 | outside §A.2 (decorator metadata in Vitest for the API) |
 | uuid | 14.0.2 | design §A.2 |
 | vite | 7.3.6 | outside §A.2 (Vitest 5 peer; single pin, review X-06) |
