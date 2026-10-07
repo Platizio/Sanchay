@@ -32,6 +32,6 @@
 **Decision.** PO-2 escalation to Cybrilla before the pilot. H-11 cannot be met as written. `fp.sendPartner` stays false (partner is never filled).
 
 **Follow-ups:**
-- Ask Cybrilla (Q12): where does the default EUIN come from (the ONDC signup?), whose EUIN is it, and how do we place execution-only orders with EUIN blank? Can the tenant default be removed, or can an explicit `euin: null` override it?
+- Ask Cybrilla (Q12; the letter's question 15, rows Q15-Q17): where does the default EUIN come from (the ONDC signup?), whose EUIN is it, and how do we place execution-only orders with EUIN blank? Can the tenant default be removed, or can an explicit `euin: null` override it?
 - Until answered, keep the execution-only declaration in the consent text (Plan 03 E20) and record the EUIN FP returns on each order, so the evidence shows what was sent to the RTA.
 - Owner: confirm with compliance whether a default EUIN on execution-only orders is acceptable at all (AMFI execution-only rules).

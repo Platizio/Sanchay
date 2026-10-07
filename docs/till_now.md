@@ -196,21 +196,21 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | **Plans 02-04 are reviewed and every backlog verdict is in** (§10-§12). The 11 owner decisions of 10-06 are written in (PR #6, merged). One plan PR is open: [Platizio/Sanchay#7](https://github.com/Platizio/Sanchay/pull/7) (E24's Maestro flow, RV-03-56), to merge when reviewed. | Owner |
-| 2 | **Who wires D4's sandbox smoke chains, and when** (R-37 needs every chain wired up to its sandbox limit before the first counted run on Mon 11-16). This is the one open backlog item; the proposal is in `docs/delivery/plan-errata-backlog.md` (Plan 04). | Owner (lead sizes it) |
-| 3 | **Six open questions from 10-05** (§9): (1) a public host for FP sandbox webhooks and payment returns before the 11-06 demo; (2) what prod can show at the 10-23 milestone; (3) the NO-GO fallback ("continue invitee onboarding") against R-31; (4) the founders' canary windows (F20, F27) under R-31; (5) Sprint 4 capacity after R-33/R-34; (6) PB-76, a vendor test on paused prod. | Owner |
-| 4 | **Plan 04 header decisions still open** (items 2-9): EUIN (Cybrilla's Q12 answer and a compliance view), T3 funding, the AWS and MSG91 accounts with the domain and hosted zone (due 10-09), SNS SMS for the alarms, stuck CRITICAL breaks (check against F7's `ops:resolve-break`), desktop MND-03 without a QR code, the interim `SANCHAY_SMS_RETRIEVER_HASH`, and the sandbox runs before GO-2. | Owner |
+| 1 | **PRs #1-#7 are merged.** This session's branch `claude/sanchay-open-decisions-b4bb04` (§14) has a draft PR to review and merge: rulings R-39 to R-41, Plan 04 Task F29 and the Sprint 2 readiness list. | Owner |
+| 2 | **Eight items on the decisions page "Sanchay: open decisions (10-07)" (Claude Docs) are still unanswered:** B1 (a public tunnel host for sandbox webhooks and payment returns, needed 10-23), B6 (PB-76 vendor test budget, 10-16), C2 (the EUIN GO-1 rule, 11-13), C4 (AWS, MSG91, domain and hosted zone; an action, due 10-09), C5 (a fifth DLT template for alarm SMS, before the 10-12 filing), C7 (desktop MND-03 without a QR), C8 (the interim retriever hash, before E25's first deploy) and C9 (the app's own SIP cancel against the sandbox, before GO-2). Each row carries a recommendation. B4, B5, C3 and C6 were already settled. | Owner |
+| 3 | **Before Sprint 2** (`docs/delivery/sprint-2-readiness.md`): allow Plan 02's new `catalog:` keys (AGENTS.md forbids editing `catalog:`), choose the `undici` major (7.x recommended), keep Docker running, fill the 10-09 velocity sheet, and authorise pushes of `feat/plan-02-mvp-kernel`. | Owner |
+| 4 | **F29's sandbox dry run** (its Step 6) needs `SANCHAY_PROBE_ACCOUNT_JSON` for the reused test investor in `tools/fp-probes/.env.sandbox` (never committed). It runs once D4 exists (S3), by Fri 11-13. | Owner (values) / Dev A |
 | 5 | **Send the Cybrilla email** on unused payment links (decision 10): `docs/business/cybrilla-payment-url-unused-email.md`. File the written reply in `docs/probes/` (G-B6). | Owner |
 | 6 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 7 | Install **Android Studio + an API 35 emulator** so the Android on-device checks (C15, and Maestro flows such as E24's) can run. | Owner |
 | 8 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, the risk questionnaire sign-off (R-36), curated fund list, commission rates. | Owner / team |
-| 9 | Velocity checkpoints: **Fri 10-09** (trims T1-T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate). | Owner + Claude |
-| 10 | **Sprint 2 starts Mon 10-12** on `feat/plan-02-mvp-kernel`, Plan 02 Task D0 first. | Claude (Dev A/B) |
+| 9 | Velocity checkpoints: **Fri 10-09** (trims T1-T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate; F29's day is on that ledger, R-39). | Owner + Claude |
+| 10 | **Sprint 2 starts Mon 10-12** on `feat/plan-02-mvp-kernel`, Plan 02 Task D0 first (ready: §14). | Claude (Dev A/B) |
 | - | ~~Create the GitHub repo and push `main`~~ **Done:** `Platizio/Sanchay`; PRs #1-#6 are merged. | - |
 
 **Key milestones:**
 - Wed 10-21: login end to end on web + Android (already achieved on web).
-- Fri 10-23: identity and profile onboarding, plus catalogue data on the paused prod stack (R-24 as amended by R-31; what prod can show by then is an open owner decision, §9).
+- Fri 10-23: identity and profile onboarding, plus D9's NAV syncs on the paused prod stack (R-24 as amended by R-31; R-40).
 - Fri 11-06: onboarding and lumpsum end to end, and the Cybrilla demo.
 - Fri 11-13: production credentials.
 - Fri 11-20: feature freeze.
@@ -569,3 +569,37 @@ Observed only, not changed:
   4. Fri 10-09: the velocity checkpoint.
   5. Mon 10-12: Sprint 2, Plan 02 Task D0 first, on `feat/plan-02-mvp-kernel`.
 
+---
+
+## 14. Session 2026-10-07: the open-decisions page, R-39 to R-41, Task F29, Sprint 2 readiness
+
+- **Start:** PR #7 was merged (03:54Z) before work began; the session branch `claude/sanchay-open-decisions-b4bb04` came from `main` at `cae350e`. Max 20x budget: one Explore agent extracted the FP request bodies; the rest was inline.
+- **G1, the decisions page.** §5 rows 2-4 (15 items) went on the Claude Docs page "Sanchay: open decisions (10-07)", each checked against the plans and rulings first:
+  - **Already settled:** B4 (the canary windows, by RV-04-HDR-1's reading of R-31), B5 (S4 capacity, by R-25 and R-02 at the 10-23 checkpoint), C3 (T3, by R-08) and C6 (stuck breaks, by F7's `ops:resolve-break`).
+  - **Found:** Plan 04 and P-04 call the EUIN question "Q12", but the Cybrilla letter numbers it 15.
+  - **Answered by the owner:** A1, B2 and B3 (all accepted). Eight items stay open (§5 row 2).
+- **G2, rulings and errata (`75f48a4`).**
+  - R-39: Dev A wires D4's chains in a new Plan 04 task, F29, run first (amends R-37).
+  - R-40: the 10-23 milestone content stands as R-24 and R-31 state it.
+  - R-41: after a NO-GO, no new invites until a re-run gate is GO. Spec §7 and F23 follow it (RV-04-F23-3).
+  - RV-04-HDR-4 and RV-04-F1-17 mark T3, stuck breaks and F1's question 1 settled, and note the Q12 naming. P-04's follow-up names the letter's question 15.
+- **G3, Task F29 (`2b71a78`).** Plan 04's new first task (Dev A, 8 h, merged by 11-13) wires onboarding, lumpsum, SIP and redemption in `tools/fp-probes` with the plans' own bodies:
+  - Each chain polls to a final state with no deadline. The steps past the limit are SKIPPED as `sandbox limit: …` naming the canary legs (lumpsum after `submitted`, A_UPI and A_NETBANKING; SIP after the first instalment `submitted`, B_SIP), and the SIP chain cancels its plan.
+  - An FP refusal now fails the step (D4 had parsed error bodies as success), and the first failure ends the chain.
+  - Errata RV-04-HDR-5, RV-04-F23-4, RV-04-F5-5 (it also drops a `--` before `--chain`) and RV-04-F28-2. The last Plan 04 backlog item is closed: every plan's backlog has 0 open.
+- **G4, Sprint 2 readiness (`648ab04`).** `docs/delivery/sprint-2-readiness.md`: D0 needs nothing from the owner. The owner's items are the `catalog:` rule against Plan 02's eight new keys, the `undici` major, the accounts, the interim hash, Docker, the 10-09 velocity sheet and push authorisation.
+- **What ran:**
+  - F29 on D4 extracted from Plan 02 with its exact pins (undici 7.16.0, tsx 4.19.2, TypeScript 6.0.3, Vitest 5.0.1). D4's baseline passed 2/2. F29's tests failed 9/9 first, then passed 11/11. `tsc` and `biome ci` were clean. The task text was extracted back out of Plan 04: the files were identical, and 11/11 passed again.
+  - F23's `gate-evidence g-e4` on three days of F29-format evidence: D4's chains read `NOT MET: chains not wired`, F29's read `NOT MET: waiting on the canary` (onboarding and redemption MET), and with the canary legs passed, `MET`.
+  - On `main`: install, `pnpm lint`, api unit 132/132, api integration 129/129 (Docker 29.8.1, started this session), features 22/22.
+  - Fences balanced and no RV id repeated, before each commit.
+- **Not run:**
+  - Any call to the FP sandbox. That is F29 Step 6, and it needs the account JSON.
+  - D0's fix on `cae350e`. It ran on `a75ae03`, and its files have not changed since.
+  - The rulings and spec edits are text only.
+- **Resume here:**
+  1. Review and merge this session's PR.
+  2. Answer the eight open rows on the decisions page; C4 and C5 are the most urgent.
+  3. Settle readiness items 1 and 2 (`catalog:` keys, `undici` major).
+  4. Fri 10-09: the velocity checkpoint.
+  5. Mon 10-12: Sprint 2 on `feat/plan-02-mvp-kernel` from `origin/main`, Task D0 first.
