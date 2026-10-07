@@ -10,6 +10,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "gen:states": "pnpm --filter=@sanchay/domain build && node scripts/gen-states.ts",
     "lint": "biome ci .",
     "format": "biome check --write .",
     "verify": "pnpm lint && pnpm build && pnpm typecheck && pnpm test",
