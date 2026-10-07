@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-07. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only, apart from the 10-06 `source-map-js` lockfile bump (PR #5). PRs #1 to #6 are merged into `main`; PR #7 (E24's Maestro flow, §12) is open. The latest sessions are §10 to §12; **§13 is the current state and the resume point**._
+_Last updated: 2026-10-07. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only, apart from two lockfile-only CI fixes: `source-map-js` on 10-06 (PR #5) and `shell-quote` plus `sharp` on 10-07 (PR #7). PRs #1 to #6 are merged into `main`; PR #7 (E24's Maestro flow, §12, and the 10-07 CI fix) is open. The latest sessions are §10 to §12; **§13 is the current state and the resume point**._
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -557,7 +557,7 @@ Observed only, not changed:
 ## 13. State on 2026-10-07 and where to resume
 
 - **Merged:** PRs #1 to #6. `main` holds Plan 01's code, Plans 02-04 with every backlog verdict, rulings R-01 to R-38, and the 10-06 `source-map-js` bump.
-- **Open:** PR #7 (E24's Maestro flow, RV-03-56 and RV-04-F18-2), docs only, waiting for review.
+- **Open:** PR #7: E24's Maestro flow (RV-03-56, RV-04-F18-2), this section, and a lockfile-only CI fix. CI's audit found GHSA-pqg4-j6r4-53mv (critical, `shell-quote` <1.11.0, mobile toolchain) and GHSA-wq5f-xc86-pv6w (high, `sharp` <0.35.5, via `next` in the web image); the lockfile now has `shell-quote` 1.11.0 and `sharp` 0.35.5, with an ADR-0001 row.
 - **Backlog** (`docs/delivery/plan-errata-backlog.md`): Plans 01-03 have 0 open. Plan 04 has 1 open: wiring D4's sandbox chains (§5 row 2).
 - **The owner's queue** is §5 rows 2 to 9. The decisions page "Sanchay: 11 open decisions" (Claude Docs) records the 10-06 answers.
 - **Founder updates:** the 10-06 WhatsApp message (today and tomorrow) was drafted in the session; it is not stored in the repo.
