@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { investorContacts, investors, otpCodes } from '../../src/db/schema.js';
@@ -19,8 +20,14 @@ beforeEach(() => {
   t.clock.advance(HOUR + MINUTE);
 });
 
+/** Every /me/email/* POST is [K] since D1, and each call here is its own intent: a fresh key per call. */
 const post = (url: string, headers: Record<string, string>, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url: `/api/v1${url}`, headers, payload });
+  t.app.inject({
+    method: 'POST',
+    url: `/api/v1${url}`,
+    headers: { ...headers, 'idempotency-key': randomUUID() },
+    payload,
+  });
 
 async function signedIn(mobile: string) {
   const s = await signInNative(t, mobile);

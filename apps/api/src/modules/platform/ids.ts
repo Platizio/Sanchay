@@ -5,12 +5,15 @@ import { v7 as uuidv7 } from 'uuid';
  * union as they add tables.
  */
 export type TableName =
+  | 'app_config'
   | 'audit_events'
   | 'auth_sessions'
+  | 'idempotency_keys'
   | 'investor_contacts'
   | 'investor_devices'
   | 'investors'
-  | 'otp_codes';
+  | 'otp_codes'
+  | 'recon_breaks';
 
 declare const rowIdBrand: unique symbol;
 

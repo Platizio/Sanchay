@@ -12,6 +12,7 @@ import { createDb, DB, type DbHandle } from '../../db/client.js';
 import { AuditService } from './audit.service.js';
 import { CLOCK, SystemClock } from './clock.js';
 import { Crypto } from './crypto.js';
+import { IdempotencyService } from './idempotency.service.js';
 import { KEY_SERVICE, type KeyService, keyServiceFromEnv } from './key-service.js';
 
 @Injectable()
@@ -43,9 +44,10 @@ export class PlatformModule {
           useFactory: () => createDb(env.DATABASE_URL, env.SANCHAY_DB_POOL_MAX),
         },
         AuditService,
+        IdempotencyService,
         DbLifecycle,
       ],
-      exports: [AppConfig, CLOCK, KEY_SERVICE, Crypto, DB, AuditService],
+      exports: [AppConfig, CLOCK, KEY_SERVICE, Crypto, DB, AuditService, IdempotencyService],
     };
   }
 }
