@@ -1,0 +1,9 @@
+scope,trail_min_bps,trail_max_bps,kind,effective_from,source
+aditya-birla-sun-life-mutual-fund,25,100,RANGE,2026-01-01,ADMIN
+icici-prudential-mutual-fund,25,100,RANGE,2026-01-01,ADMIN
+hdfc-mutual-fund,25,110,RANGE,2026-01-01,ADMIN
+sbi-mutual-fund,20,90,RANGE,2026-01-01,ADMIN
+axis-mutual-fund,25,100,RANGE,2026-01-01,ADMIN
+kotak-mahindra-mutual-fund,25,100,RANGE,2026-01-01,ADMIN
+nippon-india-mutual-fund,20,95,RANGE,2026-01-01,ADMIN
+parag-parikh-mutual-fund,50,50,EXACT,2026-01-01,ADMIN

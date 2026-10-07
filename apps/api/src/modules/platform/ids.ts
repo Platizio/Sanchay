@@ -5,15 +5,27 @@ import { v7 as uuidv7 } from 'uuid';
  * union as they add tables.
  */
 export type TableName =
+  | 'amcs'
   | 'app_config'
   | 'audit_events'
   | 'auth_sessions'
+  | 'category_aliases'
+  | 'commission_disclosures'
+  | 'fund_facts'
+  | 'fund_facts_revisions'
   | 'idempotency_keys'
   | 'investor_contacts'
   | 'investor_devices'
   | 'investors'
+  | 'market_holidays'
+  | 'nav_history'
+  | 'nav_sync_runs'
   | 'otp_codes'
   | 'recon_breaks'
+  | 'scheme_navs'
+  | 'scheme_returns'
+  | 'schemes'
+  | 'sebi_categories'
   | 'worker_heartbeats';
 
 declare const rowIdBrand: unique symbol;

@@ -43,3 +43,7 @@ export type NavGrade = EnumValue<typeof NAV_GRADES>;
 
 export const EXTERNAL_PLAN_TYPES = defineEnum(['DIRECT', 'REGULAR', 'UNKNOWN']);
 export type ExternalPlanType = EnumValue<typeof EXTERNAL_PLAN_TYPES>;
+
+/** D8: schemes.status (spec §2.3). */
+export const SCHEME_STATUSES = defineEnum(['DRAFT', 'PUBLISHED', 'SUSPENDED']);
+export type SchemeStatus = EnumValue<typeof SCHEME_STATUSES>;
