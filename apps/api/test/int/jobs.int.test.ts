@@ -158,6 +158,14 @@ describe('worker heartbeat', () => {
   });
 });
 
+describe('pg-boss error events', () => {
+  it('the started PgBoss has an error listener, so an internal pg-boss error cannot throw out of the process', () => {
+    const boss = t.app.get(JobsService).started();
+    expect(boss.listenerCount('error')).toBeGreaterThan(0);
+    expect(() => boss.emit('error', new Error('simulated pg-boss internal error'))).not.toThrow();
+  });
+});
+
 describe('pg-boss queues (R-32 policies; D6: the app login has no CREATE on schema pgboss)', () => {
   it('creates every queue with its JOB_POLICIES policy and without a partition table, which would be DDL', async () => {
     const { rows } = await t.db.pool.query<{ name: string; policy: string; partition: boolean }>(

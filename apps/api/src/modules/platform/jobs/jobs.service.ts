@@ -1,10 +1,17 @@
-import { Inject, Injectable, type OnApplicationShutdown, type OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type OnApplicationShutdown,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { DiscoveryService, Reflector } from '@nestjs/core';
 import { sql } from 'drizzle-orm';
 import { PgBoss } from 'pg-boss';
 import { AppConfig } from '../../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../../db/client.js';
 import { CLOCK, type Clock } from '../clock.js';
+import { attachBossErrorLog } from './boss-errors.js';
 import { type Heartbeat, startHeartbeat } from './heartbeat.js';
 import {
   JOB_HANDLER,
@@ -38,6 +45,7 @@ function drizzleAdapter(exec: DbExecutor) {
 
 @Injectable()
 export class JobsService implements OnModuleInit, OnApplicationShutdown {
+  private readonly log = new Logger(JobsService.name);
   private boss: PgBoss | undefined;
   /** Set once every queue exists. Per application, never module state: each Nest app in a process owns one (RV-02-45). */
   private ready: PgBoss | undefined;
@@ -66,6 +74,9 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
       connectionString: this.config.env.DATABASE_URL,
       schema: 'pgboss',
       migrate: false, // db/migrate.ts bootstraps pg-boss's own schema; the api/worker roles never migrate it.
+    });
+    attachBossErrorLog(this.boss, (err) => {
+      this.log.error(`pg-boss error: ${err.message}`, err.stack);
     });
     await this.boss.start();
     // R-32: each queue gets its JOB_POLICIES policy (still an idempotent INSERT into pgboss.queue, no DDL).
