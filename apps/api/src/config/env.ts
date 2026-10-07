@@ -131,6 +131,7 @@ export const EnvSchema = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   SANCHAY_DB_POOL_MAX: z.coerce.number().int().min(2).max(100).default(10),
   SANCHAY_APP_ORIGIN: z.url({ protocol: /^https?$/ }),
+  SANCHAY_API_ORIGIN: z.url({ protocol: /^https?$/ }),
   SANCHAY_CLIENT_IP_SOURCE: z.enum(['socket', 'alb']).default('socket'),
   SANCHAY_KEY_SERVICE: z.enum(['local', 'secrets', 'kms']).default('local'),
   SANCHAY_LOCAL_PII_KEY: key32.optional(),

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
-import { nativeHeaders } from './http.js';
+import { apiHost, nativeHeaders } from './http.js';
 import { InfraRoutesTestModule } from './infra-routes.js';
 
 let t: TestApp;
@@ -69,15 +69,16 @@ describe('throttler (per session, across routes)', () => {
           method,
           url,
           remoteAddress: '198.51.100.33',
+          // HostGuard: all four are infra routes served on the api host.
           ...(webhook
             ? {
-                headers: { 'content-type': 'application/json' },
+                headers: { host: apiHost(), 'content-type': 'application/json' },
                 payload: JSON.stringify({
                   event: { id: `evt_throttle_${i}`, type: 'mf_purchase.updated' },
                   data: { object: { id: 'pur_throttle', object: 'mf_purchase' } },
                 }),
               }
-            : {}),
+            : { headers: { host: apiHost() } }),
         });
         expect(res.statusCode, `${method} ${url} #${i + 1}`).toBe(200);
       }

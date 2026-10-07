@@ -17,8 +17,11 @@ import { SessionGuard } from './modules/identity/session.guard.js';
 import { LegalConsentModule } from './modules/legal-consent/legal-consent.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
+import { AppConfigRouter } from './modules/platform/app-config.router.js';
+import { AppVersionGuard } from './modules/platform/app-version.guard.js';
 import { ClientGuard } from './modules/platform/client.guard.js';
 import { HealthRouter } from './modules/platform/health.router.js';
+import { HostGuard } from './modules/platform/host.guard.js';
 import { JobsModule } from './modules/platform/jobs/jobs.module.js';
 import { buildPinoHttpOptions } from './modules/platform/logging.js';
 import { buildOrpcConfig } from './modules/platform/orpc.js';
@@ -77,11 +80,14 @@ export class AppModule {
         ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
         CatalogueModule.forRoot(env),
       ],
-      controllers: [HealthRouter],
+      controllers: [HealthRouter, AppConfigRouter],
       providers: [
         { provide: APP_FILTER, useClass: ApiExceptionFilter },
-        // Order matters: client identification, then session. B21 appends ThrottlerGuard third.
+        // Order matters: host, then client identification, then app-version gate, then session.
+        // B21 appends ThrottlerGuard last.
+        { provide: APP_GUARD, useClass: HostGuard },
         { provide: APP_GUARD, useClass: ClientGuard },
+        { provide: APP_GUARD, useClass: AppVersionGuard },
         { provide: APP_GUARD, useClass: SessionGuard },
         { provide: APP_GUARD, useClass: ThrottlerGuard },
       ],
