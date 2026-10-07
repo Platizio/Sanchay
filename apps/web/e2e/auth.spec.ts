@@ -39,7 +39,7 @@ test.describe('@api mobile OTP authentication', () => {
     await expect(nav.getByText('Account', { exact: true })).toBeVisible();
     await nav.getByText('Explore', { exact: true }).click();
     await expect(page).toHaveURL(/\/explore$/);
-    await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Explore funds' })).toBeVisible();
   });
 
   test('a wrong code shows investor copy and the right code still works', async ({

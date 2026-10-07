@@ -3,8 +3,11 @@ import {
   AccountScreen,
   AppShell,
   ComingSoonScreen,
+  ExploreScreen,
+  FundScreen,
   HomeScreen,
   LoginScreen,
+  SearchScreen,
 } from '@sanchay/features';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -24,6 +27,22 @@ export function AccountRoute() {
 
 export function ComingSoonRoute({ title }: { title: string }) {
   return <ComingSoonScreen title={title} />;
+}
+
+export function ExploreRoute() {
+  return <ExploreScreen />;
+}
+
+export function ExploreCategoryRoute({ slug }: { slug: string }) {
+  return <ExploreScreen category={slug} />;
+}
+
+export function ExploreSearchRoute() {
+  return <SearchScreen />;
+}
+
+export function FundRoute({ schemeSlug }: { schemeSlug: string }) {
+  return <FundScreen schemeSlug={schemeSlug} />;
 }
 
 /**
