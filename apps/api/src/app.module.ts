@@ -9,6 +9,7 @@ import { Logger, LoggerModule } from 'nestjs-pino';
 import { v7 as uuidv7 } from 'uuid';
 import type { Env } from './config/env.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
+import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { SessionGuard } from './modules/identity/session.guard.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
@@ -64,6 +65,7 @@ export class AppModule {
         JobsModule,
         IntegrationsModule.forRoot(env),
         IdentityModule,
+        CatalogueModule,
       ],
       controllers: [HealthRouter],
       providers: [

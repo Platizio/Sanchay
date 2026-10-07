@@ -158,6 +158,7 @@ and `pnpm install` would have refused on the real platform package for this mach
 | tailwindcss | 4.3.3 | design §A.2 |
 | turbo | 2.11.4 | design §A.2 |
 | typescript | 6.0.3 | design §A.2 |
+| undici | 7.30.0 | outside §A.2 (new in Plan 02: HTTP client for the AMFI NAV feeds (D9) and FpGateway (D3); 7.x only, R-42, R-43; published 2026-09-25, past the 7-day release age, so no exclusion row) |
 | unplugin-swc | 2.0.0 | outside §A.2 (decorator metadata in Vitest for the API) |
 | uuid | 14.0.2 | design §A.2 |
 | vite | 7.3.6 | outside §A.2 (Vitest 5 peer; single pin, review X-06) |

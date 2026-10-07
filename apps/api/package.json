@@ -14,7 +14,9 @@
     "db:check": "node scripts/db-check.ts",
     "db:migrate": "nest build -b swc && node dist/cli/migrate.js",
     "openapi": "node scripts/openapi.ts",
-    "ops:catalogue:seed": "nest build -b swc && node dist/cli/ops-catalogue-seed.js"
+    "ops:catalogue:seed": "nest build -b swc && node dist/cli/ops-catalogue-seed.js",
+    "ops:nav-backfill": "nest build -b swc && node dist/cli/ops-nav-backfill.js",
+    "ops:nav-release": "nest build -b swc && node dist/cli/ops-nav-release.js"
   },
   "dependencies": {
     "@nestjs/common": "catalog:",
@@ -37,6 +39,7 @@
     "pino-http": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:",
+    "undici": "catalog:",
     "uuid": "catalog:",
     "zod": "catalog:"
   },

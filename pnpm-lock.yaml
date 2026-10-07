@@ -180,6 +180,9 @@ catalogs:
     typescript:
       specifier: 6.0.3
       version: 6.0.3
+    undici:
+      specifier: 7.30.0
+      version: 7.30.0
     unplugin-swc:
       specifier: 2.0.0
       version: 2.0.0
@@ -282,6 +285,9 @@ importers:
       rxjs:
         specifier: 'catalog:'
         version: 7.8.2
+      undici:
+        specifier: 'catalog:'
+        version: 7.30.0
       uuid:
         specifier: 'catalog:'
         version: 14.0.2
@@ -756,6 +762,24 @@ importers:
       fast-check:
         specifier: 'catalog:'
         version: 4.10.2
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vite:
+        specifier: 'catalog:'
+        version: 7.3.6(@types/node@24.13.6)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.1(@types/node@24.13.6)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(msw@2.15.0(@types/node@24.13.6)(typescript@6.0.3))(vite@7.3.6(@types/node@24.13.6)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/test-fixtures:
+    devDependencies:
+      '@sanchay/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.6
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -7334,6 +7358,10 @@ packages:
 
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
+
+  undici@7.30.0:
+    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
+    engines: {node: '>=20.18.1'}
 
   undici@8.10.2:
     resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
@@ -14716,6 +14744,8 @@ snapshots:
   undici-types@7.18.2: {}
 
   undici-types@8.9.0: {}
+
+  undici@7.30.0: {}
 
   undici@8.10.2: {}
 

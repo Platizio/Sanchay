@@ -178,6 +178,7 @@ catalog:
   tailwindcss: 4.3.3
   turbo: 2.11.4
   typescript: 6.0.3
+  undici: 7.30.0
   unplugin-swc: 2.0.0
   uuid: 14.0.2
   vite: 7.3.6
