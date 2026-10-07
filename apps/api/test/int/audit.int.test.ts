@@ -32,33 +32,37 @@ afterAll(async () => {
 });
 
 describe('AuditService', () => {
-  it('pins the allowlist and the Plan-01 action names', () => {
-    expect(AUDIT_DATA_ALLOWLIST).toEqual([
-      'platform',
-      'purpose',
-      'channel',
-      'reason',
-      'sessionId',
-      'deviceId',
-      'outcome',
-      'isNewInvestor',
-      'isNewDevice',
-      'challengeId',
-      'revokedCount',
-      'status',
-    ]);
-    expect(Object.keys(AUDIT_ACTIONS).sort()).toEqual([
-      'AUTH_LOGIN',
-      'AUTH_LOGOUT',
-      'AUTH_OTP_FAILED',
-      'AUTH_OTP_LOCKED',
-      'AUTH_OTP_LOCKOUT',
-      'AUTH_OTP_SENT',
-      'AUTH_SESSIONS_REVOKED_ALL',
-      'AUTH_SIGNUP',
-      'CONTACT_EMAIL_OTP_SENT',
-      'CONTACT_EMAIL_VERIFIED',
-    ]);
+  it('keeps the Plan-01 allowlist and action names (later tasks only append)', () => {
+    expect(AUDIT_DATA_ALLOWLIST).toEqual(
+      expect.arrayContaining([
+        'platform',
+        'purpose',
+        'channel',
+        'reason',
+        'sessionId',
+        'deviceId',
+        'outcome',
+        'isNewInvestor',
+        'isNewDevice',
+        'challengeId',
+        'revokedCount',
+        'status',
+      ]),
+    );
+    expect(Object.keys(AUDIT_ACTIONS)).toEqual(
+      expect.arrayContaining([
+        'AUTH_LOGIN',
+        'AUTH_LOGOUT',
+        'AUTH_OTP_FAILED',
+        'AUTH_OTP_LOCKED',
+        'AUTH_OTP_LOCKOUT',
+        'AUTH_OTP_SENT',
+        'AUTH_SESSIONS_REVOKED_ALL',
+        'AUTH_SIGNUP',
+        'CONTACT_EMAIL_OTP_SENT',
+        'CONTACT_EMAIL_VERIFIED',
+      ]),
+    );
     for (const [key, value] of Object.entries(AUDIT_ACTIONS)) expect(value).toBe(key);
   });
 

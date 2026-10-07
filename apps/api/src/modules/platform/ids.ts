@@ -23,6 +23,7 @@ export type TableName =
   | 'notification_deliveries'
   | 'notifications'
   | 'otp_codes'
+  | 'pilot_invites'
   | 'provider_calls'
   | 'recon_breaks'
   | 'scheme_navs'

@@ -14,6 +14,7 @@
     "db:check": "node scripts/db-check.ts",
     "db:migrate": "nest build -b swc && node dist/cli/migrate.js",
     "openapi": "node scripts/openapi.ts",
+    "ops:invite": "nest build -b swc && node dist/cli/ops-invite.js",
     "ops:catalogue:seed": "nest build -b swc && node dist/cli/ops-catalogue-seed.js",
     "ops:nav-backfill": "nest build -b swc && node dist/cli/ops-nav-backfill.js",
     "ops:nav-release": "nest build -b swc && node dist/cli/ops-nav-release.js"
