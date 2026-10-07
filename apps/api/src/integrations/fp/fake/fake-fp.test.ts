@@ -94,6 +94,29 @@ describe('FakeFp', () => {
     expect(body.data[0]?.state).toBe('under_review');
   });
 
+  it('a scripted 4xx creates no object, so a later list on source_ref_id is empty (final review MF-5)', async () => {
+    const fakeFp = new FakeFp(BASE_URLS);
+    const transport = transportFor(fakeFp);
+    fakeFp.script('purchase.create', {
+      status: 422,
+      body: { error: { status: 422, code: 'UNPROCESSABLE', message: 'rejected' } },
+    });
+    await expect(
+      transport.call('purchase.create', {
+        body: {
+          source_ref_id: 'order-422',
+          mf_investment_account: 'mfia_1',
+          scheme: 'INF209K01157',
+          amount: '1500.00',
+        },
+        consent: consent(),
+      }),
+    ).rejects.toMatchObject({ httpStatus: 422 });
+    const list = await transport.call('purchase.list', { query: { source_ref_id: 'order-422' } });
+    expect((list.body as { data: unknown[] }).data).toEqual([]);
+    expect(fakeFp.calls({ op: 'purchase.create' })).toHaveLength(1);
+  });
+
   it('H-2 lumpsum state path: under_review -> pending -> submitted -> successful', async () => {
     const fakeFp = new FakeFp(BASE_URLS);
     const transport = transportFor(fakeFp);

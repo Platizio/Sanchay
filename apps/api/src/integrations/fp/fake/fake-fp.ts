@@ -61,6 +61,11 @@ function findOperation(
   return null;
 }
 
+/** A scripted reply with a 400-499 status other than 409 (a 409 is the duplicate case and keeps route-then-fail). */
+function isClientRejection(mode: FpScriptMode): mode is { status: number; body: object } {
+  return typeof mode === 'object' && mode.status >= 400 && mode.status < 500 && mode.status !== 409;
+}
+
 function schemePlanPayload(fixture: FakeSchemeFixture): Record<string, unknown> {
   return {
     object: 'mf_scheme_plan',
@@ -229,13 +234,23 @@ export class FakeFp {
       };
     }
 
+    const script = this.scripts.get(op);
+    if (script !== undefined) {
+      script.remaining -= 1;
+      if (script.remaining <= 0) this.scripts.delete(op);
+    }
+    // A scripted 4xx (409 aside) is a rejection FP made before creating anything, so route() must not run:
+    // otherwise LOOKUP-ADOPT would adopt an object real FP never created (final review MF-5). Timeout, 5xx,
+    // 409-dup and 2xx scripts keep route-then-fail: FP did receive and act on the request.
+    if (script !== undefined && isClientRejection(script.mode)) {
+      this.callLog.push({ op, class: definition.class, at: this.now() });
+      return { statusCode: script.mode.status, data: script.mode.body };
+    }
+
     const result = this.route(op, params, body, url.searchParams);
     this.callLog.push({ op, class: definition.class, at: this.now() });
 
-    const script = this.scripts.get(op);
     if (script === undefined) return result;
-    script.remaining -= 1;
-    if (script.remaining <= 0) this.scripts.delete(op);
     if (script.mode === 'timeout') {
       // The object above was created as normal ("FP received it"); only the response is lost, so a
       // later list-by-source_ref_id (LOOKUP-ADOPT) still finds it.
