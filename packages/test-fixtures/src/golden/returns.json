@@ -1,0 +1,99 @@
+[
+  {
+    "id": "RT-01",
+    "description": "leap-day anniversary: asOf on Feb 29 (leap), 1y anniversary clamps to Feb 28 of the prior (non-leap) year",
+    "asOf": "2028-02-29",
+    "history": [
+      { "navDate": "2027-02-28", "nav": "100.000000" },
+      { "navDate": "2028-02-29", "nav": "100.000000" }
+    ],
+    "expected": {
+      "cagr1y": "0.0000",
+      "cagr3y": null,
+      "cagr5y": null,
+      "abs6m": "0.0000",
+      "displayEligible": true
+    }
+  },
+  {
+    "id": "RT-02",
+    "description": "missing anniversary NAV (weekend gap) falls back to the previous available point",
+    "asOf": "2027-01-11",
+    "history": [
+      { "navDate": "2026-01-08", "nav": "100.000000" },
+      { "navDate": "2027-01-11", "nav": "100.000000" }
+    ],
+    "expected": {
+      "cagr1y": "0.0000",
+      "cagr3y": null,
+      "cagr5y": null,
+      "abs6m": "0.0000",
+      "displayEligible": true
+    }
+  },
+  {
+    "id": "RT-03",
+    "description": "less than 1 year of history -> 1Y null, not display-eligible",
+    "asOf": "2026-06-01",
+    "history": [
+      { "navDate": "2026-03-01", "nav": "100.000000" },
+      { "navDate": "2026-06-01", "nav": "102.000000" }
+    ],
+    "expected": {
+      "cagr1y": null,
+      "cagr3y": null,
+      "cagr5y": null,
+      "abs6m": null,
+      "displayEligible": false
+    }
+  },
+  {
+    "id": "RT-04",
+    "description": "normal 1Y CAGR over an exact, leap-day-free 365-day span",
+    "asOf": "2027-01-10",
+    "history": [
+      { "navDate": "2026-01-10", "nav": "100.000000" },
+      { "navDate": "2027-01-10", "nav": "110.000000" }
+    ],
+    "expected": {
+      "cagr1y": "10.0000",
+      "cagr3y": null,
+      "cagr5y": null,
+      "abs6m": "10.0000",
+      "displayEligible": true
+    }
+  },
+  {
+    "id": "RT-05",
+    "description": "3Y history present (flat NAV), 5Y absent",
+    "asOf": "2029-01-10",
+    "history": [
+      { "navDate": "2026-01-10", "nav": "150.000000" },
+      { "navDate": "2029-01-10", "nav": "150.000000" }
+    ],
+    "expected": {
+      "cagr1y": "0.0000",
+      "cagr3y": "0.0000",
+      "cagr5y": null,
+      "abs6m": "0.0000",
+      "displayEligible": true
+    }
+  },
+  {
+    "id": "RT-06",
+    "description": "abs6m computed from a clean 5% half-year move; 1Y also present",
+    "asOf": "2027-07-10",
+    "history": [
+      { "navDate": "2026-07-10", "nav": "100.000000" },
+      { "navDate": "2027-01-10", "nav": "100.000000" },
+      { "navDate": "2027-07-10", "nav": "105.000000" }
+    ],
+    "expected": {
+      "cagr1y": "5.0000",
+      "cagr3y": null,
+      "cagr5y": null,
+      "abs6m": "5.0000",
+      "displayEligible": true
+    }
+  }
+]

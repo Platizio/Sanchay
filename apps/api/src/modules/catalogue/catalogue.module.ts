@@ -3,6 +3,7 @@ import type { Env } from '../../config/env.js';
 import { CatalogueRouter } from './catalogue.router.js';
 import { CatalogueFpSyncJob } from './fp-sync.job.js';
 import { NavSyncJob } from './nav/nav-sync.job.js';
+import { ReturnsComputeJob } from './returns.job.js';
 
 @Module({})
 export class CatalogueModule {
@@ -10,7 +11,11 @@ export class CatalogueModule {
     return {
       module: CatalogueModule,
       controllers: [CatalogueRouter],
-      providers: [NavSyncJob, ...(env.SANCHAY_APP_ROLE === 'worker' ? [CatalogueFpSyncJob] : [])],
+      providers: [
+        NavSyncJob,
+        ReturnsComputeJob,
+        ...(env.SANCHAY_APP_ROLE === 'worker' ? [CatalogueFpSyncJob] : []),
+      ],
     };
   }
 }
