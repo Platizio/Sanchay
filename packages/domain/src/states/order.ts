@@ -85,6 +85,24 @@ export const ORDER_TRANSITIONS: readonly Transition<OrderStatus>[] = [
   { from: 'PROCESSING', to: 'EXPIRED', trigger: 'fp_expired' },
   { from: 'PROCESSING', to: 'SKIPPED', trigger: 'instalment_skipped' },
   { from: 'UNITS_PENDING', to: 'SETTLED', trigger: 'units_reconciled' },
+  // A late payment success is honoured via re-fetch (§4.2 "Payment not completed ... a late success is
+  // still honoured"): an order left in AWAITING_PAYMENT after a FAILED/EXPIRED attempt, or in
+  // PAYMENT_PENDING, may land directly on any mapped FP success state.
+  { from: 'AWAITING_PAYMENT', to: 'PROCESSING', trigger: 'attempt_success' },
+  { from: 'AWAITING_PAYMENT', to: 'SETTLED', trigger: 'fp_successful_with_units' },
+  { from: 'AWAITING_PAYMENT', to: 'UNITS_PENDING', trigger: 'fp_successful_units_null' },
+  { from: 'PAYMENT_PENDING', to: 'SETTLED', trigger: 'fp_successful_with_units' },
+  { from: 'PAYMENT_PENDING', to: 'UNITS_PENDING', trigger: 'fp_successful_units_null' },
+  // FP failed or expired the order while it was in review, confirming or awaiting units (re-fetched FP
+  // terminal from any non-final state, §4.4), and FP reversed it after success but before SETTLED.
+  { from: 'UNDER_REVIEW', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'UNDER_REVIEW', to: 'EXPIRED', trigger: 'fp_expired' },
+  { from: 'CONFIRMING', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'CONFIRMING', to: 'EXPIRED', trigger: 'fp_expired' },
+  { from: 'PROCESSING', to: 'REVERSED', trigger: 'fp_reversed' },
+  { from: 'UNITS_PENDING', to: 'FAILED', trigger: 'fp_failed' },
+  { from: 'UNITS_PENDING', to: 'EXPIRED', trigger: 'fp_expired' },
+  { from: 'UNITS_PENDING', to: 'REVERSED', trigger: 'fp_reversed' },
   { from: 'SETTLED', to: 'REVERSED', trigger: 'fp_reversed' },
   ...RECONCILING_EXITS.map((to) => ({
     from: 'RECONCILING' as const,

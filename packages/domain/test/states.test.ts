@@ -150,6 +150,44 @@ describe('state machine registry', () => {
     expect(canTransition('PAYMENT_ATTEMPT', 'PENDING', 'FAILED', 'provider_failed')).toBe(true);
   });
 
+  it('a late payment success is honoured from AWAITING_PAYMENT / PAYMENT_PENDING via re-fetch (spec §4.2)', () => {
+    for (const from of ['AWAITING_PAYMENT', 'PAYMENT_PENDING'] as const) {
+      expect(canTransition('ORDER', from, 'SETTLED', 'fp_successful_with_units')).toBe(true);
+      expect(canTransition('ORDER', from, 'UNITS_PENDING', 'fp_successful_units_null')).toBe(true);
+    }
+    expect(canTransition('ORDER', 'AWAITING_PAYMENT', 'PROCESSING', 'attempt_success')).toBe(true);
+  });
+
+  it('every legal fpStateToOrderStatus output from a non-final order status is a legal transition (spec §4.2/§4.4)', () => {
+    const nonFinal = [
+      'UNDER_REVIEW',
+      'CONFIRMING',
+      'AWAITING_PAYMENT',
+      'PAYMENT_PENDING',
+      'PROCESSING',
+      'UNITS_PENDING',
+    ] as const;
+    // FP failed / expired can arrive on any non-final state (re-fetched FP terminal).
+    for (const from of nonFinal) {
+      for (const fp of ['failed', 'expired'] as const) {
+        const to = fpStateToOrderStatus(fp, { unitsAllotted: false });
+        expect(canTransition('ORDER', from, to), `${from} -> ${to}`).toBe(true);
+      }
+    }
+    // FP reversed arrives only after FP success: PROCESSING, UNITS_PENDING or SETTLED.
+    for (const from of ['PROCESSING', 'UNITS_PENDING', 'SETTLED'] as const) {
+      const to = fpStateToOrderStatus('reversed', { unitsAllotted: true });
+      expect(canTransition('ORDER', from, to), `${from} -> ${to}`).toBe(true);
+    }
+    // FP successful from the unpaid / processing states.
+    for (const from of ['AWAITING_PAYMENT', 'PAYMENT_PENDING', 'PROCESSING'] as const) {
+      for (const unitsAllotted of [true, false]) {
+        const to = fpStateToOrderStatus('successful', { unitsAllotted });
+        expect(canTransition('ORDER', from, to), `${from} -> ${to}`).toBe(true);
+      }
+    }
+  });
+
   it('LAUNCH_PLAN_FREQUENCIES rejects QUARTERLY', () => {
     expect(LAUNCH_PLAN_FREQUENCIES).toEqual(['MONTHLY']);
     expect((LAUNCH_PLAN_FREQUENCIES as readonly string[]).includes('QUARTERLY')).toBe(false);

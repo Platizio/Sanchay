@@ -10,11 +10,16 @@ Terminal: SETTLED, FAILED, EXPIRED, REJECTED, REVERSED, CANCELLED, CONSENT_EXPIR
 
 | From | Trigger | To |
 |---|---|---|
+| AWAITING_PAYMENT | attempt_success | PROCESSING |
 | AWAITING_PAYMENT | fp_expired | EXPIRED |
 | AWAITING_PAYMENT | fp_failed | FAILED |
+| AWAITING_PAYMENT | fp_successful_units_null | UNITS_PENDING |
+| AWAITING_PAYMENT | fp_successful_with_units | SETTLED |
 | AWAITING_PAYMENT | payment_postback_or_return | PAYMENT_PENDING |
 | CONFIRMING | ambiguous | RECONCILING |
 | CONFIRMING | fp_confirmed_submitted | PROCESSING |
+| CONFIRMING | fp_expired | EXPIRED |
+| CONFIRMING | fp_failed | FAILED |
 | CONFIRMING | fp_review_failed | REJECTED |
 | CONFIRMING | fp_submitted_redirect | AWAITING_PAYMENT |
 | CONSENT_PENDING | approve | CONSENTED |
@@ -25,8 +30,11 @@ Terminal: SETTLED, FAILED, EXPIRED, REJECTED, REVERSED, CANCELLED, CONSENT_EXPIR
 | PAYMENT_PENDING | attempt_success | PROCESSING |
 | PAYMENT_PENDING | fp_expired | EXPIRED |
 | PAYMENT_PENDING | fp_failed | FAILED |
+| PAYMENT_PENDING | fp_successful_units_null | UNITS_PENDING |
+| PAYMENT_PENDING | fp_successful_with_units | SETTLED |
 | PROCESSING | fp_expired | EXPIRED |
 | PROCESSING | fp_failed | FAILED |
+| PROCESSING | fp_reversed | REVERSED |
 | PROCESSING | fp_successful_units_null | UNITS_PENDING |
 | PROCESSING | fp_successful_with_units | SETTLED |
 | PROCESSING | instalment_skipped | SKIPPED |
@@ -47,9 +55,14 @@ Terminal: SETTLED, FAILED, EXPIRED, REJECTED, REVERSED, CANCELLED, CONSENT_EXPIR
 | SUBMITTING | fp_under_review | UNDER_REVIEW |
 | SUBMITTING | live_check_failed | REJECTED |
 | UNDER_REVIEW | ambiguous | RECONCILING |
+| UNDER_REVIEW | fp_expired | EXPIRED |
+| UNDER_REVIEW | fp_failed | FAILED |
 | UNDER_REVIEW | fp_pending | CONFIRMING |
 | UNDER_REVIEW | fp_review_failed | REJECTED |
 | UNDER_REVIEW | saga_expired_under_review | CONSENT_EXPIRED |
+| UNITS_PENDING | fp_expired | EXPIRED |
+| UNITS_PENDING | fp_failed | FAILED |
+| UNITS_PENDING | fp_reversed | REVERSED |
 | UNITS_PENDING | units_reconciled | SETTLED |
 
 ## PLAN
