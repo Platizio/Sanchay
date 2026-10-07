@@ -710,6 +710,9 @@ importers:
       '@sanchay/config':
         specifier: workspace:*
         version: link:../config
+      '@sanchay/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.6
