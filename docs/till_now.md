@@ -205,7 +205,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 | 7 | Install **Android Studio + an API 35 emulator** so the Android on-device checks (C15, and Maestro flows such as E24's) can run. | Owner |
 | 8 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, the risk questionnaire sign-off (R-36), curated fund list, commission rates. | Owner / team |
 | 9 | Velocity checkpoints: **Fri 10-09** (trims T1-T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate; F29's day is on that ledger, R-39). | Owner + Claude |
-| 10 | **Sprint 2 starts Mon 10-12** on `feat/plan-02-mvp-kernel`, Plan 02 Task D0 first (ready: §14). | Claude (Dev A/B) |
+| 10 | **Sprint 2 (Plan 02) is implemented early, on 10-07** (§15): all 12 tasks are on `feat/plan-02-mvp-kernel`, reviewed and green, in one PR. Before the named Plan 03/04 tasks start, the owner records the six rulings the final review lists (`docs/delivery/plan-02-execution-review.md`, "Rulings the controller must make before the named Plan 03/04 task"). Next: Plan 03 (S3). | Owner / Claude |
 | - | ~~Create the GitHub repo and push `main`~~ **Done:** `Platizio/Sanchay`; PRs #1-#6 are merged. | - |
 
 **Key milestones:**
@@ -609,3 +609,31 @@ Observed only, not changed:
     - Onboarding and redemption PASSED every step.
     - Lumpsum and SIP PASSED up to `submitted` and stopped at the sandbox limit; SIP cancelled its plan.
   - The run showed that FP's create and simulator responses carry no status. F29 now reads the payment back (two new tests, 13/13), and lumpsum and SIP passed on the sandbox again (RV-04-F29-1, `docs/probes/F29-sandbox-dry-run-2026-10-07.md`).
+
+---
+
+## 15. Session 2026-10-07 (continued): Sprint 2 (Plan 02) executed
+
+- **Owner instructions:** "run sprint 2", "push after each task", then "run in multiagent architecture".
+- **Branch:** `feat/plan-02-mvp-kernel`, from `main` `cec82c5`, pushed after each task or wave. The PR is open.
+- **How it ran:**
+  - D0 and D1 ran one at a time with subagent-driven development.
+  - D2 to E25 ran as parallel workflow lanes, each in its own git worktree, with an implementer, a reviewer and up to two fix rounds per task: wave 1 D5, D8; wave 2 D3, D6, D9; wave 3 D4, D7, D10; wave 4 E25.
+  - After each wave, an integrator merged the lanes in plan order and ran `pnpm verify`, `pnpm test:int`, `db:check` and `check-brand`. The controller then pushed; the lane agents' own pushes were refused by their permission check, so the controller pushed instead.
+- **Final review:** eight Opus area reviewers plus a synthesis. It found nine must-fix items:
+  - MF-1 to MF-3 close PII paths into `pgboss.job.output`, the sender errors and `provider_calls`.
+  - MF-4 and MF-5 make FakeFp trustworthy.
+  - MF-6: FP 429 and 408 are ambiguous, not rejections.
+  - MF-7: the prod web image now has the ARN at runtime.
+  - MF-8: the secrets are retained.
+  - MF-9: the seed uses the 2026 SEBI taxonomy.
+  One fix wave applied them test-first, and a scoped Opus re-review confirmed all nine.
+- **Final suites:** api unit 255, infra 28, api integration 202, `db:check`, `check-brand`, lint.
+- **Plan 02 errata:** RV-02-81 to RV-02-93. The migrations follow the merge order (0009 catalogue, 0010 provider_calls, 0011 notifications, 0012 pilot_invites), and the next free number is 0013.
+- **Record:** `docs/delivery/plan-02-execution-review.md` holds the controller's rulings, the synthesis (must-fix list, deferred items per task, the six pre-task rulings needed from the owner) and the re-review's deferred notes.
+- **Not run:** E25's AWS steps (decisions page C4) and D4's sandbox smoke run. Plan 04 F29 replaces the chains, and F29's dry run passed.
+- **Resume here:**
+  1. Review and merge the Sprint 2 PR.
+  2. Record the six pre-task rulings.
+  3. Answer the open rows on the decisions page; C4 unblocks E25's deploy.
+  4. Plan 03 (S3): Plan 03's migrations start at 0013.
