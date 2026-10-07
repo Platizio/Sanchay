@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-06. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only, apart from the 10-06 `source-map-js` lockfile bump (PR #5). The latest sessions are §10 to §12: §10 and §11 merged in PR #5, §12 is on branch `claude/sanchay-plan-02-03-backlog-huz9ym` in a follow-up PR._
+_Last updated: 2026-10-07. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only, apart from the 10-06 `source-map-js` lockfile bump (PR #5). PRs #1 to #6 are merged into `main`; PR #7 (E24's Maestro flow, §12) is open. The latest sessions are §10 to §12; **§13 is the current state and the resume point**._
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -196,12 +196,17 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | The plan backlog for Plans 02, 03 and 04 is worked and merged (§10, §11; PR #5). All 11 open owner decisions were accepted on 10-06 and are written into the plans (§12, follow-up PR). Next: assign the wiring of D4's sandbox chains (the one open backlog item), send the Cybrilla email (`docs/business/cybrilla-payment-url-unused-email.md`), then Sprint 2. | Owner + Claude |
-| 2 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
-| 3 | Install **Android Studio + an API 35 emulator** so the Android on-device check (C15) can run | Owner |
-| 4 | ~~Create the GitHub repo~~ **Done:** `Platizio/Sanchay`. Push local `main` when ready: it contains PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1) (F4) plus the merge, so the PR then shows as merged. | Owner |
-| 5 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, risk questionnaire sign-off, curated fund list, commission rates | Owner / team |
-| 6 | Velocity checkpoints: **Fri 10-09** (trims T1–T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate) | Owner + Claude |
+| 1 | **Plans 02-04 are reviewed and every backlog verdict is in** (§10-§12). The 11 owner decisions of 10-06 are written in (PR #6, merged). One plan PR is open: [Platizio/Sanchay#7](https://github.com/Platizio/Sanchay/pull/7) (E24's Maestro flow, RV-03-56), to merge when reviewed. | Owner |
+| 2 | **Who wires D4's sandbox smoke chains, and when** (R-37 needs every chain wired up to its sandbox limit before the first counted run on Mon 11-16). This is the one open backlog item; the proposal is in `docs/delivery/plan-errata-backlog.md` (Plan 04). | Owner (lead sizes it) |
+| 3 | **Six open questions from 10-05** (§9): (1) a public host for FP sandbox webhooks and payment returns before the 11-06 demo; (2) what prod can show at the 10-23 milestone; (3) the NO-GO fallback ("continue invitee onboarding") against R-31; (4) the founders' canary windows (F20, F27) under R-31; (5) Sprint 4 capacity after R-33/R-34; (6) PB-76, a vendor test on paused prod. | Owner |
+| 4 | **Plan 04 header decisions still open** (items 2-9): EUIN (Cybrilla's Q12 answer and a compliance view), T3 funding, the AWS and MSG91 accounts with the domain and hosted zone (due 10-09), SNS SMS for the alarms, stuck CRITICAL breaks (check against F7's `ops:resolve-break`), desktop MND-03 without a QR code, the interim `SANCHAY_SMS_RETRIEVER_HASH`, and the sandbox runs before GO-2. | Owner |
+| 5 | **Send the Cybrilla email** on unused payment links (decision 10): `docs/business/cybrilla-payment-url-unused-email.md`. File the written reply in `docs/probes/` (G-B6). | Owner |
+| 6 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
+| 7 | Install **Android Studio + an API 35 emulator** so the Android on-device checks (C15, and Maestro flows such as E24's) can run. | Owner |
+| 8 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, the risk questionnaire sign-off (R-36), curated fund list, commission rates. | Owner / team |
+| 9 | Velocity checkpoints: **Fri 10-09** (trims T1-T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate). | Owner + Claude |
+| 10 | **Sprint 2 starts Mon 10-12** on `feat/plan-02-mvp-kernel`, Plan 02 Task D0 first. | Claude (Dev A/B) |
+| - | ~~Create the GitHub repo and push `main`~~ **Done:** `Platizio/Sanchay`; PRs #1-#6 are merged. | - |
 
 **Key milestones:**
 - Wed 10-21: login end to end on web + Android (already achieved on web).
@@ -546,4 +551,21 @@ Observed only, not changed:
   - Cybrilla's written answers: the email is drafted in `docs/business/cybrilla-payment-url-unused-email.md`, and the owner sends it.
   - ~~E24's local Maestro flow still types fixed codes~~ **Fixed** in a later follow-up (RV-03-56; RV-04-F18-2 drops F18's old edit of it).
 - **Resume here:** assign the chain wiring, send the Cybrilla email, then Sprint 2 from Mon 10-12 on `feat/plan-02-mvp-kernel` (Task D0 first).
+
+---
+
+## 13. State on 2026-10-07 and where to resume
+
+- **Merged:** PRs #1 to #6. `main` holds Plan 01's code, Plans 02-04 with every backlog verdict, rulings R-01 to R-38, and the 10-06 `source-map-js` bump.
+- **Open:** PR #7 (E24's Maestro flow, RV-03-56 and RV-04-F18-2), docs only, waiting for review.
+- **Backlog** (`docs/delivery/plan-errata-backlog.md`): Plans 01-03 have 0 open. Plan 04 has 1 open: wiring D4's sandbox chains (§5 row 2).
+- **The owner's queue** is §5 rows 2 to 9. The decisions page "Sanchay: 11 open decisions" (Claude Docs) records the 10-06 answers.
+- **Founder updates:** the 10-06 WhatsApp message (today and tomorrow) was drafted in the session; it is not stored in the repo.
+- **Budget:** the owner's Claude usage limit was reset on 10-07 (Max 20x), so the next session is not bound by the inline-only, no-subagent rule of the 10-06 brief.
+- **Resume here:**
+  1. Merge PR #7 once it is reviewed.
+  2. Put §5 rows 2-4 on one decisions page with a recommendation each, as on 10-06, and write the answers in.
+  3. Once row 2 is decided, write the chain-wiring task into Plan 04.
+  4. Fri 10-09: the velocity checkpoint.
+  5. Mon 10-12: Sprint 2, Plan 02 Task D0 first, on `feat/plan-02-mvp-kernel`.
 
