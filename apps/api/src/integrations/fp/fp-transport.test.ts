@@ -208,6 +208,35 @@ describe('FpTransport.call', () => {
     expect((failure as FpRejectedError).httpStatus).toBe(400);
   });
 
+  it.each([
+    [429, 'RATE_LIMITED'],
+    [408, 'TIMEOUT_408'],
+  ])(
+    'maps a %i to FpAmbiguousError (retryable), not a terminal rejection, recorded as %s (final review MF-6)',
+    async (status, errorCode) => {
+      const agent = agentWithToken();
+      agent
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+        .reply(status, { error: { status, code: 'THROTTLED', message: 'slow down' } });
+      const { record, entries } = recorder();
+      const transport = new FpTransport(
+        BASE_URLS,
+        new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+        agent,
+        clsWith(false),
+        record,
+      );
+      const failure = await transport
+        .call('purchase.create', { body: { source_ref_id: 'o-1' }, consent: consent() })
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(FpAmbiguousError);
+      expect((failure as FpAmbiguousError).httpStatus).toBe(status);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ httpStatus: status, errorCode });
+    },
+  );
+
   it('parses a successful response through fpJson and returns it', async () => {
     const agent = agentWithToken();
     agent

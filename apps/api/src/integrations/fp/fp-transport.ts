@@ -306,6 +306,25 @@ export class FpTransport {
 
     const parsedBody = safeParse(text);
 
+    // A throttle (429) and a request timeout (408) say nothing about whether FP acted on the request, so
+    // they are retryable like a 5xx, never a terminal FpRejectedError (final review MF-6; the provisioning
+    // spec row: "5xx/429 backoff x5; 4xx -> FAILED"). 401/403 eviction is left to the E20 ruling.
+    if (response.statusCode === 429 || response.statusCode === 408) {
+      await this.recordCall({
+        operation: op,
+        audience: definition.audience,
+        aggregateType,
+        aggregateId,
+        httpStatus: response.statusCode,
+        durationMs,
+        errorCode: response.statusCode === 429 ? 'RATE_LIMITED' : 'TIMEOUT_408',
+        requestMeta,
+        responseMeta: meta(parsedBody),
+        rawForBodyEnc,
+      });
+      throw new FpAmbiguousError(op, { status: response.statusCode });
+    }
+
     if (response.statusCode >= 400) {
       const providerCode = extractProviderCode(parsedBody);
       await this.recordCall({
