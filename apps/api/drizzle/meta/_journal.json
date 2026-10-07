@@ -71,6 +71,20 @@
       "when": 1791356627702,
       "tag": "0012_pilot_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791367887514,
+      "tag": "0013_legal_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791367888836,
+      "tag": "0014_legal_consent_grants",
+      "breakpoints": true
     }
   ]
 }

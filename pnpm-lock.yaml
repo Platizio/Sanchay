@@ -706,6 +706,9 @@ importers:
       '@sanchay/money':
         specifier: workspace:*
         version: link:../money
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
     devDependencies:
       '@sanchay/config':
         specifier: workspace:*

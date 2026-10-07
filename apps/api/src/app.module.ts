@@ -13,6 +13,7 @@ import { IntegrationsModule } from './integrations/integrations.module.js';
 import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { SessionGuard } from './modules/identity/session.guard.js';
+import { LegalConsentModule } from './modules/legal-consent/legal-consent.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
 import { ClientGuard } from './modules/platform/client.guard.js';
@@ -69,6 +70,7 @@ export class AppModule {
         IntegrationsModule.forRoot(env),
         NotificationsModule,
         IdentityModule,
+        LegalConsentModule,
         // "Providers are called only from worker jobs": FpModule is never imported in the api role.
         ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
         CatalogueModule.forRoot(env),
