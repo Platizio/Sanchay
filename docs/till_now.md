@@ -205,7 +205,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 | 7 | Install **Android Studio + an API 35 emulator** so the Android on-device checks (C15, and Maestro flows such as E24's) can run. | Owner |
 | 8 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, the risk questionnaire sign-off (R-36), curated fund list, commission rates. | Owner / team |
 | 9 | Velocity checkpoints: **Fri 10-09** (trims T1-T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate; F29's day is on that ledger, R-39). | Owner + Claude |
-| 10 | **Sprint 2 (Plan 02) is implemented early, on 10-07** (§15): all 12 tasks are on `feat/plan-02-mvp-kernel`, reviewed and green, in one PR. Before the named Plan 03/04 tasks start, the owner records the six rulings the final review lists (`docs/delivery/plan-02-execution-review.md`, "Rulings the controller must make before the named Plan 03/04 task"). Next: Plan 03 (S3). | Owner / Claude |
+| 10 | **Sprint 2 (Plan 02) is merged (PR #10). Sprint 3 (Plan 03) is under way** (§16): waves 1-2 of 7 are merged on `feat/plan-03-mvp-onboarding-lumpsum`. E20-E24 (lumpsum, payments) wait for R-a, R-b and R-c on the follow-up decisions page. | Owner / Claude |
 | - | ~~Create the GitHub repo and push `main`~~ **Done:** `Platizio/Sanchay`; PRs #1-#6 are merged. | - |
 
 **Key milestones:**
@@ -637,3 +637,31 @@ Observed only, not changed:
   2. Record the six pre-task rulings.
   3. Answer the open rows on the decisions page; C4 unblocks E25's deploy.
   4. Plan 03 (S3): Plan 03's migrations start at 0013.
+
+---
+
+## 16. Session 2026-10-07 (evening): Sprint 3 (Plan 03) waves 1-2
+
+- **Other work after §15:**
+  - PR #10 (Sprint 2) was merged. CI's first run had failed on one infra test hitting the 5 s timeout during a CDK synth; the infra vitest timeout is now 30 s.
+  - The Plan 02 follow-up decisions (R-a to R-k) went on the Claude Docs page "Sanchay: Plan 02 follow-up decisions (10-07)". The owner accepted R-d, which became **R-44**: job retries wait 30 s, then back off, up to 10 minutes.
+  - A local end-to-end run of Sprint 1 passed: login by SMS OTP through Mailpit, Home, add and verify email, logout and log back in, no PII in the logs. The dev servers ran on Sprint 2's code, with the worker needed for readiness.
+- **Branch:** `feat/plan-03-mvp-onboarding-lumpsum`, from `main` `fa9b4a6`, pushed after each wave. It runs the same way as Sprint 2: parallel worktree lanes per wave, a review and up to two fix rounds per task, and an integrator that merges and runs `pnpm verify`, `test:int`, `db:check` and `check-brand`.
+- **Wave 1 (`f927d4f`):**
+  - Rd (R-44);
+  - E1 FP webhooks: a plan defect had dropped Fastify's JSON safety checks for all routes; they are restored;
+  - E3 legal and consent tables: the SIP mandate no longer asks for an email code (spec H-21);
+  - E14, E15, E16 catalogue API, facts and returns.
+  - Int 238.
+- **Wave 2 (`7cc97cd`):** E2 HostGuard and app config, E4 ConsentEngine, E17 Explore and Fund pages (one fix round). Int 282.
+- **Migrations:** 0013 webhooks (E1), 0014 and 0015 legal and consent (E3), 0016 consent guard (E4). The next free number is 0017; the plan header's table assumed Plan 02 ended at 0009.
+- **Held for the final review:** E3's legal-document seed can overwrite a PUBLISHED document's body and hash.
+- **Record:** `.superpowers/sdd/2026-10-26-plan-03-.../progress.md` (git-ignored) holds the ledger, briefs and lane findings. They go into `docs/` at the end of Plan 03, as for Plan 02.
+- **Resume here:**
+  1. Wave 3 (E5) with the lanes script.
+  2. Wave 4: E6, E8, E9.
+  3. Wave 5: E7, E10, E12.
+  4. Wave 6: E11.
+  5. Wave 7: E13.
+  6. Then the final review.
+  Before E20-E24: the owner answers R-a, R-b and R-c (and R-j, R-k).
