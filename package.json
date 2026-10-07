@@ -22,7 +22,8 @@
     "ops:invite": "pnpm --filter=@sanchay/api ops:invite",
     "ops:catalogue:seed": "pnpm --filter=@sanchay/api ops:catalogue:seed",
     "ops:nav-backfill": "pnpm --filter=@sanchay/api ops:nav-backfill",
-    "ops:nav-release": "pnpm --filter=@sanchay/api ops:nav-release"
+    "ops:nav-release": "pnpm --filter=@sanchay/api ops:nav-release",
+    "ops:facts:import": "pnpm --filter=@sanchay/api ops:facts:import"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
