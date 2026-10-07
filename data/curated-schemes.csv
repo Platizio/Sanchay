@@ -3,7 +3,7 @@ INF000P01011,icici-prudential-mutual-fund,ICICI Prudential Liquid Fund - Regular
 INF000P02022,hdfc-mutual-fund,HDFC Overnight Fund - Regular - Growth,DT_OVERNIGHT,
 INF000P03033,axis-mutual-fund,Axis ELSS Tax Saver Fund - Regular - Growth,EQ_ELSS,36
 INF000P04044,aditya-birla-sun-life-mutual-fund,ABSL Frontline Equity Fund - Regular - Growth,EQ_LARGE_CAP,
-INF000P05055,parag-parikh-mutual-fund,Parag Parikh Flexi Cap Fund - Regular - Growth,EQ_MULTI_CAP,
+INF000P05055,parag-parikh-mutual-fund,Parag Parikh Flexi Cap Fund - Regular - Growth,EQ_FLEXI_CAP,
 INF000P06066,kotak-mahindra-mutual-fund,Kotak Emerging Equity Fund - Regular - Growth,EQ_MID_CAP,
 INF000P07077,sbi-mutual-fund,SBI Corporate Bond Fund - Regular - Growth,DT_CORPORATE_BOND,
 INF000P08088,axis-mutual-fund,Axis Banking and PSU Debt Fund - Regular - Growth,DT_BANKING_PSU,

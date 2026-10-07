@@ -145,6 +145,53 @@ describe('catalogue schema checks', () => {
     }
   });
 
+  it('seeds the 2026 SEBI taxonomy of fund-data.md section 4.1, not the 2017 one (final review MF-9)', async () => {
+    const rows = (await t.db.select().from(sebiCategories)).filter(
+      (row) => !row.code.startsWith('TC_'),
+    );
+    const byClass: Record<string, number> = {};
+    for (const row of rows) byClass[row.assetClass] = (byClass[row.assetClass] ?? 0) + 1;
+    expect(byClass).toEqual({ EQUITY: 13, DEBT: 17, HYBRID: 7, LIFE_CYCLE: 1, OTHER: 2 });
+    const codes = rows.map((row) => row.code);
+    for (const code of ['EQ_FLEXI_CAP', 'EQ_VALUE', 'EQ_CONTRA', 'EQ_SECTORAL', 'EQ_THEMATIC']) {
+      expect(codes).toContain(code);
+    }
+    for (const code of ['HY_EQUITY_SAVINGS', 'DT_SECTORAL', 'LC_LIFE_CYCLE', 'OT_INDEX_ETF']) {
+      expect(codes).toContain(code);
+    }
+    for (const code of [
+      'EQ_VALUE_CONTRA',
+      'EQ_SECTORAL_THEMATIC',
+      'DT_ULTRA_SHORT',
+      'OT_FOF_OVERSEAS',
+    ]) {
+      expect(codes).not.toContain(code);
+    }
+    // Only the overnight and liquid funds have their own cut-off group (section 4.1); the overseas
+    // fund-of-funds cut-off is a per-scheme sub-type, not a category.
+    const cutoffs = Object.fromEntries(rows.map((row) => [row.code, row.cutoffClass]));
+    expect(cutoffs.DT_OVERNIGHT).toBe('OVERNIGHT');
+    expect(cutoffs.DT_LIQUID).toBe('LIQUID');
+    expect(
+      rows
+        .filter((row) => row.cutoffClass !== 'STANDARD')
+        .map((row) => row.code)
+        .sort(),
+    ).toEqual(['DT_LIQUID', 'DT_OVERNIGHT']);
+  });
+
+  it('every seeded alias and curated scheme points at a 2026 category, and Flexi Cap is EQ_FLEXI_CAP (final review MF-9)', async () => {
+    const codes = new Set((await t.db.select().from(sebiCategories)).map((row) => row.code));
+    const aliasRows = await t.db.select().from(categoryAliases);
+    expect(aliasRows.length).toBeGreaterThan(0);
+    for (const row of aliasRows) expect(codes).toContain(row.categoryCode);
+    expect(aliasRows.find((row) => row.alias === 'Flexi Cap')?.categoryCode).toBe('EQ_FLEXI_CAP');
+    const flexi = (await t.db.select().from(schemes)).find((row) =>
+      row.name.startsWith('Parag Parikh Flexi Cap'),
+    );
+    expect(flexi?.categoryCode).toBe('EQ_FLEXI_CAP');
+  });
+
   it('holidays 2026 include 10-02, 10-20, 11-10, 11-24', async () => {
     const rows = await t.db.select().from(marketHolidays);
     const dates = rows.map((r) => r.holidayDate);
