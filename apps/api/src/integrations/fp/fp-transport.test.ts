@@ -287,4 +287,74 @@ describe('FpTransport.call', () => {
     }
     expect(responseMeta).toMatchObject({ id: 'pv-1', status: 'pending' });
   });
+
+  /** Runs one P-class call whose scripted reply is the given body, and returns what was recorded. */
+  async function recordedFor(
+    op: 'phoneNumber.create' | 'investorProfile.create',
+    path: string,
+    reply: unknown,
+  ): Promise<{ responseMeta: unknown }> {
+    const agent = agentWithToken();
+    agent
+      .get('https://fp.fake.local')
+      .intercept({ path, method: 'POST' })
+      .reply(201, reply as never);
+    const { record, entries } = recorder();
+    const transport = new FpTransport(
+      BASE_URLS,
+      new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+      agent,
+      clsWith(false),
+      record,
+    );
+    await transport.call(op, { body: {}, consent: consent() });
+    return entries[0] as { responseMeta: unknown };
+  }
+
+  it('keeps a phone number out of response_meta although its key is only number (final review MF-3)', async () => {
+    const { responseMeta } = await recordedFor('phoneNumber.create', '/v2/phone_numbers', {
+      id: 'phn_1',
+      object: 'phone_number',
+      number: '9876543210',
+      isd: '91',
+    });
+    expect(JSON.stringify(responseMeta)).not.toContain('9876543210');
+    expect(responseMeta).toMatchObject({ id: 'phn_1', object: 'phone_number' });
+  });
+
+  it('keeps a PAN in taxid_number and a geo_location out of response_meta (final review MF-3)', async () => {
+    const { responseMeta } = await recordedFor('investorProfile.create', '/v2/investor_profiles', {
+      id: 'inv_1',
+      object: 'investor_profile',
+      status: 'pending',
+      first_tax_residency: { country: 'IN', taxid_number: 'AAAPA3751A' },
+      geo_location: { latitude: 19.07, longitude: 72.87 },
+    });
+    const text = JSON.stringify(responseMeta);
+    for (const value of ['AAAPA3751A', '19.07', '72.87']) expect(text).not.toContain(value);
+    expect(responseMeta).toMatchObject({ id: 'inv_1', status: 'pending' });
+  });
+
+  it('keeps error.status and error.code readable in response_meta of a rejection (final review MF-3)', async () => {
+    const agent = agentWithToken();
+    agent
+      .get('https://fp.fake.local')
+      .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+      .reply(400, { error: { status: 400, code: 'INVALID_SCHEME', message: 'bad 9876543210' } });
+    const { record, entries } = recorder();
+    const transport = new FpTransport(
+      BASE_URLS,
+      new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+      agent,
+      clsWith(false),
+      record,
+    );
+    await transport
+      .call('purchase.create', { body: { source_ref_id: 'o-1' }, consent: consent() })
+      .catch(() => undefined);
+    const { responseMeta } = entries[0] as { responseMeta: unknown };
+    expect(responseMeta).toEqual({
+      error: { status: '400', code: 'INVALID_SCHEME', message: '[REDACTED]' },
+    });
+  });
 });

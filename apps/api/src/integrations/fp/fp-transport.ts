@@ -3,7 +3,7 @@ import { isLosslessNumber } from 'lossless-json';
 import type { ClsService } from 'nestjs-cls';
 import type { Dispatcher } from 'undici';
 import { request } from 'undici';
-import { REDACTED, scrub } from '../../modules/platform/logging.js';
+import { isRedactedKey, REDACTED, scrub } from '../../modules/platform/logging.js';
 import type { SanchayClsStore } from '../../modules/platform/request-context.js';
 import { assertConsumed, type ConsumedConsent } from './consumed-consent.js';
 import { FpAmbiguousError, FpRejectedError, ProviderCallInTransactionError } from './fp-errors.js';
@@ -125,12 +125,57 @@ function redactFp(value: unknown, stringLeaves: boolean, depth = 0): unknown {
 }
 
 /**
- * Response meta: platform `scrub` plus the FP key list (ids and states stay readable for
- * debugging). Request meta (`stringLeaves`): every string leaf of the body is dropped as well, so
- * an unlisted key can never leak a value; the full request is in `body_enc`.
+ * The only response keys whose values may be stored in plaintext `response_meta` (final review MF-3): ids,
+ * object types and states, timestamps, the gateway, and `code` / `status` at any depth (so `error.code` and
+ * `error.status` stay readable). Everything else is redacted, so a value under a key nobody listed (a phone
+ * `number`, a PAN under `taxid_number`, a `geo_location`) can never reach the append-only table.
+ */
+const FP_RESPONSE_ALLOWED_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'object',
+  'status',
+  'state',
+  'old_id',
+  'created_at',
+  'updated_at',
+  'gateway',
+  'code',
+]);
+
+/** The second layer: the platform and FP key denylists, for the leaves the allowlist walk would otherwise keep. */
+function isDenied(key: string): boolean {
+  return isRedactedKey(key) || FP_REDACT_KEY_PATTERNS.some((pattern) => pattern.test(key));
+}
+
+/**
+ * Allowlist walk for response bodies. `numbersAsStrings` has run, so every number is a string and a latitude or a
+ * 10-digit number is redacted like any other value unless its key is listed. Booleans and null carry no PII
+ * and stay unless the key is on the denylist. (`code` is on the platform denylist for OTP codes, but an FP
+ * `code` is an error code: the allowlist wins for the listed keys.)
+ */
+function allowlist(value: unknown, key: string | null, depth = 0): unknown {
+  if (depth > 16) return '[DEPTH]';
+  if (Array.isArray(value)) return value.map((item) => allowlist(item, key, depth + 1));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [name, allowlist(item, name, depth + 1)]),
+    );
+  }
+  if (key !== null && FP_RESPONSE_ALLOWED_KEYS.has(key)) return value;
+  if (typeof value === 'string' || typeof value === 'number') return REDACTED;
+  if (key !== null && isDenied(key)) return REDACTED;
+  return value;
+}
+
+/**
+ * Request meta: platform `scrub` plus the FP key list, and every string leaf of the body is dropped as well, so
+ * an unlisted key can never leak a value; the full request is in `body_enc`. Response meta is an allowlist
+ * (`FP_RESPONSE_ALLOWED_KEYS`) instead; the unredacted response is likewise only in `body_enc`.
  */
 function meta(value: unknown, stringLeaves = false): unknown {
-  return value === undefined ? null : redactFp(scrub(numbersAsStrings(value)), stringLeaves);
+  if (value === undefined) return null;
+  const plain = numbersAsStrings(value);
+  return stringLeaves ? redactFp(scrub(plain), true) : allowlist(plain, null);
 }
 
 function extractProviderCode(body: unknown): string | null {
