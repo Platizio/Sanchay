@@ -3,7 +3,7 @@ import { isLosslessNumber } from 'lossless-json';
 import type { ClsService } from 'nestjs-cls';
 import type { Dispatcher } from 'undici';
 import { request } from 'undici';
-import { scrub } from '../../modules/platform/logging.js';
+import { REDACTED, scrub } from '../../modules/platform/logging.js';
 import type { SanchayClsStore } from '../../modules/platform/request-context.js';
 import { assertConsumed, type ConsumedConsent } from './consumed-consent.js';
 import { FpAmbiguousError, FpRejectedError, ProviderCallInTransactionError } from './fp-errors.js';
@@ -86,8 +86,51 @@ function numbersAsStrings(value: unknown, depth = 0): unknown {
   return value;
 }
 
-function meta(value: unknown): unknown {
-  return value === undefined ? null : scrub(numbersAsStrings(value));
+/**
+ * FP uses snake_case keys that the platform `scrub` list (camelCase, design section B.5) does not
+ * match: `investor_identifier` (the PAN), `date_of_birth`, `primary_account_holder_name`,
+ * `postal_code`, `line1`.., `user_ip`, `ifsc_code`. Those keys are redacted here, at any depth,
+ * on top of `scrub`. The unredacted request and response live only in the encrypted `body_enc`.
+ */
+const FP_REDACT_KEY_PATTERNS: readonly RegExp[] = [
+  /identifier/i,
+  /(^|_)pan(_|$)/i,
+  /birth/i,
+  /holder/i,
+  /(^|_)(first|middle|last|full)_?name/i,
+  /postal|pincode|zip/i,
+  /^line\d+$/i,
+  /(^|_)ip(_|$)/i,
+  /ifsc/i,
+  /account_?(number|no)/i,
+  /phone|mobile|email/i,
+  /aadhaar|nominee|guardian/i,
+];
+
+function redactFp(value: unknown, stringLeaves: boolean, depth = 0): unknown {
+  if (depth > 16) return '[DEPTH]';
+  if (typeof value === 'string') return stringLeaves ? REDACTED : value;
+  if (Array.isArray(value)) return value.map((item) => redactFp(item, stringLeaves, depth + 1));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        FP_REDACT_KEY_PATTERNS.some((pattern) => pattern.test(key))
+          ? REDACTED
+          : redactFp(item, stringLeaves, depth + 1),
+      ]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Response meta: platform `scrub` plus the FP key list (ids and states stay readable for
+ * debugging). Request meta (`stringLeaves`): every string leaf of the body is dropped as well, so
+ * an unlisted key can never leak a value; the full request is in `body_enc`.
+ */
+function meta(value: unknown, stringLeaves = false): unknown {
+  return value === undefined ? null : redactFp(scrub(numbersAsStrings(value)), stringLeaves);
 }
 
 function extractProviderCode(body: unknown): string | null {
@@ -130,7 +173,11 @@ export class FpTransport {
     const requestBody = args.body === undefined ? undefined : JSON.stringify(args.body);
     const aggregateType = args.aggregate?.type ?? null;
     const aggregateId = args.aggregate?.id ?? null;
-    const requestMeta = scrub({ method: definition.method, path, body: args.body });
+    const requestMeta = {
+      method: definition.method,
+      path,
+      body: meta(args.body, true),
+    };
     const startedAt = Date.now();
 
     let response: Awaited<ReturnType<typeof request>>;

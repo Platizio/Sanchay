@@ -172,4 +172,64 @@ describe('FpTransport.call', () => {
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ isin: 'INF209KA1K47' });
   });
+
+  it('keeps PAN, DOB and other FP snake_case PII out of request_meta and response_meta', async () => {
+    const agent = agentWithToken();
+    agent
+      .get('https://poa.fake.local')
+      .intercept({ path: '/v2/auth/cybrillarta/token', method: 'POST' })
+      .reply(200, { access_token: 'tok', expires_in: 1800 })
+      .persist();
+    agent
+      .get('https://poa.fake.local')
+      .intercept({ path: '/poa/pre_verifications', method: 'POST' })
+      .reply(201, {
+        id: 'pv-1',
+        object: 'pre_verification',
+        status: 'pending',
+        investor_identifier: 'ABCDE1234F',
+        date_of_birth: { value: '1990-01-31' },
+        primary_account_holder_name: 'Asha Rao',
+        postal_code: '560001',
+        user_ip: '203.0.113.9',
+        ifsc_code: 'HDFC0000001',
+      });
+    const { record, entries } = recorder();
+    const transport = new FpTransport(
+      BASE_URLS,
+      new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+      agent,
+      clsWith(false),
+      record,
+    );
+    await transport.call('preVerification.create', {
+      body: {
+        investor_identifier: 'ABCDE1234F',
+        pan: { value: 'ABCDE1234F' },
+        name: { value: 'Asha Rao' },
+        date_of_birth: { value: '1990-01-31' },
+        unlisted_key: 'ABCDE1234F',
+        bank_accounts: [{ value: { account_number: '123456789012', ifsc_code: 'HDFC0000001' } }],
+      },
+    });
+    expect(entries).toHaveLength(1);
+    const { requestMeta, responseMeta } = entries[0] as {
+      requestMeta: unknown;
+      responseMeta: unknown;
+    };
+    for (const meta of [JSON.stringify(requestMeta), JSON.stringify(responseMeta)]) {
+      for (const secret of [
+        'ABCDE1234F',
+        '1990-01-31',
+        'Asha Rao',
+        '560001',
+        '203.0.113.9',
+        'HDFC0000001',
+        '123456789012',
+      ]) {
+        expect(meta).not.toContain(secret);
+      }
+    }
+    expect(responseMeta).toMatchObject({ id: 'pv-1', status: 'pending' });
+  });
 });
