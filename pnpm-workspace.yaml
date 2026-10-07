@@ -117,6 +117,7 @@ allowBuilds:
   unrs-resolver: true
 
 catalog:
+  '@aws-sdk/client-sesv2': 3.1143.0
   '@biomejs/biome': 2.5.14
   '@hookform/resolvers': 5.9.1
   '@nestjs/cli': 11.0.24

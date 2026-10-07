@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { DB, type DbHandle, type Tx } from '../../db/client.js';
+import { Notify } from '../notifications/notify.service.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
@@ -34,6 +35,7 @@ export class AuthService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
+    @Inject(Notify) private readonly notify: Notify,
   ) {}
 
   /** Same response shape for every mobile (no account enumeration, H-5). */
@@ -91,6 +93,13 @@ export class AuthService {
           userAgent: ctx.userAgent,
         });
         const isNewInvestor = existing === null;
+        if (isNewDevice) {
+          await this.notify.enqueue(tx, 'SECURITY_NEW_SIGN_IN', {
+            investorId: investor.id,
+            data: { platform: ctx.platform },
+            dedupeKey: `SECURITY_NEW_SIGN_IN:${device.id}`,
+          });
+        }
         await this.audit.record(tx, {
           action: isNewInvestor ? AUDIT_ACTIONS.AUTH_SIGNUP : AUDIT_ACTIONS.AUTH_LOGIN,
           actorType: 'INVESTOR',
