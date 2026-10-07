@@ -11,7 +11,7 @@ import { SESSION_COOKIE } from '../../src/modules/platform/cookies.js';
 import { reconBreaks } from '../../src/modules/platform/kernel.schema.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
-import { webHeaders } from './http.js';
+import { apiHost, webHeaders } from './http.js';
 import { jobOf } from './jobs.js';
 
 const SECRET = 'int-test-fp-webhook-secret-32bytes!';
@@ -32,7 +32,12 @@ function post(app: TestApp, body: string, headers: Record<string, string> = {}) 
   return app.app.inject({
     method: 'POST',
     url: '/api/v1/webhooks/fp',
-    headers: { 'content-type': 'application/json', 'fp-signature': sign(body), ...headers },
+    headers: {
+      host: apiHost(),
+      'content-type': 'application/json',
+      'fp-signature': sign(body),
+      ...headers,
+    },
     payload: body,
   });
 }
@@ -87,7 +92,11 @@ describe('POST /api/v1/webhooks/fp (api role)', () => {
   });
 
   it('a POST with no body is a 400 VALIDATION_FAILED, never a 500', async () => {
-    const res = await t.app.inject({ method: 'POST', url: '/api/v1/webhooks/fp' });
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/api/v1/webhooks/fp',
+      headers: { host: apiHost() },
+    });
     expect([res.statusCode, res.json().code]).toEqual([400, 'VALIDATION_FAILED']);
   });
 

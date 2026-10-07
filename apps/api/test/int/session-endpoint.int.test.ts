@@ -6,7 +6,7 @@ import { SessionService } from '../../src/modules/identity/session.service.js';
 import { MINUTE } from '../../src/modules/platform/clock.js';
 import { sha256 } from '../../src/modules/platform/crypto.js';
 import { bootTestApp, type TestApp } from './app.js';
-import { nativeHeaders, webHeaders } from './http.js';
+import { appHost, nativeHeaders, webHeaders } from './http.js';
 
 let t: TestApp;
 
@@ -37,7 +37,11 @@ const URL_SESSION = '/api/v1/auth/session';
 
 describe('GET /api/v1/auth/session', () => {
   it('rejects requests without x-sanchay-client (ORIGIN_REJECTED)', async () => {
-    const res = await t.app.inject({ method: 'GET', url: URL_SESSION });
+    const res = await t.app.inject({
+      method: 'GET',
+      url: URL_SESSION,
+      headers: { host: appHost() },
+    });
     expect([res.statusCode, res.json().code]).toEqual([403, 'ORIGIN_REJECTED']);
   });
 

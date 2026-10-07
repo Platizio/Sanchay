@@ -14,7 +14,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 let t: TestApp;
 let baseUrl = '';
 beforeAll(async () => {
-  t = await bootTestApp();
+  // HostGuard: these real HTTP calls carry Host 127.0.0.1:<port>, so 127.0.0.1 is the app host here
+  // (F8 moves these native calls to the api host under H-1).
+  t = await bootTestApp({ env: { SANCHAY_APP_ORIGIN: 'http://127.0.0.1:3000' } });
   await t.app.listen(0, '127.0.0.1');
   baseUrl = `${await t.app.getUrl()}/api/v1`;
 });

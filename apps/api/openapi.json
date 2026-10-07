@@ -9288,6 +9288,220 @@
           }
         }
       }
+    },
+    "/app/config": {
+      "get": {
+        "operationId": "meta.appConfig",
+        "summary": "Public app configuration (flags, limits, cut-offs, support)",
+        "tags": [
+          "meta"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "minAppVersion": {
+                      "type": "object",
+                      "properties": {
+                        "android": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "android"
+                      ]
+                    },
+                    "flags": {
+                      "type": "object",
+                      "properties": {
+                        "ordersEnabled": {
+                          "type": "boolean"
+                        },
+                        "sipEnabled": {
+                          "type": "boolean"
+                        },
+                        "redeemByUnits": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ordersEnabled",
+                        "sipEnabled",
+                        "redeemByUnits"
+                      ]
+                    },
+                    "cutoff": {
+                      "type": "object",
+                      "properties": {
+                        "equityDebtHybridTime": {
+                          "type": "string"
+                        },
+                        "liquidTime": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "equityDebtHybridTime",
+                        "liquidTime"
+                      ]
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "perOrderMax": {
+                          "type": "string"
+                        },
+                        "perInvestorPerDayMax": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "perOrderMax",
+                        "perInvestorPerDayMax"
+                      ]
+                    },
+                    "support": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "email",
+                        "phone"
+                      ]
+                    },
+                    "amcTagline": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "minAppVersion",
+                    "flags",
+                    "cutoff",
+                    "limits",
+                    "support",
+                    "amcTagline"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "defined": {
+                          "const": true
+                        },
+                        "code": {
+                          "const": "INTERNAL"
+                        },
+                        "status": {
+                          "const": 500
+                        },
+                        "message": {
+                          "type": "string",
+                          "default": "INTERNAL"
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "requestId": {
+                              "type": "string"
+                            },
+                            "fields": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "code",
+                                  "message"
+                                ]
+                              }
+                            },
+                            "providerCode": {
+                              "type": "string"
+                            },
+                            "retryAfterSeconds": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "retryable",
+                            "requestId"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "defined",
+                        "code",
+                        "status",
+                        "message",
+                        "data"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "defined": {
+                          "const": false
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "number"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": [
+                        "defined",
+                        "code",
+                        "status",
+                        "message"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
