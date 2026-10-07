@@ -112,6 +112,8 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
       accepted.push(row);
       continue;
     }
+    // A row older than the stored NAV is stale: it neither applies nor is checked.
+    if (row.navDate < existing.navDate) continue;
     const release = released.has(row.isin);
     if (!release && quarantineDecision(existing.nav, row.nav)) {
       quarantinedCount++;
@@ -128,9 +130,14 @@ export async function runNavSync(db: Database, deps: NavSyncDeps): Promise<void>
       });
       continue;
     }
+    // Four syncs run per NAV date and each re-reads the same row: prev_nav (the previous day's NAV that the
+    // 1-day return reads) rolls only when the date advances; a same-date row updates nav alone.
+    const roll =
+      row.navDate > existing.navDate
+        ? { prevNav: existing.nav, prevNavDate: existing.navDate }
+        : {};
     const apply = {
-      prevNav: existing.nav,
-      prevNavDate: existing.navDate,
+      ...roll,
       nav: row.nav,
       navDate: row.navDate,
       schemeNameSnapshot: row.schemeName,

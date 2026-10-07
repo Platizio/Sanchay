@@ -123,6 +123,53 @@ describe('nav.sync.daily', () => {
   });
 });
 
+describe('nav.sync.daily prev_nav rolling', () => {
+  // Four syncs run per NAV date, each re-reading the same feed row: prev_nav must stay the previous day's NAV.
+  const isin = 'INF209KR0001';
+  const filler = Array.from(
+    { length: 1000 },
+    (_, i) =>
+      `${5000 + i};INF998F${String(i).padStart(5, '0')};-;Filler;Direct;Growth;10.0000;24-Aug-2026`,
+  );
+  const feedOf = (nav: string, date: string) =>
+    [
+      'Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date',
+      `9;${isin};-;R;Direct;Growth;${nav};${date}`,
+      ...filler,
+    ].join('\n');
+  const sync = (feed: string) =>
+    runNavSync(t.db, {
+      client: { fetchDaily: vi.fn().mockResolvedValue(feed) } as never,
+      reconBreaks: { open: vi.fn() } as never,
+      jobs: { enqueue: vi.fn() } as never,
+      clock: new FakeClock('2026-08-24T16:00:00.000Z'),
+      kind: 'DAILY_2130',
+    });
+  const stored = async () => {
+    const r = await t.db.query.schemeNavs.findFirst({ where: (s, { eq: e }) => e(s.isin, isin) });
+    return [r?.nav, r?.navDate, r?.prevNav, r?.prevNavDate];
+  };
+
+  it('rolls prev only when the date advances, keeps it on a same-date re-sync and skips an older row', async () => {
+    await t.db.insert(schemeNavs).values({ isin, nav: '10.000000', navDate: '2026-08-23' });
+
+    await sync(feedOf('10.5000', '24-Aug-2026'));
+    expect(await stored()).toEqual(['10.500000', '2026-08-24', '10.000000', '2026-08-23']);
+
+    // The same feed again (the 23:30, 07:00 and 10:30 syncs): nothing moves.
+    await sync(feedOf('10.5000', '24-Aug-2026'));
+    expect(await stored()).toEqual(['10.500000', '2026-08-24', '10.000000', '2026-08-23']);
+
+    // A corrected NAV for the same date updates nav only.
+    await sync(feedOf('10.6000', '24-Aug-2026'));
+    expect(await stored()).toEqual(['10.600000', '2026-08-24', '10.000000', '2026-08-23']);
+
+    // A row older than the stored NAV is skipped.
+    await sync(feedOf('9.0000', '23-Aug-2026'));
+    expect(await stored()).toEqual(['10.600000', '2026-08-24', '10.000000', '2026-08-23']);
+  });
+});
+
 describe('backfillNavHistory (R-33)', () => {
   const HISTORY_HEADER =
     'Scheme Code;NAV Name;Plan;Option;ISIN Div Payout/ISIN Growth;ISIN Div Reinvestment;Net Asset Value;Date';
