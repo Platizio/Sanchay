@@ -1,0 +1,11 @@
+isin,expense_ratio_pct,expense_ratio_as_of,riskometer,riskometer_as_of,benchmark_name,benchmark_riskometer,exit_load_text,sid_url,kim_url
+INF000P01011,0.35,2026-09-01,LOW,2026-09-01,CRISIL Liquid Fund Index,LOW,Nil,https://example.invalid/sid/INF000P01011.pdf,https://example.invalid/kim/INF000P01011.pdf
+INF000P02022,0.20,2026-09-01,LOW,2026-09-01,CRISIL Overnight Fund Index,LOW,Nil,https://example.invalid/sid/INF000P02022.pdf,https://example.invalid/kim/INF000P02022.pdf
+INF000P03033,1.75,2026-09-01,VERY_HIGH,2026-09-01,BSE 500 TRI,VERY_HIGH,Nil (36-month lock-in),https://example.invalid/sid/INF000P03033.pdf,https://example.invalid/kim/INF000P03033.pdf
+INF000P04044,1.65,2026-09-01,VERY_HIGH,2026-09-01,Nifty 100 TRI,VERY_HIGH,1% if redeemed within 1 year,https://example.invalid/sid/INF000P04044.pdf,https://example.invalid/kim/INF000P04044.pdf
+INF000P05055,1.55,2026-09-01,VERY_HIGH,2026-09-01,Nifty 500 TRI,VERY_HIGH,2% if redeemed within 1 year,https://example.invalid/sid/INF000P05055.pdf,https://example.invalid/kim/INF000P05055.pdf
+INF000P06066,1.80,2026-09-01,VERY_HIGH,2026-09-01,Nifty Midcap 150 TRI,VERY_HIGH,1% if redeemed within 1 year,https://example.invalid/sid/INF000P06066.pdf,https://example.invalid/kim/INF000P06066.pdf
+INF000P07077,0.90,2026-09-01,MODERATE,2026-09-01,CRISIL Corporate Bond Index,MODERATE,Nil,https://example.invalid/sid/INF000P07077.pdf,https://example.invalid/kim/INF000P07077.pdf
+INF000P08088,0.85,2026-09-01,MODERATE,2026-09-01,CRISIL Banking and PSU Debt Index,MODERATE,Nil,https://example.invalid/sid/INF000P08088.pdf,https://example.invalid/kim/INF000P08088.pdf
+INF000P09099,1.90,2026-09-01,VERY_HIGH,2026-09-01,CRISIL Hybrid 35+65 Aggressive Index,HIGH,1% if redeemed within 1 year,https://example.invalid/sid/INF000P09099.pdf,https://example.invalid/kim/INF000P09099.pdf
+INF000P10010,1.95,2026-09-01,VERY_HIGH,2026-09-01,Nifty Smallcap 250 TRI,VERY_HIGH,1% if redeemed within 1 year,https://example.invalid/sid/INF000P10010.pdf,https://example.invalid/kim/INF000P10010.pdf
