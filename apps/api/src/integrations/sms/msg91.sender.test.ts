@@ -71,4 +71,39 @@ describe('Msg91SmsSender', () => {
       sender.send({ to: '9876543210', text: 'x', templateId: 'SANCHAY_LOGIN_OTP_V1' }),
     ).rejects.toThrow(SenderUnavailableError);
   });
+
+  it('does not copy the provider message into the error (final review MF-2)', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ type: 'error', message: 'invalid mobile 9876543210' }), {
+          status: 200,
+        }),
+    );
+    const sender = new Msg91SmsSender(credentials, fetchImpl);
+    const err = await sender
+      .send({ to: '9876543210', text: 'x', templateId: 'SANCHAY_LOGIN_OTP_V1' })
+      .then(
+        () => new Error('did not reject'),
+        (e: unknown) => e as Error,
+      );
+    expect(err).toBeInstanceOf(SenderUnavailableError);
+    expect(err.message).toBe('msg91: provider error');
+    expect(err.message).not.toContain('9876543210');
+  });
+
+  it('keeps only the error name when fetch rejects, with no cause (final review MF-2)', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw Object.assign(new Error('connect ECONNRESET 9876543210'), { name: 'FetchError' });
+    });
+    const sender = new Msg91SmsSender(credentials, fetchImpl);
+    const err = await sender
+      .send({ to: '9876543210', text: 'x', templateId: 'SANCHAY_LOGIN_OTP_V1' })
+      .then(
+        () => new Error('did not reject'),
+        (e: unknown) => e as Error,
+      );
+    expect(err).toBeInstanceOf(SenderUnavailableError);
+    expect(err.message).toBe('msg91: request failed (FetchError)');
+    expect(err.cause).toBeUndefined();
+  });
 });

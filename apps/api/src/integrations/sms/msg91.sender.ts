@@ -57,12 +57,17 @@ export class Msg91SmsSender implements SmsSender {
         }),
       });
     } catch (cause) {
-      throw new SenderUnavailableError('msg91: request failed', { cause });
+      // MF-2: keep only the error name (timeout, network); a raw cause may carry the request URL or body.
+      const name = (cause as { name?: string } | null)?.name;
+      throw new SenderUnavailableError(
+        name === undefined ? 'msg91: request failed' : `msg91: request failed (${name})`,
+      );
     }
     if (!res.ok) throw new SenderUnavailableError(`msg91: HTTP ${res.status}`);
     const body = (await res.json()) as { type?: string; message?: string };
     if (body.type === 'error') {
-      throw new SenderUnavailableError(`msg91: ${body.message ?? 'error'}`);
+      // MF-2: the provider's free text may echo the mobile number; a fixed message only.
+      throw new SenderUnavailableError('msg91: provider error');
     }
     return { provider: 'MSG91', messageId: body.message ?? '' };
   }

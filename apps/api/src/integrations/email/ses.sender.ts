@@ -25,7 +25,18 @@ export class SesEmailSender implements EmailSender {
       );
       return { provider: 'SES', messageId: result.MessageId ?? '' };
     } catch (cause) {
-      throw new SenderUnavailableError('ses: send failed', { cause });
+      // MF-2: an SES sandbox MessageRejected names the recipient, so keep only the error name and HTTP status,
+      // and attach no cause (it would reach the pino err output and pgboss.job.output).
+      const { name, $metadata } = cause as {
+        name?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      const detail = [name, $metadata?.httpStatusCode]
+        .filter((part) => part !== undefined)
+        .join(' ');
+      throw new SenderUnavailableError(
+        detail === '' ? 'ses: send failed' : `ses: send failed (${detail})`,
+      );
     }
   }
 }

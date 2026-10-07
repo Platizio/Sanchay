@@ -27,4 +27,25 @@ describe('SesEmailSender', () => {
       sender.send({ to: 'investor@example.com', subject: 's', text: 't', templateId: 'x' }),
     ).rejects.toThrow(SenderUnavailableError);
   });
+
+  it('carries no provider free text and no cause: a sandbox MessageRejected names the recipient (final review MF-2)', async () => {
+    const rejected = Object.assign(
+      new Error(
+        'Email address is not verified. The following identities failed: investor@example.com',
+      ),
+      { name: 'MessageRejected', $metadata: { httpStatusCode: 400 } },
+    );
+    const client = { send: vi.fn(async () => Promise.reject(rejected)) };
+    const sender = new SesEmailSender('noreply@sanchay.in', client as never);
+    const err = await sender
+      .send({ to: 'investor@example.com', subject: 's', text: 't', templateId: 'x' })
+      .then(
+        () => new Error('did not reject'),
+        (e: unknown) => e as Error,
+      );
+    expect(err).toBeInstanceOf(SenderUnavailableError);
+    expect(err.message).toBe('ses: send failed (MessageRejected 400)');
+    expect(err.message).not.toContain('investor@example.com');
+    expect(err.cause).toBeUndefined();
+  });
 });
