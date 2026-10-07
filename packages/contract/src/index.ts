@@ -1,5 +1,6 @@
 import { authContract } from './auth.js';
 import { catalogueContract } from './catalogue.js';
+import { consentsContract } from './consents.js';
 import { healthContract } from './health.js';
 import { meContract } from './me.js';
 import { metaContract } from './meta.js';
@@ -7,6 +8,7 @@ import { metaContract } from './meta.js';
 export * from './auth.js';
 export * from './catalogue.js';
 export * from './common.js';
+export * from './consents.js';
 export * from './errors.js';
 export * from './health.js';
 export * from './me.js';
@@ -18,5 +20,6 @@ export const contract = {
   me: meContract,
   catalogue: catalogueContract,
   meta: metaContract,
+  consents: consentsContract,
 };
 export type Contract = typeof contract;

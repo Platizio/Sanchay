@@ -92,6 +92,13 @@
       "when": 1791368755058,
       "tag": "0015_legal_consent_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791369658886,
+      "tag": "0016_consent_guard",
+      "breakpoints": true
     }
   ]
 }
