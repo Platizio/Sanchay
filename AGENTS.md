@@ -41,7 +41,7 @@ Step 4 see it pass → Step 5 commit.
 - ADR files: append table rows only.
 
 ## Dependencies (the A1 rule)
-- Versions come only from `catalog:` in `pnpm-workspace.yaml`. Nobody edits `catalog:`.
+- Versions come only from `catalog:` in `pnpm-workspace.yaml`. Nobody changes an existing `catalog:` pin. A plan task may add a new key that its plan lists, with an ADR-0001 row (R-42). `undici` stays on 7.x (R-43).
 - Expo modules: `npx expo install` inside `apps/mobile`.
 - `ERR_PNPM_IGNORED_BUILDS`: add one `allowBuilds` entry (`true` only for a runtime binary) plus an ADR-0001 row.
 - Release-age refusal: add one exact `'<name>@<version>'` to `minimumReleaseAgeExclude` plus an ADR-0001 row

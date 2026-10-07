@@ -207,10 +207,11 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-HDR-4: header items 2, 3 and 6 brought up to date (header, F1; 2026-10-07 decisions page; minor).** Item 3 (T3) and item 6 (stuck CRITICAL breaks) were listed as open, but R-08 already spends T3's hours on F28 and F7's `ops:resolve-break` already resolves a handled non-invariant break; both now say so. Item 2 called the EUIN question "Q12", which is the P-04 follow-up's name: the Cybrilla letter's question 12 is about consent scope, and the EUIN question is its question 15. The note says so, and the identifiers built on the name (`EUIN_Q12_MISSING`, `EUIN_NOT_AS_Q12`, F20's `q12` field) keep it. Text only.
 - **RV-04-F1-17: F1's open question 1 is resolved by F7 (F1; minor).** The question asked for an audited two-founder command that resolves a non-invariant CRITICAL break; F7 adds `ops:resolve-break` (deviation 9). Text only.
 - **RV-04-F23-3: the NO-GO fallback follows R-41 (F23; R-41; minor).** The gate doc's fallback said onboarding of invitees continues on prod after a NO-GO if G-B7 and G-C1 are green, which contradicted R-31. Following the owner's 2026-10-07 decision (R-41), no invite is added except the founders' test accounts until a re-run gate is GO; spec §7 now says the same. Text only; no test reads the fallback line.
-- **RV-04-HDR-5: F29 wires D4's sandbox chains, first in Plan 04 (header, F29; R-39; major).** R-37 needs every chain wired up to its sandbox limit before the first counted G-E4 run on Mon 11-16, and no task did it, so F23 would read `NOT MET: chains not wired`. Following the owner's 2026-10-07 decision (R-39), the new Task F29 (Dev A, 8 h) wires onboarding, lumpsum, SIP and redemption in `tools/fp-probes` with the plans' own bodies, polls each FP object to a final state with no deadline, records the steps past the limit SKIPPED as `sandbox limit: …` naming the canary legs, and cancels its SIP plan. The execution order now starts with F29, and header item 1 says so. Run: F29's tests on D4's extracted code (red 9/9, then 11/11, `tsc` clean), and F23's `gate-evidence g-e4` on F29's output (`NOT MET: chains not wired` from D4's chains, `waiting on the canary` from F29's, `MET` with the canary legs). Not run: any FP sandbox call (F29 Step 6).
+- **RV-04-HDR-5: F29 wires D4's sandbox chains, first in Plan 04 (header, F29; R-39; major).** R-37 needs every chain wired up to its sandbox limit before the first counted G-E4 run on Mon 11-16, and no task did it, so F23 would read `NOT MET: chains not wired`. Following the owner's 2026-10-07 decision (R-39), the new Task F29 (Dev A, 8 h) wires onboarding, lumpsum, SIP and redemption in `tools/fp-probes` with the plans' own bodies, polls each FP object to a final state with no deadline, records the steps past the limit SKIPPED as `sandbox limit: …` naming the canary legs, and cancels its SIP plan. The execution order now starts with F29, and header item 1 says so. Run: F29's tests on D4's extracted code (red 9/9, then 11/11, `tsc` clean), and F23's `gate-evidence g-e4` on F29's output (`NOT MET: chains not wired` from D4's chains, `waiting on the canary` from F29's, `MET` with the canary legs). Not run at the time: any FP sandbox call (F29 Step 6); it ran later the same day (RV-04-F29-1).
 - **RV-04-F23-4: F23's G-E4 dependency 1 is met by F29 (F23; R-39; minor).** The Interfaces note said no task wires D4's chains; it now names F29. No code change: F23's parser already counts F29's `sandbox limit:` steps (checked as in RV-04-HDR-5). Text only.
 - **RV-04-F5-5: F5 deviation 3 is superseded by F29 (F5; R-39; minor).** The redemption chain is no longer left as D4's placeholder; F29 wires it. The deviation's command also lost its `--` before `--chain` (RV-02-26). Text only.
 - **RV-04-F28-2: F28 deviation 7 is updated for F29 (F28; R-39; minor).** F29's SIP chain now ends with F28's cancel body on every sandbox run. Running the app's own `plans.cancel` against the sandbox is still open (header item 9). Text only.
+- **RV-04-F29-1: F29's sandbox dry run passes, and the simulated payment is read back (F29; owner request 2026-10-07; major).** F29's Step 6 ran on the FP sandbox, with F29's code on D4 extracted from Plan 02 (`undici` 7.30.0, R-43). Onboarding and redemption PASSED every step, lumpsum and SIP PASSED up to `submitted` and stopped at the sandbox limit, and SIP cancelled its plan (`docs/probes/F29-sandbox-dry-run-2026-10-07.md`). The run showed that FP's create and simulator responses carry no status, so the lumpsum simulate step had passed on HTTP 200 alone. F29 now reads the payment back and needs `SUCCESS` or `APPROVED`, its details print only fields FP returned, and its fake matches the sandbox. Two tests were added (red against the first version, then 13/13), and lumpsum and SIP passed on the sandbox again. The plan text was extracted back and is identical to the tested files.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit); where a task needs the workspace build, that line comes first, before biome, because the re-run reads `dist` (RV-04-HDR-3). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -48836,7 +48837,7 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
   - `src/types.ts`: `Audience` (`'fp' | 'poa' | 'pg'`); `FpProbeClient.request(audience, method, path, body?)`; `ProbeAccount` (`mfInvestmentAccount`, `bankAccountOldId`, `consentEmail`, `consentMobile`, `purchaseIsin`, `redemptionFolio`, `redemptionIsin`, `paymentPostbackUrl`); `ChainContext` gains `account` and `pollIntervalMs`. D4's other names are unchanged.
   - `src/poll.ts`: `pollUntil(read, done, intervalMs)` returns `{value, reads, seconds}`, with no deadline (D7).
   - `src/steps.ts`: `Steps` (`do`, `skip`, `run`: the first error is recorded FAILED and ends the chain) and `expectField(object, field, expected)`.
-  - `src/fake-server.ts`: `createFakeServer(urls, options?)` and `FakeServerOptions` (`settlePurchases`, `reject`, `redemptionSubmittedReads`, `redemptionFinalState`). Its defaults behave like the sandbox in P-07 and P-09.
+  - `src/fake-server.ts`: `createFakeServer(urls, options?)` and `FakeServerOptions` (`settlePurchases`, `reject`, `redemptionSubmittedReads`, `redemptionFinalState`, `simulatedPaymentStatus`). Its defaults behave like the sandbox in P-07, P-09 and F29's dry run: create and simulator responses carry no status; only a read does.
   - `src/fp-client.ts`: `buildClient(options)` (an HTTP status of 400 or more now throws `HTTP <status> on <METHOD> <path> (<FP code: message>)`, never with a request body), `buildFakeContext(fake?)` and `sandboxAccount(raw?)`.
   - `src/chains/lumpsum.ts`: `LUMPSUM_SANDBOX_LIMIT`; `src/chains/sip.ts`: `SIP_SANDBOX_LIMIT`. Both start `sandbox limit:` and name their canary legs (`A_UPI`, `A_NETBANKING`; `B_SIP`).
   - Step names: onboarding 9, lumpsum 9, SIP 13 and redemption 5, exactly as `test/chains.test.ts` lists them.
@@ -48852,11 +48853,11 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
 1. **An FP refusal now throws.** D4's client parsed an error body as a result, so a 400 could PASS a step. Tokens and calls now throw on HTTP 400 or more, and the detail names FP's code and message, never the request body.
 2. **A chain stops at its first FAILED step.** Nothing after it runs, so no step passes on top of a broken one. D4's `test/smoke.test.ts` still holds: no fake chain fails, and each passes at least one step.
 3. **Onboarding creates a new sandbox investor on every run.** It must prove provisioning, and FP profiles cannot be deleted. That is at least four profiles by 11-25 (three counted runs plus Step 6's dry run). It uses a fresh simulator PAN (`simulatorPan()`) and a fresh account number ending 1193, but the reused investor's contacts, so no real-looking number is invented.
-4. **Lumpsum pays through the sandbox simulator, netbanking only.** The simulator payment takes the purchase to `submitted`, which is the sandbox limit (P-07). The order then fails at 23:00 IST with `fp_payment_url_unused`, after the run has ended, so that does not matter here. UPI is the canary's leg `A_UPI`. If the sandbox ever settles the purchase, the last step must PASS with `allotted_units` instead of being SKIPPED.
+4. **Lumpsum pays through the sandbox simulator, netbanking only.** The simulator payment takes the purchase to `submitted`, which is the sandbox limit (P-07). The order then fails at 23:00 IST with `fp_payment_url_unused`, after the run has ended, so that does not matter here. UPI is the canary's leg `A_UPI`. The simulator's answer carries no status, so the chain reads the payment back and needs `SUCCESS` or `APPROVED`. If the sandbox ever settles the purchase, the last step must PASS with `allotted_units` instead of being SKIPPED.
 5. **SIP sends `generate_first_installment_now: true`, which F2 does not.** The smoke needs an instalment on the same day (P-09 row 6). The chain cancels its plan with F28's body every time. If a run fails between `plan create` and `plan cancel`, that plan stays active in the sandbox: cancel it by hand with the same body (`POST /v2/mf_purchase_plans/cancel`). This chain is GO-2 evidence (R-37), and its cancel step is half of Plan 04 header item 9.
 6. **Redemption redeems ₹100 a run** from the reused folio (395.394 units on 10-01, worth about ₹10,000), so there is room for every planned run.
 7. **No deadline (D7).** `pollUntil` reads every `SANCHAY_PROBE_POLL_MS` (default 5000) until FP reports a final state. The operator stops a run that really hangs.
-8. **A refusal in the sandbox is a finding against the app task too.** The chains send the plans' own bodies, so a FAILED step (for example, E11's address `state` or `nature`, which Plan 03 E11 asked D4's harness to confirm) gets an erratum on the task that builds that body, not just a fix here.
+8. **A refusal in the sandbox is a finding against the app task too.** The chains send the plans' own bodies, so a FAILED step (the 2026-10-07 dry run accepted all of E11's bodies, including the address `state` and `nature` that Plan 03 E11 asked D4's harness to confirm) gets an erratum on the task that builds that body, not just a fix here.
 9. **Configuration.** A sandbox run reads `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON` (D3's names) and the tool-only `SANCHAY_PROBE_ACCOUNT_JSON` and `SANCHAY_PROBE_POLL_MS` from the git-ignored `tools/fp-probes/.env.sandbox`, through `tsx --env-file`. No container reads the two `SANCHAY_PROBE_*` variables, so they are not H-8 rows. The account JSON holds the reused investor's ids and contacts and is never committed.
 
 - [ ] **Step 1: Write the failing test**
@@ -48972,6 +48973,22 @@ describe('F29: D4 chains wired up to the sandbox limit (R-37, R-39)', () => {
     expect(steps[1]?.detail).toContain('HTTP 400 on POST /v2/mf_purchases');
   });
 
+  it('a simulated payment is read back: one that is not SUCCESS or APPROVED is FAILED', async () => {
+    const steps = await lumpsum.run(await buildFakeContext({ simulatedPaymentStatus: 'FAILED' }));
+    expect(steps.at(-1)?.name).toBe('payment simulate SUCCESS (sandbox simulator)');
+    expect(steps.at(-1)?.status).toBe('FAILED');
+    expect(steps.at(-1)?.detail).toContain('status=FAILED, expected SUCCESS or APPROVED');
+  });
+
+  it('a detail never prints a field FP did not return (the sandbox omits status on creates)', async () => {
+    const chains = { onboarding, lumpsum, sip, redemption };
+    for (const [name, chain] of Object.entries(chains)) {
+      for (const step of await chain.run(await buildFakeContext())) {
+        expect(step.detail, `${name}: ${step.name}`).not.toMatch(/undefined|UNDEFINED/);
+      }
+    }
+  });
+
   it('an unexpected final state is FAILED, not PASSED', async () => {
     const steps = await redemption.run(await buildFakeContext({ redemptionFinalState: 'failed' }));
     expect(steps.at(-1)?.status).toBe('FAILED');
@@ -48996,7 +49013,7 @@ describe('F29: D4 chains wired up to the sandbox limit (R-37, R-39)', () => {
 ```
 pnpm --filter=@sanchay/fp-probes test
 ```
-Expected: `test/chains.test.ts` fails 9 of 9 with `TypeError: buildFakeContext is not a function`; D4's `test/smoke.test.ts` still passes 2 of 2.
+Expected: `test/chains.test.ts` fails 11 of 11 with `TypeError: buildFakeContext is not a function`; D4's `test/smoke.test.ts` still passes 2 of 2.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -49185,6 +49202,8 @@ export interface FakeServerOptions {
   readonly redemptionSubmittedReads?: number;
   /** The state a confirmed redemption ends in (default `successful`). */
   readonly redemptionFinalState?: string;
+  /** The status the payment simulator leaves (default: what the chain asked for, `SUCCESS`). */
+  readonly simulatedPaymentStatus?: string;
 }
 
 type Row = Record<string, unknown>;
@@ -49369,19 +49388,24 @@ export function createFakeServer(urls: FakeServerUrls, options: FakeServerOption
     return record;
   });
 
-  // Payments: a create returns a token_url (netbanking) or the UPI intent; the simulator marks it SUCCESS.
+  // Payments and mandates: like the sandbox (dry run 2026-10-07), a create or simulator response carries
+  // no status; only a read does. The simulator marks a payment SUCCESS and a mandate APPROVED.
+  const withoutStatus = (row: Row): Row => {
+    const { status: _status, mandate_status: _mandateStatus, ...rest } = row;
+    return rest;
+  };
   route(urls.pg, 'POST', '/api/pg/payments/netbanking', (opts) => {
     const body = bodyOf(opts);
     const payment: Row = { ...body, id: nextOldId(), status: 'PENDING' };
     if (body.method === 'UPI') payment.upi = { type: 'uri', uri: 'upi://pay?pa=fake@upi' };
     else payment.token_url = 'https://pg.fake.local/pay';
     payments.set(Number(payment.id), payment);
-    return payment;
+    return withoutStatus(payment);
   });
   route(urls.pg, 'POST', '/api/pg/payments/nach', (opts) => {
     const payment: Row = { ...bodyOf(opts), id: nextOldId(), status: 'PENDING' };
     payments.set(Number(payment.id), payment);
-    return payment;
+    return withoutStatus(payment);
   });
   route(
     urls.pg,
@@ -49389,16 +49413,22 @@ export function createFakeServer(urls: FakeServerUrls, options: FakeServerOption
     (p) => p.startsWith('/api/pg/simulate/payments/'),
     (opts) => {
       const payment = payments.get(Number(lastSegment(opts.path))) ?? {};
-      payment.status = String(bodyOf(opts).status ?? 'SUCCESS');
-      return payment;
+      payment.status = options.simulatedPaymentStatus ?? String(bodyOf(opts).status ?? 'SUCCESS');
+      return withoutStatus(payment);
     },
+  );
+  route(
+    urls.pg,
+    'GET',
+    (p) => p.startsWith('/api/pg/payments/'),
+    (opts) => payments.get(Number(lastSegment(opts.path))) ?? {},
   );
 
   // Mandates: CREATED, SUBMITTED on authorise (UPI intent), APPROVED by the simulator.
   route(urls.pg, 'POST', '/api/pg/mandates', (opts) => {
     const mandate: Row = { ...bodyOf(opts), id: nextOldId(), mandate_status: 'CREATED' };
     mandates.set(Number(mandate.id), mandate);
-    return mandate;
+    return withoutStatus(mandate);
   });
   route(urls.pg, 'POST', '/api/pg/payments/emandate/auth', (opts) => {
     const mandate = mandates.get(Number(bodyOf(opts).mandate_id)) ?? {};
@@ -49412,7 +49442,7 @@ export function createFakeServer(urls: FakeServerUrls, options: FakeServerOption
     (opts) => {
       const mandate = mandates.get(Number(lastSegment(opts.path))) ?? {};
       mandate.mandate_status = String(bodyOf(opts).status ?? 'APPROVED');
-      return mandate;
+      return withoutStatus(mandate);
     },
   );
   route(
@@ -49901,6 +49931,8 @@ export const LUMPSUM_SANDBOX_LIMIT =
   'sandbox limit: the FP sandbox keeps a simulator-paid ONDC purchase submitted (P-07); proven by G-E7(a), canary legs A_UPI and A_NETBANKING';
 
 const PURCHASE_FINAL = ['submitted', 'successful', 'failed', 'expired', 'reversed', 'cancelled'];
+const PAYMENT_FINAL = ['SUCCESS', 'APPROVED', 'FAILED', 'EXPIRED', 'REJECTED', 'CANCELLED'];
+const paymentStatus = (v: Record<string, unknown>): string => String(v.status).toUpperCase();
 
 /**
  * F29 (R-37, R-39): Plan 03 E20/E21's H-2 custom checkout, in lumpsum-flow.md's order: create, review,
@@ -49972,7 +50004,7 @@ export async function run(ctx: ChainContext): Promise<StepResult[]> {
         if (typeof v.token_url !== 'string') throw new Error('no token_url in the payment');
         return v;
       },
-      (v) => `payment id=${v.id}, status=${v.status}, token_url returned`,
+      (v) => `payment id=${v.id}, token_url returned`,
     );
     await s.do(
       'purchase confirm (PATCH state confirmed)',
@@ -49981,11 +50013,22 @@ export async function run(ctx: ChainContext): Promise<StepResult[]> {
     );
     await s.do(
       'payment simulate SUCCESS (sandbox simulator)',
-      () =>
-        client.request('pg', 'POST', `/api/pg/simulate/payments/${payment.id}`, {
+      async () => {
+        await client.request('pg', 'POST', `/api/pg/simulate/payments/${payment.id}`, {
           status: 'SUCCESS',
-        }),
-      (v) => `payment status=${v.status}`,
+        });
+        // The simulator's answer carries no status (dry run 2026-10-07), so read the payment back.
+        const polled = await pollUntil(
+          () => client.request('pg', 'GET', `/api/pg/payments/${payment.id}`),
+          (v) => PAYMENT_FINAL.includes(paymentStatus(v)),
+          ctx.pollIntervalMs,
+        );
+        if (!['SUCCESS', 'APPROVED'].includes(paymentStatus(polled.value))) {
+          throw new Error(`status=${paymentStatus(polled.value)}, expected SUCCESS or APPROVED`);
+        }
+        return polled;
+      },
+      (p) => `payment status=${paymentStatus(p.value)} after ${p.reads} read(s)`,
     );
     const submitted = await s.do(
       'purchase submitted (poll to a final state)',
@@ -50069,7 +50112,7 @@ export async function run(ctx: ChainContext): Promise<StepResult[]> {
           mandate_limit: 100_000,
           provider_name: 'CYBRILLAPOA',
         }),
-      (v) => `id=${v.id}, status=${mandateStatus(v)}`,
+      (v) => `id=${v.id}`,
     );
     const mandateId = Number(mandate.id);
     await s.do(
@@ -50092,7 +50135,7 @@ export async function run(ctx: ChainContext): Promise<StepResult[]> {
         client.request('pg', 'POST', `/api/pg/simulate/mandates/${mandateId}`, {
           status: 'APPROVED',
         }),
-      (v) => `status=${mandateStatus(v)}`,
+      () => 'simulator accepted',
     );
     await s.do(
       'mandate approved (poll to a final status)',
@@ -50178,7 +50221,7 @@ export async function run(ctx: ChainContext): Promise<StepResult[]> {
           mandate_id: mandateId,
           amc_order_ids: [first.old_id],
         }),
-      (v) => `payment id=${v.id}, status=${v.status}`,
+      (v) => `payment id=${v.id}`,
     );
     const instalment = await s.do(
       'first instalment submitted (poll to a final state)',
@@ -50344,7 +50387,7 @@ pnpm --filter=@sanchay/fp-probes test
 pnpm --filter=@sanchay/fp-probes typecheck
 pnpm --filter=@sanchay/fp-probes smoke --chain=lumpsum --env=fake
 ```
-Expected: 11 passed in 2 files (`chains.test.ts` 9, `smoke.test.ts` 2); the typecheck exits 0; the fake lumpsum run prints eight `[PASSED]` lines and `[SKIPPED] purchase settled with allotted units -- sandbox limit: …`, and exits 0. Until F23 Part A lands, a fake run writes `docs/probes/smoke-<IST day>-lumpsum.md` with no `-fake` suffix. Delete it, and never commit it:
+Expected: 13 passed in 2 files (`chains.test.ts` 11, `smoke.test.ts` 2); the typecheck exits 0; the fake lumpsum run prints eight `[PASSED]` lines and `[SKIPPED] purchase settled with allotted units -- sandbox limit: …`, and exits 0. Until F23 Part A lands, a fake run writes `docs/probes/smoke-<IST day>-lumpsum.md` with no `-fake` suffix. Delete it, and never commit it:
 ```
 rm docs/probes/smoke-<IST day>-lumpsum.md
 ```
@@ -50380,10 +50423,16 @@ rm docs/probes/smoke-<IST day>-redemption.md
 
 **How this task was checked while it was written (2026-10-07).** D4's `tools/fp-probes` was extracted from Plan 02 into a scratch folder with Plan 02's pins (undici 7.16.0, tsx 4.19.2, TypeScript 6.0.3, Vitest 5.0.1, `@types/node` 24.13.6) and the repo's `node-lib` tsconfig.
 - **Baseline:** D4 as written passes its 2 tests, and `tsc` exits 0.
-- **Red:** with `test/chains.test.ts` added, 9 of 9 new tests failed with `TypeError: buildFakeContext is not a function`, and D4's 2 still passed.
-- **Green:** with this task's files, 11 of 11 pass and `tsc` exits 0. `biome check --write` with the repo's `biome.json` only re-wrapped lines; `biome ci` is then clean. undici 7.16.0 does not export `MockInterceptor` from its root, so `fake-server.ts` types the two reply-callback fields it reads itself.
+- **Red:** with `test/chains.test.ts` added, every new test failed with `TypeError: buildFakeContext is not a function` (9 of 9 in the first version), and D4's 2 still passed. The two tests added after the dry run (payment read-back, no `undefined` detail) failed against the first version's chains and a fake that, like the sandbox, returns no status on creates.
+- **Green:** with this task's files, 13 of 13 pass and `tsc` exits 0, on `undici` 7.16.0 and again on 7.30.0 (R-43). `biome check --write` with the repo's `biome.json` only re-wrapped lines; `biome ci` is then clean. undici 7.16.0 does not export `MockInterceptor` from its root, so `fake-server.ts` types the two reply-callback fields it reads itself.
 - **F23 reads the result:** F23's `scripts/gate-evidence.ts`, its Part A `evidence.ts` and the gate doc were extracted from this plan. Three IST days (11-16 to 11-18) of evidence were written in F23's format from each chain's fake run, labelled `sandbox` for this check only.
   - From D4's chains, `node scripts/gate-evidence.ts g-e4` wrote `**G-E4: NOT MET: chains not wired.**`, listed every run as `STEP_SKIPPED`, and exited 1.
   - From this task's chains it wrote `**G-E4: NOT MET: waiting on the canary.**`: onboarding and redemption MET with 3 days, lumpsum `A_UPI pending, A_NETBANKING pending`, SIP `B_SIP pending`. It exited 1.
   - With a canary report listing `A_UPI` and `A_NETBANKING` as PASS, it wrote `**G-E4: MET.**` and exited 0.
-- **Not run:** any call to the FP sandbox. Step 6 is that check, and it needs the reused investor's `SANCHAY_PROBE_ACCOUNT_JSON`. In the workspace, `pnpm lint` and the `pnpm --filter` commands were not run against `tools/fp-probes`: the package does not exist on `main` until D4.
+- **Sandbox dry run (Step 6, 2026-10-07, host `s.finprim.com`).** The credentials came from `apps/api/.env`, and the account values from read-only lookups of the reused investor (folio defaults; an `INF209KA1K47` folio holding 395.394 units). The return URL was R-11's `https://api.sanchay.in/api/v1/pg/return/probe`, because R-05's sandbox host is still open; a simulated payment never redirects. Every chain exited 0:
+  - onboarding: all 9 steps PASSED in 1 s (a new investor `invp_9157…`, `mfia_420e…` old id 87);
+  - lumpsum: PASSED to `submitted` in 8-10 s (`mfp_ebe0…` old id 231, payment `SUCCESS` read back), then SKIPPED at the sandbox limit;
+  - SIP: PASSED to the first instalment `submitted` (`mfp_a505…` old id 232), SKIPPED at the limit, plan cancelled, 12 s;
+  - redemption: all 5 steps PASSED, `successful` in 12 s with `redeemed_units` 3.9268.
+  The first run showed that FP's create and simulator responses carry no status, so the payment read-back and the status-free details were added test-first, and lumpsum and SIP were run again with the same result.
+- **Not run:** in the workspace, `pnpm lint` and the `pnpm --filter` commands were not run against `tools/fp-probes`: the package does not exist on `main` until D4.
