@@ -64,7 +64,21 @@ describe('throttler (per session, across routes)', () => {
     ];
     for (const [method, url] of routes) {
       for (let i = 0; i < 10; i++) {
-        const res = await t.app.inject({ method, url, remoteAddress: '198.51.100.33' });
+        const webhook = url === '/api/v1/webhooks/fp';
+        const res = await t.app.inject({
+          method,
+          url,
+          remoteAddress: '198.51.100.33',
+          ...(webhook
+            ? {
+                headers: { 'content-type': 'application/json' },
+                payload: JSON.stringify({
+                  event: { id: `evt_throttle_${i}`, type: 'mf_purchase.updated' },
+                  data: { object: { id: 'pur_throttle', object: 'mf_purchase' } },
+                }),
+              }
+            : {}),
+        });
         expect(res.statusCode, `${method} ${url} #${i + 1}`).toBe(200);
       }
     }

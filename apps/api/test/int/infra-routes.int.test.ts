@@ -20,12 +20,11 @@ afterAll(async () => {
 const REF = 'r7Qx2mV9pL4sN8wK1cZ5bA';
 const INFRA_ROUTES: Array<[string, 'GET' | 'POST', string]> = [
   ['GET /api/v1/health', 'GET', '/api/v1/health'],
-  ['POST /api/v1/webhooks/fp', 'POST', '/api/v1/webhooks/fp'],
   ['GET /api/v1/pg/return/:ref', 'GET', `/api/v1/pg/return/${REF}`],
   ['POST /api/v1/pg/return/:ref', 'POST', `/api/v1/pg/return/${REF}`],
 ];
 
-describe('R-11 guard exemptions (restricted only by HostGuard, which arrives with the Plan-02 kernel)', () => {
+describe('R-11 guard exemptions (restricted only by HostGuard, which arrives with E2)', () => {
   it.each(INFRA_ROUTES)(
     '%s skips ClientGuard and SessionGuard: no client header, no session, 200',
     async (_name, method, url) => {
@@ -61,11 +60,11 @@ describe('R-11 guard exemptions (restricted only by HostGuard, which arrives wit
     expect([anonymous.statusCode, anonymous.json().code]).toEqual([401, 'AUTH_REQUIRED']);
   });
 
-  it('records the HostGuard scope: webhook and returns on the api host only, health on both hosts', () => {
+  it('records the HostGuard scope: pg/return on the api host only, health on both hosts', () => {
     const reflector = new Reflector();
     expect(reflector.get(INFRA_ROUTE, HealthRouter)).toBe('APP_AND_API_HOSTS');
     const proto = InfraRoutesTestController.prototype;
-    for (const handler of [proto.fpWebhook, proto.pgReturnGet, proto.pgReturnPost]) {
+    for (const handler of [proto.pgReturnGet, proto.pgReturnPost]) {
       expect(reflector.get(INFRA_ROUTE, handler)).toBe('API_HOST');
     }
   });

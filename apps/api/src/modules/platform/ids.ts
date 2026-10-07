@@ -14,6 +14,7 @@ export type TableName =
   | 'fund_facts'
   | 'fund_facts_revisions'
   | 'idempotency_keys'
+  | 'inbound_webhook_events'
   | 'investor_contacts'
   | 'investor_devices'
   | 'investors'

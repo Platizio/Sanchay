@@ -9,6 +9,7 @@ import { Logger, LoggerModule } from 'nestjs-pino';
 import { v7 as uuidv7 } from 'uuid';
 import type { Env } from './config/env.js';
 import { FpModule } from './integrations/fp/fp.module.js';
+import { FpWebhooksModule } from './integrations/fp/webhooks/fp-webhooks.module.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
 import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
@@ -69,6 +70,7 @@ export class AppModule {
         IntegrationsModule.forRoot(env),
         NotificationsModule,
         IdentityModule,
+        FpWebhooksModule.forRoot(env),
         // "Providers are called only from worker jobs": FpModule is never imported in the api role.
         ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
         CatalogueModule.forRoot(env),
