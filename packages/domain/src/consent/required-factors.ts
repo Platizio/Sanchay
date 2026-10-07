@@ -3,12 +3,12 @@ import type { ConsentSubjectType } from '../platform.js';
 
 export type RequiredFactor = 'SMS' | 'EMAIL';
 
-/** H-21: subject types whose risk profile always needs both factors, independent of amount. */
+/** H-21: subject types whose risk profile always needs both factors, independent of amount.
+ * MANDATE_REGISTRATION is deliberately absent: H-21 makes SIP registration, including its mandate, SMS only. */
 const EMAIL_ALWAYS: ReadonlySet<ConsentSubjectType> = new Set<ConsentSubjectType>([
   'REDEMPTION',
   'SWITCH',
   'ONBOARDING_ATTEST',
-  'MANDATE_REGISTRATION',
   'MANDATE_CANCEL',
   'BANK_CHANGE',
   'CONTACT_CHANGE',

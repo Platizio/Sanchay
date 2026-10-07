@@ -21,4 +21,8 @@ describe('requiredFactorsFor (H-21)', () => {
   it('SIP registration needs SMS only', () => {
     expect(requiredFactorsFor('SIP_REGISTRATION', '5000.00')).toEqual(['SMS']);
   });
+
+  it('mandate registration is the SIP mandate step and needs SMS only', () => {
+    expect(requiredFactorsFor('MANDATE_REGISTRATION', null)).toEqual(['SMS']);
+  });
 });
