@@ -67,4 +67,18 @@ describe('ExploreScreen', () => {
     await userEvent.click(await screen.findByRole('button', { name: /search/i }));
     expect(nav.push).toHaveBeenCalledWith('/explore/search');
   });
+
+  it('filters by the category code when given the category slug (EXP-03)', async () => {
+    let requested: string | null = null;
+    server.use(
+      http.get(`${TEST_API}/catalogue/categories`, () => HttpResponse.json(categories())),
+      http.get(`${TEST_API}/catalogue/schemes`, ({ request }) => {
+        requested = new URL(request.url).searchParams.get('category');
+        return HttpResponse.json(schemes());
+      }),
+    );
+    renderWithProviders(<ExploreScreen category="flexi-cap" />);
+    expect(await screen.findByText('Parag Parikh Flexi Cap Fund - Regular - Growth')).toBeTruthy();
+    expect(requested).toBe('EQ_FLEXI');
+  });
 });

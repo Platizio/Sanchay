@@ -2,7 +2,8 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { Linking } from 'react-native';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders, TEST_API } from '../test-utils';
 import { FundScreen } from './FundScreen';
 
@@ -113,5 +114,21 @@ describe('FundScreen', () => {
     const { nav } = renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
     await user.click(await screen.findByRole('link', { name: 'Invest' }));
     expect(nav.push).toHaveBeenCalledWith('/invest/0190c0de-0000-7000-8000-0000000000b1/lumpsum');
+  });
+
+  it('opens the SID and KIM documents (FUND-01)', async () => {
+    server.use(
+      http.get(`${TEST_API}/catalogue/schemes/parag-parikh-flexi-cap`, () =>
+        HttpResponse.json(schemeDetail()),
+      ),
+    );
+    const open = vi.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    const user = userEvent.setup();
+    renderWithProviders(<FundScreen schemeSlug="parag-parikh-flexi-cap" />);
+    await user.click(await screen.findByLabelText('Scheme Information Document: View'));
+    expect(open).toHaveBeenCalledWith('https://example.invalid/sid.pdf');
+    await user.click(screen.getByLabelText('Key Information Memorandum: View'));
+    expect(open).toHaveBeenCalledWith('https://example.invalid/kim.pdf');
+    open.mockRestore();
   });
 });

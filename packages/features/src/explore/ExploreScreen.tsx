@@ -16,17 +16,17 @@ export function ExploreScreen({ category }: ExploreScreenProps) {
   const { utils } = useApi();
   const nav = useNav();
   const categories = useQuery(utils.catalogue.categories.queryOptions({ input: {} }));
-  const list = useQuery(
-    utils.catalogue.listSchemes.queryOptions({ input: { category, sort: 'name' } }),
-  );
-
-  if (list.isPending || categories.isPending) {
-    return (
-      <Screen testID="explore-loading">
-        <AppText tone="muted">Loading funds…</AppText>
-      </Screen>
-    );
-  }
+  // The route carries the category slug; the API filters on the category code. Wait for the
+  // categories so the slug can be resolved (an unknown slug passes through and lists nothing).
+  const categoryCode = category
+    ? (categories.data?.find((c) => c.slug === category)?.code ?? category)
+    : undefined;
+  const list = useQuery({
+    ...utils.catalogue.listSchemes.queryOptions({
+      input: { category: categoryCode, sort: 'name' },
+    }),
+    enabled: !category || categories.isSuccess,
+  });
 
   if (list.isError || categories.isError) {
     const err = list.error ?? categories.error;
@@ -40,6 +40,14 @@ export function ExploreScreen({ category }: ExploreScreenProps) {
             void categories.refetch();
           }}
         />
+      </Screen>
+    );
+  }
+
+  if (list.isPending || categories.isPending) {
+    return (
+      <Screen testID="explore-loading">
+        <AppText tone="muted">Loading funds…</AppText>
       </Screen>
     );
   }

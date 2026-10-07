@@ -3,7 +3,7 @@ import { messageForError } from '@sanchay/app-core';
 import { DASH, formatInr, formatPct, Money } from '@sanchay/money';
 import { AppText, Banner, Button, Card, ListRow, Screen } from '@sanchay/ui';
 import { useQuery } from '@tanstack/react-query';
-import { Pressable, View } from 'react-native';
+import { Linking, Pressable, View } from 'react-native';
 import { useApi } from '../api/ApiContext';
 import { useNav } from '../nav/NavContext';
 import { Disclosures, ReturnCaveat, RiskometerBadge } from './Disclosures';
@@ -42,6 +42,7 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
 
   const scheme = detail.data;
   const t = scheme.thresholds;
+  const { sidUrl, kimUrl } = scheme;
   return (
     <Screen testID="fund-screen">
       <AppText variant="title">{scheme.name}</AppText>
@@ -98,11 +99,23 @@ export function FundScreen({ schemeSlug }: FundScreenProps) {
 
       <Card>
         <AppText variant="heading">Documents</AppText>
-        {scheme.sidUrl ? (
-          <ListRow label="Scheme Information Document" value="View" onPress={() => undefined} />
+        {sidUrl ? (
+          <ListRow
+            label="Scheme Information Document"
+            value="View"
+            onPress={() => {
+              void Linking.openURL(sidUrl);
+            }}
+          />
         ) : null}
-        {scheme.kimUrl ? (
-          <ListRow label="Key Information Memorandum" value="View" onPress={() => undefined} />
+        {kimUrl ? (
+          <ListRow
+            label="Key Information Memorandum"
+            value="View"
+            onPress={() => {
+              void Linking.openURL(kimUrl);
+            }}
+          />
         ) : null}
       </Card>
 
