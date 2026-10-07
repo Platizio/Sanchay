@@ -1,15 +1,15 @@
 import { eq } from 'drizzle-orm';
 import { ClsService } from 'nestjs-cls';
-import type { MockAgent } from 'undici';
 import { describe, expect, it } from 'vitest';
 import { runInTx } from '../../src/db/client.js';
 import { ProviderCallInTransactionError } from '../../src/integrations/fp/fp-errors.js';
-import { FP_DISPATCHER, FpTransport } from '../../src/integrations/fp/fp-transport.js';
+import { FpTransport } from '../../src/integrations/fp/fp-transport.js';
 import { providerCalls } from '../../src/integrations/fp/provider-calls.schema.js';
 import { Crypto } from '../../src/modules/platform/crypto.js';
 import { asRowId } from '../../src/modules/platform/ids.js';
 import type { SanchayClsStore } from '../../src/modules/platform/request-context.js';
 import { bootTestApp } from './app.js';
+import { bootFpTestApp } from './fake-fp.js';
 
 describe('provider_calls (worker role)', () => {
   it('api role cannot resolve FpTransport', async () => {
@@ -22,21 +22,22 @@ describe('provider_calls (worker role)', () => {
   });
 
   it('worker role resolves FpTransport, records a call, and redacts PII from the stored meta', async () => {
-    const t = await bootTestApp({
-      env: { SANCHAY_APP_ROLE: 'worker', SANCHAY_PROVIDER_MODE_FP: 'fake' },
-    });
+    const t = await bootFpTestApp();
     try {
-      const dispatcher = t.app.get<MockAgent>(FP_DISPATCHER);
-      dispatcher
-        .get('https://fp.fake.local')
-        .intercept({ path: '/v2/auth/sanchay/token', method: 'POST' })
-        .reply(200, { access_token: 'tok', expires_in: 1800 })
-        .persist();
-      dispatcher
-        .get('https://fp.fake.local')
-        .intercept({ path: '/v2/mf_scheme_plans/cybrillapoa', method: 'GET' })
-        .reply(200, { object: 'list', data: [], pan: 'AAAPA3751A', mobile: '9876543210' })
-        .persist();
+      // FakeFp's catch-all router sits in front of any interceptor added to its agent afterwards, so the
+      // payload has to be scripted (final review MF-4).
+      t.fakeFp.script('schemePlans.list', {
+        status: 200,
+        // pan and mobile are caught by the key denylist; number and taxid_number only by the allowlist (MF-3).
+        body: {
+          object: 'list',
+          data: [],
+          pan: 'AAAPA3751A',
+          mobile: '9876543210',
+          number: '9123456780',
+          taxid_number: 'BBBPB1234B',
+        },
+      });
       const transport = t.app.get(FpTransport);
       await transport.call('schemePlans.list', {});
       const [row] = await t.db.db
@@ -44,28 +45,18 @@ describe('provider_calls (worker role)', () => {
         .from(providerCalls)
         .where(eq(providerCalls.operation, 'schemePlans.list'));
       if (row === undefined) throw new Error('no provider_calls row for schemePlans.list');
-      expect(JSON.stringify(row.responseMeta)).not.toMatch(/9876543210|AAAPA3751A/);
+      const stored = JSON.stringify(row.responseMeta);
+      expect(stored).not.toMatch(/9876543210|AAAPA3751A|9123456780|BBBPB1234B/);
+      // Proves the scripted payload was the one served, so the assertion above is not vacuous.
+      expect(stored).toContain('[REDACTED]');
     } finally {
       await t.close();
     }
   });
 
   it('body_enc decrypts only under its own row AAD', async () => {
-    const t = await bootTestApp({
-      env: { SANCHAY_APP_ROLE: 'worker', SANCHAY_PROVIDER_MODE_FP: 'fake' },
-    });
+    const t = await bootFpTestApp();
     try {
-      const dispatcher = t.app.get<MockAgent>(FP_DISPATCHER);
-      dispatcher
-        .get('https://fp.fake.local')
-        .intercept({ path: '/v2/auth/sanchay/token', method: 'POST' })
-        .reply(200, { access_token: 'tok', expires_in: 1800 })
-        .persist();
-      dispatcher
-        .get('https://fp.fake.local')
-        .intercept({ path: '/v2/mf_scheme_plans/cybrillapoa', method: 'GET' })
-        .reply(200, { object: 'list', data: [] })
-        .persist();
       const transport = t.app.get(FpTransport);
       await transport.call('schemePlans.list', {});
       const [row] = await t.db.db
@@ -91,21 +82,8 @@ describe('provider_calls (worker role)', () => {
   });
 
   it('runInTx (also outside a request context) makes FpTransport.call refuse to run inside the transaction', async () => {
-    const t = await bootTestApp({
-      env: { SANCHAY_APP_ROLE: 'worker', SANCHAY_PROVIDER_MODE_FP: 'fake' },
-    });
+    const t = await bootFpTestApp();
     try {
-      const dispatcher = t.app.get<MockAgent>(FP_DISPATCHER);
-      dispatcher
-        .get('https://fp.fake.local')
-        .intercept({ path: '/v2/auth/sanchay/token', method: 'POST' })
-        .reply(200, { access_token: 'tok', expires_in: 1800 })
-        .persist();
-      dispatcher
-        .get('https://fp.fake.local')
-        .intercept({ path: '/v2/mf_scheme_plans/cybrillapoa', method: 'GET' })
-        .reply(200, { object: 'list', data: [] })
-        .persist();
       const transport = t.app.get(FpTransport);
       const cls = t.app.get<ClsService<SanchayClsStore>>(ClsService);
       await expect(

@@ -104,6 +104,9 @@ function purchasePayload(p: StoredPurchase): Record<string, unknown> {
  * A stateful undici `MockAgent` standing in for FP/POA/PG in `SANCHAY_PROVIDER_MODE_FP=fake`
  * (D3's `fp.module.ts` selects it). `FpTransport`, `FpRead`, `FpKyc`, `FpProvision` and `FpTransact`
  * all run unchanged against `agent` — FakeFp is a fake *server*, not a parallel client.
+ *
+ * Do not add `intercept()`s to `agent` after construction: the catch-all router registered first always
+ * matches, so they never fire and the test passes against the router's own reply. Use `script()`.
  */
 export class FakeFp {
   readonly agent: MockAgent;
