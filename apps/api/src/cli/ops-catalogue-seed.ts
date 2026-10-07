@@ -22,6 +22,13 @@ export const DEFAULT_DATA_DIR = resolve(HERE, '../../../../data');
 
 type CsvRow = Record<string, string>;
 
+/** Key-order-independent form: jsonb does not preserve key order, so a read-back payload never matches by insertion order. */
+function canonicalJson(value: Record<string, unknown>): string {
+  return JSON.stringify(
+    Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+  );
+}
+
 function parseCsv(text: string): CsvRow[] {
   const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
   const header = lines[0]?.split(',') ?? [];
@@ -163,7 +170,10 @@ export async function seedCatalogue(db: Database, dataDir: string): Promise<void
       where: (t, { eq: eqOp, and }) => and(eqOp(t.schemeId, schemeId), eqOp(t.source, 'ADMIN')),
       orderBy: (t, { desc }) => desc(t.createdAt),
     });
-    if (!latest || JSON.stringify(latest.payload) !== JSON.stringify(payload)) {
+    if (
+      !latest ||
+      canonicalJson(latest.payload as Record<string, unknown>) !== canonicalJson(payload)
+    ) {
       await db.insert(fundFactsRevisions).values({ schemeId, source: 'ADMIN', payload });
     }
   }

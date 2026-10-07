@@ -120,13 +120,16 @@ describe('catalogue schema checks', () => {
       categories: (await t.db.select().from(sebiCategories)).length,
       aliases: (await t.db.select().from(categoryAliases)).length,
       schemes: (await t.db.select().from(schemes)).length,
+      factsRevisions: (await t.db.select().from(fundFactsRevisions)).length,
     };
+    expect(firstCounts.factsRevisions).toBeGreaterThan(0);
     await seedCatalogue(t.db, DEFAULT_DATA_DIR);
     const secondCounts = {
       amcs: (await t.db.select().from(amcs)).length,
       categories: (await t.db.select().from(sebiCategories)).length,
       aliases: (await t.db.select().from(categoryAliases)).length,
       schemes: (await t.db.select().from(schemes)).length,
+      factsRevisions: (await t.db.select().from(fundFactsRevisions)).length,
     };
     expect(secondCounts).toEqual(firstCounts);
   });
