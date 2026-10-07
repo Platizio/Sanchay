@@ -15,7 +15,7 @@
 
 **Branch:** `feat/plan-04-mvp-sip-portfolio` from `main` after Plan 03 is merged. Nothing is pushed until the owner asks. Update the branch line in `AGENTS.md`.
 
-> **Status: assembled 2026-10-01 (F1–F28). Execute tasks only in the order of "Execution order" below.**
+> **Status: assembled 2026-10-01 (F1–F28); F29 added 2026-10-07 (R-39). Execute tasks only in the order of "Execution order" below.**
 > The plan text was cross-reviewed twice (62, then 23 defects, all fixed or listed) and each task states what its own
 > prototype run covered. Nothing in Plans 02–04 has run in the repo yet, so expect execution-time fixes. F6 and F17 are
 > SKIPPED: trim T5 is forced by probe P-09. Read "Owner decisions before executing" first.
@@ -29,8 +29,9 @@
 
 Run in this order; a task consumes only tasks above it. Migration numbers follow this order.
 
-F1 → F2 → F3 → F4 → F5 → F7 → F10 → F11 → F8 → F9 → F12 → F13 → F28 → F14 → F15 → F16 → F18 → F19 → F20 → F21 → F22 → F23 → F24 → F25 → F26 → F27
+F29 → F1 → F2 → F3 → F4 → F5 → F7 → F10 → F11 → F8 → F9 → F12 → F13 → F28 → F14 → F15 → F16 → F18 → F19 → F20 → F21 → F22 → F23 → F24 → F25 → F26 → F27
 
+- **F29 first (R-39, owner decision 2026-10-07):** it wires D4's sandbox chains up to their sandbox limit and changes only `tools/fp-probes`, so it needs nothing else in this plan. It runs Mon 11-09 to Tue 11-10 and is merged by Fri 11-13, before the first counted G-E4 run on Mon 11-16. F23 Part A follows it.
 - **Skipped:** F6 and F17 (trim T5 is forced: P-09 showed that a units redemption fails at the ONDC gateway). Their text stays for reference only, and no other task depends on them.
 - **Trim candidates (R-02):** F3 and F13 are T6 (eNACH); F15 is T3 (allocation chart; F14's own smoke no longer depends on it); F18 is removed by T7. If a trim is applied, skip the task and follow the trim notes in the tasks that mention it. For example, F10's `createSip` test passes `rail` only while F3 is in.
 - **Why not numeric order:** F7 extends F5's redemption reconcile; F9's BOLA sweep covers F10 and F11; F28 edits F12's `SipDetailScreen` and registers `plans.cancel` in F9's meta-test; F14 moves F12's mobile SIP routes.
@@ -38,7 +39,7 @@ F1 → F2 → F3 → F4 → F5 → F7 → F10 → F11 → F8 → F9 → F12 → 
 ## Owner decisions before executing
 
 These are open; each blocks or changes a task. Owners and dates are in `docs/till_now.md` and `docs/business/pilot-actions-checklist.md`.
-1. **G-E4 sandbox smoke (GO-1).** D4's sandbox chains still have SKIPPED placeholders for onboarding, lumpsum, SIP and redemption, and no task wires them. P-07 also shows that sandbox ONDC purchases may never settle. Without a ruling, F23's G-E4 line reads "owner ruling required". Either fund the chain wiring, or rule how G-E4 is evidenced. **Settled 2026-10-06 by R-37 (option A; RV-04-F23-2):** G-E4 is met per chain by sandbox runs up to the chain's sandbox limit plus the founders' canary leg for the steps past it, and GO-1 needs the onboarding, lumpsum and redemption chains. Still open: no task wires D4's chains up to their sandbox limit (`docs/delivery/plan-errata-backlog.md`).
+1. **G-E4 sandbox smoke (GO-1).** D4's sandbox chains still have SKIPPED placeholders for onboarding, lumpsum, SIP and redemption, and no task wires them. P-07 also shows that sandbox ONDC purchases may never settle. Without a ruling, F23's G-E4 line reads "owner ruling required". Either fund the chain wiring, or rule how G-E4 is evidenced. **Settled 2026-10-06 by R-37 (option A; RV-04-F23-2):** G-E4 is met per chain by sandbox runs up to the chain's sandbox limit plus the founders' canary leg for the steps past it, and GO-1 needs the onboarding, lumpsum and redemption chains. Still open: no task wires D4's chains up to their sandbox limit (`docs/delivery/plan-errata-backlog.md`). **Settled 2026-10-07 by R-39 (RV-04-HDR-5):** F29 wires them, first in this plan.
 2. **EUIN (P-04 FAIL).** FP fills a tenant-default EUIN on every order. Cybrilla's answer to Q12 and a compliance view on execution-only orders are needed. Tasks never send `euin`; F20/F23 record what FP returns. "Q12" in this plan (and in its identifiers, such as `EUIN_Q12_MISSING`) is the P-04 follow-up; the Cybrilla letter numbers that question 15 (rows Q15-Q17), and the names stay as they are (RV-04-HDR-4).
 3. **T3 funding.** F15 runs only if T3 is funded; R-08 funds F28 from T3 + T5. **Settled by R-08 (confirmed on the 2026-10-07 decisions page; RV-04-HDR-4):** T3's hours fund F28, so F15 stays skipped unless the Fri 10-23 factor leaves room.
 4. **AWS and MSG91 accounts, the domain and its hosted zone.** E25 deploys the prod stack in S2 week 2 (R-31), so the prod account, the registered `sanchay.in` and its Route 53 hosted zone in that account must exist before E25 deploys (owner action). F1 (hardening, SES, alarms) and real SMS (DLT) need them too. They were due on 10-09 (PB-45, PB-30/31, PB-41).
@@ -206,6 +207,10 @@ The two Plan 03 errata found while researching F5 are fixed: Plan 03 RV-03-1 (co
 - **RV-04-HDR-4: header items 2, 3 and 6 brought up to date (header, F1; 2026-10-07 decisions page; minor).** Item 3 (T3) and item 6 (stuck CRITICAL breaks) were listed as open, but R-08 already spends T3's hours on F28 and F7's `ops:resolve-break` already resolves a handled non-invariant break; both now say so. Item 2 called the EUIN question "Q12", which is the P-04 follow-up's name: the Cybrilla letter's question 12 is about consent scope, and the EUIN question is its question 15. The note says so, and the identifiers built on the name (`EUIN_Q12_MISSING`, `EUIN_NOT_AS_Q12`, F20's `q12` field) keep it. Text only.
 - **RV-04-F1-17: F1's open question 1 is resolved by F7 (F1; minor).** The question asked for an audited two-founder command that resolves a non-invariant CRITICAL break; F7 adds `ops:resolve-break` (deviation 9). Text only.
 - **RV-04-F23-3: the NO-GO fallback follows R-41 (F23; R-41; minor).** The gate doc's fallback said onboarding of invitees continues on prod after a NO-GO if G-B7 and G-C1 are green, which contradicted R-31. Following the owner's 2026-10-07 decision (R-41), no invite is added except the founders' test accounts until a re-run gate is GO; spec §7 now says the same. Text only; no test reads the fallback line.
+- **RV-04-HDR-5: F29 wires D4's sandbox chains, first in Plan 04 (header, F29; R-39; major).** R-37 needs every chain wired up to its sandbox limit before the first counted G-E4 run on Mon 11-16, and no task did it, so F23 would read `NOT MET: chains not wired`. Following the owner's 2026-10-07 decision (R-39), the new Task F29 (Dev A, 8 h) wires onboarding, lumpsum, SIP and redemption in `tools/fp-probes` with the plans' own bodies, polls each FP object to a final state with no deadline, records the steps past the limit SKIPPED as `sandbox limit: …` naming the canary legs, and cancels its SIP plan. The execution order now starts with F29, and header item 1 says so. Run: F29's tests on D4's extracted code (red 9/9, then 11/11, `tsc` clean), and F23's `gate-evidence g-e4` on F29's output (`NOT MET: chains not wired` from D4's chains, `waiting on the canary` from F29's, `MET` with the canary legs). Not run: any FP sandbox call (F29 Step 6).
+- **RV-04-F23-4: F23's G-E4 dependency 1 is met by F29 (F23; R-39; minor).** The Interfaces note said no task wires D4's chains; it now names F29. No code change: F23's parser already counts F29's `sandbox limit:` steps (checked as in RV-04-HDR-5). Text only.
+- **RV-04-F5-5: F5 deviation 3 is superseded by F29 (F5; R-39; minor).** The redemption chain is no longer left as D4's placeholder; F29 wires it. The deviation's command also lost its `--` before `--chain` (RV-02-26). Text only.
+- **RV-04-F28-2: F28 deviation 7 is updated for F29 (F28; R-39; minor).** F29's SIP chain now ends with F28's cancel body on every sandbox run. Running the app's own `plans.cancel` against the sandbox is still open (header item 9). Text only.
 - **Commands:** every task builds workspace dependencies before api, features, web or mobile checks; runs the full domain suite as the pass check; and checks OpenAPI with the drift test (`pnpm --filter=@sanchay/api test openapi`). No test filter follows `--`. Every Step 5 block follows AGENTS.md's order (biome, then the Step 4 re-run, then lint, add and commit); where a task needs the workspace build, that line comes first, before biome, because the re-run reads `dist` (RV-04-HDR-3). A post-staging `git diff` on openapi.json became the drift test.
 
 ## Known gaps (confirm in the FP sandbox, D4 `tools/fp-probes`, before the pilot)
@@ -11850,7 +11855,7 @@ Continues "Task F5 … PART 1 OF 2 (domain rules)" above: it builds on part 1's 
 - **Deviations from the outline:**
   1. The outline lists `orders/{redemption.service.ts, redemption-submit.job.ts, payout-watch.job.ts}`; the saga also needs `redemption-advance.job.ts` (the FP review and the confirm PATCH), `redemption-events.ts`, the evaluation and snapshot modules, and the settlement in `portfolio/` (beside `PurchaseSettlement`, so `orders.units.reconcile` can call it without a module cycle).
   2. `orders.payout_due_by` is added beside spec §2.3's `payout_expected_on`: the regulatory maximum depends on the category and the holiday calendar at trade time.
-  3. The sandbox chain `pnpm --filter=@sanchay/fp-probes smoke -- --chain=redemption` stays D4's SKIPPED placeholder. Probe P-09 found a usable ONDC folio (v1's, 399.324 units; an amount redemption settled in 10 s), but ONDC settlement timing in the sandbox is not predictable (purchases can sit in `submitted` for a long time, and `/api/oms/simulate/orders` refuses ONDC orders), so a wired chain must poll to a terminal state and never pass or fail on a fixed deadline. Wiring it is an open item before the pilot.
+  3. The sandbox chain `pnpm --filter=@sanchay/fp-probes smoke --chain=redemption` stays D4's SKIPPED placeholder. Probe P-09 found a usable ONDC folio (v1's, 399.324 units; an amount redemption settled in 10 s), but ONDC settlement timing in the sandbox is not predictable (purchases can sit in `submitted` for a long time, and `/api/oms/simulate/orders` refuses ONDC orders), so a wired chain must poll to a terminal state and never pass or fail on a fixed deadline. Wiring it is an open item before the pilot. **Superseded by F29 (R-39; RV-04-F5-5):** F29 wires the redemption chain with F5's AMOUNT body and polls to a final state with no deadline.
   4. D-MONEY-051's scheme `min_withdrawal_amount` is not checked: `schemes.thresholds` (D8/D10) carries no withdrawal fields. FP refuses a too-small amount with a 4xx, which the submit job turns into REJECTED and released.
 
 - **Review fixes (assembly, 2026-10-01; BRIEF D7/D8):**
@@ -41903,8 +41908,8 @@ This task makes both computed:
   - F1: `deploy.yml`, the cluster, the log group and stream prefix, and the G-E5 record sections are as listed under Prerequisites.
   - D4: the file contents are exactly as Plan 02 writes them, RV-02-24 included. Part A edits `evidence.ts` whole and `smoke.ts` by one line.
   - F2's `sip-seed.ts`: `seedSipInvestor` returns E20's `seedInvestableInvestor` shape (`investorId`, `bankId`) with the bank registered at FP.
-  - **G-E4 depends on two things this task does not provide, so GO-1's G-E4 line needs an owner ruling until both exist (FR-12, assembly 2026-10-01).** **Settled 2026-10-06 by R-37 (RV-04-F23-2):** dependency 2 no longer blocks, because the canary leg proves what the sandbox cannot settle; dependency 1 still does, up to each chain's sandbox limit.
-    1. **D4's sandbox chains must be wired end to end.** Each D4 chain still carries one SKIPPED placeholder step: onboarding's FP provisioning (investor profile, contacts, bank, MF investment account), lumpsum's consent, confirm, payment and allotment, SIP's mandate authorise, plan create and first instalment, and redemption's create, consent and confirm. No Plan 02-04 task wires them (F5 deviation 3 and F28 deviation 7 leave theirs SKIPPED), and F23 does not either: the assembler raises it with the owner.
+  - **G-E4 depends on two things this task does not provide, so GO-1's G-E4 line needs an owner ruling until both exist (FR-12, assembly 2026-10-01).** **Settled 2026-10-06 by R-37 (RV-04-F23-2):** dependency 2 no longer blocks, because the canary leg proves what the sandbox cannot settle; dependency 1 still does, up to each chain's sandbox limit. **Since R-39 (2026-10-07), F29 meets dependency 1 (RV-04-F23-4).**
+    1. **D4's sandbox chains must be wired end to end.** Each D4 chain still carries one SKIPPED placeholder step: onboarding's FP provisioning (investor profile, contacts, bank, MF investment account), lumpsum's consent, confirm, payment and allotment, SIP's mandate authorise, plan create and first instalment, and redemption's create, consent and confirm. No Plan 02-04 task wires them (F5 deviation 3 and F28 deviation 7 leave theirs SKIPPED), and F23 does not either: the assembler raises it with the owner. **F29 now wires them (R-39), so F23's runs from 11-16 on read F29's steps.**
     2. **Sandbox ONDC purchases must settle.** In probe P-07 (`docs/probes/P-07-allotted-units.md`, result PENDING) three paid sandbox purchases stayed `submitted` while a watcher polled them, none of the tenant's 145 earlier sandbox purchases ever reached `successful`, and the order simulator refuses ONDC orders. Cybrilla's answer on how sandbox ONDC purchases settle is pending, so even a wired lumpsum or SIP chain may never reach a terminal state in the sandbox.
   - G-E4 counts a run only when every step PASSED, apart from steps at R-37's sandbox limit: a chain records each step it cannot complete in the sandbox as SKIPPED with a detail starting `sandbox limit` and naming its canary leg, and only lumpsum and SIP have such legs. Any other SKIPPED step is D4's placeholder and is rejected as `STEP_SKIPPED` (the chain is not wired); a FAILED step is `STEP_NOT_PASSED`. A chain with a limited run reads `NOT MET (canary pending)` until its legs read PASS in `canary-2026-11.md`. The block reads `**G-E4: NOT MET: chains not wired.**` while a GO-1 chain is not wired, and `**G-E4: NOT MET: waiting on the canary.**` while one waits on its legs. A wired step polls the FP object to a terminal state with no fixed deadline and never assumes quick ONDC settlement in the sandbox (BRIEF D7).
 
@@ -46608,7 +46613,7 @@ git commit -m "docs(probes): invitee dry run and kill-switch drill results (F27)
   4. **Refusal code.** The outline names no code. `PLAN_NOT_MODIFIABLE` (Plan 01, 409) is the investor-facing refusal; F2's `PLAN_STATE_INVALID` stays the internal illegal-transition error.
   5. **Reconcile.** The outline's "LOOKUP-ADOPT by re-fetching the plan" is done by `plans.cancel.submit` itself. F2's `plans.sip.advance` adopts only a RECONCILING plan with no FP id, so F28 adds a branch there that routes F7's backstop to this job.
   6. **Extra state handling** the outline does not list, because without it a plan can stay CANCEL_PENDING forever: three D5 edges back to ACTIVE, the lazy reclaim in `requestCancel`, and `plans.cancel.sweep`.
-  7. **Sandbox smoke.** `--chain=sip` gets no cancel step. F2 did not wire a SIP chain into D4's `tools/fp-probes` smoke, so there is nothing to extend. Sandbox run 1 (P-09 row 9) already cancelled a plan with `invest_later`; running this task's code against the FP sandbox stays an open item before GO-2 (R-06).
+  7. **Sandbox smoke.** `--chain=sip` gets no cancel step. F2 did not wire a SIP chain into D4's `tools/fp-probes` smoke, so there is nothing to extend. Sandbox run 1 (P-09 row 9) already cancelled a plan with `invest_later`; running this task's code against the FP sandbox stays an open item before GO-2 (R-06). **Since F29 (R-39; RV-04-F28-2):** F29's SIP chain ends with this task's cancel body on every sandbox run; running the app's own `plans.cancel` against the sandbox is still open (Plan 04 header item 9).
   8. **Idempotency key in the sheet.** One key per intent, as F12 and F16 do: `CancelSipSheet` reuses its key after a network error, a 5xx or `IDEMPOTENCY_IN_PROGRESS` (the first request may still land), and mints a new one after any other 4xx (a definitive refusal ends the intent; D1's `requireIdempotency` releases the key of any refusal, Plan 02 RV-02-37).
 
 - [ ] **Step 1: Write the failing tests**
@@ -48802,3 +48807,1583 @@ The first line rebuilds before the re-run checks. Biome only reformats, so those
   - the contract's `openapi.json`;
   - F9's meta-test;
   - E13's real `ConsentOtpSheet` behind the real RV-03-9 facade.
+
+### Task F29: Wire D4's sandbox chains up to the sandbox limit (R-37, R-39) (Dev A, 8 h)
+
+> **Execution gate (R-39).** Run this task **first in Plan 04** (Mon 11-09 to Tue 11-10) and merge it by **Fri 11-13**, before the first counted G-E4 run on Mon 11-16. It needs only D4 (Plan 02, with RV-02-15, RV-02-24, RV-02-26 and RV-02-53). F23 Part A comes after it and edits `src/evidence.ts`, `src/smoke.ts` and `test/smoke.test.ts`; this task leaves those three files alone.
+
+**Why.** R-37 (owner decision 2026-10-06) meets G-E4 by split proof: sandbox runs on three IST days in which every step the FP sandbox can reach PASSES, plus the founders' canary leg for the steps past the sandbox limit. D4 left one SKIPPED placeholder in each chain (onboarding's provisioning; lumpsum's consent, payment and confirm; SIP's mandate authorise, plan and first instalment; redemption's create, consent and confirm). No Plan 02-04 task replaced them (F5 deviation 3 and F28 deviation 7 left theirs SKIPPED), so F23's `gate-evidence g-e4` would read `NOT MET: chains not wired` on every run. R-39 (owner decision 2026-10-07) gives the wiring to Dev A, in this task.
+
+**Files:**
+- Create:
+  - `tools/fp-probes/src/poll.ts`
+  - `tools/fp-probes/src/steps.ts`
+  - `tools/fp-probes/test/chains.test.ts`
+- Modify (whole file; D4's files):
+  - `tools/fp-probes/src/types.ts`
+  - `tools/fp-probes/src/fake-server.ts`
+  - `tools/fp-probes/src/fp-client.ts`
+  - `tools/fp-probes/src/chains/onboarding.ts`
+  - `tools/fp-probes/src/chains/lumpsum.ts`
+  - `tools/fp-probes/src/chains/sip.ts`
+  - `tools/fp-probes/src/chains/redemption.ts`
+- Modify (key-level): `tools/fp-probes/README.md` (one paragraph replaced by three).
+- Not touched: `src/evidence.ts`, `src/smoke.ts` and `test/smoke.test.ts` (F23 Part A edits them), `package.json` (no new dependency), `apps/api`.
+
+**Interfaces:**
+- **Prerequisites (D4, Plan 02 as amended):** `tools/fp-probes` with `src/types.ts` (`ChainName`, `StepStatus`, `StepResult`, `ChainResult`, `FpProbeClient`, `ChainContext`, `RunOptions`), `src/fake-server.ts` (`createFakeServer`, `FakeServerUrls`), `src/fp-client.ts` (`buildClient`), `src/chains/*.ts` (`run(ctx)`), `src/smoke.ts` (`CHAIN_NAMES`, `runChain`, `main`), `test/smoke.test.ts` (2 tests), and the scripts `smoke`, `typecheck`, `test`.
+- **Produces:**
+  - `src/types.ts`: `Audience` (`'fp' | 'poa' | 'pg'`); `FpProbeClient.request(audience, method, path, body?)`; `ProbeAccount` (`mfInvestmentAccount`, `bankAccountOldId`, `consentEmail`, `consentMobile`, `purchaseIsin`, `redemptionFolio`, `redemptionIsin`, `paymentPostbackUrl`); `ChainContext` gains `account` and `pollIntervalMs`. D4's other names are unchanged.
+  - `src/poll.ts`: `pollUntil(read, done, intervalMs)` returns `{value, reads, seconds}`, with no deadline (D7).
+  - `src/steps.ts`: `Steps` (`do`, `skip`, `run`: the first error is recorded FAILED and ends the chain) and `expectField(object, field, expected)`.
+  - `src/fake-server.ts`: `createFakeServer(urls, options?)` and `FakeServerOptions` (`settlePurchases`, `reject`, `redemptionSubmittedReads`, `redemptionFinalState`). Its defaults behave like the sandbox in P-07 and P-09.
+  - `src/fp-client.ts`: `buildClient(options)` (an HTTP status of 400 or more now throws `HTTP <status> on <METHOD> <path> (<FP code: message>)`, never with a request body), `buildFakeContext(fake?)` and `sandboxAccount(raw?)`.
+  - `src/chains/lumpsum.ts`: `LUMPSUM_SANDBOX_LIMIT`; `src/chains/sip.ts`: `SIP_SANDBOX_LIMIT`. Both start `sandbox limit:` and name their canary legs (`A_UPI`, `A_NETBANKING`; `B_SIP`).
+  - Step names: onboarding 9, lumpsum 9, SIP 13 and redemption 5, exactly as `test/chains.test.ts` lists them.
+- **Consumed facts (each body follows the plan task that sends it in the app):**
+  - Onboarding: Plan 03 E11's `FpProvision` bodies (`toFpInvestorProfile`, phone, email, address, bank account, MF investment account, the `folio_defaults` PATCH) and E6's pre-verification identity shape.
+  - Lumpsum: Plan 03 E20/E21 in `docs/probes/lumpsum-flow.md`'s order (create, review, consent in its own PATCH, payment, confirm), then the sandbox simulator (`POST /api/pg/simulate/payments/{id}`).
+  - SIP: Plan 04 F2's mandate and plan bodies, P-09 rows 5-11 (authorise returns a `upi://` intent; `POST /api/pg/simulate/mandates/{id}`; `generate_first_installment_now`; the first instalment's `POST /api/pg/payments/nach`), and F28's cancel body.
+  - Redemption: Plan 04 F5's AMOUNT body, and one PATCH with the state and the folio-default contacts (P-09 rows 2-3).
+  - Sandbox rules (`docs/research/fp-api.md` §9, `docs/probes/README.md`): simulator PAN digits 3751 are KYC-ready; a 5th letter `I` or `A` fails; an account number ending 1193 passes; amounts ending in 0 succeed.
+- **Consumers:** F23's `gate-evidence g-e4` counts a run when every step PASSED except a SKIPPED step whose detail matches `SANDBOX_LIMIT` (`/^sandbox limit\b/i`) on a chain with canary legs (`CANARY_LEGS_FOR`: lumpsum and SIP). F20's canary report supplies the PASS legs.
+
+**Decisions and deviations:**
+1. **An FP refusal now throws.** D4's client parsed an error body as a result, so a 400 could PASS a step. Tokens and calls now throw on HTTP 400 or more, and the detail names FP's code and message, never the request body.
+2. **A chain stops at its first FAILED step.** Nothing after it runs, so no step passes on top of a broken one. D4's `test/smoke.test.ts` still holds: no fake chain fails, and each passes at least one step.
+3. **Onboarding creates a new sandbox investor on every run.** It must prove provisioning, and FP profiles cannot be deleted. That is at least four profiles by 11-25 (three counted runs plus Step 6's dry run). It uses a fresh simulator PAN (`simulatorPan()`) and a fresh account number ending 1193, but the reused investor's contacts, so no real-looking number is invented.
+4. **Lumpsum pays through the sandbox simulator, netbanking only.** The simulator payment takes the purchase to `submitted`, which is the sandbox limit (P-07). The order then fails at 23:00 IST with `fp_payment_url_unused`, after the run has ended, so that does not matter here. UPI is the canary's leg `A_UPI`. If the sandbox ever settles the purchase, the last step must PASS with `allotted_units` instead of being SKIPPED.
+5. **SIP sends `generate_first_installment_now: true`, which F2 does not.** The smoke needs an instalment on the same day (P-09 row 6). The chain cancels its plan with F28's body every time. If a run fails between `plan create` and `plan cancel`, that plan stays active in the sandbox: cancel it by hand with the same body (`POST /v2/mf_purchase_plans/cancel`). This chain is GO-2 evidence (R-37), and its cancel step is half of Plan 04 header item 9.
+6. **Redemption redeems ₹100 a run** from the reused folio (395.394 units on 10-01, worth about ₹10,000), so there is room for every planned run.
+7. **No deadline (D7).** `pollUntil` reads every `SANCHAY_PROBE_POLL_MS` (default 5000) until FP reports a final state. The operator stops a run that really hangs.
+8. **A refusal in the sandbox is a finding against the app task too.** The chains send the plans' own bodies, so a FAILED step (for example, E11's address `state` or `nature`, which Plan 03 E11 asked D4's harness to confirm) gets an erratum on the task that builds that body, not just a fix here.
+9. **Configuration.** A sandbox run reads `SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON` (D3's names) and the tool-only `SANCHAY_PROBE_ACCOUNT_JSON` and `SANCHAY_PROBE_POLL_MS` from the git-ignored `tools/fp-probes/.env.sandbox`, through `tsx --env-file`. No container reads the two `SANCHAY_PROBE_*` variables, so they are not H-8 rows. The account JSON holds the reused investor's ids and contacts and is never committed.
+
+- [ ] **Step 1: Write the failing test**
+
+`tools/fp-probes/test/chains.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import * as lumpsum from '../src/chains/lumpsum.js';
+import * as onboarding from '../src/chains/onboarding.js';
+import * as redemption from '../src/chains/redemption.js';
+import * as sip from '../src/chains/sip.js';
+import { buildFakeContext } from '../src/fp-client.js';
+import type { StepResult } from '../src/types.js';
+
+/** F23's `SANDBOX_LIMIT` (scripts/gate-evidence.ts): R-37 counts a SKIPPED step only with this detail. */
+const SANDBOX_LIMIT = /^sandbox limit\b/i;
+
+const statuses = (steps: readonly StepResult[]): string[] =>
+  steps.map((s) => `${s.status} ${s.name}`);
+
+describe('F29: D4 chains wired up to the sandbox limit (R-37, R-39)', () => {
+  it('onboarding: every step passes, from pre-verification to the folio defaults', async () => {
+    const steps = await onboarding.run(await buildFakeContext());
+    expect(statuses(steps)).toEqual([
+      'PASSED POA pre-verification create',
+      'PASSED POA pre-verification result (poll to a final status)',
+      'PASSED investor profile create',
+      'PASSED phone number create',
+      'PASSED email address create',
+      'PASSED address create',
+      'PASSED bank account create',
+      'PASSED MF investment account create',
+      'PASSED folio defaults (PATCH MF investment account)',
+    ]);
+  });
+
+  it('lumpsum: passes to FP submitted, then stops at the sandbox limit, naming G-E7(a)', async () => {
+    const steps = await lumpsum.run(await buildFakeContext());
+    expect(statuses(steps)).toEqual([
+      'PASSED scheme catalogue list',
+      'PASSED purchase create (H-2 custom checkout, step 1)',
+      'PASSED purchase review (poll to pending)',
+      'PASSED purchase consent (PATCH, apart from the state change)',
+      'PASSED payment create (netbanking, ONDC)',
+      'PASSED purchase confirm (PATCH state confirmed)',
+      'PASSED payment simulate SUCCESS (sandbox simulator)',
+      'PASSED purchase submitted (poll to a final state)',
+      'SKIPPED purchase settled with allotted units',
+    ]);
+    const last = steps.at(-1);
+    expect(last?.detail).toMatch(SANDBOX_LIMIT);
+    expect(last?.detail).toContain('G-E7(a)');
+    expect(last?.detail).toContain('A_UPI');
+    expect(last?.detail).toContain('A_NETBANKING');
+  });
+
+  it('lumpsum: a purchase that settles passes the allotment step instead of skipping it', async () => {
+    const steps = await lumpsum.run(await buildFakeContext({ settlePurchases: true }));
+    expect(steps.every((s) => s.status === 'PASSED')).toBe(true);
+    expect(steps.at(-1)?.detail).toContain('allotted_units=');
+  });
+
+  it('sip: passes to the first instalment submitted, stops at the sandbox limit naming G-E7(b), then cancels the plan', async () => {
+    const steps = await sip.run(await buildFakeContext());
+    expect(statuses(steps)).toEqual([
+      'PASSED scheme catalogue list',
+      'PASSED mandate create (UPI Autopay, limit 100000)',
+      'PASSED mandate authorise (UPI intent)',
+      'PASSED mandate approve (sandbox simulator)',
+      'PASSED mandate approved (poll to a final status)',
+      'PASSED plan create (monthly, first instalment now)',
+      'PASSED plan confirm with consent (PATCH)',
+      'PASSED plan active (poll to a final state)',
+      'PASSED first instalment found (GET purchases by plan)',
+      'PASSED first instalment payment create (NACH)',
+      'PASSED first instalment submitted (poll to a final state)',
+      'SKIPPED first instalment settled with allotted units',
+      'PASSED plan cancel (F28 form)',
+    ]);
+    const limit = steps.find((s) => s.status === 'SKIPPED');
+    expect(limit?.detail).toMatch(SANDBOX_LIMIT);
+    expect(limit?.detail).toContain('G-E7(b)');
+    expect(limit?.detail).toContain('B_SIP');
+  });
+
+  it('redemption: passes to successful, with no sandbox limit', async () => {
+    const steps = await redemption.run(await buildFakeContext());
+    expect(statuses(steps)).toEqual([
+      'PASSED scheme catalogue list',
+      'PASSED redemption create (amount, ONDC)',
+      'PASSED redemption review (poll to pending)',
+      'PASSED redemption confirm with consent (PATCH)',
+      'PASSED redemption settled (poll to a final state)',
+    ]);
+    expect(steps.at(-1)?.detail).toContain('redeemed_units=');
+  });
+
+  it('polls with no fixed deadline: a redemption that reads submitted 25 times still passes', async () => {
+    const steps = await redemption.run(await buildFakeContext({ redemptionSubmittedReads: 25 }));
+    expect(steps.at(-1)?.status).toBe('PASSED');
+    expect(steps.at(-1)?.detail).toContain('26 read(s)');
+  });
+
+  it('an FP refusal is FAILED with its HTTP status, and the chain stops there', async () => {
+    const steps = await lumpsum.run(
+      await buildFakeContext({ reject: { method: 'POST', path: '/v2/mf_purchases' } }),
+    );
+    expect(statuses(steps)).toEqual([
+      'PASSED scheme catalogue list',
+      'FAILED purchase create (H-2 custom checkout, step 1)',
+    ]);
+    expect(steps[1]?.detail).toContain('HTTP 400 on POST /v2/mf_purchases');
+  });
+
+  it('an unexpected final state is FAILED, not PASSED', async () => {
+    const steps = await redemption.run(await buildFakeContext({ redemptionFinalState: 'failed' }));
+    expect(steps.at(-1)?.status).toBe('FAILED');
+    expect(steps.at(-1)?.detail).toContain('state=failed, expected successful');
+  });
+
+  it('only lumpsum and SIP skip a step, and only at the sandbox limit (R-37: anything else rejects the run)', async () => {
+    const chains = { onboarding, lumpsum, sip, redemption };
+    for (const [name, chain] of Object.entries(chains)) {
+      const skipped = (await chain.run(await buildFakeContext())).filter(
+        (s) => s.status === 'SKIPPED',
+      );
+      expect(skipped.length, name).toBe(name === 'lumpsum' || name === 'sip' ? 1 : 0);
+      for (const step of skipped) expect(step.detail, name).toMatch(SANDBOX_LIMIT);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+```
+pnpm --filter=@sanchay/fp-probes test
+```
+Expected: `test/chains.test.ts` fails 9 of 9 with `TypeError: buildFakeContext is not a function`; D4's `test/smoke.test.ts` still passes 2 of 2.
+
+- [ ] **Step 3: Write the implementation**
+
+Create the two helpers.
+
+`tools/fp-probes/src/poll.ts`:
+
+```ts
+export interface PollResult<T> {
+  readonly value: T;
+  readonly reads: number;
+  readonly seconds: number;
+}
+
+/**
+ * Reads an FP object until `done` holds. There is no deadline (D7, R-37): the sandbox can take minutes,
+ * and a chain must never pass or fail on a timer. A run that really hangs is stopped by the operator.
+ */
+export async function pollUntil<T>(
+  read: () => Promise<T>,
+  done: (value: T) => boolean,
+  intervalMs: number,
+): Promise<PollResult<T>> {
+  const started = Date.now();
+  for (let reads = 1; ; reads += 1) {
+    const value = await read();
+    if (done(value)) return { value, reads, seconds: Math.round((Date.now() - started) / 1000) };
+    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+```
+
+`tools/fp-probes/src/steps.ts`:
+
+```ts
+import type { StepResult } from './types.js';
+
+class StopChain extends Error {}
+
+/**
+ * Records one chain's steps. The first error is recorded FAILED with its message and ends the chain:
+ * nothing after it runs, so a later step never passes on top of a broken one.
+ */
+export class Steps {
+  private readonly results: StepResult[] = [];
+
+  async do<T>(name: string, action: () => Promise<T>, detail: (value: T) => string): Promise<T> {
+    try {
+      const value = await action();
+      this.results.push({ name, status: 'PASSED', detail: detail(value) });
+      return value;
+    } catch (error) {
+      this.results.push({
+        name,
+        status: 'FAILED',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw new StopChain();
+    }
+  }
+
+  /** R-37: only a step past the chain's sandbox limit is SKIPPED, with a `sandbox limit: …` detail. */
+  skip(name: string, detail: string): void {
+    this.results.push({ name, status: 'SKIPPED', detail });
+  }
+
+  async run(body: () => Promise<void>): Promise<StepResult[]> {
+    try {
+      await body();
+    } catch (error) {
+      if (!(error instanceof StopChain)) throw error;
+    }
+    return this.results;
+  }
+}
+
+/** Throws unless `field` of an FP object is one of `expected`, so an unexpected state fails its step. */
+export function expectField(
+  object: Record<string, unknown>,
+  field: string,
+  expected: readonly string[],
+): Record<string, unknown> {
+  const value = String(object[field]);
+  if (!expected.includes(value))
+    throw new Error(`${field}=${value}, expected ${expected.join(' or ')}`);
+  return object;
+}
+```
+
+Replace D4's `src/types.ts`, `src/fake-server.ts` and `src/fp-client.ts` with:
+
+`tools/fp-probes/src/types.ts`:
+
+```ts
+export type ChainName = 'onboarding' | 'lumpsum' | 'sip' | 'redemption';
+export type StepStatus = 'PASSED' | 'SKIPPED' | 'FAILED';
+
+export interface StepResult {
+  readonly name: string;
+  readonly status: StepStatus;
+  readonly detail: string;
+}
+
+export interface ChainResult {
+  readonly chain: ChainName;
+  readonly steps: readonly StepResult[];
+}
+
+/** F29: the three FP audiences; each has its own token. */
+export type Audience = 'fp' | 'poa' | 'pg';
+
+export interface FpProbeClient {
+  preVerify(input: {
+    pan: string;
+    name: string;
+    dateOfBirth: string;
+  }): Promise<Record<string, unknown>>;
+  getPreVerification(id: string): Promise<Record<string, unknown>>;
+  schemePlans(): Promise<Array<Record<string, unknown>>>;
+  createPurchase(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+  getPurchase(id: string): Promise<Record<string, unknown>>;
+  updatePurchase(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+  createMandate(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** F29: any other FP call the chains make. An HTTP status of 400 or more throws. */
+  request(
+    audience: Audience,
+    method: 'GET' | 'POST' | 'PATCH',
+    path: string,
+    body?: unknown,
+  ): Promise<Record<string, unknown>>;
+}
+
+/**
+ * F29: the sandbox records the chains reuse (`SANCHAY_PROBE_ACCOUNT_JSON`, one line, never committed).
+ * FP profiles cannot be deleted, so lumpsum, SIP and redemption reuse one test investor (probes/README.md);
+ * only the onboarding chain creates a new one.
+ */
+export interface ProbeAccount {
+  /** `mfia_…` of the reused test investor (folio defaults complete). */
+  readonly mfInvestmentAccount: string;
+  /** That investor's bank `old_id` (payments and mandates take the integer id). */
+  readonly bankAccountOldId: number;
+  /** The folio-default contacts FP accepts as consent (P-09); also the onboarding chain's contacts. */
+  readonly consentEmail: string;
+  readonly consentMobile: string;
+  /** Purchases and plans (an ABSL or ICICI Pru regular-growth ISIN; only those exist in the sandbox). */
+  readonly purchaseIsin: string;
+  /** A folio of this investor holding units of `redemptionIsin` (each run redeems ₹100). */
+  readonly redemptionFolio: string;
+  readonly redemptionIsin: string;
+  /** Where FP sends the investor after a payment (R-05: the sandbox return host). */
+  readonly paymentPostbackUrl: string;
+}
+
+export interface ChainContext {
+  readonly client: FpProbeClient;
+  /** F29 */
+  readonly account: ProbeAccount;
+  /** F29: pause between two reads of an FP object (D7: no fixed deadline). */
+  readonly pollIntervalMs: number;
+}
+
+export interface RunOptions {
+  readonly env: 'fake' | 'sandbox';
+}
+```
+
+`tools/fp-probes/src/fake-server.ts`:
+
+```ts
+import { MockAgent } from 'undici';
+
+export interface FakeServerUrls {
+  readonly fp: string;
+  readonly poa: string;
+  readonly pg: string;
+}
+
+/** F29: switches for the chain tests; the defaults behave like the sandbox in probes P-07 and P-09. */
+export interface FakeServerOptions {
+  /** The sandbox keeps a paid ONDC purchase `submitted` (P-07); true settles it, for the allotment PASS path. */
+  readonly settlePurchases?: boolean;
+  /** Answer this one call with HTTP 400, for the FAILED path. */
+  readonly reject?: { readonly method: string; readonly path: string };
+  /** Reads of a confirmed redemption that still say `submitted` before it settles (default 1). */
+  readonly redemptionSubmittedReads?: number;
+  /** The state a confirmed redemption ends in (default `successful`). */
+  readonly redemptionFinalState?: string;
+}
+
+type Row = Record<string, unknown>;
+type Method = 'GET' | 'POST' | 'PATCH';
+/** The part of undici's reply-callback options this fake reads (the full type is not a top-level export). */
+interface ReplyOptions {
+  readonly path: string;
+  readonly body?: unknown;
+}
+
+/**
+ * A small, independent fake FP/POA/PG responder for `--env=fake` (see D4's Interfaces deviation note for
+ * why this does not reuse `apps/api`'s `FakeFp`). F29 makes it stateful for the calls the four wired
+ * chains make, with the state sequences the sandbox showed in probes P-07 and P-09.
+ */
+export function createFakeServer(urls: FakeServerUrls, options: FakeServerOptions = {}): MockAgent {
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  let sequence = 0;
+  const nextId = (prefix: string): string => {
+    sequence += 1;
+    return `${prefix}${sequence}`;
+  };
+  const nextOldId = (): number => {
+    sequence += 1;
+    return 1000 + sequence;
+  };
+  const purchases = new Map<string, Row>();
+  const payments = new Map<number, Row>();
+  const mandates = new Map<number, Row>();
+  const plans = new Map<string, Row>();
+  const redemptions = new Map<string, Row>();
+  const redemptionReads = new Map<string, number>();
+
+  const bodyOf = (opts: ReplyOptions): Row => JSON.parse(String(opts.body ?? '{}')) as Row;
+  const pathOnly = (p: string): string => p.split('?')[0] ?? p;
+  const lastSegment = (p: string): string => pathOnly(p).split('/').at(-1) ?? '';
+
+  function route(
+    base: string,
+    method: Method,
+    path: string | ((p: string) => boolean),
+    reply: (opts: ReplyOptions) => Row,
+  ): void {
+    agent
+      .get(base)
+      .intercept({ path, method })
+      .reply((opts) => {
+        const reject = options.reject;
+        if (
+          reject !== undefined &&
+          reject.method === method &&
+          pathOnly(opts.path) === reject.path
+        ) {
+          return {
+            statusCode: 400,
+            data: { error: { code: 'parameter_invalid', message: 'refused by the fake' } },
+          };
+        }
+        return { statusCode: 200, data: reply(opts) };
+      })
+      .persist();
+  }
+
+  for (const base of [urls.fp, urls.poa, urls.pg]) {
+    route(
+      base,
+      'POST',
+      (p) => p.startsWith('/v2/auth/'),
+      () => ({ access_token: 'fake-token', expires_in: 1800 }),
+    );
+  }
+
+  // POA pre-verification: `accepted` on create, then `completed` and verified on the next read.
+  route(urls.poa, 'POST', '/poa/pre_verifications', () => ({
+    object: 'pre_verification',
+    id: nextId('pv_'),
+    status: 'accepted',
+  }));
+  route(
+    urls.poa,
+    'GET',
+    (p) => p.startsWith('/poa/pre_verifications/'),
+    (opts) => ({
+      object: 'pre_verification',
+      id: lastSegment(opts.path),
+      status: 'completed',
+      readiness: { status: 'verified' },
+    }),
+  );
+
+  route(
+    urls.fp,
+    'GET',
+    // RV-02-15: FP answers 400 parameter_missing without `expand`, so the stub only matches when it is sent.
+    (p) =>
+      p.startsWith('/v2/mf_scheme_plans/cybrillapoa?') &&
+      new URLSearchParams(p.slice(p.indexOf('?') + 1)).get('expand') === 'mf_scheme,mf_fund',
+    () => ({
+      object: 'list',
+      data: [
+        {
+          isin: 'INF209K01165',
+          type: 'regular',
+          option: 'growth',
+          active: true,
+          mf_scheme: { name: 'Fake Large and Mid Cap' },
+        },
+        {
+          isin: 'INF209KA1K47',
+          type: 'regular',
+          option: 'growth',
+          active: true,
+          mf_scheme: { name: 'Fake Credit Risk' },
+        },
+      ],
+    }),
+  );
+
+  // Provisioning (Plan 03 E11's calls): each create returns its id; bank and account also an old_id.
+  route(urls.fp, 'POST', '/v2/investor_profiles', () => ({ id: nextId('invp_') }));
+  route(urls.fp, 'POST', '/v2/phone_numbers', () => ({ id: nextId('phone_') }));
+  route(urls.fp, 'POST', '/v2/email_addresses', () => ({ id: nextId('email_') }));
+  route(urls.fp, 'POST', '/v2/addresses', () => ({ id: nextId('addr_') }));
+  route(urls.fp, 'POST', '/v2/bank_accounts', () => ({ id: nextId('bac_'), old_id: nextOldId() }));
+  route(urls.fp, 'POST', '/v2/mf_investment_accounts', () => ({
+    id: nextId('mfia_'),
+    old_id: nextOldId(),
+  }));
+  route(urls.fp, 'PATCH', '/v2/mf_investment_accounts', (opts) => {
+    const body = bodyOf(opts);
+    return { id: body.id, folio_defaults: body.folio_defaults };
+  });
+
+  // Purchases (lumpsum and SIP instalments): under_review, then pending on the next read; confirmed → submitted.
+  route(urls.fp, 'POST', '/v2/mf_purchases', (opts) => {
+    const record: Row = {
+      ...bodyOf(opts),
+      id: nextId('mfp_'),
+      old_id: nextOldId(),
+      state: 'under_review',
+    };
+    purchases.set(String(record.id), record);
+    return record;
+  });
+  route(
+    urls.fp,
+    'GET',
+    (p) => p.startsWith('/v2/mf_purchases?'),
+    (opts) => {
+      const plan = new URLSearchParams(opts.path.slice(opts.path.indexOf('?') + 1)).get('plan');
+      return { object: 'list', data: [...purchases.values()].filter((p) => p.plan === plan) };
+    },
+  );
+  route(
+    urls.fp,
+    'GET',
+    (p) => p.startsWith('/v2/mf_purchases/'),
+    (opts) => {
+      const record = purchases.get(lastSegment(opts.path));
+      if (record === undefined) return { error: { code: 'not_found' } };
+      if (record.state === 'under_review') record.state = 'pending';
+      const paid = [...payments.values()].some(
+        (pay) =>
+          pay.status === 'SUCCESS' && (pay.amc_order_ids as unknown[]).includes(record.old_id),
+      );
+      if (record.state === 'submitted' && paid && options.settlePurchases === true) {
+        Object.assign(record, {
+          state: 'successful',
+          allotted_units: '39.299',
+          purchased_price: '25.4459',
+        });
+      }
+      return record;
+    },
+  );
+  route(urls.fp, 'PATCH', '/v2/mf_purchases', (opts) => {
+    const body = bodyOf(opts);
+    const record = purchases.get(String(body.id)) ?? {};
+    if (body.consent !== undefined) record.consent = body.consent;
+    if (body.state === 'confirmed') record.state = 'submitted';
+    return record;
+  });
+
+  // Payments: a create returns a token_url (netbanking) or the UPI intent; the simulator marks it SUCCESS.
+  route(urls.pg, 'POST', '/api/pg/payments/netbanking', (opts) => {
+    const body = bodyOf(opts);
+    const payment: Row = { ...body, id: nextOldId(), status: 'PENDING' };
+    if (body.method === 'UPI') payment.upi = { type: 'uri', uri: 'upi://pay?pa=fake@upi' };
+    else payment.token_url = 'https://pg.fake.local/pay';
+    payments.set(Number(payment.id), payment);
+    return payment;
+  });
+  route(urls.pg, 'POST', '/api/pg/payments/nach', (opts) => {
+    const payment: Row = { ...bodyOf(opts), id: nextOldId(), status: 'PENDING' };
+    payments.set(Number(payment.id), payment);
+    return payment;
+  });
+  route(
+    urls.pg,
+    'POST',
+    (p) => p.startsWith('/api/pg/simulate/payments/'),
+    (opts) => {
+      const payment = payments.get(Number(lastSegment(opts.path))) ?? {};
+      payment.status = String(bodyOf(opts).status ?? 'SUCCESS');
+      return payment;
+    },
+  );
+
+  // Mandates: CREATED, SUBMITTED on authorise (UPI intent), APPROVED by the simulator.
+  route(urls.pg, 'POST', '/api/pg/mandates', (opts) => {
+    const mandate: Row = { ...bodyOf(opts), id: nextOldId(), mandate_status: 'CREATED' };
+    mandates.set(Number(mandate.id), mandate);
+    return mandate;
+  });
+  route(urls.pg, 'POST', '/api/pg/payments/emandate/auth', (opts) => {
+    const mandate = mandates.get(Number(bodyOf(opts).mandate_id)) ?? {};
+    mandate.mandate_status = 'SUBMITTED';
+    return { id: nextOldId(), upi: { type: 'uri', uri: 'upi://mandate?pa=fake@upi' } };
+  });
+  route(
+    urls.pg,
+    'POST',
+    (p) => p.startsWith('/api/pg/simulate/mandates/'),
+    (opts) => {
+      const mandate = mandates.get(Number(lastSegment(opts.path))) ?? {};
+      mandate.mandate_status = String(bodyOf(opts).status ?? 'APPROVED');
+      return mandate;
+    },
+  );
+  route(
+    urls.pg,
+    'GET',
+    (p) => p.startsWith('/api/pg/mandates/'),
+    (opts) => mandates.get(Number(lastSegment(opts.path))) ?? {},
+  );
+
+  // Plans: created, then review_completed on the next read; confirmed → active, with the first instalment
+  // `submitted` when `generate_first_installment_now` was sent (P-09 row 6); cancel → cancelled.
+  route(urls.fp, 'POST', '/v2/mf_purchase_plans/cancel', (opts) => {
+    const plan = plans.get(String(bodyOf(opts).id)) ?? {};
+    Object.assign(plan, { state: 'cancelled', cancellation_code: 'custom_reason' });
+    return plan;
+  });
+  route(urls.fp, 'POST', '/v2/mf_purchase_plans', (opts) => {
+    const plan: Row = { ...bodyOf(opts), id: nextId('mfpp_'), state: 'created' };
+    plans.set(String(plan.id), plan);
+    return plan;
+  });
+  route(
+    urls.fp,
+    'GET',
+    (p) => p.startsWith('/v2/mf_purchase_plans/'),
+    (opts) => {
+      const plan = plans.get(lastSegment(opts.path));
+      if (plan === undefined) return { error: { code: 'not_found' } };
+      if (plan.state === 'created') plan.state = 'review_completed';
+      return plan;
+    },
+  );
+  route(urls.fp, 'PATCH', '/v2/mf_purchase_plans', (opts) => {
+    const body = bodyOf(opts);
+    const plan = plans.get(String(body.id)) ?? {};
+    if (body.consent !== undefined) plan.consent = body.consent;
+    if (body.state === 'confirmed' && plan.state !== 'active') {
+      plan.state = 'active';
+      if (plan.generate_first_installment_now === true) {
+        const first: Row = {
+          id: nextId('mfp_'),
+          old_id: nextOldId(),
+          plan: plan.id,
+          state: 'submitted',
+          amount: plan.amount,
+        };
+        purchases.set(String(first.id), first);
+      }
+    }
+    return plan;
+  });
+
+  // Redemptions: under_review, then pending; confirmed → `submitted` for N reads, then the final state.
+  route(urls.fp, 'POST', '/v2/mf_redemptions', (opts) => {
+    const record: Row = {
+      ...bodyOf(opts),
+      id: nextId('mfr_'),
+      old_id: nextOldId(),
+      state: 'under_review',
+    };
+    redemptions.set(String(record.id), record);
+    return record;
+  });
+  route(
+    urls.fp,
+    'GET',
+    (p) => p.startsWith('/v2/mf_redemptions/'),
+    (opts) => {
+      const id = lastSegment(opts.path);
+      const record = redemptions.get(id);
+      if (record === undefined) return { error: { code: 'not_found' } };
+      if (record.state === 'under_review') record.state = 'pending';
+      else if (record.state === 'submitted') {
+        const reads = (redemptionReads.get(id) ?? 0) + 1;
+        redemptionReads.set(id, reads);
+        if (reads > (options.redemptionSubmittedReads ?? 1)) {
+          const final = options.redemptionFinalState ?? 'successful';
+          Object.assign(
+            record,
+            final === 'successful'
+              ? { state: final, redeemed_units: '3.9299', redeemed_amount: 100 }
+              : { state: final },
+          );
+        }
+      }
+      return record;
+    },
+  );
+  route(urls.fp, 'PATCH', '/v2/mf_redemptions', (opts) => {
+    const body = bodyOf(opts);
+    const record = redemptions.get(String(body.id)) ?? {};
+    if (body.consent !== undefined) record.consent = body.consent;
+    if (body.state === 'confirmed') record.state = 'submitted';
+    return record;
+  });
+
+  return agent;
+}
+```
+
+`tools/fp-probes/src/fp-client.ts`:
+
+```ts
+import { Agent, type Dispatcher, request } from 'undici';
+import { createFakeServer, type FakeServerOptions, type FakeServerUrls } from './fake-server.js';
+import type { Audience, ChainContext, FpProbeClient, ProbeAccount, RunOptions } from './types.js';
+
+interface AudienceCredentials {
+  readonly clientId: string;
+  readonly clientSecret: string;
+}
+
+interface Credentials {
+  readonly tenantId: string;
+  readonly fp: AudienceCredentials;
+  readonly poa: AudienceCredentials;
+  readonly pg: AudienceCredentials;
+}
+
+const FAKE_URLS: FakeServerUrls = {
+  fp: 'https://fp.fake.local',
+  poa: 'https://poa.fake.local',
+  pg: 'https://pg.fake.local',
+};
+const FAKE_CREDENTIALS: Credentials = {
+  tenantId: 'sanchay',
+  fp: { clientId: 'fake', clientSecret: 'fake' },
+  poa: { clientId: 'fake', clientSecret: 'fake' },
+  pg: { clientId: 'fake', clientSecret: 'fake' },
+};
+/** F29: the fake run's stand-in for `SANCHAY_PROBE_ACCOUNT_JSON` (no real record; never sent anywhere). */
+const FAKE_ACCOUNT: ProbeAccount = {
+  mfInvestmentAccount: 'mfia_probe',
+  bankAccountOldId: 33,
+  consentEmail: 'probe@example.com',
+  consentMobile: '9000000000',
+  purchaseIsin: 'INF209K01165',
+  redemptionFolio: 'FAKEFOLIO1',
+  redemptionIsin: 'INF209KA1K47',
+  paymentPostbackUrl: 'https://api.fake.local/api/v1/pg/return/probe',
+};
+const ACCOUNT_KEYS = Object.keys(FAKE_ACCOUNT) as Array<keyof ProbeAccount>;
+/** F29: default pause between two reads of an FP object in the sandbox (`SANCHAY_PROBE_POLL_MS` overrides it). */
+const SANDBOX_POLL_MS = 5_000;
+
+function sandboxUrls(): FakeServerUrls {
+  const base = process.env.SANCHAY_FP_BASE_URL;
+  if (base === undefined) throw new Error('SANCHAY_FP_BASE_URL is required for --env=sandbox');
+  return { fp: base, poa: base, pg: base };
+}
+
+function sandboxCredentials(): Credentials {
+  const raw = process.env.SANCHAY_FP_CREDENTIALS_JSON;
+  if (raw === undefined)
+    throw new Error('SANCHAY_FP_CREDENTIALS_JSON is required for --env=sandbox');
+  return JSON.parse(raw) as Credentials;
+}
+
+/** F29: the reused sandbox records, from one line of JSON in the environment; a missing key stops the run. */
+export function sandboxAccount(raw = process.env.SANCHAY_PROBE_ACCOUNT_JSON): ProbeAccount {
+  if (raw === undefined)
+    throw new Error('SANCHAY_PROBE_ACCOUNT_JSON is required for --env=sandbox');
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const missing = ACCOUNT_KEYS.filter((key) => parsed[key] === undefined || parsed[key] === '');
+  if (missing.length > 0) throw new Error(`SANCHAY_PROBE_ACCOUNT_JSON lacks ${missing.join(', ')}`);
+  if (!Number.isInteger(parsed.bankAccountOldId))
+    throw new Error('SANCHAY_PROBE_ACCOUNT_JSON: bankAccountOldId must be an integer');
+  return parsed as unknown as ProbeAccount;
+}
+
+/** F29: FP's error code and message (never a request body), so a FAILED step says why without PII. */
+function refusal(method: string, path: string, status: number, text: string): Error {
+  let reason = '';
+  try {
+    const body = JSON.parse(text) as {
+      error?: { code?: unknown; message?: unknown };
+      code?: unknown;
+      message?: unknown;
+    };
+    const code = body.error?.code ?? body.code;
+    const message = body.error?.message ?? body.message;
+    reason = [code, message]
+      .filter((v) => typeof v === 'string' && v !== '')
+      .join(': ')
+      .slice(0, 160);
+  } catch {
+    // not JSON: the status alone
+  }
+  return new Error(
+    `HTTP ${status} on ${method} ${path.split('?')[0]}${reason === '' ? '' : ` (${reason})`}`,
+  );
+}
+
+async function fetchToken(
+  dispatcher: Dispatcher,
+  base: string,
+  path: string,
+  credentials: AudienceCredentials,
+): Promise<string> {
+  const response = await request(`${base}${path}`, {
+    method: 'POST',
+    dispatcher,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
+      grant_type: 'client_credentials',
+    }).toString(),
+  });
+  const text = await response.body.text();
+  if (response.statusCode >= 400) throw refusal('POST', path, response.statusCode, text);
+  return (JSON.parse(text) as { access_token: string }).access_token;
+}
+
+async function connect(
+  urls: FakeServerUrls,
+  credentials: Credentials,
+  dispatcher: Dispatcher,
+  env: RunOptions['env'],
+  account: ProbeAccount,
+  pollIntervalMs: number,
+): Promise<ChainContext> {
+  const fpToken = await fetchToken(
+    dispatcher,
+    urls.fp,
+    `/v2/auth/${credentials.tenantId}/token`,
+    credentials.fp,
+  );
+  const poaToken = await fetchToken(
+    dispatcher,
+    urls.poa,
+    '/v2/auth/cybrillarta/token',
+    credentials.poa,
+  );
+  const pgToken =
+    env === 'fake'
+      ? fpToken
+      : await fetchToken(
+          dispatcher,
+          urls.pg,
+          `/v2/auth/${credentials.tenantId}/token`,
+          credentials.pg,
+        );
+  const audiences: Record<Audience, { base: string; token: string }> = {
+    fp: { base: urls.fp, token: fpToken },
+    poa: { base: urls.poa, token: poaToken },
+    pg: { base: urls.pg, token: pgToken },
+  };
+
+  async function call(
+    audience: Audience,
+    path: string,
+    method: string,
+    body?: unknown,
+  ): Promise<Record<string, unknown>> {
+    const { base, token } = audiences[audience];
+    const response = await request(`${base}${path}`, {
+      method,
+      dispatcher,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        'x-tenant-id': credentials.tenantId,
+      },
+      body: body === undefined ? null : JSON.stringify(body),
+    });
+    const text = await response.body.text();
+    // F29: a refusal throws, so a chain step can never pass on an FP error body.
+    if (response.statusCode >= 400) throw refusal(method, path, response.statusCode, text);
+    return text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : {};
+  }
+
+  const client: FpProbeClient = {
+    preVerify: (input) =>
+      call('poa', '/poa/pre_verifications', 'POST', {
+        investor_identifier: input.pan,
+        pan: { value: input.pan },
+        name: { value: input.name },
+        date_of_birth: { value: input.dateOfBirth },
+      }),
+    getPreVerification: (id) => call('poa', `/poa/pre_verifications/${id}`, 'GET'),
+    schemePlans: async () => {
+      const result = await call(
+        'fp',
+        '/v2/mf_scheme_plans/cybrillapoa?expand=mf_scheme,mf_fund&page=0&size=100',
+        'GET',
+      );
+      return Array.isArray(result.data) ? (result.data as Array<Record<string, unknown>>) : [];
+    },
+    createPurchase: (input) => call('fp', '/v2/mf_purchases', 'POST', input),
+    getPurchase: (id) => call('fp', `/v2/mf_purchases/${id}`, 'GET'),
+    updatePurchase: (input) => call('fp', '/v2/mf_purchases', 'PATCH', input),
+    createMandate: (input) => call('pg', '/api/pg/mandates', 'POST', input),
+    request: (audience, method, path, body) => call(audience, path, method, body),
+  };
+  return { client, account, pollIntervalMs };
+}
+
+export async function buildClient(options: RunOptions): Promise<ChainContext> {
+  if (options.env === 'fake') return buildFakeContext();
+  const poll = Number(process.env.SANCHAY_PROBE_POLL_MS ?? SANDBOX_POLL_MS);
+  return connect(
+    sandboxUrls(),
+    sandboxCredentials(),
+    new Agent({ connectTimeout: 10_000, bodyTimeout: 30_000, headersTimeout: 30_000 }),
+    'sandbox',
+    sandboxAccount(),
+    Number.isFinite(poll) && poll >= 0 ? poll : SANDBOX_POLL_MS,
+  );
+}
+
+/** F29: a context on this tool's own fake responder, with test switches (`FakeServerOptions`). */
+export async function buildFakeContext(fake: FakeServerOptions = {}): Promise<ChainContext> {
+  return connect(
+    FAKE_URLS,
+    FAKE_CREDENTIALS,
+    createFakeServer(FAKE_URLS, fake),
+    'fake',
+    FAKE_ACCOUNT,
+    0,
+  );
+}
+```
+
+Replace D4's four chains with:
+
+`tools/fp-probes/src/chains/onboarding.ts`:
+
+```ts
+import { randomInt } from 'node:crypto';
+import { pollUntil } from '../poll.js';
+import { expectField, Steps } from '../steps.js';
+import type { ChainContext, StepResult } from '../types.js';
+
+const LETTERS = 'BCDEFGHJKLMNOPQRSTUVWXYZ';
+const letter = (): string => LETTERS[randomInt(LETTERS.length)] ?? 'B';
+
+/**
+ * A sandbox simulator PAN that pre-verifies as ready: digits 3751 mean "KYC ready", the 4th letter P is an
+ * individual, and the 5th letter is never I (invalid PAN) or A (Aadhaar not linked) (research fp-api §9).
+ * A new one per run, because FP keeps every profile and a run creates one.
+ */
+export function simulatorPan(): string {
+  return `${letter()}${letter()}${letter()}P${letter()}3751${letter()}`;
+}
+
+/** A sandbox account number ending 1193, which the simulator passes (research fp-api §5). */
+const simulatorAccountNumber = (): string => `${randomInt(10_000_000, 100_000_000)}1193`;
+
+/**
+ * F29 (R-37, R-39): onboarding has no sandbox limit, so every step must pass. It pre-verifies a simulator
+ * PAN, then provisions a new investor with Plan 03 E11's calls and bodies, ending with the folio defaults
+ * that later consents use. The contacts are the reused test investor's, so no real number is invented.
+ */
+export async function run(ctx: ChainContext): Promise<StepResult[]> {
+  const s = new Steps();
+  const { client, account } = ctx;
+  const pan = simulatorPan();
+  const name = 'Sanchay Probe';
+  const dateOfBirth = '1990-01-15';
+  return s.run(async () => {
+    const pv = await s.do(
+      'POA pre-verification create',
+      () => client.preVerify({ pan, name, dateOfBirth }),
+      (v) => `id=${v.id}, status=${v.status}`,
+    );
+    await s.do(
+      'POA pre-verification result (poll to a final status)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.getPreVerification(String(pv.id)),
+          (v) => v.status === 'completed' || v.status === 'failed',
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'status', ['completed']);
+        const readiness = (polled.value.readiness ?? {}) as Record<string, unknown>;
+        expectField(readiness, 'status', ['verified']);
+        return polled;
+      },
+      (p) => `status=completed, readiness=verified after ${p.reads} read(s)`,
+    );
+    const profile = await s.do(
+      'investor profile create',
+      () =>
+        client.request('fp', 'POST', '/v2/investor_profiles', {
+          type: 'individual',
+          tax_status: 'resident_individual',
+          name,
+          date_of_birth: dateOfBirth,
+          pan,
+          gender: 'female',
+          occupation: 'private_sector_service',
+          income_slab: 'above_1lakh_upto_5lakh',
+          source_of_wealth: 'salary',
+          pep_details: 'not_applicable',
+          country_of_birth: 'IN',
+          place_of_birth: 'Bengaluru',
+          nationality_country: 'IN',
+          use_default_tax_residences: true,
+        }),
+      (v) => `id=${v.id}`,
+    );
+    const phone = await s.do(
+      'phone number create',
+      () =>
+        client.request('fp', 'POST', '/v2/phone_numbers', {
+          profile: profile.id,
+          isd: '91',
+          number: account.consentMobile.slice(-10),
+          belongs_to: 'self',
+        }),
+      (v) => `id=${v.id}`,
+    );
+    const email = await s.do(
+      'email address create',
+      () =>
+        client.request('fp', 'POST', '/v2/email_addresses', {
+          profile: profile.id,
+          email: account.consentEmail,
+          belongs_to: 'self',
+        }),
+      (v) => `id=${v.id}`,
+    );
+    const address = await s.do(
+      'address create',
+      () =>
+        client.request('fp', 'POST', '/v2/addresses', {
+          profile: profile.id,
+          line1: '1 Probe Street',
+          city: 'Bengaluru',
+          state: 'Karnataka',
+          postal_code: '560001',
+          country: 'IN',
+          nature: 'residential',
+        }),
+      (v) => `id=${v.id}`,
+    );
+    const bank = await s.do(
+      'bank account create',
+      () =>
+        client.request('fp', 'POST', '/v2/bank_accounts', {
+          profile: profile.id,
+          primary_account_holder_name: name,
+          account_number: simulatorAccountNumber(),
+          type: 'savings',
+          ifsc_code: 'HDFC0000123',
+        }),
+      (v) => `id=${v.id}, old_id=${v.old_id}`,
+    );
+    const mfia = await s.do(
+      'MF investment account create',
+      () =>
+        client.request('fp', 'POST', '/v2/mf_investment_accounts', {
+          primary_investor: profile.id,
+          holding_pattern: 'single',
+        }),
+      (v) => `id=${v.id}, old_id=${v.old_id}`,
+    );
+    await s.do(
+      'folio defaults (PATCH MF investment account)',
+      () =>
+        client.request('fp', 'PATCH', '/v2/mf_investment_accounts', {
+          id: mfia.id,
+          folio_defaults: {
+            communication_email_address: email.id,
+            communication_mobile_number: phone.id,
+            communication_address: address.id,
+            payout_bank_account: bank.id,
+          },
+        }),
+      (v) => `id=${v.id}, folio defaults set`,
+    );
+  });
+}
+```
+
+`tools/fp-probes/src/chains/lumpsum.ts`:
+
+```ts
+import { pollUntil } from '../poll.js';
+import { expectField, Steps } from '../steps.js';
+import type { ChainContext, StepResult } from '../types.js';
+
+/** R-37: F23's `gate-evidence g-e4` counts this SKIPPED step because the detail starts `sandbox limit`. */
+export const LUMPSUM_SANDBOX_LIMIT =
+  'sandbox limit: the FP sandbox keeps a simulator-paid ONDC purchase submitted (P-07); proven by G-E7(a), canary legs A_UPI and A_NETBANKING';
+
+const PURCHASE_FINAL = ['submitted', 'successful', 'failed', 'expired', 'reversed', 'cancelled'];
+
+/**
+ * F29 (R-37, R-39): Plan 03 E20/E21's H-2 custom checkout, in lumpsum-flow.md's order: create, review,
+ * consent (its own PATCH), payment, confirm, then pay with the sandbox simulator and poll. Past FP
+ * `submitted` the sandbox does not settle (P-07), so the allotment is SKIPPED at the sandbox limit,
+ * unless the sandbox settles it, in which case it must PASS with allotted units.
+ */
+export async function run(ctx: ChainContext): Promise<StepResult[]> {
+  const s = new Steps();
+  const { client, account } = ctx;
+  return s.run(async () => {
+    await s.do(
+      'scheme catalogue list',
+      () => client.schemePlans(),
+      (plans) => `${plans.length} scheme(s) visible`,
+    );
+    const created = await s.do(
+      'purchase create (H-2 custom checkout, step 1)',
+      () =>
+        client.createPurchase({
+          mf_investment_account: account.mfInvestmentAccount,
+          scheme: account.purchaseIsin,
+          amount: '1000.00',
+          user_ip: '127.0.0.1',
+          source_ref_id: `probe-${Date.now()}`,
+          gateway: 'ondc',
+          initiated_by: 'investor',
+          initiated_via: 'web',
+        }),
+      (v) => `id=${v.id}, old_id=${v.old_id}, state=${v.state}`,
+    );
+    const id = String(created.id);
+    await s.do(
+      'purchase review (poll to pending)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.getPurchase(id),
+          (v) => v.state !== 'under_review',
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['pending']);
+        return polled;
+      },
+      (p) => `state=pending after ${p.reads} read(s)`,
+    );
+    await s.do(
+      'purchase consent (PATCH, apart from the state change)',
+      () =>
+        client.updatePurchase({
+          id,
+          consent: {
+            isd_code: '91',
+            mobile: account.consentMobile.slice(-10),
+            email: account.consentEmail,
+          },
+        }),
+      (v) => `state=${v.state}`,
+    );
+    const payment = await s.do(
+      'payment create (netbanking, ONDC)',
+      async () => {
+        const v = await client.request('pg', 'POST', '/api/pg/payments/netbanking', {
+          amc_order_ids: [created.old_id],
+          method: 'NETBANKING',
+          bank_account_id: account.bankAccountOldId,
+          payment_postback_url: account.paymentPostbackUrl,
+          provider_name: 'ONDC',
+        });
+        if (typeof v.token_url !== 'string') throw new Error('no token_url in the payment');
+        return v;
+      },
+      (v) => `payment id=${v.id}, status=${v.status}, token_url returned`,
+    );
+    await s.do(
+      'purchase confirm (PATCH state confirmed)',
+      () => client.updatePurchase({ id, state: 'confirmed' }),
+      (v) => `state=${v.state}`,
+    );
+    await s.do(
+      'payment simulate SUCCESS (sandbox simulator)',
+      () =>
+        client.request('pg', 'POST', `/api/pg/simulate/payments/${payment.id}`, {
+          status: 'SUCCESS',
+        }),
+      (v) => `payment status=${v.status}`,
+    );
+    const submitted = await s.do(
+      'purchase submitted (poll to a final state)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.getPurchase(id),
+          (v) => PURCHASE_FINAL.includes(String(v.state)),
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['submitted', 'successful']);
+        return polled;
+      },
+      (p) => `state=${p.value.state} after ${p.reads} read(s)`,
+    );
+    if (submitted.value.state !== 'successful') {
+      s.skip('purchase settled with allotted units', LUMPSUM_SANDBOX_LIMIT);
+      return;
+    }
+    await s.do(
+      'purchase settled with allotted units',
+      async () => {
+        if (
+          submitted.value.allotted_units === undefined ||
+          submitted.value.allotted_units === null
+        ) {
+          throw new Error('state=successful but no allotted_units (P-07)');
+        }
+        return submitted.value;
+      },
+      (v) => `state=successful, allotted_units=${v.allotted_units}`,
+    );
+  });
+}
+```
+
+`tools/fp-probes/src/chains/sip.ts`:
+
+```ts
+import { pollUntil } from '../poll.js';
+import { expectField, Steps } from '../steps.js';
+import type { ChainContext, StepResult } from '../types.js';
+
+/** R-37: F23's `gate-evidence g-e4` counts this SKIPPED step because the detail starts `sandbox limit`. */
+export const SIP_SANDBOX_LIMIT =
+  'sandbox limit: the FP sandbox keeps a mandate-funded first instalment submitted (P-09); proven by G-E7(b), canary leg B_SIP';
+
+const MANDATE_FINAL = ['APPROVED', 'REJECTED', 'CANCELLED', 'FAILED'];
+const PLAN_FINAL = ['active', 'failed', 'cancelled'];
+const PURCHASE_FINAL = ['submitted', 'successful', 'failed', 'expired', 'reversed', 'cancelled'];
+
+const mandateStatus = (v: Record<string, unknown>): string =>
+  String(v.mandate_status ?? v.status).toUpperCase();
+
+/**
+ * F29 (R-37, R-39): Plan 04 F2's UPI Autopay SIP, in P-09's order: mandate create, authorise (UPI intent),
+ * the sandbox simulator's approval, then a monthly plan with its first instalment now, confirmed with
+ * consent, its NACH payment, and the poll to `submitted`. Past that the sandbox does not settle (P-09),
+ * so the allotment is SKIPPED at the sandbox limit. The chain then cancels the plan with F28's form, so
+ * every run leaves no active plan behind (and exercises the cancel GO-2 needs, header item 9).
+ */
+export async function run(ctx: ChainContext): Promise<StepResult[]> {
+  const s = new Steps();
+  const { client, account } = ctx;
+  const consent = {
+    isd_code: '91',
+    mobile: account.consentMobile.slice(-10),
+    email: account.consentEmail,
+  };
+  return s.run(async () => {
+    await s.do(
+      'scheme catalogue list',
+      () => client.schemePlans(),
+      (plans) => `${plans.length} scheme(s) visible`,
+    );
+    const mandate = await s.do(
+      'mandate create (UPI Autopay, limit 100000)',
+      () =>
+        client.createMandate({
+          mandate_type: 'UPI',
+          bank_account_id: account.bankAccountOldId,
+          mandate_limit: 100_000,
+          provider_name: 'CYBRILLAPOA',
+        }),
+      (v) => `id=${v.id}, status=${mandateStatus(v)}`,
+    );
+    const mandateId = Number(mandate.id);
+    await s.do(
+      'mandate authorise (UPI intent)',
+      async () => {
+        const v = await client.request('pg', 'POST', '/api/pg/payments/emandate/auth', {
+          mandate_id: mandateId,
+          upi: { type: 'uri' },
+        });
+        const uri = (v.upi as { uri?: unknown } | undefined)?.uri;
+        if (typeof uri !== 'string' || !uri.startsWith('upi://'))
+          throw new Error('no upi:// intent in the authorisation');
+        return v;
+      },
+      () => 'upi:// intent returned',
+    );
+    await s.do(
+      'mandate approve (sandbox simulator)',
+      () =>
+        client.request('pg', 'POST', `/api/pg/simulate/mandates/${mandateId}`, {
+          status: 'APPROVED',
+        }),
+      (v) => `status=${mandateStatus(v)}`,
+    );
+    await s.do(
+      'mandate approved (poll to a final status)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.request('pg', 'GET', `/api/pg/mandates/${mandateId}`),
+          (v) => MANDATE_FINAL.includes(mandateStatus(v)),
+          ctx.pollIntervalMs,
+        );
+        if (mandateStatus(polled.value) !== 'APPROVED')
+          throw new Error(`mandate_status=${mandateStatus(polled.value)}, expected APPROVED`);
+        return polled;
+      },
+      (p) => `status=APPROVED after ${p.reads} read(s)`,
+    );
+    const plan = await s.do(
+      'plan create (monthly, first instalment now)',
+      () =>
+        client.request('fp', 'POST', '/v2/mf_purchase_plans', {
+          mf_investment_account: account.mfInvestmentAccount,
+          scheme: account.purchaseIsin,
+          frequency: 'monthly',
+          // P-09 row 5: a plan created on 10-01 had its next instalment on the 10th.
+          installment_day: 10,
+          number_of_installments: 6,
+          amount: '1000.00',
+          systematic: true,
+          payment_method: 'mandate',
+          payment_source: String(mandateId),
+          source_ref_id: `probe-${Date.now()}`,
+          user_ip: '127.0.0.1',
+          initiated_by: 'investor',
+          generate_first_installment_now: true,
+        }),
+      (v) => `id=${v.id}, state=${v.state}`,
+    );
+    const planId = String(plan.id);
+    await s.do(
+      'plan confirm with consent (PATCH)',
+      async () => {
+        await pollUntil(
+          () => client.request('fp', 'GET', `/v2/mf_purchase_plans/${planId}`),
+          (v) => v.state !== 'created',
+          ctx.pollIntervalMs,
+        ).then((p) => expectField(p.value, 'state', ['review_completed']));
+        return client.request('fp', 'PATCH', '/v2/mf_purchase_plans', {
+          id: planId,
+          consent,
+          state: 'confirmed',
+        });
+      },
+      (v) => `state=${v.state}`,
+    );
+    await s.do(
+      'plan active (poll to a final state)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.request('fp', 'GET', `/v2/mf_purchase_plans/${planId}`),
+          (v) => PLAN_FINAL.includes(String(v.state)),
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['active']);
+        return polled;
+      },
+      (p) => `state=active after ${p.reads} read(s)`,
+    );
+    const first = await s.do(
+      'first instalment found (GET purchases by plan)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.request('fp', 'GET', `/v2/mf_purchases?plan=${encodeURIComponent(planId)}`),
+          (v) => Array.isArray(v.data) && v.data.length > 0,
+          ctx.pollIntervalMs,
+        );
+        return (polled.value.data as Array<Record<string, unknown>>)[0] ?? {};
+      },
+      (v) => `id=${v.id}, old_id=${v.old_id}, state=${v.state}`,
+    );
+    await s.do(
+      'first instalment payment create (NACH)',
+      () =>
+        client.request('pg', 'POST', '/api/pg/payments/nach', {
+          mandate_id: mandateId,
+          amc_order_ids: [first.old_id],
+        }),
+      (v) => `payment id=${v.id}, status=${v.status}`,
+    );
+    const instalment = await s.do(
+      'first instalment submitted (poll to a final state)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.getPurchase(String(first.id)),
+          (v) => PURCHASE_FINAL.includes(String(v.state)),
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['submitted', 'successful']);
+        return polled;
+      },
+      (p) => `state=${p.value.state} after ${p.reads} read(s)`,
+    );
+    if (instalment.value.state === 'successful') {
+      await s.do(
+        'first instalment settled with allotted units',
+        async () => {
+          if (
+            instalment.value.allotted_units === undefined ||
+            instalment.value.allotted_units === null
+          ) {
+            throw new Error('state=successful but no allotted_units (P-07)');
+          }
+          return instalment.value;
+        },
+        (v) => `state=successful, allotted_units=${v.allotted_units}`,
+      );
+    } else {
+      s.skip('first instalment settled with allotted units', SIP_SANDBOX_LIMIT);
+    }
+    await s.do(
+      'plan cancel (F28 form)',
+      async () => {
+        await client.request('fp', 'POST', '/v2/mf_purchase_plans/cancel', {
+          id: planId,
+          cancellation_code: 'invest_later',
+        });
+        const polled = await pollUntil(
+          () => client.request('fp', 'GET', `/v2/mf_purchase_plans/${planId}`),
+          (v) => v.state !== 'active',
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['cancelled']);
+        return polled;
+      },
+      (p) => `state=cancelled after ${p.reads} read(s)`,
+    );
+  });
+}
+```
+
+`tools/fp-probes/src/chains/redemption.ts`:
+
+```ts
+import { pollUntil } from '../poll.js';
+import { expectField, Steps } from '../steps.js';
+import type { ChainContext, StepResult } from '../types.js';
+
+const REDEMPTION_FINAL = ['successful', 'failed', 'expired', 'cancelled', 'reversed'];
+
+/**
+ * F29 (R-37, R-39): Plan 04 F5's AMOUNT redemption on ONDC (units fail at the gateway, P-09): create,
+ * review, one PATCH with the state and the folio-default contacts as consent (P-09 rows 2-3), then a poll
+ * to a final state with no deadline (D7). Redemption has no sandbox limit (P-09 saw one settle in 10 s),
+ * so the run passes only when FP reports `successful`.
+ */
+export async function run(ctx: ChainContext): Promise<StepResult[]> {
+  const s = new Steps();
+  const { client, account } = ctx;
+  return s.run(async () => {
+    await s.do(
+      'scheme catalogue list',
+      () => client.schemePlans(),
+      (plans) => `${plans.length} scheme(s) visible`,
+    );
+    const created = await s.do(
+      'redemption create (amount, ONDC)',
+      () =>
+        client.request('fp', 'POST', '/v2/mf_redemptions', {
+          mf_investment_account: account.mfInvestmentAccount,
+          scheme: account.redemptionIsin,
+          folio_number: account.redemptionFolio,
+          amount: '100.00',
+          user_ip: '127.0.0.1',
+          source_ref_id: `probe-${Date.now()}`,
+          gateway: 'ondc',
+        }),
+      (v) => `id=${v.id}, old_id=${v.old_id}, state=${v.state}`,
+    );
+    const id = String(created.id);
+    await s.do(
+      'redemption review (poll to pending)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.request('fp', 'GET', `/v2/mf_redemptions/${id}`),
+          (v) => v.state !== 'under_review',
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['pending']);
+        return polled;
+      },
+      (p) => `state=pending after ${p.reads} read(s)`,
+    );
+    await s.do(
+      'redemption confirm with consent (PATCH)',
+      () =>
+        client.request('fp', 'PATCH', '/v2/mf_redemptions', {
+          id,
+          state: 'confirmed',
+          consent: {
+            isd_code: '91',
+            mobile: account.consentMobile.slice(-10),
+            email: account.consentEmail,
+          },
+        }),
+      (v) => `state=${v.state}`,
+    );
+    await s.do(
+      'redemption settled (poll to a final state)',
+      async () => {
+        const polled = await pollUntil(
+          () => client.request('fp', 'GET', `/v2/mf_redemptions/${id}`),
+          (v) => REDEMPTION_FINAL.includes(String(v.state)),
+          ctx.pollIntervalMs,
+        );
+        expectField(polled.value, 'state', ['successful']);
+        return polled;
+      },
+      (p) =>
+        `state=successful, redeemed_units=${p.value.redeemed_units} after ${p.reads} read(s), ${p.seconds} s`,
+    );
+  });
+}
+```
+
+`tools/fp-probes/README.md` (D4's file; key-level): replace the paragraph that starts "Each run writes" and ends "this harness's own scope note here." with:
+
+````markdown
+Each run writes `docs/probes/smoke-<date>-<chain>.md`: one row per step, `PASSED` / `SKIPPED` /
+`FAILED`. Since F29 (R-37, R-39), every step the sandbox can reach is a real call that must PASS, and
+the first FAILED step ends the chain. A step is SKIPPED only past the chain's sandbox limit, with a
+detail that starts `sandbox limit:` and names its canary leg: lumpsum after FP `submitted` (G-E7 a),
+SIP after the first instalment `submitted` (G-E7 b). Onboarding and redemption have no limit. A chain
+polls each FP object until it reaches a final state, with no deadline (D7).
+
+A sandbox run reads three variables from the git-ignored `tools/fp-probes/.env.sandbox`:
+`SANCHAY_FP_BASE_URL`, `SANCHAY_FP_CREDENTIALS_JSON` and `SANCHAY_PROBE_ACCOUNT_JSON` (one line of
+JSON; its keys are `ProbeAccount`'s in `src/types.ts`). `SANCHAY_PROBE_POLL_MS` (default 5000) sets
+the pause between two reads.
+
+    pnpm --filter=@sanchay/fp-probes exec tsx --env-file=.env.sandbox src/smoke.ts --chain=sip --env=sandbox
+
+The onboarding chain creates a new sandbox investor on every run (FP profiles cannot be deleted). The
+other chains reuse one test investor: the SIP chain cancels the plan it creates, and the redemption
+chain redeems ₹100 from that investor's folio.
+````
+
+- [ ] **Step 4: Run the tests to confirm they pass**
+
+```
+pnpm --filter=@sanchay/fp-probes test
+pnpm --filter=@sanchay/fp-probes typecheck
+pnpm --filter=@sanchay/fp-probes smoke --chain=lumpsum --env=fake
+```
+Expected: 11 passed in 2 files (`chains.test.ts` 9, `smoke.test.ts` 2); the typecheck exits 0; the fake lumpsum run prints eight `[PASSED]` lines and `[SKIPPED] purchase settled with allotted units -- sandbox limit: …`, and exits 0. Until F23 Part A lands, a fake run writes `docs/probes/smoke-<IST day>-lumpsum.md` with no `-fake` suffix. Delete it, and never commit it:
+```
+rm docs/probes/smoke-<IST day>-lumpsum.md
+```
+
+- [ ] **Step 5: Commit**
+
+```
+pnpm exec biome check --write tools/fp-probes
+pnpm --filter=@sanchay/fp-probes test
+pnpm --filter=@sanchay/fp-probes typecheck
+pnpm lint
+git add tools/fp-probes/src/poll.ts tools/fp-probes/src/steps.ts tools/fp-probes/src/types.ts tools/fp-probes/src/fake-server.ts tools/fp-probes/src/fp-client.ts tools/fp-probes/src/chains/onboarding.ts tools/fp-probes/src/chains/lumpsum.ts tools/fp-probes/src/chains/sip.ts tools/fp-probes/src/chains/redemption.ts tools/fp-probes/test/chains.test.ts tools/fp-probes/README.md
+git commit -m "feat(fp-probes): wire the four sandbox chains up to the sandbox limit (F29, R-37, R-39)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+If lefthook re-stages files (`stage_fixed`), re-run the Step 4 commands.
+
+- [ ] **Step 6: Sandbox dry run (by Fri 11-13; not counted)**
+
+Create `tools/fp-probes/.env.sandbox` (git-ignored by `.env.*`; never commit it) with three lines: `SANCHAY_FP_BASE_URL` (the FP sandbox host), `SANCHAY_FP_CREDENTIALS_JSON` (as in `apps/api/.env`), and `SANCHAY_PROBE_ACCOUNT_JSON`, a one-line JSON object with `ProbeAccount`'s eight keys (the reused investor in `docs/probes/README.md`: its `mfia_…` id, bank old id, folio-default email and mobile, `purchaseIsin` `INF209K01165`, the ABSL Credit Risk folio and `redemptionIsin` `INF209KA1K47`, and the sandbox return URL that R-05's open item sets). Then, one chain at a time:
+```
+pnpm --filter=@sanchay/fp-probes exec tsx --env-file=.env.sandbox src/smoke.ts --chain=onboarding --env=sandbox
+pnpm --filter=@sanchay/fp-probes exec tsx --env-file=.env.sandbox src/smoke.ts --chain=lumpsum --env=sandbox
+pnpm --filter=@sanchay/fp-probes exec tsx --env-file=.env.sandbox src/smoke.ts --chain=sip --env=sandbox
+pnpm --filter=@sanchay/fp-probes exec tsx --env-file=.env.sandbox src/smoke.ts --chain=redemption --env=sandbox
+```
+Expected: onboarding and redemption print only `[PASSED]` lines and exit 0. Lumpsum and SIP print `[PASSED]` up to `submitted`, then one `[SKIPPED] … -- sandbox limit: …` line (SIP then `[PASSED] plan cancel (F28 form)`), and exit 0. A `[FAILED]` line exits 1. Fix the chain if the chain is wrong; if the sandbox refuses a body the app also sends, raise an erratum on that app task (decision 8). Paste the printed lines into the PR description and delete the four evidence files: they are dated before 11-16, so G-E4 would not count them anyway (`BEFORE_WINDOW`).
+```
+rm docs/probes/smoke-<IST day>-onboarding.md
+rm docs/probes/smoke-<IST day>-lumpsum.md
+rm docs/probes/smoke-<IST day>-sip.md
+rm docs/probes/smoke-<IST day>-redemption.md
+```
+
+**How this task was checked while it was written (2026-10-07).** D4's `tools/fp-probes` was extracted from Plan 02 into a scratch folder with Plan 02's pins (undici 7.16.0, tsx 4.19.2, TypeScript 6.0.3, Vitest 5.0.1, `@types/node` 24.13.6) and the repo's `node-lib` tsconfig.
+- **Baseline:** D4 as written passes its 2 tests, and `tsc` exits 0.
+- **Red:** with `test/chains.test.ts` added, 9 of 9 new tests failed with `TypeError: buildFakeContext is not a function`, and D4's 2 still passed.
+- **Green:** with this task's files, 11 of 11 pass and `tsc` exits 0. `biome check --write` with the repo's `biome.json` only re-wrapped lines; `biome ci` is then clean. undici 7.16.0 does not export `MockInterceptor` from its root, so `fake-server.ts` types the two reply-callback fields it reads itself.
+- **F23 reads the result:** F23's `scripts/gate-evidence.ts`, its Part A `evidence.ts` and the gate doc were extracted from this plan. Three IST days (11-16 to 11-18) of evidence were written in F23's format from each chain's fake run, labelled `sandbox` for this check only.
+  - From D4's chains, `node scripts/gate-evidence.ts g-e4` wrote `**G-E4: NOT MET: chains not wired.**`, listed every run as `STEP_SKIPPED`, and exited 1.
+  - From this task's chains it wrote `**G-E4: NOT MET: waiting on the canary.**`: onboarding and redemption MET with 3 days, lumpsum `A_UPI pending, A_NETBANKING pending`, SIP `B_SIP pending`. It exited 1.
+  - With a canary report listing `A_UPI` and `A_NETBANKING` as PASS, it wrote `**G-E4: MET.**` and exited 0.
+- **Not run:** any call to the FP sandbox. Step 6 is that check, and it needs the reused investor's `SANCHAY_PROBE_ACCOUNT_JSON`. In the workspace, `pnpm lint` and the `pnpm --filter` commands were not run against `tools/fp-probes`: the package does not exist on `main` until D4.

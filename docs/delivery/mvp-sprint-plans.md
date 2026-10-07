@@ -312,7 +312,7 @@ This is a read-only planning deliverable. No files were created or changed.
 | P0 | Android internal build: local Gradle AAB → Play internal testing, App Links `assetlinks.json`, FLAG_SECURE, SMS hash taken from Play App Signing | 1.0 | Dev B | G-B9 |
 | P1 | Catalogue polish (curated v1 import, empty/error states, a11y). **The curated v1 import stays: R-33 loads the list on prod before GO-1.** | 0.5 | Dev B | G-B10 |
 
-### Planned Capacity: 19.0 | Sprint Load: 19.5 before the P1 drop (Dev A 10.0 / Dev B 9.5): `plans.cancel` costs 1.0 against the 0.75 freed by T3 + T5, and AccountScreen v2 adds 0.25. The P1 catalogue polish (0.5) is dropped first, which brings the load back to 19.0; R-33 keeps its curated v1 import, so only the polish part can go (open for the owner: the S4 load). The Plan 03 carry (outlines §0.3) comes on top.
+### Planned Capacity: 19.0 | Sprint Load: 19.5 before the P1 drop (Dev A 10.0 / Dev B 9.5): `plans.cancel` costs 1.0 against the 0.75 freed by T3 + T5, and AccountScreen v2 adds 0.25. The P1 catalogue polish (0.5) is dropped first, which brings the load back to 19.0; R-33 keeps its curated v1 import, so only the polish part can go (open for the owner: the S4 load). The Plan 03 carry (outlines §0.3) comes on top. **R-39 (2026-10-07)** adds Plan 04 F29, the sandbox chain wiring (Dev A, ≈ 1.0 day, first in S4); the Fri 10-23 checkpoint weighs it with the rest of the S4 load (R-25).
 
 ### Risks
 | Risk | Impact | Mitigation |
