@@ -56,6 +56,40 @@ export function parseKeyringJson(raw: string | undefined): Keyring {
   return result.data;
 }
 
+const FpAudienceCredentialsSchema = z.strictObject({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+});
+
+export const FpCredentialsSchema = z.strictObject({
+  tenantId: z.string().min(1),
+  fp: FpAudienceCredentialsSchema,
+  poa: FpAudienceCredentialsSchema,
+  pg: FpAudienceCredentialsSchema,
+});
+export type FpCredentials = z.infer<typeof FpCredentialsSchema>;
+
+const FP_CREDENTIALS_PROBLEM =
+  'SANCHAY_FP_CREDENTIALS_JSON is required and must be well-formed outside fake mode';
+
+/** Parses the FP OAuth credentials. Fixed messages only, so a secret can never reach a log line. */
+export function parseFpCredentialsJson(raw: string | undefined): FpCredentials {
+  if (raw === undefined || raw === '') {
+    throw new EnvError(`${FP_CREDENTIALS_PROBLEM} (missing)`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new EnvError(`${FP_CREDENTIALS_PROBLEM} (not valid JSON)`);
+  }
+  const result = FpCredentialsSchema.safeParse(json);
+  if (!result.success) {
+    throw new EnvError(`${FP_CREDENTIALS_PROBLEM} (wrong shape)`);
+  }
+  return result.data;
+}
+
 export const EnvSchema = z.object({
   SANCHAY_APP_ENV: z.enum(['local', 'test', 'dev', 'staging', 'prod']),
   SANCHAY_APP_ROLE: z.enum(['api', 'worker', 'migrate']).default('api'),
@@ -83,6 +117,9 @@ export const EnvSchema = z.object({
     .optional(),
   SANCHAY_THROTTLE_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(120),
   SANCHAY_OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
+  SANCHAY_PROVIDER_MODE_FP: z.enum(['fake', 'sandbox', 'production']).default('fake'),
+  SANCHAY_FP_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
+  SANCHAY_FP_CREDENTIALS_JSON: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -158,6 +195,14 @@ export function assertBootInvariants(env: Env): void {
     problems.push(
       'SANCHAY_SMS_RETRIEVER_HASH is required outside local/test (every DLT OTP template has three lines, R-10)',
     );
+  }
+  // 8 (plan-02-mvp-kernel D3): the fake FP transport must never run outside local/test.
+  if (!localOrTest && env.SANCHAY_PROVIDER_MODE_FP === 'fake') {
+    problems.push('SANCHAY_PROVIDER_MODE_FP=fake is refused outside local/test');
+  }
+  // 9 (plan-02-mvp-kernel D3): the live production FP transport must only run in the prod app env.
+  if (env.SANCHAY_PROVIDER_MODE_FP === 'production' && env.SANCHAY_APP_ENV !== 'prod') {
+    problems.push('SANCHAY_PROVIDER_MODE_FP=production requires SANCHAY_APP_ENV=prod');
   }
 
   if (problems.length > 0) {

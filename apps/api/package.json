@@ -27,8 +27,10 @@
     "@orpc/server": "catalog:",
     "@sanchay/contract": "workspace:*",
     "@sanchay/domain": "workspace:*",
+    "@sanchay/money": "workspace:*",
     "drizzle-orm": "catalog:",
     "fastify": "catalog:",
+    "lossless-json": "catalog:",
     "nestjs-cls": "catalog:",
     "nestjs-pino": "catalog:",
     "pg": "catalog:",
@@ -37,6 +39,7 @@
     "pino-http": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:",
+    "undici": "catalog:",
     "uuid": "catalog:",
     "zod": "catalog:"
   },

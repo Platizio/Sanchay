@@ -21,6 +21,7 @@ export type TableName =
   | 'nav_history'
   | 'nav_sync_runs'
   | 'otp_codes'
+  | 'provider_calls'
   | 'recon_breaks'
   | 'scheme_navs'
   | 'scheme_returns'
