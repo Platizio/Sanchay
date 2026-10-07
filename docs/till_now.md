@@ -198,8 +198,8 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 |---|---|---|
 | 1 | **PRs #1-#7 are merged.** This session's branch `claude/sanchay-open-decisions-b4bb04` (§14) has a draft PR to review and merge: rulings R-39 to R-41, Plan 04 Task F29 and the Sprint 2 readiness list. | Owner |
 | 2 | **Eight items on the decisions page "Sanchay: open decisions (10-07)" (Claude Docs) are still unanswered:** B1 (a public tunnel host for sandbox webhooks and payment returns, needed 10-23), B6 (PB-76 vendor test budget, 10-16), C2 (the EUIN GO-1 rule, 11-13), C4 (AWS, MSG91, domain and hosted zone; an action, due 10-09), C5 (a fifth DLT template for alarm SMS, before the 10-12 filing), C7 (desktop MND-03 without a QR), C8 (the interim retriever hash, before E25's first deploy) and C9 (the app's own SIP cancel against the sandbox, before GO-2). Each row carries a recommendation. B4, B5, C3 and C6 were already settled. | Owner |
-| 3 | **Before Sprint 2** (`docs/delivery/sprint-2-readiness.md`): allow Plan 02's new `catalog:` keys (AGENTS.md forbids editing `catalog:`), choose the `undici` major (7.x recommended), keep Docker running, fill the 10-09 velocity sheet, and authorise pushes of `feat/plan-02-mvp-kernel`. | Owner |
-| 4 | **F29's sandbox dry run** (its Step 6) needs `SANCHAY_PROBE_ACCOUNT_JSON` for the reused test investor in `tools/fp-probes/.env.sandbox` (never committed). It runs once D4 exists (S3), by Fri 11-13. | Owner (values) / Dev A |
+| 3 | **Before Sprint 2** (`docs/delivery/sprint-2-readiness.md`): keep Docker running, fill the 10-09 velocity sheet, and authorise pushes of `feat/plan-02-mvp-kernel`. The `catalog:` keys (R-42) and the `undici` major (R-43, 7.x) were settled on 10-07. | Owner |
+| 4 | **F29's sandbox dry run passed on 10-07** (§14, RV-04-F29-1). When F29 is executed in S4, its Step 6 runs again from the git-ignored `tools/fp-probes/.env.sandbox`; the account values come from read-only lookups of the reused investor, as on 10-07. | Dev A |
 | 5 | **Send the Cybrilla email** on unused payment links (decision 10): `docs/business/cybrilla-payment-url-unused-email.md`. File the written reply in `docs/probes/` (G-B6). | Owner |
 | 6 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 7 | Install **Android Studio + an API 35 emulator** so the Android on-device checks (C15, and Maestro flows such as E24's) can run. | Owner |
@@ -603,3 +603,9 @@ Observed only, not changed:
   3. Settle readiness items 1 and 2 (`catalog:` keys, `undici` major).
   4. Fri 10-09: the velocity checkpoint.
   5. Mon 10-12: Sprint 2 on `feat/plan-02-mvp-kernel` from `origin/main`, Task D0 first.
+- **Later on 10-07 (after PR #8 merged):**
+  - **R-42** allows plan tasks to add new `catalog:` keys; AGENTS.md now forbids only changes to existing pins. **R-43** pins `undici` to 7.x: D3's fragment and ADR row move to 7.30.0 (Plan 02 RV-02-80), and F29's tests also pass on 7.30.0.
+  - **F29's sandbox dry run passed** on `s.finprim.com`. The credentials came from `apps/api/.env` and the account values from read-only lookups, so no input was needed from the owner.
+    - Onboarding and redemption PASSED every step.
+    - Lumpsum and SIP PASSED up to `submitted` and stopped at the sandbox limit; SIP cancelled its plan.
+  - The run showed that FP's create and simulator responses carry no status. F29 now reads the payment back (two new tests, 13/13), and lumpsum and SIP passed on the sandbox again (RV-04-F29-1, `docs/probes/F29-sandbox-dry-run-2026-10-07.md`).
