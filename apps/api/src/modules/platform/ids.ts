@@ -13,7 +13,8 @@ export type TableName =
   | 'investor_devices'
   | 'investors'
   | 'otp_codes'
-  | 'recon_breaks';
+  | 'recon_breaks'
+  | 'worker_heartbeats';
 
 declare const rowIdBrand: unique symbol;
 

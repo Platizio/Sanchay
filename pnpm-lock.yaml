@@ -141,6 +141,9 @@ catalogs:
     pg:
       specifier: 8.23.0
       version: 8.23.0
+    pg-boss:
+      specifier: 12.34.0
+      version: 12.34.0
     pino:
       specifier: 10.3.1
       version: 10.3.1
@@ -264,6 +267,9 @@ importers:
       pg:
         specifier: 'catalog:'
         version: 8.23.0
+      pg-boss:
+        specifier: 'catalog:'
+        version: 12.34.0
       pino:
         specifier: 'catalog:'
         version: 10.3.1
@@ -4486,6 +4492,10 @@ packages:
     resolution: {integrity: sha512-piICUB6ei4IlTv1+653yq5+KoqfBYmj9bw6LqXoOneTMDXk5nM1qt12mFW1caG3LlJXEKW1Bp0WggEmIfQB34g==}
     engines: {node: '>= 14'}
 
+  cron-parser@5.10.1:
+    resolution: {integrity: sha512-pKRrRagItwk9rGIStcUyMxFX34x56zoX3KDf9HJ4ttwkXIK1qxK63EvXvEDmlxI9AdPJ+Y7TEKRftRlW5eSS7A==}
+    engines: {node: '>=18'}
+
   cross-fetch@3.2.0:
     resolution: {integrity: sha512-Q+xVJLoGOeIMXZmbUK4HYk+69cQH6LudR0Vu/pRm2YlU/hDV9CiS0gKUMaWY5f2NeUH9C1nV3bsTlCo0FsTV1Q==}
 
@@ -5706,6 +5716,10 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
+
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -6114,6 +6128,10 @@ packages:
     resolution: {integrity: sha512-x0InOIyzgdk+eyaWaRJFH5snEtiImgBgblZ2CyPrLmqqcuMQkEvcDPHbzqbD8eDsSeJbVOjn+crzyzHaM4D+/A==}
     engines: {node: '>=18'}
 
+  non-error@0.1.0:
+    resolution: {integrity: sha512-TMB1uHiGsHRGv1uYclfhivcnf0/PdFp2pNqRxXjncaAsjYMoisaQJI+SSZCqRq+VliwRTC8tsMQfmrWjDMhkPQ==}
+    engines: {node: '>=20'}
+
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
     engines: {node: '>=0.10.0'}
@@ -6275,6 +6293,11 @@ packages:
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
+
+  pg-boss@12.34.0:
+    resolution: {integrity: sha512-03boJOWLiiHEQPgXCPgrMv6My5Qv6ieD85AOrm/adi475oo74kn//gHOheYqWiU/2guCJMRpKQpD6F7Oln1aWQ==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
 
   pg-cloudflare@1.4.0:
     resolution: {integrity: sha512-Vo7z/6rrQYxpNRylp4Tlob2elzbh+N/MOQbxFVWCxS7oEx6jF53GTJFxK2WWpKuBRkmiin4Mt+xofFDjx09R0A==}
@@ -6727,6 +6750,9 @@ packages:
   rou3@0.7.12:
     resolution: {integrity: sha512-iFE4hLDuloSWcD7mjdCDhx2bKcIsYbtOTpfH5MHHLSKMOUyjqQXTeZVa289uuwEGEKFoE/BAPbhaU4B774nceg==}
 
+  rrule-temporal@2.2.7:
+    resolution: {integrity: sha512-sd4ee2vAeb5VtGfQSVg9KWc522cHRIz2O2waSiwgRXMYeAu3LFl1qzNqR0RkoqwKWH2bKYKN8WMFdDE+ffuwPQ==}
+
   rxjs@7.8.1:
     resolution: {integrity: sha512-AA3TVj+0A2iuIoQkWEK/tqFjBq2j+6PO6Y0zJcvzLAFhEFIO3HL0vls9hWLncZbAAbK0mar7oZ4V079I/qPMxg==}
 
@@ -6801,6 +6827,10 @@ packages:
   send@0.19.2:
     resolution: {integrity: sha512-VMbMxbDeehAxpOtWJXlcUS5E8iXh6QmN+BkRX1GARS3wRaXEEgzCcB10gTQazO42tpNIya8xIyNx8fll1OFPrg==}
     engines: {node: '>= 0.8.0'}
+
+  serialize-error@13.0.2:
+    resolution: {integrity: sha512-G+YKwp9I6IvWMe5RlwqxdmTPIcq/G8HK/sU51gdV1XAJznYkRSTB0ph+zB9AfSxG0fx6xrqYA6i9HeIcHFTXow==}
+    engines: {node: '>=20'}
 
   serialize-error@2.1.0:
     resolution: {integrity: sha512-ghgmKt5o4Tly5yEG/UJp8qTd0AN7Xalw4XBtDEKP655B699qMEtra1WlXeE6WIvdEG481JvRxULKsInq/iNysw==}
@@ -7095,6 +7125,9 @@ packages:
 
   teex@1.0.1:
     resolution: {integrity: sha512-eYE6iEI62Ni1H8oIa7KlDU6uQBtqr4Eajni3wX7rpfXD8ysFx8z0+dri+KWEPWpBsxXfxu58x/0jvTVT1ekOSg==}
+
+  temporal-spec@1.0.1:
+    resolution: {integrity: sha512-wxVoanmDeavXie1vu2JaQ3WIc3JZnWAOYFBsJyATaVsXsycKYUflGsyBmrRSnoCpZJpwPyr38VpgSUlQ8CbFxg==}
 
   terminal-link@2.1.1:
     resolution: {integrity: sha512-un0FmiRUQNr5PJqy9kP7c40F5BOfpGlYTrxonDChEZB7pzZxRNp/bt+ymiy9/npwXya9KH99nJ/GXFIiUkYGFQ==}
@@ -11423,6 +11456,10 @@ snapshots:
       crc-32: 1.2.2
       readable-stream: 4.7.0
 
+  cron-parser@5.10.1:
+    dependencies:
+      luxon: 3.7.2
+
   cross-fetch@3.2.0:
     dependencies:
       node-fetch: 2.7.0
@@ -12614,6 +12651,8 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
+  luxon@3.7.2: {}
+
   lz-string@1.5.0: {}
 
   magic-string@0.30.17:
@@ -13360,6 +13399,8 @@ snapshots:
 
   node-releases@2.0.56: {}
 
+  non-error@0.1.0: {}
+
   normalize-path@3.0.0: {}
 
   normalize-url@8.1.1: {}
@@ -13512,6 +13553,15 @@ snapshots:
   path-type@4.0.0: {}
 
   pend@1.2.0: {}
+
+  pg-boss@12.34.0:
+    dependencies:
+      cron-parser: 5.10.1
+      pg: 8.23.0
+      rrule-temporal: 2.2.7
+      serialize-error: 13.0.2
+    transitivePeerDependencies:
+      - pg-native
 
   pg-cloudflare@1.4.0:
     optional: true
@@ -14088,6 +14138,10 @@ snapshots:
 
   rou3@0.7.12: {}
 
+  rrule-temporal@2.2.7:
+    dependencies:
+      temporal-spec: 1.0.1
+
   rxjs@7.8.1:
     dependencies:
       tslib: 2.8.1
@@ -14164,6 +14218,11 @@ snapshots:
       statuses: 2.0.2
     transitivePeerDependencies:
       - supports-color
+
+  serialize-error@13.0.2:
+    dependencies:
+      non-error: 0.1.0
+      type-fest: 5.10.0
 
   serialize-error@2.1.0: {}
 
@@ -14477,6 +14536,8 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
+
+  temporal-spec@1.0.1: {}
 
   terminal-link@2.1.1:
     dependencies:

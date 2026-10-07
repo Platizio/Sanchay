@@ -13,12 +13,10 @@ if (env.SANCHAY_APP_ROLE === 'migrate') {
 }
 
 if (env.SANCHAY_APP_ROLE === 'worker') {
-  console.error(
-    'SANCHAY_APP_ROLE=worker is not available yet: the JobsModule (pg-boss) lands in plan-02-mvp-kernel',
-  );
-  process.exit(1);
+  const { runWorker } = await import('./modules/platform/jobs/worker.main.js');
+  await runWorker(env);
+} else {
+  const { createApp } = await import('./bootstrap.js');
+  const app = await createApp(env);
+  await app.listen(env.PORT, env.HOST);
 }
-
-const { createApp } = await import('./bootstrap.js');
-const app = await createApp(env);
-await app.listen(env.PORT, env.HOST);

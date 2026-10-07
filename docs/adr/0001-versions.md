@@ -145,6 +145,7 @@ and `pnpm install` would have refused on the real platform package for this mach
 | nestjs-pino | 5.2.0 | design §A.2 |
 | next | 16.3.6 | design §A.2 |
 | pg | 8.23.0 | design §A.2 |
+| pg-boss | 12.34.0 | outside §A.2 (new in Plan 02 D2: JobsModule queues, R-32; R-42; published 2026-09-23, past the 7-day release age, so no exclusion row) |
 | pino | 10.3.1 | design §A.2 |
 | pino-http | 11.0.0 | design §A.2 |
 | react | 19.2.3 | design §A.2 (one version; Expo 57 bundled) |

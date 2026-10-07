@@ -14,6 +14,7 @@ import { SessionGuard } from './modules/identity/session.guard.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
 import { ClientGuard } from './modules/platform/client.guard.js';
 import { HealthRouter } from './modules/platform/health.router.js';
+import { JobsModule } from './modules/platform/jobs/jobs.module.js';
 import { buildPinoHttpOptions } from './modules/platform/logging.js';
 import { buildOrpcConfig } from './modules/platform/orpc.js';
 import { PlatformModule } from './modules/platform/platform.module.js';
@@ -60,6 +61,7 @@ export class AppModule {
             buildOrpcConfig(cls, logger),
         }),
         PlatformModule.forRoot(env),
+        JobsModule,
         IntegrationsModule.forRoot(env),
         IdentityModule,
       ],
