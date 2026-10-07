@@ -120,4 +120,46 @@ describe('FundFactsProvider.resolve', () => {
     const [row] = await t.db.db.select().from(fundFacts).where(eq(fundFacts.schemeId, scheme.id));
     expect(row?.fieldSources).toEqual({ exitLoadText: 'CYBRILLA' });
   });
+  it('folds a seed-shaped ADMIN revision (snake_case CSV keys, empty cells) so a partial import does not blank it', async () => {
+    const scheme = await seedScheme();
+    // ops:catalogue:seed writes the CSV row as the payload: snake_case keys, the isin column, "" for an empty cell.
+    await t.db.db.insert(fundFactsRevisions).values({
+      schemeId: scheme.id,
+      source: 'ADMIN',
+      payload: {
+        isin: 'INF000000000',
+        expense_ratio_pct: '1.75',
+        expense_ratio_as_of: '2026-09-01',
+        riskometer: 'VERY_HIGH',
+        riskometer_as_of: '2026-09-01',
+        benchmark_name: 'BSE 500 TRI',
+        benchmark_riskometer: 'VERY_HIGH',
+        exit_load_text: 'Nil',
+        sid_url: 'https://example.invalid/sid.pdf',
+        kim_url: '',
+      },
+    });
+    // A later partial ops:facts:import row (camelCase) carries only one field.
+    await t.db.db.insert(fundFactsRevisions).values({
+      schemeId: scheme.id,
+      source: 'ADMIN',
+      payload: { expenseRatioPct: '1.80' },
+    });
+    const resolution = await provider.resolve(scheme.id);
+    expect(resolution.fields.expenseRatioPct).toEqual({ value: '1.80', source: 'ADMIN' });
+    expect(resolution.fields.exitLoadText).toEqual({ value: 'Nil', source: 'ADMIN' });
+    expect(resolution.fields.sidUrl).toEqual({
+      value: 'https://example.invalid/sid.pdf',
+      source: 'ADMIN',
+    });
+    expect(resolution.fields.kimUrl).toBeUndefined(); // "" is an empty cell, not a value
+    expect(Object.keys(resolution.fields)).not.toContain('isin');
+    expect(Object.keys(resolution.fields)).not.toContain('expense_ratio_pct');
+    const [row] = await t.db.db.select().from(fundFacts).where(eq(fundFacts.schemeId, scheme.id));
+    expect(row?.expenseRatioPct).toBe('1.80');
+    expect(row?.riskometer).toBe('VERY_HIGH');
+    expect(row?.benchmarkName).toBe('BSE 500 TRI');
+    expect(row?.sidUrl).toBe('https://example.invalid/sid.pdf');
+    expect(row?.kimUrl).toBeNull();
+  });
 });

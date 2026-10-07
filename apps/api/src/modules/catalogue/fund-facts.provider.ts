@@ -32,6 +32,21 @@ const FOLDED_KEYS: ReadonlySet<string> = new Set([
   'kimUrl',
 ]);
 
+/**
+ * ops:catalogue:seed writes its ADMIN revision as the raw CSV row (snake_case keys), while ops:facts:import and the
+ * fold use camelCase. The provider accepts both so a seeded scheme is not blanked on resolve.
+ */
+const PAYLOAD_KEY_ALIASES: Readonly<Record<string, string>> = {
+  expense_ratio_pct: 'expenseRatioPct',
+  expense_ratio_as_of: 'expenseRatioAsOf',
+  riskometer_as_of: 'riskometerAsOf',
+  benchmark_name: 'benchmarkName',
+  benchmark_riskometer: 'benchmarkRiskometer',
+  exit_load_text: 'exitLoadText',
+  sid_url: 'sidUrl',
+  kim_url: 'kimUrl',
+};
+
 export interface FundFactsFieldValue<T = unknown> {
   value: T;
   source: FundFactsSource;
@@ -57,9 +72,12 @@ export class FundFactsProvider {
 
     const fields: Record<string, FundFactsFieldValue> = {};
     for (const revision of revisions) {
-      for (const [key, value] of Object.entries(revision.payload)) {
+      for (const [rawKey, value] of Object.entries(revision.payload)) {
+        const key = PAYLOAD_KEY_ALIASES[rawKey] ?? rawKey;
         // The CYBRILLA sync revision also carries purchase flags and thresholds, which are not fund facts.
-        if (!FOLDED_KEYS.has(key) || value === undefined || value === null) continue;
+        // An empty string is an empty CSV cell (a seed row's payload keeps those), not a value.
+        if (!FOLDED_KEYS.has(key) || value === undefined || value === null || value === '')
+          continue;
         const current = fields[key];
         const currentRank = current ? FUND_FACTS_SOURCE_RANK[current.source] : -1;
         const incomingRank = FUND_FACTS_SOURCE_RANK[revision.source];
