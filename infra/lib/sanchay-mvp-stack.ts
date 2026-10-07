@@ -99,20 +99,28 @@ export class SanchayMvpStack extends Stack {
     });
 
     // --- Secrets (R-19 owning containers) -------------------------------------------------
+    // Final review MF-8: the keyring is the only key to the encrypted PII in the retained database, and the
+    // other secrets are populated out-of-band, so a teardown or a rename keeps all of them (a failed first
+    // create removes them, as for the repositories and log groups).
+    const keptSecret = { removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE } as const;
     const keyringSecret = new secretsmanager.Secret(this, 'KeyringSecret', {
+      ...keptSecret,
       secretName: `sanchay/${envName}/keyring`,
       description: 'SANCHAY_KEYRING_JSON (owning containers: api, worker). Populated out-of-band.',
     });
     const fpSecret = new secretsmanager.Secret(this, 'FpSecret', {
+      ...keptSecret,
       secretName: `sanchay/${envName}/fp`,
       description:
         'SANCHAY_FP_CREDENTIALS_JSON (owning container: worker only). Populated out-of-band.',
     });
     const fpWebhookSecret = new secretsmanager.Secret(this, 'FpWebhookSecret', {
+      ...keptSecret,
       secretName: `sanchay/${envName}/fp-webhook`,
       description: 'SANCHAY_FP_WEBHOOK_SECRET (owning container: api only). Populated out-of-band.',
     });
     const msg91Secret = new secretsmanager.Secret(this, 'Msg91Secret', {
+      ...keptSecret,
       secretName: `sanchay/${envName}/msg91`,
       description:
         'SANCHAY_MSG91_CREDENTIALS_JSON (owning containers: api, worker). Populated out-of-band.',
@@ -160,6 +168,12 @@ export class SanchayMvpStack extends Stack {
     if (dbMasterSecret === undefined) {
       throw new Error('Credentials.fromGeneratedSecret always attaches a secret');
     }
+    // MF-8, as the secrets above. `dbInstance.secret` is the attachment; the Secret itself is the instance's child.
+    const generatedSecret = dbInstance.node.findChild('Secret');
+    if (!(generatedSecret instanceof secretsmanager.Secret)) {
+      throw new Error('The RDS instance Secret child is not a secretsmanager.Secret');
+    }
+    generatedSecret.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE);
 
     // --- Logs, cluster, ECS Exec (R-16) ---------------------------------------------------
     // R-34: one group for every container (each gets its own streams through the awslogs prefix), 400

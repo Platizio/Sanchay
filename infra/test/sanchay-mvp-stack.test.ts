@@ -285,6 +285,27 @@ describe('SanchayMvpStack-prod (E25, R-31)', () => {
     expect(swcrc.jsc?.experimental?.keepImportAttributes).toBe(true);
   });
 
+  it('every secret survives a teardown next to the retained RDS instance: the keyring is the only key to the PII (final review MF-8)', () => {
+    const template = synthProdTemplate();
+    const secrets = template.findResources('AWS::SecretsManager::Secret');
+    const names = Object.values(secrets)
+      .map((secret) => secret.Properties.Name as string)
+      .sort();
+    expect(names).toEqual(
+      [
+        'sanchay/prod/db-master',
+        'sanchay/prod/fp',
+        'sanchay/prod/fp-webhook',
+        'sanchay/prod/keyring',
+        'sanchay/prod/msg91',
+      ].sort(),
+    );
+    for (const secret of Object.values(secrets)) {
+      expect(secret.DeletionPolicy).toBe('RetainExceptOnCreate');
+      expect(secret.UpdateReplacePolicy).toBe('Retain');
+    }
+  });
+
   it('RDS master is sanchay_master in sanchay/prod/db-master, and migrate logs in as it (D6)', () => {
     const template = synthProdTemplate();
     template.hasResourceProperties('AWS::SecretsManager::Secret', {
