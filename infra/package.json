@@ -1,0 +1,25 @@
+{
+  "name": "@sanchay/infra",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "catalog:",
+    "constructs": "catalog:"
+  },
+  "devDependencies": {
+    "@sanchay/config": "workspace:*",
+    "@types/node": "catalog:",
+    "aws-cdk": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

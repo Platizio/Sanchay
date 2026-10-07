@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - tools/*
+  - infra
 
 nodeLinker: hoisted
 engineStrict: true
@@ -150,7 +151,10 @@ catalog:
   '@types/react': 19.2.9
   '@types/react-dom': 19.2.7
   '@vitest/coverage-v8': 5.0.1
+  aws-cdk: 2.1143.0
+  aws-cdk-lib: 2.271.0
   babel-plugin-react-compiler: 1.0.0
+  constructs: 10.8.1
   decimal.js: 10.6.0
   drizzle-kit: 0.31.11
   drizzle-orm: 0.45.3

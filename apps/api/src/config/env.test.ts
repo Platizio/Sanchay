@@ -179,6 +179,33 @@ describe('parseEnv', () => {
     expect(parseEnv(devSecrets).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
   });
 
+  it('binds the retriever hash (invariant 7) to the api role only (R-19 owning containers, E25)', () => {
+    const noHash = {
+      ...omit(devSecrets, 'SANCHAY_SMS_RETRIEVER_HASH'),
+      SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+    };
+    expect(errorMessage(() => parseEnv({ ...noHash, SANCHAY_APP_ROLE: 'api' }))).toMatch(
+      /SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/,
+    );
+    for (const role of ['worker', 'migrate']) {
+      expect(parseEnv({ ...noHash, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
+    }
+  });
+
+  it('refuses fake senders in prod for api and worker only; migrate sends nothing (invariant 1, E25)', () => {
+    const prod = { ...devSecrets, SANCHAY_APP_ENV: 'prod', SANCHAY_PROVIDER_MODE_FP: 'production' };
+    for (const role of ['api', 'worker']) {
+      expect(errorMessage(() => parseEnv({ ...prod, SANCHAY_APP_ROLE: role }))).toMatch(
+        /fake SMS\/email providers \(capture, mailpit\) are refused in staging\/prod/,
+      );
+    }
+    const migrate = parseEnv({
+      ...omit(prod, 'SANCHAY_SMS_RETRIEVER_HASH'),
+      SANCHAY_APP_ROLE: 'migrate',
+    });
+    expect(migrate.SANCHAY_PROVIDER_MODE_SMS).toBe('capture');
+  });
+
   it('no longer knows SANCHAY_TRUST_EDGE_HEADERS (replaced by SANCHAY_CLIENT_IP_SOURCE)', () => {
     expect(Object.keys(EnvSchema.shape)).not.toContain('SANCHAY_TRUST_EDGE_HEADERS');
     expect(parseEnv({ ...base, SANCHAY_TRUST_EDGE_HEADERS: 'true' })).not.toHaveProperty(

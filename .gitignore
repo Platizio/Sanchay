@@ -21,3 +21,4 @@ apps/mobile/.expo/
 apps/mobile/dist-export/
 apps/mobile/android/
 apps/mobile/ios/
+cdk.out/
