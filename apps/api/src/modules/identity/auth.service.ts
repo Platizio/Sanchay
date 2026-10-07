@@ -1,9 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
+import { AppConfig } from '../../config/app-config.js';
 import { DB, type DbHandle, type Tx } from '../../db/client.js';
 import { Notify } from '../notifications/notify.service.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
+import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
 import { pgErrorCodeOf } from '../platform/pg-errors.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
@@ -11,6 +13,7 @@ import { DeviceRegistry } from './device-registry.service.js';
 import { InvestorAccounts } from './investor-accounts.service.js';
 import { OtpService, type VerifiedOtp } from './otp.service.js';
 import { type OtpSentBody, toOtpSent } from './otp-sent.js';
+import { PilotInvites } from './pilot-invites.service.js';
 import { requireDeviceContext } from './request-auth.js';
 import { type IssuedSession, SessionService } from './session.service.js';
 
@@ -36,6 +39,9 @@ export class AuthService {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
     @Inject(Notify) private readonly notify: Notify,
+    @Inject(PilotInvites) private readonly pilotInvites: PilotInvites,
+    @Inject(Crypto) private readonly crypto: Crypto,
+    @Inject(AppConfig) private readonly config: AppConfig,
   ) {}
 
   /** Same response shape for every mobile (no account enumeration, H-5). */
@@ -77,7 +83,12 @@ export class AuthService {
         if (verified.channel !== 'SMS') throw new AppError('OTP_INVALID');
         const mobile = verified.destination;
         const existing = await this.accounts.findByMobile(tx, mobile);
-        // The S2 pilot invite gate (403 PILOT_INVITE_REQUIRED) hooks in here, before a new investor is created.
+        // The S2 pilot invite gate (403 PILOT_INVITE_REQUIRED): only for a brand-new mobile, only while the
+        // pilot is invite-only, and only after OTP verification above (H-5 anti-enumeration). The invite is
+        // consumed in this transaction, so a rolled-back sign-in leaves it unused.
+        if (existing === null && this.config.env.SANCHAY_PILOT_INVITE_ONLY) {
+          await this.pilotInvites.assertInvited(tx, this.crypto.blindIndex('mobile', mobile));
+        }
         const investor = existing ?? (await this.accounts.createWithVerifiedMobile(tx, mobile));
         if (BLOCKED_STATUSES.has(investor.status)) throw new AppError('FORBIDDEN');
         const { device, isNew: isNewDevice } = await this.devices.upsert(tx, investor.id, {

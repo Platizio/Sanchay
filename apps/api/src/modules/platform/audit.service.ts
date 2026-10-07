@@ -42,6 +42,8 @@ export const AUDIT_ACTIONS = {
   CONTACT_EMAIL_OTP_SENT: 'CONTACT_EMAIL_OTP_SENT',
   /** The investor's first email was verified and recorded as CURRENT (B20). */
   CONTACT_EMAIL_VERIFIED: 'CONTACT_EMAIL_VERIFIED',
+  /** ops:invite CLI write (D7). */
+  PILOT_INVITE_ADDED: 'PILOT_INVITE_ADDED',
 } as const;
 
 export interface AuditEventInput {

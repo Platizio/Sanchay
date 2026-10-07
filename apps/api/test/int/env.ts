@@ -18,6 +18,7 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
     SANCHAY_AUTH_TOKEN_KEY: key(4),
     SANCHAY_PROVIDER_MODE_SMS: 'capture',
     SANCHAY_PROVIDER_MODE_EMAIL: 'capture',
+    SANCHAY_PILOT_INVITE_ONLY: 'false',
     SANCHAY_LOG_LEVEL: 'silent',
     ...overrides,
   });

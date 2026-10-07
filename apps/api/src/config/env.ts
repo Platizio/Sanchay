@@ -149,6 +149,7 @@ export const EnvSchema = z.object({
     .optional(),
   SANCHAY_THROTTLE_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(120),
   SANCHAY_OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
+  SANCHAY_PILOT_INVITE_ONLY: z.stringbool().default(true),
   SANCHAY_PROVIDER_MODE_FP: z.enum(['fake', 'sandbox', 'production']).default('fake'),
   SANCHAY_FP_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
   SANCHAY_FP_CREDENTIALS_JSON: z.string().optional(),
@@ -246,6 +247,10 @@ export function assertBootInvariants(env: Env): void {
   // 12 (D6; numbered provisionally)
   if (env.SANCHAY_PROVIDER_MODE_EMAIL === 'ses' && env.SANCHAY_SES_FROM === undefined) {
     problems.push('SANCHAY_PROVIDER_MODE_EMAIL=ses requires SANCHAY_SES_FROM');
+  }
+  // 10 (R-06 gate; H-8 addendum; D7: the outline fixes this number, D6's 11 and 12 are provisional)
+  if (env.SANCHAY_APP_ENV === 'prod' && !env.SANCHAY_PILOT_INVITE_ONLY) {
+    problems.push('SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2');
   }
 
   if (problems.length > 0) {

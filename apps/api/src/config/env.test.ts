@@ -126,6 +126,7 @@ describe('parseEnv', () => {
       'SANCHAY_MSG91_CREDENTIALS_JSON',
       'SANCHAY_OTP_PEPPER',
       'SANCHAY_OTP_PER_IP_PER_HOUR',
+      'SANCHAY_PILOT_INVITE_ONLY',
       'SANCHAY_PROVIDER_MODE_EMAIL',
       'SANCHAY_PROVIDER_MODE_FP',
       'SANCHAY_PROVIDER_MODE_SMS',
@@ -285,6 +286,15 @@ describe('parseEnv', () => {
     expect(
       errorMessage(() => parseEnv({ ...devSecrets, SANCHAY_OTP_PER_IP_PER_HOUR: '1000' })),
     ).toMatch(/SANCHAY_OTP_PER_IP_PER_HOUR must be 20 outside local\/test/);
+  });
+
+  it('refuses SANCHAY_PILOT_INVITE_ONLY=false in prod (invariant 10)', () => {
+    expect(
+      errorMessage(() =>
+        parseEnv({ ...devSecrets, SANCHAY_APP_ENV: 'prod', SANCHAY_PILOT_INVITE_ONLY: 'false' }),
+      ),
+    ).toMatch(/SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2/);
+    expect(parseEnv(base).SANCHAY_PILOT_INVITE_ONLY).toBe(true);
   });
 
   it('requires the ALB client-IP source outside local/test', () => {

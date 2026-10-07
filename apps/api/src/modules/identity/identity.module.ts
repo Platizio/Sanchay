@@ -14,6 +14,7 @@ import { InvestorAccounts } from './investor-accounts.service.js';
 import { LoginRouter } from './login.router.js';
 import { MeRouter } from './me.router.js';
 import { OTP_BOOKKEEPING_DB, OtpService } from './otp.service.js';
+import { PilotInvites } from './pilot-invites.service.js';
 import { SessionGuard } from './session.guard.js';
 import { SessionRouter } from './session.router.js';
 import { SessionService } from './session.service.js';
@@ -79,6 +80,7 @@ class IdentityCleanupJob {
     ContactEmailService,
     SessionGuard,
     IdentityCleanupJob,
+    PilotInvites,
     {
       provide: OTP_BOOKKEEPING_DB,
       inject: [AppConfig],
