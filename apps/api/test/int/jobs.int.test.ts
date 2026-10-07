@@ -1,9 +1,15 @@
 import { DiscoveryService, Reflector } from '@nestjs/core';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Logger as PinoLogger } from 'nestjs-pino';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppConfig } from '../../src/config/app-config.js';
 import { HOUR } from '../../src/modules/platform/clock.js';
-import { JOB_POLICIES, type JobName } from '../../src/modules/platform/jobs/job-registry.js';
+import {
+  JOB_HANDLER,
+  JOB_POLICIES,
+  type JobHandler,
+  type JobName,
+} from '../../src/modules/platform/jobs/job-registry.js';
 import { workerHeartbeats } from '../../src/modules/platform/jobs/jobs.schema.js';
 import { Jobs, JobsService } from '../../src/modules/platform/jobs/jobs.service.js';
 import { bootTestApp, type TestApp } from './app.js';
@@ -119,6 +125,61 @@ describe('Jobs.enqueue', () => {
   });
 });
 
+describe('handler failures (final review MF-1)', () => {
+  it('stores no bound query parameter or cause message in pgboss.job.output', async () => {
+    const reflector = t.app.get(Reflector);
+    const provider = t.app
+      .get(DiscoveryService)
+      .getProviders()
+      .find(
+        (w) =>
+          w.metatype !== null &&
+          w.metatype !== undefined &&
+          reflector.get<JobName | undefined>(JOB_HANDLER, w.metatype) === 'identity.cleanup',
+      );
+    const handler = provider?.instance as JobHandler | undefined;
+    if (handler === undefined) throw new Error('the identity.cleanup handler is not registered');
+    const thrown = Object.assign(
+      new Error('Failed query: insert into otp_codes values ($1)\nparams: 9876543210'),
+      {
+        name: 'DrizzleQueryError',
+        params: ['9876543210'],
+        query: 'insert into otp_codes values ($1)',
+        cause: new Error('Email address is not verified: investor@example.com'),
+      },
+    );
+    const spy = vi.spyOn(handler, 'handle').mockRejectedValue(thrown);
+    try {
+      const id = await t.app
+        .get(Jobs)
+        .enqueue(
+          t.db.db,
+          'identity.cleanup',
+          { mf1: true },
+          { singletonKey: 'mf1-failure', retryLimit: 0 },
+        );
+      expect(id).toEqual(expect.any(String));
+      await eventually(async () => {
+        const r = await t.db.pool.query<{ state: string }>(
+          'SELECT state FROM pgboss.job WHERE id = $1',
+          [id],
+        );
+        return r.rows[0]?.state === 'failed';
+      });
+      const { rows } = await t.db.pool.query<{ output: string }>(
+        'SELECT output::text AS output FROM pgboss.job WHERE id = $1',
+        [id],
+      );
+      const output = rows[0]?.output ?? '';
+      expect(output).toContain('DrizzleQueryError');
+      expect(output).not.toContain('9876543210');
+      expect(output).not.toContain('investor@example.com');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('role gating', () => {
   it('the worker role does not listen on HTTP', async () => {
     const { runWorker } = await import('../../src/modules/platform/jobs/worker.main.js');
@@ -188,6 +249,7 @@ describe('pg-boss queues (R-32 policies; D6: the app login has no CREATE on sche
       t.clock,
       t.app.get(DiscoveryService),
       t.app.get(Reflector),
+      t.app.get(PinoLogger),
     );
     try {
       await expect(service.onModuleInit()).rejects.toThrow(

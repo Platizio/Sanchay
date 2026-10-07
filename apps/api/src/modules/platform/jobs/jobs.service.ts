@@ -7,12 +7,14 @@ import {
 } from '@nestjs/common';
 import { DiscoveryService, Reflector } from '@nestjs/core';
 import { sql } from 'drizzle-orm';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { PgBoss } from 'pg-boss';
 import { AppConfig } from '../../../config/app-config.js';
 import { DB, type DbExecutor, type DbHandle } from '../../../db/client.js';
 import { CLOCK, type Clock } from '../clock.js';
 import { attachBossErrorLog } from './boss-errors.js';
 import { type Heartbeat, startHeartbeat } from './heartbeat.js';
+import { sanitiseHandlerError } from './job-error.js';
 import {
   JOB_HANDLER,
   JOB_NAMES,
@@ -57,6 +59,7 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(DiscoveryService) private readonly discovery: DiscoveryService,
     @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(PinoLogger) private readonly pino: PinoLogger,
   ) {}
 
   /** This application's started PgBoss; `Jobs.enqueue` sends through it. */
@@ -100,7 +103,14 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
       if (name === undefined) continue;
       const handler = instance as JobHandler;
       await this.boss.work(name, async ([job]) => {
-        await handler.handle(job as Job);
+        try {
+          await handler.handle(job as Job);
+        } catch (err) {
+          // MF-1: pg-boss stores what is thrown in plaintext pgboss.job.output; log the original through pino
+          // (EF-B4 redaction) and throw a sanitised copy.
+          this.pino.error({ err, job: name, jobId: job?.id }, 'job handler failed');
+          throw sanitiseHandlerError(err);
+        }
       });
     }
     await registerSchedules(this.boss);
