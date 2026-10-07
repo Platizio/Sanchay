@@ -78,6 +78,20 @@
       "when": 1791367694855,
       "tag": "0013_inbound_webhook_events",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791368748478,
+      "tag": "0014_legal_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791368755058,
+      "tag": "0015_legal_consent_grants",
+      "breakpoints": true
     }
   ]
 }

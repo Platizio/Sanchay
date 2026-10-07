@@ -1,4 +1,5 @@
 export * from './catalogue.js';
+export * from './consent/index.js';
 export { defineEnum, type EnumValue, isOneOf } from './define-enum.js';
 export * from './ids.js';
 export * from './investor.js';

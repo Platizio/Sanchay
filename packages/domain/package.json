@@ -19,7 +19,8 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@sanchay/money": "workspace:*"
+    "@sanchay/money": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@sanchay/config": "workspace:*",
