@@ -1,11 +1,13 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
-import { Agent, MockAgent } from 'undici';
+import { Agent, type Dispatcher } from 'undici';
 import { type Env, EnvError, parseFpCredentialsJson } from '../../config/env.js';
 import { DB, type DbHandle } from '../../db/client.js';
+import { CLOCK, type Clock } from '../../modules/platform/clock.js';
 import { Crypto } from '../../modules/platform/crypto.js';
 import { newId } from '../../modules/platform/ids.js';
 import type { SanchayClsStore } from '../../modules/platform/request-context.js';
+import { FakeFp } from './fake/fake-fp.js';
 import { FpKyc } from './fp-kyc.js';
 import { FpProvision } from './fp-provision.js';
 import { FpRead } from './fp-read.js';
@@ -63,7 +65,8 @@ function recordProviderCall(dbh: DbHandle, crypto: Crypto) {
 /**
  * Imported only when SANCHAY_APP_ROLE === 'worker' (app.module.ts). Global, so worker-only job
  * handlers in other modules (D10 CatalogueFpSyncJob, E-tasks) can inject FpRead and friends. In
- * 'fake' mode D3 uses a bare undici MockAgent with net connect disabled; D4 swaps in FakeFp.
+ * 'fake' mode the dispatcher is FakeFp's stateful MockAgent (net connect disabled); FakeFp itself is
+ * provided and exported so integration tests can script and inspect it.
  */
 @Module({})
 export class FpModule {
@@ -78,32 +81,38 @@ export class FpModule {
       module: FpModule,
       global: true,
       providers: [
+        ...(isFake
+          ? [
+              {
+                provide: FakeFp,
+                inject: [CLOCK],
+                useFactory: (clock: Clock) => new FakeFp(baseUrls, () => clock.now().getTime()),
+              },
+            ]
+          : []),
         {
           provide: FP_DISPATCHER,
-          useFactory: () => {
-            if (!isFake) {
-              return new Agent({
-                connectTimeout: CONNECT_TIMEOUT_MS,
-                bodyTimeout: BODY_TIMEOUT_MS,
-                headersTimeout: BODY_TIMEOUT_MS,
-              });
-            }
-            const agent = new MockAgent();
-            agent.disableNetConnect();
-            return agent;
-          },
+          inject: isFake ? [FakeFp] : [],
+          useFactory: (fakeFp?: FakeFp) =>
+            fakeFp !== undefined
+              ? fakeFp.agent
+              : new Agent({
+                  connectTimeout: CONNECT_TIMEOUT_MS,
+                  bodyTimeout: BODY_TIMEOUT_MS,
+                  headersTimeout: BODY_TIMEOUT_MS,
+                }),
         },
         {
           provide: FpTokenCache,
           inject: [FP_DISPATCHER],
-          useFactory: (dispatcher: Agent | MockAgent) =>
+          useFactory: (dispatcher: Dispatcher) =>
             new FpTokenCache(baseUrls, credentials, dispatcher),
         },
         {
           provide: FpTransport,
           inject: [FP_DISPATCHER, FpTokenCache, ClsService, DB, Crypto],
           useFactory: (
-            dispatcher: Agent | MockAgent,
+            dispatcher: Dispatcher,
             tokens: FpTokenCache,
             cls: ClsService<SanchayClsStore>,
             dbh: DbHandle,
@@ -123,7 +132,15 @@ export class FpModule {
           useFactory: (t: FpTransport) => new FpTransact(t),
         },
       ],
-      exports: [FpTransport, FpRead, FpKyc, FpProvision, FpTransact, FP_DISPATCHER],
+      exports: [
+        FpTransport,
+        FpRead,
+        FpKyc,
+        FpProvision,
+        FpTransact,
+        FP_DISPATCHER,
+        ...(isFake ? [FakeFp] : []),
+      ],
     };
   }
 }
