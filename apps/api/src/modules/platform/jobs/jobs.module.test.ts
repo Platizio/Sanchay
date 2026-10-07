@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { JOB_NAMES, JOB_POLICIES, queuePolicyDrift } from './job-registry.js';
+import { JOB_NAMES, JOB_POLICIES, JOB_RETRY_DEFAULTS, queuePolicyDrift } from './job-registry.js';
 import { JobsModule } from './jobs.module.js';
 
 describe('JobsModule wiring (unit; no live pg-boss connection needed to assert this)', () => {
@@ -33,5 +33,11 @@ describe('JOB_POLICIES (R-32)', () => {
       'identity.cleanup: stored none, JOB_POLICIES stately',
       'drafts.abandon: stored standard, JOB_POLICIES stately',
     ]);
+  });
+});
+
+describe('JOB_RETRY_DEFAULTS (R-44)', () => {
+  it('retries after 30 s, backing off exponentially to at most 10 minutes', () => {
+    expect(JOB_RETRY_DEFAULTS).toEqual({ retryDelay: 30, retryBackoff: true, retryDelayMax: 600 });
   });
 });

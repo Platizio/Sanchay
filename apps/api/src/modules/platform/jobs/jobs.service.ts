@@ -19,6 +19,7 @@ import {
   JOB_HANDLER,
   JOB_NAMES,
   JOB_POLICIES,
+  JOB_RETRY_DEFAULTS,
   type Job,
   type JobHandler,
   type JobName,
@@ -84,8 +85,9 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
     await this.boss.start();
     // R-32: each queue gets its JOB_POLICIES policy (still an idempotent INSERT into pgboss.queue, no DDL).
     // createQueue never changes an existing queue and updateQueue refuses `policy`, so a drift stops the boot.
+    // R-44: and the default retry policy; a `send` inherits it from the queue.
     for (const name of JOB_NAMES) {
-      await this.boss.createQueue(name, { policy: JOB_POLICIES[name] });
+      await this.boss.createQueue(name, { policy: JOB_POLICIES[name], ...JOB_RETRY_DEFAULTS });
     }
     const drift = queuePolicyDrift(await this.boss.getQueues(JOB_NAMES));
     if (drift.length > 0) {
