@@ -267,6 +267,9 @@ importers:
       '@sanchay/money':
         specifier: workspace:*
         version: link:../../packages/money
+      '@sanchay/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)

@@ -71,7 +71,7 @@ export class AppModule {
         IdentityModule,
         // "Providers are called only from worker jobs": FpModule is never imported in the api role.
         ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
-        CatalogueModule,
+        CatalogueModule.forRoot(env),
       ],
       controllers: [HealthRouter],
       providers: [

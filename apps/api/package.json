@@ -32,6 +32,7 @@
     "@sanchay/contract": "workspace:*",
     "@sanchay/domain": "workspace:*",
     "@sanchay/money": "workspace:*",
+    "@sanchay/validation": "workspace:*",
     "drizzle-orm": "catalog:",
     "fastify": "catalog:",
     "lossless-json": "catalog:",

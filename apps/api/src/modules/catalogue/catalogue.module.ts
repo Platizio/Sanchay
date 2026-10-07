@@ -1,5 +1,16 @@
-import { Module } from '@nestjs/common';
+import { type DynamicModule, Module } from '@nestjs/common';
+import type { Env } from '../../config/env.js';
+import { CatalogueRouter } from './catalogue.router.js';
+import { CatalogueFpSyncJob } from './fp-sync.job.js';
 import { NavSyncJob } from './nav/nav-sync.job.js';
 
-@Module({ providers: [NavSyncJob] })
-export class CatalogueModule {}
+@Module({})
+export class CatalogueModule {
+  static forRoot(env: Env): DynamicModule {
+    return {
+      module: CatalogueModule,
+      controllers: [CatalogueRouter],
+      providers: [NavSyncJob, ...(env.SANCHAY_APP_ROLE === 'worker' ? [CatalogueFpSyncJob] : [])],
+    };
+  }
+}
