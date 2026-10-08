@@ -3,7 +3,10 @@ import { desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { amcs, schemes, sebiCategories } from '../../src/modules/catalogue/catalogue.schema.js';
 import { investors } from '../../src/modules/identity/identity.schema.js';
-import { onboardingApplications } from '../../src/modules/onboarding/onboarding.schema.js';
+import {
+  investorProfiles,
+  onboardingApplications,
+} from '../../src/modules/onboarding/onboarding.schema.js';
 import {
   riskProfiles,
   riskQuestionnaires,
@@ -11,6 +14,8 @@ import {
 } from '../../src/modules/onboarding/risk-profile.schema.js';
 import { seedRiskQuestionnaire } from '../../src/modules/onboarding/risk-profile.service.js';
 import { SuitabilityService } from '../../src/modules/onboarding/suitability.service.js';
+import { Crypto } from '../../src/modules/platform/crypto.js';
+import { asRowId, newId } from '../../src/modules/platform/ids.js';
 import { auditEvents } from '../../src/modules/platform/platform.schema.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInWeb } from './flows.js';
@@ -40,6 +45,40 @@ const call = (
     headers: { ...webHeaders({ cookies }), 'idempotency-key': randomUUID() },
     ...(payload === undefined ? {} : { payload }),
   });
+
+/** RSK-1: Q1 reads investor_profiles.dob_enc (the KYC date of birth), so every submitter needs identity captured. */
+async function captureIdentity(investorId: string, dob: string): Promise<void> {
+  const crypto = t.app.get(Crypto);
+  const id = newId('investor_profiles');
+  const pan = `ABCPE${String(Math.floor(Math.random() * 1e4)).padStart(4, '0')}F`;
+  await t.db.db.insert(investorProfiles).values({
+    id,
+    investorId,
+    createdBy: investorId,
+    updatedBy: investorId,
+    panEnc: crypto.encrypt(pan, {
+      table: 'investor_profiles',
+      column: 'pan_enc',
+      rowId: asRowId('investor_profiles', id),
+    }),
+    panBidx: crypto.blindIndex('pan', pan),
+    panLast4: pan.slice(-4),
+    nameAsPerPan: 'Test Investor',
+    dobEnc: crypto.encrypt(dob, {
+      table: 'investor_profiles',
+      column: 'dob_enc',
+      rowId: asRowId('investor_profiles', id),
+    }),
+    kycStatus: 'VALIDATED',
+  });
+}
+
+/** A signed-in investor whose KYC date of birth is already captured. */
+async function signInWithKyc(mobile: string, dob = '2000-01-01') {
+  const signIn = await signInWeb(t, mobile);
+  await captureIdentity(signIn.investorId, dob);
+  return signIn;
+}
 
 beforeAll(async () => {
   t = await bootTestApp();
@@ -99,7 +138,7 @@ describe('riskProfile.questionnaire / get / submit', () => {
   });
 
   it('submit computes the level from GAP-03 bands and pins the questionnaire', async () => {
-    const s = await signInWeb(t, '9844600004');
+    const s = await signInWithKyc('9844600004');
     const res = await call('PUT', '/risk-profile', s.cookies, {
       dob: '2000-01-01',
       ...ANSWERS_AGGRESSIVE,
@@ -142,8 +181,59 @@ describe('riskProfile.questionnaire / get / submit', () => {
     expect(audit?.actorId).toBe(s.investorId);
   });
 
+  it('RSK-1: Q1 is scored from the KYC date of birth; the client dob is ignored', async () => {
+    const s = await signInWithKyc('9844600015', '1964-01-01'); // 62 at the test clock: Q1 = 1 point
+    const answers = {
+      horizon: '>5',
+      goal: 'BALANCED_GROWTH',
+      incomeStability: 'STABLE',
+      emergencySavings: 'M3_6',
+      emiShare: 'PCT_10_30',
+      experience: 'EQUITY_LT_3Y',
+      reaction: 'HOLD',
+    };
+    // The other seven answers add up to 22: Q1 = 1 -> 23 (MODERATE); a typed 2000-01-01 would give 4 -> 26 (MOD_AGGRESSIVE).
+    for (const typed of ['2000-01-01', '2099-01-01']) {
+      const res = await call('PUT', '/risk-profile', s.cookies, { dob: typed, ...answers });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        level: 'MODERATE',
+        maxRiskometer: 'MODERATELY_HIGH',
+        rawScore: 23,
+      });
+      t.clock.advance(60_000);
+    }
+    const rows = await t.db.db
+      .select()
+      .from(riskProfiles)
+      .where(eq(riskProfiles.investorId, s.investorId));
+    for (const row of rows) {
+      // The Q1 points are kept so raw_score can be re-derived; no date of birth is stored.
+      expect(row.answers).toMatchObject({ q1AgePoints: 1 });
+      const stored = JSON.stringify(row.answers);
+      expect(stored).not.toContain('1964-01-01');
+      expect(stored).not.toContain('2000-01-01');
+      expect(stored).not.toContain('2099-01-01');
+    }
+  });
+
+  it('RSK-1: submit before identity is captured is ONBOARDING_INCOMPLETE and stores nothing', async () => {
+    const s = await signInWeb(t, '9844600016');
+    const res = await call('PUT', '/risk-profile', s.cookies, {
+      dob: '2000-01-01',
+      ...ANSWERS_AGGRESSIVE,
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ code: 'ONBOARDING_INCOMPLETE' });
+    const rows = await t.db.db
+      .select()
+      .from(riskProfiles)
+      .where(eq(riskProfiles.investorId, s.investorId));
+    expect(rows).toHaveLength(0);
+  });
+
   it('applies the GAP-03 caps (horizon under a year caps at CONSERVATIVE)', async () => {
-    const s = await signInWeb(t, '9844600005');
+    const s = await signInWithKyc('9844600005');
     const res = await call('PUT', '/risk-profile', s.cookies, {
       dob: '2000-01-01',
       ...ANSWERS_AGGRESSIVE,
@@ -154,7 +244,7 @@ describe('riskProfile.questionnaire / get / submit', () => {
   });
 
   it('a retake supersedes the prior ACTIVE row and repoints the investor', async () => {
-    const s = await signInWeb(t, '9844600006');
+    const s = await signInWithKyc('9844600006');
     await call('PUT', '/risk-profile', s.cookies, { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
     t.clock.advance(60_000);
     const res = await call('PUT', '/risk-profile', s.cookies, {
@@ -176,7 +266,7 @@ describe('riskProfile.questionnaire / get / submit', () => {
   });
 
   it('an expired profile reads back as EXPIRED at the next get', async () => {
-    const s = await signInWeb(t, '9844600007');
+    const s = await signInWithKyc('9844600007');
     await call('PUT', '/risk-profile', s.cookies, { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
     await t.db.db
       .update(riskProfiles)
@@ -193,7 +283,7 @@ describe('riskProfile.questionnaire / get / submit', () => {
   });
 
   it('rejects an unknown answer value and a missing session', async () => {
-    const s = await signInWeb(t, '9844600008');
+    const s = await signInWithKyc('9844600008');
     const bad = await call('PUT', '/risk-profile', s.cookies, {
       dob: '2000-01-01',
       ...ANSWERS_AGGRESSIVE,
@@ -211,8 +301,8 @@ describe('riskProfile.questionnaire / get / submit', () => {
   // RV-03-33: neither procedure takes an id, so expectBola (foreign-id -> 404) has nothing to forge.
   // The BOLA property here is session scoping: B never sees or touches A's profile.
   it('is session-scoped (riskProfile.get / riskProfile.submit take no id)', async () => {
-    const a = await signInWeb(t, '9844600009');
-    const b = await signInWeb(t, '9844600010');
+    const a = await signInWithKyc('9844600009');
+    const b = await signInWithKyc('9844600010');
     await call('PUT', '/risk-profile', a.cookies, { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
     const seenByB = await call('GET', '/risk-profile', b.cookies);
     expect(seenByB.json()).toBeNull();
@@ -289,7 +379,7 @@ describe('Suitability.check (the SuitabilityHook)', () => {
   });
 
   it('records MATCH and MISMATCH rows against the ACTIVE profile', async () => {
-    const s = await signInWeb(t, '9844600012');
+    const s = await signInWithKyc('9844600012');
     await call('PUT', '/risk-profile', s.cookies, {
       dob: '2000-01-01',
       ...ANSWERS_AGGRESSIVE,
@@ -313,7 +403,7 @@ describe('Suitability.check (the SuitabilityHook)', () => {
   });
 
   it('throws RISK_PROFILE_EXPIRED / RISK_PROFILE_STALE for those statuses', async () => {
-    const s = await signInWeb(t, '9844600013');
+    const s = await signInWithKyc('9844600013');
     await call('PUT', '/risk-profile', s.cookies, { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
     await t.db.db
       .update(riskProfiles)
@@ -332,7 +422,7 @@ describe('Suitability.check (the SuitabilityHook)', () => {
   });
 
   it('throws RISK_PROFILE_EXPIRED for an ACTIVE row whose expires_at has passed (get never ran)', async () => {
-    const s = await signInWeb(t, '9844600014');
+    const s = await signInWithKyc('9844600014');
     await call('PUT', '/risk-profile', s.cookies, { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
     await t.db.db
       .update(riskProfiles)

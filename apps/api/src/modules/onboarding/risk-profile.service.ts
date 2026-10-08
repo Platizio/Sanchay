@@ -3,16 +3,18 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Inject, Injectable } from '@nestjs/common';
-import { type RiskQuestionnaireAnswers, scoreRiskQuestionnaire } from '@sanchay/domain';
+import { ageScore, type RiskQuestionnaireAnswers, scoreRiskQuestionnaire } from '@sanchay/domain';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { ClsService } from 'nestjs-cls';
 import { type Database, DB, type DbHandle } from '../../db/client.js';
 import { investors } from '../identity/identity.schema.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
+import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
+import { asRowId } from '../platform/ids.js';
 import type { AuthContext, SanchayClsStore } from '../platform/request-context.js';
-import { onboardingApplications } from './onboarding.schema.js';
+import { investorProfiles, onboardingApplications } from './onboarding.schema.js';
 import { riskProfiles, riskQuestionnaires } from './risk-profile.schema.js';
 
 /** apps/api/src/modules/onboarding -> modules -> src -> api -> apps -> repo root -> data */
@@ -95,6 +97,7 @@ export class RiskProfileService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
+    @Inject(Crypto) private readonly crypto: Crypto,
   ) {}
 
   private async publishedQuestionnaire(exec: Database = this.dbh.db) {
@@ -138,14 +141,31 @@ export class RiskProfileService {
     return toView(profile, row.questionnaireVersion);
   }
 
+  /**
+   * Q1 (age) is scored from the KYC date of birth in `investor_profiles.dob_enc`, never from the client (GAP-03:
+   * "age taken from the KYC date of birth"). A `dob` in the request is accepted by the contract and ignored.
+   */
   async submit(
     auth: AuthContext,
-    input: { dob: string } & RiskQuestionnaireAnswers,
+    input: { dob?: string | undefined } & RiskQuestionnaireAnswers,
   ): Promise<RiskProfileView> {
     const questionnaire = await this.publishedQuestionnaire();
-    const { dob, ...answers } = input;
+    const { dob: _clientDob, ...answers } = input;
+    const [identity] = await this.dbh.db
+      .select({ id: investorProfiles.id, dobEnc: investorProfiles.dobEnc })
+      .from(investorProfiles)
+      .where(eq(investorProfiles.investorId, auth.investorId));
+    if (identity === undefined) {
+      throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Submit identity first' });
+    }
+    const kycDob = this.crypto.decrypt(identity.dobEnc, {
+      table: 'investor_profiles',
+      column: 'dob_enc',
+      rowId: asRowId('investor_profiles', identity.id),
+    });
     const completedAt = this.clock.now();
-    const scored = scoreRiskQuestionnaire(dob, answers, completedAt.toISOString().slice(0, 10));
+    const asOf = completedAt.toISOString().slice(0, 10);
+    const scored = scoreRiskQuestionnaire(kycDob, answers, asOf);
     const expiresAt = addMonthsUtc(completedAt, 24);
 
     return this.dbh.db.transaction(async (tx) => {
@@ -164,8 +184,9 @@ export class RiskProfileService {
         .values({
           investorId: auth.investorId,
           questionnaireId: questionnaire.id,
-          // The date of birth only feeds Q1; it is PII and is not copied into the answers blob.
-          answers,
+          // The date of birth is PII and is not copied into the answers blob; the Q1 points are, so raw_score
+          // can be re-derived from the stored answers.
+          answers: { ...answers, q1AgePoints: ageScore(kycDob, asOf) },
           rawScore: scored.rawScore,
           caps: scored.cappedBy,
           level: scored.level,
