@@ -127,13 +127,6 @@ export class OnboardingRouter {
   riskProfileSubmit() {
     return implement(contract.riskProfile.submit)
       .use(requireIdempotency(this.idempotency, this.cls))
-      .handler(({ input }) =>
-        // RSK-1: `dob` is optional on the wire now. RiskProfileService.submit still types it as required until the
-        // provisioning-risk lane makes the server score Q1 from the KYC date of birth; remove the cast then.
-        this.riskProfiles.submit(
-          requireAuth(this.cls),
-          input as Parameters<RiskProfileService['submit']>[1],
-        ),
-      );
+      .handler(({ input }) => this.riskProfiles.submit(requireAuth(this.cls), input));
   }
 }
