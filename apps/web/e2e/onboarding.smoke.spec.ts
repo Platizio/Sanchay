@@ -81,7 +81,7 @@ test('onboarding: identity through provisioning reaches an account that is ready
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByLabel('Account number', { exact: true }).fill('50100123456789');
   await page.getByLabel('Confirm account number').fill('50100123456789');
-  await page.getByLabel('IFSC').fill('HDFC0000001');
+  await page.getByLabel('IFSC').fill('HDFC0000123');
   await page.getByRole('button', { name: 'Save bank account' }).click();
   await expect(page.getByText(/Verifying your bank account/)).toBeVisible();
   await expect(page.getByText('Bank account verified')).toBeVisible({ timeout: 60_000 });
@@ -111,7 +111,7 @@ test('onboarding: identity through provisioning reaches an account that is ready
   ] as const) {
     await page
       .getByRole('radiogroup', { name: question })
-      .getByRole('radio', { name: answer })
+      .getByRole('radio', { name: answer, exact: true })
       .click();
   }
   await page.getByRole('button', { name: 'See my risk profile' }).click();
@@ -135,7 +135,9 @@ test('onboarding: identity through provisioning reaches an account that is ready
   // ONB-16: CNF-01's two codes, read from Mailpit (RV-03-49; Plan 01 has no fixed OTP).
   since = Date.now();
   await page.getByRole('button', { name: 'Attest and submit' }).click();
-  await page.getByLabel('SMS code').fill(await readLatestOtp(request, mobile, since));
+  await page
+    .getByLabel('SMS code')
+    .fill(await readLatestOtp(request, mobile, since, 'SANCHAY_ATTEST_OTP_V1'));
   await page.getByLabel('Email code').fill(await readLatestOtpTo(request, email, since));
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Your account is ready')).toBeVisible({ timeout: 60_000 });

@@ -24,7 +24,11 @@ const get = (url: string, jar: Record<string, string> = {}) =>
 /** Each test file has its own database, so a per-file counter keeps codes, slugs and ISINs unique (RV-02-56). */
 let seq = 0;
 
-async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
+async function seedOneScheme(
+  status: 'DRAFT' | 'PUBLISHED',
+  curated: boolean,
+  name = 'Parag Parikh Flexi Cap Fund - Regular - Growth',
+) {
   seq += 1;
   const n = String(seq).padStart(5, '0');
   const [amc] = await app.db.db
@@ -47,7 +51,7 @@ async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
   await app.db.db.insert(schemes).values({
     isin: `INFTEST${n}`,
     amcId: amc.id,
-    name: 'Parag Parikh Flexi Cap Fund - Regular - Growth',
+    name,
     slug: `scheme-${n}`,
     categoryCode: cat.code,
     status,
@@ -77,6 +81,20 @@ describe('catalogue.categories / catalogue.listSchemes', () => {
     const res = await get('/catalogue/schemes?q=parag%20flexi', cookies);
     const body = JSON.parse(res.body) as { items: unknown[] };
     expect(body.items.length).toBeGreaterThan(0);
+  });
+
+  it('word search finds a fund by one word of its name (CAT-1: "axis", "elss", the placeholder examples)', async () => {
+    await seedOneScheme('PUBLISHED', true, 'Axis ELSS Tax Saver Fund - Regular - Growth');
+    const names = async (q: string) =>
+      (
+        JSON.parse((await get(`/catalogue/schemes?q=${q}`, cookies)).body) as {
+          items: { name: string }[];
+        }
+      ).items.map((i) => i.name);
+    expect(await names('axis')).toContain('Axis ELSS Tax Saver Fund - Regular - Growth');
+    expect(await names('elss')).toContain('Axis ELSS Tax Saver Fund - Regular - Growth');
+    expect(await names('zzzz')).toEqual([]);
+    expect(await names('%25')).toEqual([]); // a literal '%' is escaped, not a wildcard
   });
 
   it('cursor pagination stable', async () => {
