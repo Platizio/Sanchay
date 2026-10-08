@@ -39,7 +39,7 @@ describe('LegalPendingBanner (R-18)', () => {
     await user.click(checkbox);
     expect(submit.getAttribute('aria-disabled')).not.toBe('true');
     await user.click(submit);
-    await waitFor(() => expect(accepted).toEqual({ keys: ['TNC'] }));
+    await waitFor(() => expect(accepted).toEqual({ accept: [{ key: 'TNC', version: '3' }] }));
     await waitFor(() => expect(screen.queryByText('Updated terms are available.')).toBeNull());
   });
 
