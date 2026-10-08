@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { AmountInput, Checkbox, RadioGroup, SegmentedControl, Select } from './index';
 
@@ -117,6 +117,24 @@ describe('Select', () => {
     const dialog = screen.getByRole('dialog', { name: 'Gender' });
     expect(container.contains(dialog)).toBe(false);
     expect(document.body.contains(dialog)).toBe(true);
+  });
+
+  // next dev runs the app router under React StrictMode. react-native-web's ModalPortal removes its
+  // body node in an effect cleanup, so a Modal that is first mounted already visible is left rendering
+  // into a detached node and no option ever reaches the document (UI-4).
+  it('opens under React StrictMode, and choosing an option closes the sheet', async () => {
+    const user = setupUser();
+    render(
+      <StrictMode>
+        <ControlledSelect />
+      </StrictMode>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Gender: Choose one' }));
+    const dialog = screen.getByRole('dialog', { name: 'Gender' });
+    expect(document.body.contains(dialog)).toBe(true);
+    await user.click(screen.getByRole('radio', { name: 'Female' }));
+    expect(await screen.findByRole('button', { name: 'Gender: Female' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Gender' })).toBeNull();
   });
 });
 

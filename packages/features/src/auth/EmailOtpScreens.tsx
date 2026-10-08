@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useApi } from '../api/ApiContext';
+import { newIntentKey } from '../common/intentKey';
 
 const emailFormSchema = z.object({ email: emailSchema });
 const emailOtpFormSchema = z.object({ code: otpCodeSchema });
@@ -46,7 +47,11 @@ export function EmailOtpScreens({ onVerified }: EmailOtpScreensProps) {
     setPending(true);
     setErrorCode(null);
     try {
-      const sent = await client.me.requestEmailOtp({ email });
+      // me.requestEmailOtp and me.verifyEmail sit behind requireIdempotency(): one fresh key per tap.
+      const sent = await client.me.requestEmailOtp(
+        { email },
+        { context: { idempotencyKey: newIntentKey() } },
+      );
       setStep({
         name: 'CODE',
         email,
@@ -66,7 +71,10 @@ export function EmailOtpScreens({ onVerified }: EmailOtpScreensProps) {
     setPending(true);
     setErrorCode(null);
     try {
-      await client.me.verifyEmail({ challengeId: step.challengeId, code });
+      await client.me.verifyEmail(
+        { challengeId: step.challengeId, code },
+        { context: { idempotencyKey: newIntentKey() } },
+      );
       onVerified();
     } catch (err) {
       setErrorCode(toApiError(err).code);

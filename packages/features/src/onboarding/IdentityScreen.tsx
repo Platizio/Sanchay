@@ -3,6 +3,7 @@ import { AppText, Banner, Button, Checkbox, Screen, TextField } from '@sanchay/u
 import { panSchema } from '@sanchay/validation';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { ReadDocumentAction } from '../legal/ReacceptSheet';
 import { useNav } from '../nav/NavContext';
 import { useSubmitIdentity } from './useOnboarding';
 
@@ -111,6 +112,7 @@ export function IdentityScreen() {
           />
         )}
       />
+      <ReadDocumentAction docKey="KYC_CONSENT" title="KYC consent" />
       <Button
         label="Continue"
         loading={identity.pending}
