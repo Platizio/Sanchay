@@ -370,12 +370,14 @@ export class ProvisionJob {
       case 'FOLIO_DEFAULTS': {
         const fresh = await this.investor(investorId);
         const bank = await this.payoutBank(investorId);
+        // A payout bank added after BANK_ACCOUNTS has no FP id: fail visibly, as for nominees below.
+        if (bank.fpBankAccountId === null) throw new StepFailed('BANK_NOT_PROVISIONED');
         const current = await this.currentNominees(investorId);
         const folioDefaults: Row = {
           communication_email_address: this.need(fresh.fpEmailId),
           communication_mobile_number: this.need(fresh.fpPhoneId),
           communication_address: this.need(fresh.fpAddressId),
-          payout_bank_account: this.need(bank.fpBankAccountId),
+          payout_bank_account: bank.fpBankAccountId,
         };
         current.forEach((n, i) => {
           // A nominee set replaced after RELATED_PARTIES has no FP ids yet: fail visibly (runbook: re-attest

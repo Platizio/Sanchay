@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { investors } from '../../src/modules/identity/identity.schema.js';
 import {
   consentChallenges,
   consentRecords,
@@ -215,6 +216,48 @@ describe('write guards after attest / provisioning (MF-4, ONB-3)', () => {
     expect(bank.statusCode).toBe(200);
   });
 
+  describe('a FAILED run whose FP objects already exist (re-review N1)', () => {
+    async function failedAt(mobile: string, n: number, step: string, fpProfile: boolean) {
+      const s = await signedUpWithIdentity(mobile, n);
+      expect((await put('/onboarding/profile', s.cookies, FULL_PROFILE)).statusCode).toBe(200);
+      await setApp(s.investorId, {
+        attestStatus: 'DONE',
+        provisioningStatus: 'FAILED',
+        provisioningStep: step,
+        provisioningFailedReason: 'FP_REJECTED:x',
+        stage: 'PROVISIONING_FAILED',
+      });
+      if (fpProfile) {
+        await t.db.db
+          .update(investors)
+          .set({ fpInvestorProfileId: `invp_n1_${n}` })
+          .where(eq(investors.id, s.investorId));
+      }
+      return s;
+    }
+
+    it('refuses identity and profile changes once FP holds the investor profile', async () => {
+      const s = await failedAt('9844800091', 91, 'BANK_ACCOUNTS', true);
+      const identity = await post('/onboarding/identity', s.cookies, {
+        ...identityFor(91),
+        name: 'Asha K Rao',
+      });
+      expect(identity.statusCode).toBe(409);
+      const profile = await put('/onboarding/profile', s.cookies, {
+        ...FULL_PROFILE,
+        city: 'Pune',
+      });
+      expect(profile.statusCode).toBe(409);
+    });
+
+    it('refuses a new bank once the run is past BANK_ACCOUNTS, and accepts one at BANK_ACCOUNTS', async () => {
+      const past = await failedAt('9844800092', 92, 'MF_INVESTMENT_ACCOUNT', true);
+      expect((await post('/onboarding/bank-accounts', past.cookies, BANK)).statusCode).toBe(409);
+      const at = await failedAt('9844800093', 93, 'BANK_ACCOUNTS', true);
+      expect((await post('/onboarding/bank-accounts', at.cookies, BANK)).statusCode).toBe(200);
+    });
+  });
+
   describe('an attest that was started and abandoned', () => {
     async function withAttestChallenge(
       mobile: string,
@@ -424,6 +467,16 @@ describe('profile validation and the PEP block (MF-9, ONB-4)', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_FAILED');
     expect((await profileOf(s.investorId))?.countryOfBirth).toBeNull();
+  });
+
+  it('refuses a country of birth that FP cannot map, whatever its case (re-review N4)', async () => {
+    const s = await signedUpWithIdentity('9844800062', 62);
+    const res = await put('/onboarding/profile', s.cookies, {
+      ...FULL_PROFILE,
+      countryOfBirth: 'india',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_FAILED');
   });
 
   it('a PEP block survives a resubmitted NOT_APPLICABLE profile and keeps the reason', async () => {

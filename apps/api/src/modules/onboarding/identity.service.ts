@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { KYC_CHECK_PURPOSES } from '@sanchay/domain';
 import { and, count, desc, eq, gte, isNotNull, ne, or } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
+import { investors } from '../identity/identity.schema.js';
 import { consentChallenges } from '../legal-consent/legal-consent.schema.js';
 import { LegalDocs } from '../legal-consent/legal-docs.service.js';
 import { CLOCK, type Clock, HOUR, MINUTE } from '../platform/clock.js';
@@ -12,6 +13,7 @@ import { Jobs } from '../platform/jobs/jobs.service.js';
 import { pgConstraintOf } from '../platform/pg-errors.js';
 import { OnboardingQueries } from './onboarding.queries.js';
 import { investorProfiles, kycChecks, onboardingApplications } from './onboarding.schema.js';
+import { PROVISIONING_STEPS, type ProvisioningStep } from './provision.job.js';
 
 export interface SubmitIdentityInput {
   pan: string;
@@ -46,18 +48,43 @@ const ENDED_UNAPPROVED: readonly string[] = ['EXPIRED', 'CANCELLED', 'SUPERSEDED
  *   past its expiry): the investor backed out, and no OTP can approve it any more.
  * A re-attest after a FAILED run (attestStatus IN_PROGRESS, provisioning still FAILED) locks writes while its
  * challenge is live, as a first attest does.
+ *
+ * A FAILED run resumes at its failed step, and the steps before it skip once their FP id is set, so `kind`
+ * narrows the FAILED exception: identity and profile are refused once FP holds the investor profile (PAN,
+ * name and DOB are immutable there, and the address follows it), and a bank once the run is past
+ * BANK_ACCOUNTS (the payout bank is already registered).
  */
 export async function assertOnboardingWritable(
   exec: DbExecutor,
   now: Date,
   app: {
+    investorId: string;
     attestStatus: string;
     attestChallengeId: string | null;
     provisioningStatus: string;
+    provisioningStep: string | null;
   },
+  kind: 'identity' | 'profile' | 'bank',
 ): Promise<void> {
   if (app.provisioningStatus !== 'NOT_STARTED' && app.provisioningStatus !== 'FAILED') {
     throw writeRefused();
+  }
+  if (app.provisioningStatus === 'FAILED') {
+    if (kind === 'bank') {
+      const step = app.provisioningStep as ProvisioningStep | null;
+      if (
+        step !== null &&
+        PROVISIONING_STEPS.indexOf(step) > PROVISIONING_STEPS.indexOf('BANK_ACCOUNTS')
+      ) {
+        throw writeRefused();
+      }
+    } else {
+      const [investor] = await exec
+        .select({ fpInvestorProfileId: investors.fpInvestorProfileId })
+        .from(investors)
+        .where(eq(investors.id, app.investorId));
+      if (investor?.fpInvestorProfileId != null) throw writeRefused();
+    }
   }
   // A FAILED run leaves attestStatus DONE (fail() never resets it); that state stays editable.
   if (app.attestStatus === 'DONE' && app.provisioningStatus === 'NOT_STARTED') throw writeRefused();
@@ -113,7 +140,7 @@ export class IdentityService {
         .limit(1)
         .for('update');
       if (!app) throw new Error('IdentityService.submitIdentity: application row vanished');
-      await assertOnboardingWritable(tx, this.clock.now(), app);
+      await assertOnboardingWritable(tx, this.clock.now(), app, 'identity');
       const [existing] = await tx
         .select()
         .from(investorProfiles)

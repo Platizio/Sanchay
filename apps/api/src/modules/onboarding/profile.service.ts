@@ -15,6 +15,7 @@ import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
 import { asRowId } from '../platform/ids.js';
+import { isFpCountrySupported } from './fp-profile-mapping.js';
 import { assertOnboardingWritable } from './identity.service.js';
 import { investorProfiles, onboardingApplications } from './onboarding.schema.js';
 
@@ -55,7 +56,7 @@ export class ProfileService {
     }
     // The pilot is for Indian-born residents: FP's country mapping (fpCountry) throws for anything else, which
     // would otherwise only surface as PROFILE_NOT_SUPPORTED after the investor has attested.
-    if (input.countryOfBirth.trim().toLowerCase() !== 'india') {
+    if (!isFpCountrySupported(input.countryOfBirth)) {
       throw new AppError('VALIDATION_FAILED', {
         fields: [
           {
@@ -81,7 +82,7 @@ export class ProfileService {
         .limit(1)
         .for('update');
       if (!app) throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Submit identity first' });
-      await assertOnboardingWritable(tx, this.clock.now(), app);
+      await assertOnboardingWritable(tx, this.clock.now(), app, 'profile');
       // A PEP / related-PEP block is cleared by compliance only; the investor path cannot overwrite the
       // declaration or its recorded reason.
       if (app.profileStatus === 'BLOCKED') {

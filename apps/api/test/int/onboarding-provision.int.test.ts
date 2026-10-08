@@ -473,6 +473,30 @@ describe('onboarding.provision', () => {
     });
   });
 
+  it('a payout bank with no FP id at FOLIO_DEFAULTS fails visibly, not as a retried INTERNAL (re-review N1)', async () => {
+    const investor = await seedReadyInvestor(t);
+    const first = await attestAndApprove(investor);
+    t.fakeFp.script('mfInvestmentAccount.update', {
+      status: 422,
+      body: { error: { status: 422, code: 'X', message: 'x' } },
+    });
+    await run(first);
+    expect((await applicationOf(investor.investorId))?.provisioningStep).toBe('FOLIO_DEFAULTS');
+
+    // The payout bank the run would pick has never been registered at FP.
+    await t.db.db
+      .update(bankAccounts)
+      .set({ fpBankAccountId: null })
+      .where(eq(bankAccounts.id, investor.bankId));
+    enqueued.length = 0;
+    await run(await attestAndApprove(investor));
+    expect(await applicationOf(investor.investorId)).toMatchObject({
+      provisioningStatus: 'FAILED',
+      provisioningFailedReason: 'BANK_NOT_PROVISIONED',
+      stage: 'PROVISIONING_FAILED',
+    });
+  });
+
   it('FP 4xx -> FAILED, a CRITICAL recon break and a v_onboarding_blocked row, no retry', async () => {
     const investor = await seedReadyInvestor(t);
     const data = await attestAndApprove(investor);

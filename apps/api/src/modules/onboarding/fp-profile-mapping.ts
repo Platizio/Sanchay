@@ -51,8 +51,13 @@ export interface FpProfileSource {
   placeOfBirth: string;
 }
 
+/** The countries fpCountry can map; putProfile refuses anything else before the investor attests. */
+export function isFpCountrySupported(value: string): boolean {
+  return value === 'India' || value === 'IN';
+}
+
 export function fpCountry(value: string): 'IN' {
-  if (value === 'India' || value === 'IN') return 'IN';
+  if (isFpCountrySupported(value)) return 'IN';
   throw new Error(`fpCountry: only Indian residents are in the pilot (got "${value}")`);
 }
 
