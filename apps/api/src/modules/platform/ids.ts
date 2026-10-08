@@ -34,6 +34,7 @@ export type TableName =
   | 'pilot_invites'
   | 'provider_calls'
   | 'recon_breaks'
+  | 'ref_pincodes'
   | 'scheme_navs'
   | 'scheme_returns'
   | 'schemes'
