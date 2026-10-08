@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders, TEST_API } from '../test-utils';
 import { BankScreen } from './BankScreen';
 
@@ -101,6 +101,19 @@ describe('BankScreen (ONB-08/09)', () => {
     const { nav } = renderWithProviders(<BankScreen />);
     await user.click(await screen.findByRole('button', { name: 'Continue' }));
     expect(nav.replace).toHaveBeenCalledWith('/onboarding');
+  });
+
+  it('refreshes the onboarding stage before returning to the hub (the worker moved it on)', async () => {
+    server.use(
+      http.get(`${TEST_API}/me`, () => HttpResponse.json(me)),
+      http.get(`${TEST_API}/onboarding/bank-accounts`, () => HttpResponse.json([bank('VERIFIED')])),
+    );
+    const user = userEvent.setup();
+    const { queryClient } = renderWithProviders(<BankScreen />);
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    const keys = invalidate.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+    expect(keys.some((k) => k.includes('"onboarding"') && k.includes('"get"'))).toBe(true);
   });
 
   it('offers the form again when the verification failed', async () => {

@@ -95,7 +95,14 @@ export function BankScreen() {
         <AppText tone="muted">
           Your investments are paid from and redeemed into this account.
         </AppText>
-        <Button label="Continue" onPress={() => nav.replace('/onboarding')} />
+        <Button
+          label="Continue"
+          onPress={async () => {
+            // The worker settled the account after addBank's invalidation, so the cached stage is stale.
+            await queryClient.invalidateQueries({ queryKey: utils.onboarding.get.key() });
+            nav.replace('/onboarding');
+          }}
+        />
       </Screen>
     );
   }
