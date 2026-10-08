@@ -9,6 +9,7 @@ Probes answer questions the plans cannot settle from the documentation. Each res
 | [P-07](P-07-allotted-units.md) | Does a successful purchase report `allotted_units`, price, amount and NAV date? | Assumption A2, gate G5; how often UNITS_PENDING happens | Fri 10-16 |
 | [P-09](P-09-units-and-instalments.md) | Redeem by units on ONDC? First SIP instalment, pause, quarterly, step-up? | `features.redeemByUnits` (T5), `features.sipPause`, `fp.sipQuarterly`, PO-6 step-up | Fri 10-16 |
 | [Lumpsum flow](lumpsum-flow.md) | Does the H-2 custom checkout work end to end in the sandbox? | `fp.lumpsumFlow`; the 11-06 lumpsum milestone; the PB-17 demo fallback | Fri 10-09 |
+| [FP lookup filters](fp-lookup-filters-2026-10-08.md) | Do LOOKUP-ADOPT's `pan=`, `profile=` and `primary_investor=` filters filter? | Plan 03 E11 adopt; `primary_investor=` is ignored, use `primary_investor_pan=` (fix wave) | Done 10-08 |
 
 ## Before any probe
 1. Credentials live in `apps/api/.env` (git-ignored; v1 names `FINPRIM_*`, `CYBRILLA_PRE_VERIFICATION_*` are accepted until Plan 02 renames them). Run `node scripts/sandbox-check.mjs`: the FP tenant token and POA token lines must say OK.

@@ -340,6 +340,40 @@ describe('FpTransport.call', () => {
     return entries[0] as { responseMeta: unknown };
   }
 
+  it('keeps plain number leaves of a request body out of request_meta (RV-02-84: geo_location)', async () => {
+    const agent = agentWithToken();
+    agent
+      .get('https://fp.fake.local')
+      .intercept({ path: '/v2/investor_profiles', method: 'POST' })
+      .reply(200, { id: 'invp_1', object: 'investor_profile' });
+    const { record, entries } = recorder();
+    const transport = new FpTransport(
+      BASE_URLS,
+      new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+      agent,
+      clsWith(false),
+      record,
+    );
+    await transport.call('investorProfile.create', {
+      body: {
+        type: 'individual',
+        geo_location: { latitude: 12.971599, longitude: 77.594566 },
+        retries: 3,
+        verified: true,
+      },
+      consent: consent(),
+    });
+    const { requestMeta } = entries[0] as { requestMeta: { body: unknown } };
+    const stored = JSON.stringify(requestMeta);
+    expect(stored).not.toContain('12.971599');
+    expect(stored).not.toContain('77.594566');
+    expect(requestMeta.body).toMatchObject({
+      geo_location: { latitude: '[REDACTED]', longitude: '[REDACTED]' },
+      retries: '[REDACTED]',
+      verified: true,
+    });
+  });
+
   it('keeps a phone number out of response_meta although its key is only number (final review MF-3)', async () => {
     const { responseMeta } = await recordedFor('phoneNumber.create', '/v2/phone_numbers', {
       id: 'phn_1',

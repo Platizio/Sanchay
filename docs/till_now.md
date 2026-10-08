@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-07. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. Plan 01 code is at `225d60a`; everything after it is plan documents only, apart from two lockfile-only CI fixes: `source-map-js` on 10-06 (PR #5) and `shell-quote` plus `sharp` on 10-07 (PR #7). PRs #1 to #6 are merged into `main`; PR #7 (E24's Maestro flow, §12, and the 10-07 CI fix) is open. The latest sessions are §10 to §12; **§13 is the current state and the resume point**._
+_Last updated: 2026-10-08. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. `main` holds Plan 01 and Plan 02 (Sprint 2, PR #10) code and Plans 02-04. PRs #1 to #10 are merged. Draft PR #11 (`feat/plan-03-mvp-onboarding-lumpsum`: Plan 03 E1-E17 and Rd, the final review and its fix wave) is open. Its first CI run failed only on `pnpm audit` (a new Next.js advisory), which is fixed by `next` 16.3.8. **§17 is the current state and the resume point.**_
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -196,16 +196,16 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | **PRs #1-#7 are merged.** This session's branch `claude/sanchay-open-decisions-b4bb04` (§14) has a draft PR to review and merge: rulings R-39 to R-41, Plan 04 Task F29 and the Sprint 2 readiness list. | Owner |
+| 1 | **PRs #1-#10 are merged. Review and merge draft PR #11** (Plan 03 part 1: consent, onboarding, catalogue, final-review fixes; §17). Its first CI run failed only on `pnpm audit` (GHSA-cjq9-62q9-8jv4, Next.js); `next` is now 16.3.8 (owner-directed catalog exception, ADR-0001 row), and CI re-runs on `1161873`. | Owner |
 | 2 | **Eight items on the decisions page "Sanchay: open decisions (10-07)" (Claude Docs) are still unanswered:** B1 (a public tunnel host for sandbox webhooks and payment returns, needed 10-23), B6 (PB-76 vendor test budget, 10-16), C2 (the EUIN GO-1 rule, 11-13), C4 (AWS, MSG91, domain and hosted zone; an action, due 10-09), C5 (a fifth DLT template for alarm SMS, before the 10-12 filing), C7 (desktop MND-03 without a QR), C8 (the interim retriever hash, before E25's first deploy) and C9 (the app's own SIP cancel against the sandbox, before GO-2). Each row carries a recommendation. B4, B5, C3 and C6 were already settled. | Owner |
-| 3 | **Before Sprint 2** (`docs/delivery/sprint-2-readiness.md`): keep Docker running, fill the 10-09 velocity sheet, and authorise pushes of `feat/plan-02-mvp-kernel`. The `catalog:` keys (R-42) and the `undici` major (R-43, 7.x) were settled on 10-07. | Owner |
+| 3 | **Plan 03 owner calls from the final review** (`docs/delivery/plan-03-execution-review.md`; the code takes the safe default until answered): PEP self-correction (only ops clears a block today), country of birth beyond India (India only today), a deadline for KRA "under process" (none today), bank name-match normalisation, sending the nominee PAN to FP, and per-document ONB-15 evidence. Plus **RSK-3: compliance must sign off `data/risk-questionnaire-v1.0.0.json`**; until then the risk step returns 500. | Owner |
 | 4 | **F29's sandbox dry run passed on 10-07** (§14, RV-04-F29-1). When F29 is executed in S4, its Step 6 runs again from the git-ignored `tools/fp-probes/.env.sandbox`; the account values come from read-only lookups of the reused investor, as on 10-07. | Dev A |
 | 5 | **Send the Cybrilla email** on unused payment links (decision 10): `docs/business/cybrilla-payment-url-unused-email.md`. File the written reply in `docs/probes/` (G-B6). | Owner |
 | 6 | **Register `sanchay.in`**, then **send the Cybrilla production letter** (`docs/business/cybrilla-production-letter.md`). Production access is the one step with no slack before 11-27. | Owner |
 | 7 | Install **Android Studio + an API 35 emulator** so the Android on-device checks (C15, and Maestro flows such as E24's) can run. | Owner |
 | 8 | Pilot business checklist: DLT/SMS vendor, SES, AWS accounts, Play Console, counsel sign-offs, the risk questionnaire sign-off (R-36), curated fund list, commission rates. | Owner / team |
 | 9 | Velocity checkpoints: **Fri 10-09** (trims T1-T6 are pre-approved if short) and **Fri 10-23** (the owner decides on T7 web-only, T8, or moving the gate; F29's day is on that ledger, R-39). | Owner + Claude |
-| 10 | **Sprint 2 (Plan 02) is implemented early, on 10-07** (§15): all 12 tasks are on `feat/plan-02-mvp-kernel`, reviewed and green, in one PR. Before the named Plan 03/04 tasks start, the owner records the six rulings the final review lists (`docs/delivery/plan-02-execution-review.md`, "Rulings the controller must make before the named Plan 03/04 task"). Next: Plan 03 (S3). | Owner / Claude |
+| 10 | **Sprint 3 (Plan 03) part 1 is done** (§17): E1-E17 and Rd, the final review (51 findings, 9 must-fix) and its fix wave are on draft PR #11. **E20-E24** (lumpsum, payments) wait for R-a, R-b and R-c on the Plan 02 follow-up decisions page (R-j and R-k are also open). Two read-only sandbox probes are pending: ONB-2 (can a completed pre-verification change?) and ONB-6 (FP's mismatch codes). | Owner / Claude |
 | - | ~~Create the GitHub repo and push `main`~~ **Done:** `Platizio/Sanchay`; PRs #1-#6 are merged. | - |
 
 **Key milestones:**
@@ -223,6 +223,9 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 - **Rules for agents:** `AGENTS.md`
 - **Execution ledger (every task, review, fix and ruling):** `.superpowers/sdd/2026-09-28-plan-01-foundation/progress.md`
 - **Rulings:** `docs/delivery/rulings.md`
+- **Plan 02 and Plan 03 execution reviews:** `docs/delivery/plan-02-execution-review.md`, `docs/delivery/plan-03-execution-review.md` (final review, fix wave, smoke run, re-review)
+- **Plan 02 and Plan 03 ledgers (git-ignored):** `.superpowers/sdd/2026-10-12-plan-02-*/progress.md`, `.superpowers/sdd/2026-10-26-plan-03-mvp-consent-onboarding-catalogue-lumpsum/progress.md` and `lane-findings.md`
+- **Sandbox probes:** `docs/probes/` (latest: `fp-lookup-filters-2026-10-08.md`)
 - **Master plan (approved):** `C:\Users\pc\.claude\plans\superpowers-brainstorming-product-manag-smooth-waterfall.md`
 
 ---
@@ -556,6 +559,8 @@ Observed only, not changed:
 
 ## 13. State on 2026-10-07 and where to resume
 
+_Superseded by §17 (2026-10-08); kept as the record of that day._
+
 - **Merged:** PRs #1 to #6. `main` holds Plan 01's code, Plans 02-04 with every backlog verdict, rulings R-01 to R-38, and the 10-06 `source-map-js` bump.
 - **Open:** PR #7: E24's Maestro flow (RV-03-56, RV-04-F18-2), this section, and a lockfile-only CI fix. CI's audit found GHSA-pqg4-j6r4-53mv (critical, `shell-quote` <1.11.0, mobile toolchain) and GHSA-wq5f-xc86-pv6w (high, `sharp` <0.35.5, via `next` in the web image); the lockfile now has `shell-quote` 1.11.0 and `sharp` 0.35.5, with an ADR-0001 row.
 - **Backlog** (`docs/delivery/plan-errata-backlog.md`): Plans 01-03 have 0 open. Plan 04 has 1 open: wiring D4's sandbox chains (§5 row 2).
@@ -637,3 +642,75 @@ Observed only, not changed:
   2. Record the six pre-task rulings.
   3. Answer the open rows on the decisions page; C4 unblocks E25's deploy.
   4. Plan 03 (S3): Plan 03's migrations start at 0013.
+
+---
+
+## 16. Session 2026-10-07 (evening): Sprint 3 (Plan 03) waves 1-2
+
+- **Other work after §15:**
+  - PR #10 (Sprint 2) was merged. CI's first run had failed on one infra test hitting the 5 s timeout during a CDK synth; the infra vitest timeout is now 30 s.
+  - The Plan 02 follow-up decisions (R-a to R-k) went on the Claude Docs page "Sanchay: Plan 02 follow-up decisions (10-07)". The owner accepted R-d, which became **R-44**: job retries wait 30 s, then back off, up to 10 minutes.
+  - A local end-to-end run of Sprint 1 passed: login by SMS OTP through Mailpit, Home, add and verify email, logout and log back in, no PII in the logs. The dev servers ran on Sprint 2's code, with the worker needed for readiness.
+- **Branch:** `feat/plan-03-mvp-onboarding-lumpsum`, from `main` `fa9b4a6`, pushed after each wave. It runs the same way as Sprint 2: parallel worktree lanes per wave, a review and up to two fix rounds per task, and an integrator that merges and runs `pnpm verify`, `test:int`, `db:check` and `check-brand`.
+- **Wave 1 (`f927d4f`):**
+  - Rd (R-44);
+  - E1 FP webhooks: a plan defect had dropped Fastify's JSON safety checks for all routes; they are restored;
+  - E3 legal and consent tables: the SIP mandate no longer asks for an email code (spec H-21);
+  - E14, E15, E16 catalogue API, facts and returns.
+  - Int 238.
+- **Wave 2 (`7cc97cd`):** E2 HostGuard and app config, E4 ConsentEngine, E17 Explore and Fund pages (one fix round). Int 282.
+- **Migrations:** 0013 webhooks (E1), 0014 and 0015 legal and consent (E3), 0016 consent guard (E4). The next free number is 0017; the plan header's table assumed Plan 02 ended at 0009.
+- **Held for the final review:** E3's legal-document seed can overwrite a PUBLISHED document's body and hash.
+- **Record:** `.superpowers/sdd/2026-10-26-plan-03-.../progress.md` (git-ignored) holds the ledger, briefs and lane findings. They go into `docs/` at the end of Plan 03, as for Plan 02.
+- **Resume here:**
+  1. Wave 3 (E5) with the lanes script.
+  2. Wave 4: E6, E8, E9.
+  3. Wave 5: E7, E10, E12.
+  4. Wave 6: E11.
+  5. Wave 7: E13.
+  6. Then the final review.
+  Before E20-E24: the owner answers R-a, R-b and R-c (and R-j, R-k).
+
+## 17. Session 2026-10-08: Sprint 3 waves 3-7, walkthrough, sandbox probe, final review, draft PR #11
+
+- **Waves 3-7 merged and green:**
+  - **Wave 3:** E5.
+  - **Wave 4:** E6, E8, E9.
+  - **Wave 5:** E7, E10, E12.
+  - **Wave 6:** E11.
+  - **Wave 7:** E13.
+  - **Migrations:** 0017-0025, renumbered by merge order. E1-E17 and Rd are complete. E20-E24 wait for R-a, R-b and R-c.
+- **Local walkthrough** (investor 9000000002, FakeFp, a worker, Mailpit): sign-up reached "Your account is ready", with all nine onboarding stages DONE. Two web blockers forced API calls for some steps:
+  - the email OTP screens sent no Idempotency-Key (428);
+  - the Select/Sheet never opened on web.
+  - The FakeFp never verified a bank (fixed in eec15ef).
+- **Read-only sandbox probe** (`docs/probes/fp-lookup-filters-2026-10-08.md`):
+  - FP filters `investor_profiles?pan=` and the five `?profile=` lists.
+  - FP **ignores** `mf_investment_accounts?primary_investor=`: it returned all 87 tenant accounts, and provisioning adopted `[0]`, another investor's account. `primary_investor_pan=` filters.
+- **Final review** (opus: 4 area reviewers, an adversarial verify, a synthesis): 51 findings, 9 must-fix, none refuted. `docs/delivery/plan-03-execution-review.md` records the review, the fix wave, the smoke run and the re-review.
+- **Fix wave:**
+  - **Lanes:** six parallel lanes FX1-FX6, merged and green. Migrations 0026 (column grant), 0027 (legal document guard), 0028 (stuck runs in `v_onboarding_blocked`).
+  - **Controller fixes:**
+    - b9de7f8: write lock during a re-attest; unlock after an ended attest.
+    - 290731b: the bank screen refreshes the hub's stage.
+    - 6ace460: the router cast removed.
+    - e2ef596: KYC_UPDATE_NEEDED gets a way out (N2).
+    - c574201: a FAILED run keeps what FP holds; FOLIO_DEFAULTS fails visibly; FP's country mapping (N1, N4).
+  - **Errata:** RV-03-57..78.
+- **Onboarding smoke:** green for the first time (6efa1c2). Sign-up to "Your account is ready" runs through the UI, every dropdown included, in 22 s, against `next dev`.
+- **Suites at c574201:** verify 23/23; test:int 47 files, 485 tests; db:check OK; check-brand OK.
+- **Draft PR:** [Platizio/Sanchay#11](https://github.com/Platizio/Sanchay/pull/11) (`feat/plan-03-mvp-onboarding-lumpsum` to `main`). The owner merges.
+- **PR #11 CI, first run:**
+  - **What failed:** `verify` failed only at its last step, `pnpm audit --prod --audit-level=high`. A new advisory, GHSA-cjq9-62q9-8jv4 (high, Next.js SSRF in Image Optimization, `next` >=16.0.0 <16.3.8), had appeared. `e2e-web` passed. Lint, build, typecheck, unit tests, test:int, db:check, gen:states and gitleaks all passed.
+  - **Why upgrade, not ignore:** no component imports `next/image`, but Next serves `/_next/image` by default, so the flaw was reachable. A patched version exists, and the PR #4 rule ignores only advisories with no fix.
+  - **Fix (`1161873`):** `next` 16.3.6 → **16.3.8** (catalog and lockfile). This is an owner-directed exception to "nobody edits `catalog:`", as for PR #2's fastify bump, recorded in an ADR-0001 row. 16.3.8 is older than the 7-day release age, so no exclude entry is needed.
+  - **Local check:** audit has no high findings; lint clean; build 10/10; typecheck and test 23/23; check-brand tests 20/20.
+  - **Flaky test:** the CI log also shows the known `features` search-debounce retry (`'para'` vs `'parag'`). It passed on retry and is a backlog item, not a failure.
+- **Open:**
+  - RSK-3: compliance sign-off of the risk questionnaire. Until then the risk step returns 500.
+  - Owner calls: PEP self-correction, country of birth beyond India, the KRA "under process" deadline, name-match normalisation, the nominee PAN to FP, per-document ONB-15 evidence.
+  - Read-only probes: ONB-2/MF-6 and ONB-6/N3.
+  - Backlog (`docs/delivery/plan-errata-backlog.md`, Plan 03: 5 open): N3 (mismatch hint and the `aadhaar_not_linked` code), the 0027 DELETE guard, the risk Q1 after a DOB fix, the features search-debounce flake, and the unused `next` 16.3.6 release-age excludes.
+- **Resume here:**
+  1. Watch PR #11's CI on `1161873` (or later), then the owner reviews and merges.
+  2. Once the owner answers R-a, R-b and R-c, run E20-E24 with the lanes script (next migration 0029).

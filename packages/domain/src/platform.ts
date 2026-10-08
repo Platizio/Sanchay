@@ -122,3 +122,15 @@ export const LEGAL_DOCUMENT_KEYS = defineEnum([
   'TPL_NOMINATION_OPT_OUT',
 ]);
 export type LegalDocumentKey = EnumValue<typeof LEGAL_DOCUMENT_KEYS>;
+
+/** Display titles of the documents an investor accepts in onboarding and re-accepts (E10's legal.pending). */
+export const LEGAL_DOCUMENT_TITLES = {
+  TNC: 'Terms and Conditions',
+  PRIVACY_NOTICE: 'Privacy Notice',
+  RISK_DISCLOSURE: 'Risk Disclosure',
+  REGULAR_PLAN_COMMISSION: 'Regular plan commission disclosure',
+  EXECUTION_ONLY_DECLARATION: 'Execution-only declaration',
+  FATCA_CRS_DECLARATION: 'FATCA/CRS declaration',
+  NOMINATION_OPT_OUT_ANNEX_B: 'Nomination opt-out declaration (Annexure B)',
+  KYC_CONSENT: 'KYC consent',
+} as const satisfies Partial<Record<LegalDocumentKey, string>>;

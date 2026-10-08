@@ -131,6 +131,7 @@ export const EnvSchema = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   SANCHAY_DB_POOL_MAX: z.coerce.number().int().min(2).max(100).default(10),
   SANCHAY_APP_ORIGIN: z.url({ protocol: /^https?$/ }),
+  SANCHAY_API_ORIGIN: z.url({ protocol: /^https?$/ }),
   SANCHAY_CLIENT_IP_SOURCE: z.enum(['socket', 'alb']).default('socket'),
   SANCHAY_KEY_SERVICE: z.enum(['local', 'secrets', 'kms']).default('local'),
   SANCHAY_LOCAL_PII_KEY: key32.optional(),
@@ -149,6 +150,8 @@ export const EnvSchema = z.object({
     .optional(),
   SANCHAY_THROTTLE_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(120),
   SANCHAY_OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
+  SANCHAY_FP_WEBHOOK_AUTH: z.enum(['hmac', 'shared_secret']).default('hmac'),
+  SANCHAY_FP_WEBHOOK_SECRET: z.string().min(16).optional(),
   SANCHAY_PILOT_INVITE_ONLY: z.stringbool().default(true),
   SANCHAY_PROVIDER_MODE_FP: z.enum(['fake', 'sandbox', 'production']).default('fake'),
   SANCHAY_FP_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
@@ -256,6 +259,13 @@ export function assertBootInvariants(env: Env): void {
   // 10 (R-06 gate; H-8 addendum; D7: the outline fixes this number, D6's 11 and 12 are provisional)
   if (env.SANCHAY_APP_ENV === 'prod' && !env.SANCHAY_PILOT_INVITE_ONLY) {
     problems.push('SANCHAY_PILOT_INVITE_ONLY=false is refused in prod until P2');
+  }
+
+  // 13 (E1): the FP webhook needs a secret to verify FP-Signature; without it verifyFpSignature
+  // falls back to NONE mode, which accepts any body, so that is refused outside local/test. Only the
+  // api receives the webhook (R-19 gives it the secret alone), so the worker and migrate boot without.
+  if (!localOrTest && role === 'api' && env.SANCHAY_FP_WEBHOOK_SECRET === undefined) {
+    problems.push('SANCHAY_FP_WEBHOOK_SECRET is required outside local/test');
   }
 
   if (problems.length > 0) {

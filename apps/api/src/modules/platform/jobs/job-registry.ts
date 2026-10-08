@@ -24,7 +24,25 @@ export const JOB_POLICIES = {
   'consent.expiry.sweep': 'stately', // every 5 minutes, keyless (E4)
   'drafts.abandon': 'stately', // hourly, keyless (E4)
   'fp.event.process': 'stately', // key: the inbound_webhook_events id; re-enqueues itself to retry (E1)
+  'onboarding.preverify': 'stately', // key: the kyc_checks id; creates the FP pre-verification once, then re-enqueues itself to poll (E6)
+  'onboarding.bank.verify': 'stately', // key: the kyc_checks id; creates the bank pre-verification once, then re-enqueues itself to poll (E7)
+  'onboarding.kyc.sweep': 'stately', // every 5 minutes, keyless; re-enqueues the poll of a PENDING kyc_checks row whose job died (ONB-1)
+  'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)
 } as const satisfies Record<string, JobPolicy>;
+
+/**
+ * The retry policy every queue is created with (R-44): wait 30 s before the first retry, double the wait on each
+ * further one (exponential backoff), and never wait more than 600 s (10 minutes). Without it pg-boss retries at
+ * once, so a provider outage (FP, MSG91, SES, AMFI) burns every retry in seconds. A job's `retryLimit` is not
+ * here: each send sets its own (`Jobs.enqueue`). `send` inherits these from its queue, so it passes none.
+ * pg-boss keeps a queue's stored options after the first `createQueue`; changing them on a deployed queue needs
+ * `updateQueue` at startup or a migration step.
+ */
+export const JOB_RETRY_DEFAULTS = {
+  retryDelay: 30,
+  retryBackoff: true,
+  retryDelayMax: 600,
+} as const;
 
 /** Append-only (see JOB_POLICIES). */
 export type JobName = keyof typeof JOB_POLICIES;

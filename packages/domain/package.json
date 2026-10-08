@@ -19,10 +19,12 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@sanchay/money": "workspace:*"
+    "@sanchay/money": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@sanchay/config": "workspace:*",
+    "@sanchay/test-fixtures": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "typescript": "catalog:",

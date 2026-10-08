@@ -19,6 +19,8 @@ export const AUDIT_DATA_ALLOWLIST = [
   'challengeId',
   'revokedCount',
   'status',
+  'subjectType',
+  'subjectIds',
 ] as const;
 
 /**
@@ -42,6 +44,28 @@ export const AUDIT_ACTIONS = {
   CONTACT_EMAIL_OTP_SENT: 'CONTACT_EMAIL_OTP_SENT',
   /** The investor's first email was verified and recorded as CURRENT (B20). */
   CONTACT_EMAIL_VERIFIED: 'CONTACT_EMAIL_VERIFIED',
+  /** A consent challenge draft was created (E4). */
+  CONSENT_CHALLENGE_CREATED: 'CONSENT_CHALLENGE_CREATED',
+  /** A CONSENT OTP was issued for a challenge, by channel (E4). */
+  CONSENT_OTP_SENT: 'CONSENT_OTP_SENT',
+  /** A challenge was approved and CONSUMED (E4, R-20). */
+  CONSENT_APPROVED: 'CONSENT_APPROVED',
+  /** approve's DB recompute did not match the stored snapshot hash; the challenge went SUPERSEDED (E4). */
+  CONSENT_MISMATCH: 'CONSENT_MISMATCH',
+  /** An investor cancelled a not-yet-consumed challenge (E4, R-20). */
+  CONSENT_CANCELLED: 'CONSENT_CANCELLED',
+  /** consent.expiry.sweep moved a CONSUMED challenge past execute_before, whose saga never started, to CONSUMED_UNUSED (E4, RV-03-1). */
+  CONSENT_EXPIRED_SWEPT: 'CONSENT_EXPIRED_SWEPT',
+  /** drafts.abandon expired a PENDING challenge nobody approved within 24 h (E4). */
+  CONSENT_DRAFT_ABANDONED: 'CONSENT_DRAFT_ABANDONED',
+  /** A saga gave up before any P/M write and moved its CONSUMED challenge to CONSUMED_UNUSED; data.reason says why (E4, RV-03-1). */
+  CONSENT_MARKED_UNUSED: 'CONSENT_MARKED_UNUSED',
+  /** A nomination set (or Annexure-B opt-out) was recorded (E8). */
+  ONBOARDING_NOMINATION_SET: 'ONBOARDING_NOMINATION_SET',
+  /** The investor submitted the risk questionnaire; data.status carries the resulting level (E9). */
+  ONBOARDING_RISK_PROFILE_SUBMITTED: 'ONBOARDING_RISK_PROFILE_SUBMITTED',
+  /** The investor staged the onboarding declarations at ONB-15 (E10). */
+  ONBOARDING_DECLARATIONS_STAGED: 'ONBOARDING_DECLARATIONS_STAGED',
   /** ops:invite CLI write (D7). */
   PILOT_INVITE_ADDED: 'PILOT_INVITE_ADDED',
 } as const;

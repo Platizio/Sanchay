@@ -82,3 +82,56 @@ export const FOLIO_SERVICE_REQUEST_KINDS = defineEnum([
   'CONTACT_CHANGE',
 ]);
 export type FolioServiceRequestKind = EnumValue<typeof FOLIO_SERVICE_REQUEST_KINDS>;
+
+/** Standard KRA occupation categories (the pilot omits the rarer PSU/foreign-service rows). */
+export const OCCUPATIONS = defineEnum([
+  'BUSINESS',
+  'SERVICE_PRIVATE_SECTOR',
+  'SERVICE_PUBLIC_SECTOR',
+  'SERVICE_GOVERNMENT',
+  'PROFESSIONAL',
+  'AGRICULTURIST',
+  'RETIRED',
+  'HOUSEWIFE',
+  'STUDENT',
+  'FOREX_DEALER',
+  'OTHERS',
+]);
+export type Occupation = EnumValue<typeof OCCUPATIONS>;
+
+/** Standard KRA gross-annual-income slabs. */
+export const INCOME_SLABS = defineEnum([
+  'BELOW_1L',
+  '1L_TO_5L',
+  '5L_TO_10L',
+  '10L_TO_25L',
+  '25L_TO_1CR',
+  'ABOVE_1CR',
+]);
+export type IncomeSlab = EnumValue<typeof INCOME_SLABS>;
+
+/** PMLA source-of-funds categories (KRA form field). */
+export const SOURCE_OF_WEALTH = defineEnum([
+  'SALARY',
+  'BUSINESS_INCOME',
+  'GIFT',
+  'ANCESTRAL_PROPERTY',
+  'RENTAL_INCOME',
+  'PRIZE_MONEY_OR_ROYALTY',
+  'OTHERS',
+]);
+export type SourceOfWealth = EnumValue<typeof SOURCE_OF_WEALTH>;
+
+export const ADDRESS_NATURES = defineEnum(['RESIDENTIAL', 'BUSINESS', 'RESIDENCE_CUM_BUSINESS']);
+export type AddressNature = EnumValue<typeof ADDRESS_NATURES>;
+
+/** `kyc_checks.purpose` (spec §2.3): IDENTITY is ONB-01/02's PAN pre-verification, BANK is ONB-08/09's penny-drop pre-verification (both are the same FP `/poa/pre_verifications` endpoint, distinguished by payload shape). */
+export const KYC_CHECK_PURPOSES = defineEnum(['IDENTITY', 'BANK']);
+export type KycCheckPurpose = EnumValue<typeof KYC_CHECK_PURPOSES>;
+
+/** `kyc_checks.status`: our own polling state, distinct from `investor_profiles.kyc_status` (the KRA readiness verdict) and from the raw provider `readiness_status` text. */
+export const KYC_CHECK_STATUSES = defineEnum(['PENDING', 'PROCESSED', 'FAILED']);
+export type KycCheckStatus = EnumValue<typeof KYC_CHECK_STATUSES>;
+
+export const BANK_ACCOUNT_STATUSES = defineEnum(['PENDING', 'VERIFIED', 'FAILED']);
+export type BankAccountStatus = EnumValue<typeof BANK_ACCOUNT_STATUSES>;

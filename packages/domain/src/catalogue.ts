@@ -47,3 +47,14 @@ export type ExternalPlanType = EnumValue<typeof EXTERNAL_PLAN_TYPES>;
 /** D8: schemes.status (spec §2.3). */
 export const SCHEME_STATUSES = defineEnum(['DRAFT', 'PUBLISHED', 'SUSPENDED']);
 export type SchemeStatus = EnumValue<typeof SCHEME_STATUSES>;
+
+/** SEBI riskometer scale (5-Oct-2020 circular), ordered low to high. */
+export const RISKOMETER_LEVELS = defineEnum([
+  'LOW',
+  'LOW_TO_MODERATE',
+  'MODERATE',
+  'MODERATELY_HIGH',
+  'HIGH',
+  'VERY_HIGH',
+]);
+export type Riskometer = EnumValue<typeof RISKOMETER_LEVELS>;

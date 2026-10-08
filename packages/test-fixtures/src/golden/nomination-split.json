@@ -1,0 +1,8 @@
+[
+  { "id": "NS-01", "kind": "equalSplit", "n": 1, "expected": [100] },
+  { "id": "NS-02", "kind": "equalSplit", "n": 2, "expected": [50, 50] },
+  { "id": "NS-03", "kind": "equalSplit", "n": 3, "expected": [34, 33, 33] },
+  { "id": "NS-04", "kind": "custom", "allocations": [60, 40], "valid": true },
+  { "id": "NS-05", "kind": "custom", "allocations": [60, 39], "valid": false },
+  { "id": "NS-06", "kind": "custom", "allocations": [25, 25, 25, 25], "valid": false }
+]

@@ -24,7 +24,11 @@ const get = (url: string, jar: Record<string, string> = {}) =>
 /** Each test file has its own database, so a per-file counter keeps codes, slugs and ISINs unique (RV-02-56). */
 let seq = 0;
 
-async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
+async function seedOneScheme(
+  status: 'DRAFT' | 'PUBLISHED',
+  curated: boolean,
+  name = 'Parag Parikh Flexi Cap Fund - Regular - Growth',
+) {
   seq += 1;
   const n = String(seq).padStart(5, '0');
   const [amc] = await app.db.db
@@ -47,7 +51,7 @@ async function seedOneScheme(status: 'DRAFT' | 'PUBLISHED', curated: boolean) {
   await app.db.db.insert(schemes).values({
     isin: `INFTEST${n}`,
     amcId: amc.id,
-    name: 'Parag Parikh Flexi Cap Fund - Regular - Growth',
+    name,
     slug: `scheme-${n}`,
     categoryCode: cat.code,
     status,
@@ -79,6 +83,20 @@ describe('catalogue.categories / catalogue.listSchemes', () => {
     expect(body.items.length).toBeGreaterThan(0);
   });
 
+  it('word search finds a fund by one word of its name (CAT-1: "axis", "elss", the placeholder examples)', async () => {
+    await seedOneScheme('PUBLISHED', true, 'Axis ELSS Tax Saver Fund - Regular - Growth');
+    const names = async (q: string) =>
+      (
+        JSON.parse((await get(`/catalogue/schemes?q=${q}`, cookies)).body) as {
+          items: { name: string }[];
+        }
+      ).items.map((i) => i.name);
+    expect(await names('axis')).toContain('Axis ELSS Tax Saver Fund - Regular - Growth');
+    expect(await names('elss')).toContain('Axis ELSS Tax Saver Fund - Regular - Growth');
+    expect(await names('zzzz')).toEqual([]);
+    expect(await names('%25')).toEqual([]); // a literal '%' is escaped, not a wildcard
+  });
+
   it('cursor pagination stable', async () => {
     for (let i = 0; i < 3; i++) await seedOneScheme('PUBLISHED', true);
     const page1 = JSON.parse((await get('/catalogue/schemes?cursor=', cookies)).body) as {
@@ -93,5 +111,15 @@ describe('catalogue.categories / catalogue.listSchemes', () => {
       const isins1 = new Set(page1.items.map((i) => i.isin));
       for (const item of page2.items) expect(isins1.has(item.isin)).toBe(false);
     }
+  });
+
+  it('sorts by name ascending by default, with a stable compound cursor', async () => {
+    await seedOneScheme('PUBLISHED', true); // 'Parag Parikh Flexi Cap Fund - Regular - Growth' (see the shared factory)
+    // D10's file-level `get` and `cookies` (Plan 01's signInWeb); `signIn`/`httpGet` never existed (RV-03-23).
+    const page1 = JSON.parse((await get('/catalogue/schemes', cookies)).body) as {
+      items: { name: string }[];
+    };
+    const names = page1.items.map((i) => i.name);
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
   });
 });

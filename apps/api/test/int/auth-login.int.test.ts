@@ -6,7 +6,7 @@ import { AUDIT_ACTIONS } from '../../src/modules/platform/audit.service.js';
 import { HOUR, MINUTE } from '../../src/modules/platform/clock.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInNative } from './flows.js';
-import { cookiesFrom, nativeHeaders, webHeaders } from './http.js';
+import { appHost, cookiesFrom, nativeHeaders, webHeaders } from './http.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -276,7 +276,7 @@ describe('client checks on public auth routes', () => {
   });
 
   it('rejects a missing client header', async () => {
-    const res = await post('/auth/otp', {}, { mobile: '9822200012' });
+    const res = await post('/auth/otp', { host: appHost() }, { mobile: '9822200012' });
     expect([res.statusCode, res.json().code]).toEqual([403, 'ORIGIN_REJECTED']);
   });
 

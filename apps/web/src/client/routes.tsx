@@ -1,13 +1,27 @@
 'use client';
 import {
   AccountScreen,
+  AddressScreen,
   AppShell,
+  BankScreen,
   ComingSoonScreen,
+  DeclarationsScreen,
+  ExploreScreen,
+  FatcaScreen,
+  FundScreen,
   HomeScreen,
+  IdentityScreen,
   LoginScreen,
+  NomineesScreen,
+  OnboardingHubScreen,
+  PersonalDetailsScreen,
+  ProvisioningStatusScreen,
+  ReviewAttestScreen,
+  RiskQuestionnaireScreen,
+  SearchScreen,
 } from '@sanchay/features';
-import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { notFound, usePathname } from 'next/navigation';
+import type { ComponentType, ReactNode } from 'react';
 import { navKeyForPath } from '../lib/nav';
 
 export function LoginRoute({ mode, next }: { mode: 'login' | 'signup'; next: string | null }) {
@@ -24,6 +38,45 @@ export function AccountRoute() {
 
 export function ComingSoonRoute({ title }: { title: string }) {
   return <ComingSoonScreen title={title} />;
+}
+
+export function ExploreRoute() {
+  return <ExploreScreen />;
+}
+
+export function ExploreCategoryRoute({ slug }: { slug: string }) {
+  return <ExploreScreen category={slug} />;
+}
+
+export function ExploreSearchRoute() {
+  return <SearchScreen />;
+}
+
+export function FundRoute({ schemeSlug }: { schemeSlug: string }) {
+  return <FundScreen schemeSlug={schemeSlug} />;
+}
+
+export function OnboardingHubRoute() {
+  return <OnboardingHubScreen />;
+}
+
+const ONBOARDING_STEP_SCREENS: Record<string, ComponentType> = {
+  identity: IdentityScreen,
+  personal: PersonalDetailsScreen,
+  address: AddressScreen,
+  fatca: FatcaScreen,
+  bank: BankScreen,
+  nominees: NomineesScreen,
+  risk: RiskQuestionnaireScreen,
+  declarations: DeclarationsScreen,
+  review: ReviewAttestScreen,
+  provisioning: ProvisioningStatusScreen,
+};
+
+export function OnboardingStepRoute({ step }: { step: string }) {
+  const StepScreen = ONBOARDING_STEP_SCREENS[step];
+  if (!StepScreen) notFound();
+  return <StepScreen />;
 }
 
 /**

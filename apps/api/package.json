@@ -17,7 +17,8 @@
     "ops:invite": "nest build -b swc && node dist/cli/ops-invite.js",
     "ops:catalogue:seed": "nest build -b swc && node dist/cli/ops-catalogue-seed.js",
     "ops:nav-backfill": "nest build -b swc && node dist/cli/ops-nav-backfill.js",
-    "ops:nav-release": "nest build -b swc && node dist/cli/ops-nav-release.js"
+    "ops:nav-release": "nest build -b swc && node dist/cli/ops-nav-release.js",
+    "ops:facts:import": "nest build -b swc && node dist/cli/ops-facts-import.js"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "catalog:",

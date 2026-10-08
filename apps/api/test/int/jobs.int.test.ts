@@ -7,6 +7,7 @@ import { HOUR } from '../../src/modules/platform/clock.js';
 import {
   JOB_HANDLER,
   JOB_POLICIES,
+  JOB_RETRY_DEFAULTS,
   type JobHandler,
   type JobName,
 } from '../../src/modules/platform/jobs/job-registry.js';
@@ -237,6 +238,49 @@ describe('pg-boss queues (R-32 policies; D6: the app login has no CREATE on sche
       rows.filter((q) => q.name in JOB_POLICIES).map((q) => [q.name, q.policy]),
     );
     expect(stored).toEqual(JOB_POLICIES);
+  });
+
+  it('gives every queue the R-44 retry defaults: 30 s, exponential backoff, capped at 600 s', async () => {
+    const { rows } = await t.db.pool.query<{
+      name: string;
+      retry_delay: number;
+      retry_backoff: boolean;
+      retry_delay_max: number | null;
+    }>('SELECT name, retry_delay, retry_backoff, retry_delay_max FROM pgboss.queue');
+    const ours = rows.filter((q) => q.name in JOB_POLICIES);
+    expect(ours.map((q) => q.name).sort()).toEqual(Object.keys(JOB_POLICIES).sort());
+    for (const q of ours) {
+      expect(
+        {
+          retryDelay: q.retry_delay,
+          retryBackoff: q.retry_backoff,
+          retryDelayMax: q.retry_delay_max,
+        },
+        q.name,
+      ).toEqual(JOB_RETRY_DEFAULTS);
+    }
+  });
+
+  it('a job sent to a queue inherits the retry defaults, with the send keeping its own retry limit', async () => {
+    const id = await t.app
+      .get(Jobs)
+      .enqueue(t.db.db, 'identity.cleanup', {}, { singletonKey: 'r44-inherit', startAfter: 3600 });
+    expect(id).toEqual(expect.any(String));
+    const { rows } = await t.db.pool.query<{
+      retry_limit: number;
+      retry_delay: number;
+      retry_backoff: boolean;
+      retry_delay_max: number | null;
+    }>(
+      'SELECT retry_limit, retry_delay, retry_backoff, retry_delay_max FROM pgboss.job WHERE id = $1',
+      [id],
+    );
+    expect(rows[0]).toEqual({
+      retry_limit: 3,
+      retry_delay: 30,
+      retry_backoff: true,
+      retry_delay_max: 600,
+    });
   });
 
   it('refuses to start when a queue already holds another policy, which pg-boss would keep', async () => {

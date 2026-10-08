@@ -71,6 +71,118 @@
       "when": 1791356627702,
       "tag": "0012_pilot_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791367694855,
+      "tag": "0013_inbound_webhook_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791368748478,
+      "tag": "0014_legal_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791368755058,
+      "tag": "0015_legal_consent_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791369658886,
+      "tag": "0016_consent_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791429888375,
+      "tag": "0017_onboarding_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791431058226,
+      "tag": "0018_ref_pincodes",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791431068226,
+      "tag": "0019_nominees",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791431078226,
+      "tag": "0020_nominees_set_sum",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791431220737,
+      "tag": "0021_risk_suitability",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791431226846,
+      "tag": "0022_risk_suitability_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791433004922,
+      "tag": "0023_bank_accounts_ref_ifsc",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791433988973,
+      "tag": "0024_declaration_stagings",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791434929897,
+      "tag": "0025_readiness_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791442537362,
+      "tag": "0026_consent_records_first_attempt_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791442918004,
+      "tag": "0027_legal_documents_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791442919323,
+      "tag": "0028_onboarding_blocked_in_progress",
+      "breakpoints": true
     }
   ]
 }

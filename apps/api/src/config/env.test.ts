@@ -20,6 +20,7 @@ const base: Record<string, string> = {
   SANCHAY_APP_ENV: 'local',
   DATABASE_URL: 'postgres://sanchay:sanchay_local_only@localhost:55432/sanchay',
   SANCHAY_APP_ORIGIN: 'http://localhost:3001',
+  SANCHAY_API_ORIGIN: 'http://localhost:3000',
   SANCHAY_LOCAL_PII_KEY: key(1),
   SANCHAY_LOCAL_BIDX_KEY: key(2),
   SANCHAY_OTP_PEPPER: key(3),
@@ -50,6 +51,7 @@ const devSecrets: Record<string, string> = {
   SANCHAY_CLIENT_IP_SOURCE: 'alb',
   SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
   SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+  SANCHAY_FP_WEBHOOK_SECRET: 'x'.repeat(32),
 };
 
 function msg91Json(overrides: Record<string, unknown> = {}): string {
@@ -109,6 +111,7 @@ describe('parseEnv', () => {
       'DATABASE_URL',
       'HOST',
       'PORT',
+      'SANCHAY_API_ORIGIN',
       'SANCHAY_APP_ENV',
       'SANCHAY_APP_ORIGIN',
       'SANCHAY_APP_ROLE',
@@ -117,6 +120,8 @@ describe('parseEnv', () => {
       'SANCHAY_DB_POOL_MAX',
       'SANCHAY_FP_BASE_URL',
       'SANCHAY_FP_CREDENTIALS_JSON',
+      'SANCHAY_FP_WEBHOOK_AUTH',
+      'SANCHAY_FP_WEBHOOK_SECRET',
       'SANCHAY_KEYRING_JSON',
       'SANCHAY_KEY_SERVICE',
       'SANCHAY_LOCAL_BIDX_KEY',
@@ -189,6 +194,33 @@ describe('parseEnv', () => {
     );
     for (const role of ['worker', 'migrate']) {
       expect(parseEnv({ ...noHash, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
+    }
+  });
+
+  it('requires SANCHAY_FP_WEBHOOK_SECRET outside local/test (invariant 13)', () => {
+    for (const appEnv of ['dev', 'staging', 'prod']) {
+      expect(
+        errorMessage(() =>
+          parseEnv({ ...omit(devSecrets, 'SANCHAY_FP_WEBHOOK_SECRET'), SANCHAY_APP_ENV: appEnv }),
+        ),
+      ).toMatch(/SANCHAY_FP_WEBHOOK_SECRET is required outside local\/test/);
+    }
+    expect(parseEnv(base).SANCHAY_FP_WEBHOOK_SECRET).toBeUndefined();
+    expect(parseEnv(devSecrets).SANCHAY_FP_WEBHOOK_SECRET).toBe(
+      devSecrets.SANCHAY_FP_WEBHOOK_SECRET,
+    );
+  });
+
+  it('binds the FP webhook secret (invariant 13) to the api role only (R-19 owning containers, RV-03-10)', () => {
+    const noSecret = {
+      ...omit(devSecrets, 'SANCHAY_FP_WEBHOOK_SECRET'),
+      SANCHAY_PROVIDER_MODE_FP: 'sandbox',
+    };
+    expect(errorMessage(() => parseEnv({ ...noSecret, SANCHAY_APP_ROLE: 'api' }))).toMatch(
+      /SANCHAY_FP_WEBHOOK_SECRET is required outside local\/test/,
+    );
+    for (const role of ['worker', 'migrate']) {
+      expect(parseEnv({ ...noSecret, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
     }
   });
 

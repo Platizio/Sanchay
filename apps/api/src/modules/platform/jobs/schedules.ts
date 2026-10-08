@@ -34,4 +34,17 @@ export async function registerSchedules(boss: PgBoss): Promise<void> {
     { kind: 'DAILY_1030' },
     { tz, key: 'nav-1030' },
   );
+  await boss.schedule(
+    'consent.expiry.sweep',
+    '*/5 * * * *',
+    {},
+    { tz, key: 'consent-expiry-sweep' },
+  );
+  await boss.schedule('drafts.abandon', '0 * * * *', {}, { tz, key: 'drafts-abandon' });
+  await boss.schedule(
+    'onboarding.kyc.sweep',
+    '*/5 * * * *',
+    {},
+    { tz, key: 'onboarding-kyc-sweep' },
+  );
 }

@@ -12,7 +12,7 @@ import {
   type FakeSchemeFixture,
   type FpScriptMode,
 } from './fake-fp.scenarios.js';
-import { FakeFpState, type StoredPurchase } from './fake-fp.state.js';
+import { FakeFpState, type StoredPreVerification, type StoredPurchase } from './fake-fp.state.js';
 
 interface FakeReply {
   readonly statusCode: number;
@@ -79,15 +79,16 @@ function schemePlanPayload(fixture: FakeSchemeFixture): Record<string, unknown> 
   };
 }
 
-function preVerificationPayload(id: string, status: string): Record<string, unknown> {
+function preVerificationPayload(record: StoredPreVerification): Record<string, unknown> {
   return {
     object: 'pre_verification',
-    id,
-    status,
+    id: record.id,
+    status: record.status,
     readiness: { status: 'verified' },
     pan: { status: 'completed' },
     name: { status: 'completed' },
     date_of_birth: { status: 'completed' },
+    ...(record.bankAccounts === undefined ? {} : { bank_accounts: record.bankAccounts }),
   };
 }
 
@@ -104,6 +105,33 @@ function purchasePayload(p: StoredPurchase): Record<string, unknown> {
     folio_number: p.folioNumber,
   };
 }
+
+/** The provisioning creates FakeFp stores as plain rows (`FakeFpState.provisioned`), with FP's id prefixes. */
+const PROVISIONED_CREATES: Partial<
+  Record<FpOperationKey, { kind: string; prefix: string; oldId: boolean }>
+> = {
+  'phoneNumber.create': { kind: 'phone_number', prefix: 'phone_', oldId: false },
+  'emailAddress.create': { kind: 'email_address', prefix: 'email_', oldId: false },
+  'address.create': { kind: 'address', prefix: 'addr_', oldId: false },
+  'relatedParty.create': { kind: 'related_party', prefix: 'rp_', oldId: false },
+  'bankAccount.create': { kind: 'bank_account', prefix: 'bac_', oldId: true },
+  'mfInvestmentAccount.create': { kind: 'mf_investment_account', prefix: 'mfia_', oldId: true },
+};
+
+/**
+ * The lookups LOOKUP-ADOPT runs: each filters its kind by the query parameter that names the owner.
+ * The sandbox ignores `mf_investment_accounts?primary_investor=` and returns every tenant account
+ * (docs/probes/fp-lookup-filters-2026-10-08.md); only `primary_investor_pan=` filters, so that is the one
+ * owner key listed here and a `primary_investor=` query is deliberately a no-op.
+ */
+const PROVISIONED_LISTS: Partial<Record<FpOperationKey, { kind: string; owner: string }>> = {
+  'phoneNumber.list': { kind: 'phone_number', owner: 'profile' },
+  'emailAddress.list': { kind: 'email_address', owner: 'profile' },
+  'address.list': { kind: 'address', owner: 'profile' },
+  'relatedParty.list': { kind: 'related_party', owner: 'profile' },
+  'bankAccount.list': { kind: 'bank_account', owner: 'profile' },
+  'mfInvestmentAccount.list': { kind: 'mf_investment_account', owner: 'primary_investor_pan' },
+};
 
 /**
  * A stateful undici `MockAgent` standing in for FP/POA/PG in `SANCHAY_PROVIDER_MODE_FP=fake`
@@ -280,6 +308,30 @@ export class FakeFp {
     body: Record<string, unknown>,
     query: URLSearchParams,
   ): FakeReply {
+    const create = PROVISIONED_CREATES[op];
+    if (create !== undefined) {
+      const row: Record<string, unknown> = {
+        object: create.kind,
+        id: this.state.nextId(create.prefix),
+        ...(create.oldId ? { old_id: this.state.nextOldId() } : {}),
+        ...body,
+      };
+      if (op === 'mfInvestmentAccount.create') {
+        // Real FP stamps the owner's PAN on the account; it is the only key the list can filter by.
+        const owner = this.state.investorProfiles.get(String(body.primary_investor));
+        if (owner !== undefined) row.primary_investor_pan = owner.raw.pan;
+      }
+      this.state.provisioned(create.kind).push(row);
+      return { statusCode: 200, data: row };
+    }
+    const list = PROVISIONED_LISTS[op];
+    if (list !== undefined) {
+      const owner = query.get(list.owner);
+      const data = this.state
+        .provisioned(list.kind)
+        .filter((r) => owner === null || r[list.owner] === owner);
+      return { statusCode: 200, data: { object: 'list', data } };
+    }
     switch (op) {
       case 'schemePlans.list':
         return {
@@ -300,15 +352,19 @@ export class FakeFp {
       }
       case 'preVerification.create': {
         const id = this.state.nextId('pv_');
-        this.state.preVerifications.set(id, {
+        const record: StoredPreVerification = {
           id,
           status: 'completed',
           readiness: { status: 'verified' },
           pan: { status: 'completed' },
           name: { status: 'completed' },
           dateOfBirth: { status: 'completed' },
-        });
-        return { statusCode: 200, data: preVerificationPayload(id, 'completed') };
+          ...(Array.isArray(body.bank_accounts)
+            ? { bankAccounts: body.bank_accounts.map(() => ({ status: 'verified', code: null })) }
+            : {}),
+        };
+        this.state.preVerifications.set(id, record);
+        return { statusCode: 200, data: preVerificationPayload(record) };
       }
       case 'preVerification.get': {
         const record = this.state.preVerifications.get(params.id ?? '');
@@ -324,12 +380,36 @@ export class FakeFp {
             },
           };
         }
-        return { statusCode: 200, data: preVerificationPayload(record.id, record.status) };
+        return { statusCode: 200, data: preVerificationPayload(record) };
       }
       case 'investorProfile.create': {
         const id = this.state.nextId('invp_');
         this.state.investorProfiles.set(id, { id, raw: body });
         return { statusCode: 200, data: { object: 'investor_profile', id, ...body } };
+      }
+      case 'investorProfile.list': {
+        const pan = query.get('pan');
+        const data = [...this.state.investorProfiles.values()]
+          .filter((p) => pan === null || p.raw.pan === pan)
+          .map((p) => ({ object: 'investor_profile', id: p.id, ...p.raw }));
+        return { statusCode: 200, data: { object: 'list', data } };
+      }
+      case 'mfInvestmentAccount.update': {
+        const row = this.state.provisioned('mf_investment_account').find((r) => r.id === body.id);
+        if (row === undefined) {
+          return {
+            statusCode: 404,
+            data: {
+              error: {
+                status: 404,
+                code: 'NOT_FOUND',
+                message: `mf_investment_account ${String(body.id)} not found`,
+              },
+            },
+          };
+        }
+        row.folio_defaults = body.folio_defaults;
+        return { statusCode: 200, data: row };
       }
       case 'purchase.create': {
         const id = this.state.nextId('mfp_');

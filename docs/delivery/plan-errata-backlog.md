@@ -57,7 +57,7 @@ Some items repeat across sources, because several agents saw the same defect. **
 - [x] E25: the NAT's `CfnEIP` has no DeletionPolicy (CloudFormation deletes it with the stack), while PB-19 has Cybrilla allowlist that IP; retain it (`RETAIN_ON_UPDATE_OR_DELETE`) and assert it. _(2026-10-05 follow-up, DOCS agent)_ → **2026-10-06:** Plan 02 RV-02-77 (verified with aws-cdk-lib 2.216.0), Plan 04 RV-04-F1-12.
 - [x] D9 (lead decision): `ops:nav-release` only clears the quarantine flag, so a genuine NAV move over 25% is quarantined again on the next sync and drops out of `nav_history`. Either let a released ISIN accept the next feed value once, or scale NAV-09's tolerance by elapsed days as v1 did. _(2026-10-05 follow-up, D9 agent)_ → **2026-10-06:** R-35 (owner decision): a released ISIN accepts the next feed value once. Plan 02 RV-02-76 (verified on PostgreSQL 18.6), Plan 04 RV-04-F7-5.
 
-## Plan 03 (62; 0 open)
+## Plan 03 (67; 5 open)
 
 _2026-10-06: every Plan 03 item has a verdict. The ones still open need an owner decision, and each carries a proposal._
 
@@ -123,6 +123,11 @@ _2026-10-06: every Plan 03 item has a verdict. The ones still open need an owner
 - [x] Sweep Plan 03 for a caught `23505` after an INSERT that runs on a caller's transaction; PostgreSQL aborts that transaction and its COMMIT silently rolls back. Plan 02 fixed D1 `ReconBreaks.open` (RV-02-67) and D6 `Notify.enqueue` (RV-02-68) with `ON CONFLICT DO NOTHING`. _(2026-10-05 review)_ → **2026-10-06:** not-a-defect after the sweep: Plan 03 has no caught `23505` and no swallowed statement error inside a caller's transaction. E6's `investor_profiles_pan_bidx_uq` catch rethrows (the transaction rolls back and the error surfaces); E1's, E11's and E20's catches wrap provider calls outside a transaction.
 - [x] E21 commands (beyond the plan-wide `--` item): Steps 2, 4 and 5 run `pnpm --filter=@sanchay/api test:int -- payments …`; Step 4 checks `git diff --exit-code apps/api/openapi.json` instead of the drift test (`pnpm --filter=@sanchay/api test openapi`); Steps 4 and 5 lack the `pnpm exec turbo run build --filter=@sanchay/api^...` line although E21 adds the `payments` contract key; Step 5 re-runs only `payments orders`. _(2026-10-05 follow-up, ADOPT agent)_ → **2026-10-06:** fixed: RV-03-45.
 - [x] E21/R-32: under `stately`, a nudge is refused while a delayed poll for the same key is queued, so the `payments.poll` return and the webhook can wait up to 15 minutes (F5 and F2 waits are shorter). A pull-forward (pg-boss update by `singletonKey`) would shorten it. _(2026-10-05, Q agent)_ → **2026-10-06:** fixed: RV-03-44 (2-minute steps through the 30-minute window; a pull-forward would need raw writes to pg-boss's tables).
+- [ ] E6/E12 (N3): a `*_mismatch` readiness code is not shown on IdentityScreen, so the investor resubmits the same data until RATE_LIMITED, and pan `aadhaar_not_linked` is filed as `pan_mismatch` (ACTION_REQUIRED) although editing the form cannot fix an inoperative PAN. Give it its own blocking code and show a field hint. Wait for the ONB-6 read-only probe, which decides FP's real codes. _(2026-10-08 fix-wave re-review, N3)_
+- [ ] E3 (0027): the legal-document guard trigger covers UPDATE only; `sanchay_app` can still DELETE a PUBLISHED `legal_documents` row through the default privileges. Add `REVOKE DELETE` or a delete guard in a new migration. _(2026-10-08 fix-wave re-review, defer)_
+- [ ] E9: a DOB correction after the risk step (allowed before attest) leaves Q1 scored from the old KYC DOB, and attest does not re-check it. Re-score or reopen the risk step on a DOB change. _(2026-10-08 fix-wave re-review, defer)_
+- [ ] Features flake: the catalogue search test types 'parag' and sometimes reads 'p'..'para' (debounce race), passing on retry (seen again in PR #11's CI). Wait for the debounced value or use fake timers. _(2026-10-08 PR #11 CI log; first noted in the wave 4 ledger)_
+- [ ] ADR-0001 cleanup: the ten `minimumReleaseAgeExclude` entries for `next`/`@next/*` 16.3.6 are unused since `next` 16.3.8 (PR #11). Remove them at the next dependency change. _(2026-10-08 CI fix)_
 
 ## Plan 04 (82; 0 open)
 

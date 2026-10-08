@@ -62,6 +62,24 @@ describe('FakeFp', () => {
     expect(fakeFp.calls({ op: 'schemePlans.list' })).toHaveLength(1);
   });
 
+  it('verifies the bank accounts a pre-verification carries, so a local bank check can settle', async () => {
+    const fakeFp = new FakeFp(BASE_URLS);
+    const transport = transportFor(fakeFp);
+    const created = await transport.call('preVerification.create', {
+      body: {
+        pan: { value: 'AAAPA3751A' },
+        name: { value: 'Rani Gupta' },
+        date_of_birth: { value: '1955-10-25' },
+        bank_accounts: [{ value: { account_number: '50100123456789', ifsc_code: 'HDFC0000123' } }],
+      },
+    });
+    const id = (created.body as { id: string }).id;
+    const fetched = await transport.call('preVerification.get', { pathParams: { id } });
+    expect((fetched.body as { bank_accounts: unknown }).bank_accounts).toEqual([
+      { status: 'verified', code: null },
+    ]);
+  });
+
   it('lists 10 scheme fixtures covering liquid, ELSS, equity and debt', async () => {
     const fakeFp = new FakeFp(BASE_URLS);
     const transport = transportFor(fakeFp);
