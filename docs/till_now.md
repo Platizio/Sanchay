@@ -1,6 +1,6 @@
 # Sanchay: progress so far
 
-_Last updated: 2026-10-08. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. `main` holds Plan 01 and Plan 02 (Sprint 2, PR #10) code and Plans 02-04. PRs #1 to #10 are merged. Draft PR #11 (`feat/plan-03-mvp-onboarding-lumpsum`: Plan 03 E1-E17 and Rd, the final review and its fix wave) is open. Its first CI run failed only on `pnpm audit` (a new Next.js advisory), which is fixed by `next` 16.3.8. **§17 is the current state and the resume point.**_
+_Last updated: 2026-10-08. Repo: `C:\Users\pc\Desktop\sanchay`, GitHub `Platizio/Sanchay`. `main` (`03059ae`) holds the code of Plan 01, Plan 02 (Sprint 2, PR #10) and Plan 03 part 1 (E1-E17, Rd and the final-review fixes, PR #11), plus Plans 02-04. PRs #1 to #11 are merged. **§17 is the current state and the resume point.**_
 
 _2026-09-30: the local Plan 04 work (F1–F3, not yet pushed) and the cloud F4 branch (draft PR [Platizio/Sanchay#1](https://github.com/Platizio/Sanchay/pull/1)) were merged into local `main`; see §4.5. Pushing local `main` also lands PR #1._
 
@@ -196,7 +196,7 @@ Their test data also uses string document versions, matching the E10 fix. The Pl
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | **PRs #1-#10 are merged. Review and merge draft PR #11** (Plan 03 part 1: consent, onboarding, catalogue, final-review fixes; §17). Its first CI run failed only on `pnpm audit` (GHSA-cjq9-62q9-8jv4, Next.js); `next` is now 16.3.8 (owner-directed catalog exception, ADR-0001 row), and CI re-runs on `1161873`. | Owner |
+| 1 | **PRs #1-#11 are merged.** PR #11 (Plan 03 part 1) merged on 2026-10-08 as `03059ae`, after CI passed on `24dfe5d`. The first run's `pnpm audit` failure was fixed by `next` 16.3.8. Nothing is open. | - |
 | 2 | **Eight items on the decisions page "Sanchay: open decisions (10-07)" (Claude Docs) are still unanswered:** B1 (a public tunnel host for sandbox webhooks and payment returns, needed 10-23), B6 (PB-76 vendor test budget, 10-16), C2 (the EUIN GO-1 rule, 11-13), C4 (AWS, MSG91, domain and hosted zone; an action, due 10-09), C5 (a fifth DLT template for alarm SMS, before the 10-12 filing), C7 (desktop MND-03 without a QR), C8 (the interim retriever hash, before E25's first deploy) and C9 (the app's own SIP cancel against the sandbox, before GO-2). Each row carries a recommendation. B4, B5, C3 and C6 were already settled. | Owner |
 | 3 | **Plan 03 owner calls from the final review** (`docs/delivery/plan-03-execution-review.md`; the code takes the safe default until answered): PEP self-correction (only ops clears a block today), country of birth beyond India (India only today), a deadline for KRA "under process" (none today), bank name-match normalisation, sending the nominee PAN to FP, and per-document ONB-15 evidence. Plus **RSK-3: compliance must sign off `data/risk-questionnaire-v1.0.0.json`**; until then the risk step returns 500. | Owner |
 | 4 | **F29's sandbox dry run passed on 10-07** (§14, RV-04-F29-1). When F29 is executed in S4, its Step 6 runs again from the git-ignored `tools/fp-probes/.env.sandbox`; the account values come from read-only lookups of the reused investor, as on 10-07. | Dev A |
@@ -699,7 +699,7 @@ _Superseded by §17 (2026-10-08); kept as the record of that day._
   - **Errata:** RV-03-57..78.
 - **Onboarding smoke:** green for the first time (6efa1c2). Sign-up to "Your account is ready" runs through the UI, every dropdown included, in 22 s, against `next dev`.
 - **Suites at c574201:** verify 23/23; test:int 47 files, 485 tests; db:check OK; check-brand OK.
-- **Draft PR:** [Platizio/Sanchay#11](https://github.com/Platizio/Sanchay/pull/11) (`feat/plan-03-mvp-onboarding-lumpsum` to `main`). The owner merges.
+- **PR:** [Platizio/Sanchay#11](https://github.com/Platizio/Sanchay/pull/11) (`feat/plan-03-mvp-onboarding-lumpsum` to `main`). **Merged 2026-10-08 as `03059ae`**, after CI passed on `24dfe5d` (run 2: `verify` and `e2e-web` green).
 - **PR #11 CI, first run:**
   - **What failed:** `verify` failed only at its last step, `pnpm audit --prod --audit-level=high`. A new advisory, GHSA-cjq9-62q9-8jv4 (high, Next.js SSRF in Image Optimization, `next` >=16.0.0 <16.3.8), had appeared. `e2e-web` passed. Lint, build, typecheck, unit tests, test:int, db:check, gen:states and gitleaks all passed.
   - **Why upgrade, not ignore:** no component imports `next/image`, but Next serves `/_next/image` by default, so the flaw was reachable. A patched version exists, and the PR #4 rule ignores only advisories with no fix.
@@ -712,5 +712,5 @@ _Superseded by §17 (2026-10-08); kept as the record of that day._
   - Read-only probes: ONB-2/MF-6 and ONB-6/N3.
   - Backlog (`docs/delivery/plan-errata-backlog.md`, Plan 03: 5 open): N3 (mismatch hint and the `aadhaar_not_linked` code), the 0027 DELETE guard, the risk Q1 after a DOB fix, the features search-debounce flake, and the unused `next` 16.3.6 release-age excludes.
 - **Resume here:**
-  1. Watch PR #11's CI on `1161873` (or later), then the owner reviews and merges.
+  1. PR #11 is merged. `feat/plan-03-mvp-onboarding-lumpsum` is fast-forwarded to `main` `03059ae` for E20-E24.
   2. Once the owner answers R-a, R-b and R-c, run E20-E24 with the lanes script (next migration 0029).
