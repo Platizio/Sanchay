@@ -97,4 +97,54 @@ describe('GET /me', () => {
     const res = await get('/me', s.cookies);
     expect(res.json().legalVersionsAccepted).toEqual([{ key: 'KYC_CONSENT', version: '1' }]);
   });
+  it('reports the version in force at consumed_at, once per key, when a later version is published', async () => {
+    const { consentRecords } = await import(
+      '../../src/modules/legal-consent/legal-consent.schema.js'
+    );
+    const s = await signInWeb(t, '9844500006');
+    const doc = (key: 'PRIVACY_NOTICE' | 'RISK_DISCLOSURE', version: string, from: string) => ({
+      id: newId('legal_documents'),
+      createdBy: 'test',
+      updatedBy: 'test',
+      key,
+      version,
+      bodyMarkdown: `x${version}`,
+      sha256: Buffer.alloc(32, Number(version)),
+      status: 'PUBLISHED' as const,
+      effectiveFrom: new Date(from),
+    });
+    await t.db.db
+      .insert(legalDocuments)
+      .values([
+        doc('PRIVACY_NOTICE', '1', '2026-01-01T00:00:00Z'),
+        doc('PRIVACY_NOTICE', '2', '2026-06-01T00:00:00Z'),
+        doc('RISK_DISCLOSURE', '1', '2026-01-01T00:00:00Z'),
+        doc('RISK_DISCLOSURE', '2', '2026-06-01T00:00:00Z'),
+      ]);
+    const accept = (key: 'PRIVACY_NOTICE' | 'RISK_DISCLOSURE', at: string) => ({
+      id: newId('consent_records'),
+      createdBy: s.investorId,
+      kind: 'DOCUMENT_ACCEPTANCE' as const,
+      investorId: s.investorId,
+      documentKey: key,
+      channel: 'APP',
+      consumedAt: new Date(at),
+    });
+    await t.db.db
+      .insert(consentRecords)
+      .values([
+        accept('PRIVACY_NOTICE', '2026-03-01T00:00:00Z'),
+        accept('RISK_DISCLOSURE', '2026-03-01T00:00:00Z'),
+        accept('RISK_DISCLOSURE', '2026-07-01T00:00:00Z'),
+      ]);
+    const res = await get('/me', s.cookies);
+    const accepted = res.json().legalVersionsAccepted as Array<{ key: string; version: string }>;
+    expect(accepted).toHaveLength(2);
+    expect(accepted).toEqual(
+      expect.arrayContaining([
+        { key: 'PRIVACY_NOTICE', version: '1' },
+        { key: 'RISK_DISCLOSURE', version: '2' },
+      ]),
+    );
+  });
 });

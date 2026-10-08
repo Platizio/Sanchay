@@ -1,11 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { OnboardingStage } from '@sanchay/domain';
 import { deriveOnboardingStage } from '@sanchay/domain';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { investors } from '../identity/identity.schema.js';
 import { maskEmail, maskMobile } from '../identity/masking.js';
-import { consentRecords } from '../legal-consent/legal-consent.schema.js';
+import { consentRecords, legalDocuments } from '../legal-consent/legal-consent.schema.js';
 import { Crypto } from '../platform/crypto.js';
 import { asRowId } from '../platform/ids.js';
 import { investorProfiles, onboardingApplications } from './onboarding.schema.js';
@@ -90,7 +90,7 @@ export class OnboardingQueries {
       .where(eq(investorProfiles.investorId, investorId))
       .limit(1);
     const acceptedDocs = await this.dbh.db
-      .select({ documentKey: consentRecords.documentKey })
+      .select({ documentKey: consentRecords.documentKey, consumedAt: consentRecords.consumedAt })
       .from(consentRecords)
       .where(
         and(
@@ -98,6 +98,44 @@ export class OnboardingQueries {
           eq(consentRecords.kind, 'DOCUMENT_ACCEPTANCE'),
         ),
       );
+    // consent_records carries no version column, so resolve the version in force at consumed_at from
+    // legal_documents (never DRAFT; a RETIRED version still counts for acceptances made while it was in
+    // force), and keep only the latest acceptance per key (E13 re-acceptance makes several rows).
+    const latestAcceptance = new Map<string, Date>();
+    for (const d of acceptedDocs) {
+      if (d.documentKey === null) continue;
+      const prev = latestAcceptance.get(d.documentKey);
+      if (prev === undefined || d.consumedAt > prev)
+        latestAcceptance.set(d.documentKey, d.consumedAt);
+    }
+    const docRows =
+      latestAcceptance.size === 0
+        ? []
+        : await this.dbh.db
+            .select({
+              key: legalDocuments.key,
+              version: legalDocuments.version,
+              effectiveFrom: legalDocuments.effectiveFrom,
+            })
+            .from(legalDocuments)
+            .where(
+              and(
+                inArray(legalDocuments.key, [...latestAcceptance.keys()] as never[]),
+                ne(legalDocuments.status, 'DRAFT'),
+              ),
+            );
+    const legalVersionsAccepted: Array<{ key: string; version: string }> = [];
+    for (const [key, consumedAt] of latestAcceptance) {
+      // Newest effective_from not after consumed_at; an undated version only when no dated one applies.
+      const inForce = docRows
+        .filter((r) => r.key === key && (r.effectiveFrom === null || r.effectiveFrom <= consumedAt))
+        .sort((a, b) => {
+          if (a.effectiveFrom === null) return b.effectiveFrom === null ? 0 : 1;
+          if (b.effectiveFrom === null) return -1;
+          return b.effectiveFrom.getTime() - a.effectiveFrom.getTime();
+        })[0];
+      if (inForce) legalVersionsAccepted.push({ key, version: inForce.version });
+    }
     const email = investor.emailEnc
       ? this.crypto.decrypt(investor.emailEnc, {
           table: 'investors',
@@ -129,10 +167,7 @@ export class OnboardingQueries {
       bank: null,
       nomineesCount: 0,
       riskLevel: null,
-      legalVersionsAccepted: acceptedDocs.map((d) => ({
-        key: d.documentKey as string,
-        version: '1',
-      })),
+      legalVersionsAccepted,
       support: { email: 'support@sanchay.in', phone: null },
     };
   }
