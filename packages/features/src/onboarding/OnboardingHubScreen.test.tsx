@@ -72,4 +72,17 @@ describe('OnboardingHubScreen', () => {
     await user.click(await screen.findByRole('button', { name: 'Try again' }));
     expect(nav.push).toHaveBeenCalledWith('/onboarding/review');
   });
+
+  it('routes KYC_UPDATE_NEEDED back to the identity step so the investor can resubmit (re-review N2)', async () => {
+    server.use(
+      http.get(`${TEST_API}/auth/session`, () => HttpResponse.json(session(true))),
+      http.get(`${TEST_API}/onboarding`, () =>
+        HttpResponse.json({ stage: 'KYC_UPDATE_NEEDED', readinessCode: null }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { nav } = renderWithProviders(<OnboardingHubScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Check status again' }));
+    expect(nav.push).toHaveBeenCalledWith('/onboarding/identity');
+  });
 });

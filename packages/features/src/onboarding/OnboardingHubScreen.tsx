@@ -90,6 +90,8 @@ function OnboardingStages({ onNavigate }: { onNavigate: (path: string) => void }
       <BlockedScreen
         reason={onboarding.stage}
         readinessCode={onboarding.readinessCode}
+        // After a KRA fix or an FP outage, an identical resubmit runs a fresh check (RV-03-62).
+        onRetry={() => onNavigate('/onboarding/identity')}
         onTryAgain={() => onNavigate('/onboarding/review')}
       />
     );
