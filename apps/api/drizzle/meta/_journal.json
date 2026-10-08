@@ -169,6 +169,20 @@
       "when": 1791442537362,
       "tag": "0026_consent_records_first_attempt_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791442918004,
+      "tag": "0027_legal_documents_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791442919323,
+      "tag": "0028_onboarding_blocked_in_progress",
+      "breakpoints": true
     }
   ]
 }

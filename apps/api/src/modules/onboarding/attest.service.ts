@@ -4,17 +4,14 @@ import {
   requiresAnnexureBAcceptance,
   SNAPSHOT_VERSION,
 } from '@sanchay/domain';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { investors } from '../identity/identity.schema.js';
 import { ConsentEngine } from '../legal-consent/consent-engine.js';
-import {
-  consentChallenges,
-  DECLARATION_KEYS,
-  legalDocuments,
-} from '../legal-consent/legal-consent.schema.js';
+import { consentChallenges, DECLARATION_KEYS } from '../legal-consent/legal-consent.schema.js';
+import { resolveLegalDocument } from '../legal-consent/legal-docs.service.js';
 import type { SnapshotBuilder } from '../legal-consent/snapshot-builders.js';
-import { CLOCK, type Clock } from '../platform/clock.js';
+import { CLOCK, type Clock, SystemClock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
 import type { AuthContext } from '../platform/request-context.js';
 import { bankAccounts } from './bank.schema.js';
@@ -23,16 +20,11 @@ import { nominationDecisions } from './nomination.schema.js';
 import { investorProfiles, onboardingApplications } from './onboarding.schema.js';
 import { riskProfiles } from './risk-profile.schema.js';
 
-/** The newest PUBLISHED version of a document (undated versions last, RV-03-29). */
-async function currentDocument(exec: DbExecutor, key: LegalDocumentKey) {
-  const [row] = await exec
-    .select()
-    .from(legalDocuments)
-    .where(and(eq(legalDocuments.key, key), eq(legalDocuments.status, 'PUBLISHED')))
-    .orderBy(sql`${legalDocuments.effectiveFrom} DESC NULLS LAST`)
-    .limit(1);
-  return row;
-}
+/**
+ * The clock the snapshot builder reads. SnapshotBuilder is a bare function in a registry (no injection), so
+ * AttestService hands it the app's CLOCK when Nest constructs it; before that it is the system clock.
+ */
+let snapshotClock: Clock = new SystemClock();
 
 /**
  * SNAPSHOT_BUILDERS.ONBOARDING_ATTEST: the documents the investor must hold today (the same set
@@ -53,7 +45,8 @@ export const buildAttestSnapshot: SnapshotBuilder = async (exec, ctx) => {
   ];
   const legalDocumentsInSnapshot = [];
   for (const key of keys) {
-    const doc = await currentDocument(exec, key);
+    // The version in force now, by the one shared rule (LC-3, PRV-3): never a DRAFT or a not-yet-effective version.
+    const doc = await resolveLegalDocument(exec, key, snapshotClock.now());
     if (doc !== undefined) {
       legalDocumentsInSnapshot.push({
         key,
@@ -94,7 +87,9 @@ export class AttestService {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ConsentEngine) private readonly consent: ConsentEngine,
     @Inject(DeclarationsService) private readonly declarations: DeclarationsService,
-  ) {}
+  ) {
+    snapshotClock = clock;
+  }
 
   /** Every onboarding gate, in the order an investor meets them. */
   async assertReady(exec: DbExecutor, investorId: string): Promise<{ applicationId: string }> {
