@@ -53,7 +53,13 @@ export async function listSchemes(db: Database, input: ListSchemesInput) {
     inArray(schemes.option, LAUNCH_SCHEME_OPTIONS),
   ];
   if (input.category) conditions.push(eq(schemes.categoryCode, input.category));
-  if (input.q) conditions.push(sql`${schemes.name} % ${input.q}`);
+  if (input.q) {
+    // CAT-1: word similarity (`<%`, gin_trgm_ops-served) matches one word of the name; whole-string `%`
+    // scored 'axis' or 'liquid' far below its 0.3 threshold. The escaped ILIKE keeps short prefixes working.
+    const like = `%${input.q.replace(/[\\%_]/g, '\\$&')}%`;
+    const byWord = or(sql`${input.q} <% ${schemes.name}`, sql`${schemes.name} ILIKE ${like}`);
+    if (byWord !== undefined) conditions.push(byWord);
+  }
   if (input.cursor) {
     const c = decodeCursor(input.cursor);
     const after = or(
