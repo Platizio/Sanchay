@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FpKyc } from '../../src/integrations/fp/fp-kyc.js';
 import {
   consentRecords,
   legalDocuments,
@@ -9,7 +10,7 @@ import {
   kycChecks,
   onboardingApplications,
 } from '../../src/modules/onboarding/onboarding.schema.js';
-import { PreverifyJob } from '../../src/modules/onboarding/preverify.job.js';
+import { MAX_POLL_ATTEMPTS, PreverifyJob } from '../../src/modules/onboarding/preverify.job.js';
 import { refPincodes } from '../../src/modules/onboarding/ref.schema.js';
 import { HOUR } from '../../src/modules/platform/clock.js';
 import { newId } from '../../src/modules/platform/ids.js';
@@ -240,6 +241,145 @@ describe('POST /onboarding/identity', () => {
       .where(eq(kycChecks.investorId, s.investorId));
     expect(checks).toHaveLength(2);
   });
+});
+
+describe('onboarding.preverify: corrected identity and polling cap', () => {
+  const checksOf = (investorId: string) =>
+    t.db.db
+      .select()
+      .from(kycChecks)
+      .where(eq(kycChecks.investorId, investorId))
+      .orderBy(kycChecks.id);
+  const profileOf = async (investorId: string) =>
+    (
+      await t.db.db
+        .select()
+        .from(investorProfiles)
+        .where(eq(investorProfiles.investorId, investorId))
+    )[0];
+  const appOf = async (investorId: string) =>
+    (
+      await t.db.db
+        .select()
+        .from(onboardingApplications)
+        .where(eq(onboardingApplications.investorId, investorId))
+    )[0];
+  const handleCheck = (investorId: string, checkId: string | undefined) =>
+    job.handle(jobOf('onboarding.preverify', { investorId, checkId: checkId as string }));
+
+  it('a correction supersedes the earlier non-terminal check, and a job for it does nothing', async () => {
+    const s = await signInWeb(t, '9844600060');
+    await submit(s.cookies, identityFor(60));
+    await submit(s.cookies, { ...identityFor(60), dateOfBirth: '1990-05-15' });
+    const [first, second] = await checksOf(s.investorId);
+    expect(first?.status).toBe('FAILED');
+    expect(first?.nextPollAt).toBeNull();
+    expect(second?.status).toBe('PENDING');
+    const callsBefore = t.fakeFp.calls().length;
+    await handleCheck(s.investorId, first?.id);
+    expect(t.fakeFp.calls()).toHaveLength(callsBefore);
+  });
+
+  it('a correction cancels a waiting UNDER_PROCESS recheck', async () => {
+    const s = await signInWeb(t, '9844600061');
+    await submit(s.cookies, identityFor(61));
+    t.fakeFp.script(
+      'preVerification.get',
+      completed({ status: 'failed', code: 'kyc_underprocess' }),
+    );
+    await runPreverify(s.investorId);
+    const [waiting] = await checksOf(s.investorId);
+    expect(waiting?.nextPollAt).not.toBeNull();
+    await submit(s.cookies, { ...identityFor(61), name: 'Asha K Rao' });
+    const [old] = await checksOf(s.investorId);
+    expect(old?.nextPollAt).toBeNull();
+    expect(old?.status).toBe('FAILED');
+    const callsBefore = t.fakeFp.calls().length;
+    await handleCheck(s.investorId, old?.id);
+    expect(t.fakeFp.calls()).toHaveLength(callsBefore);
+  });
+
+  it('a verdict for data no longer on file (correction lands while the old check is in flight) is discarded', async () => {
+    const s = await signInWeb(t, '9844600062');
+    await submit(s.cookies, identityFor(62));
+    const spy = vi
+      .spyOn(t.app.get(FpKyc), 'getPreVerification')
+      .mockImplementationOnce(async () => {
+        await submit(s.cookies, { ...identityFor(62), dateOfBirth: '1990-05-15' });
+        return { status: 'completed', readiness: { status: 'failed', code: 'kyc_rejected' } };
+      });
+    const [first] = await checksOf(s.investorId);
+    await handleCheck(s.investorId, first?.id);
+    spy.mockRestore();
+    const profile = await profileOf(s.investorId);
+    expect(profile?.kycStatus).toBe('UNKNOWN');
+    expect(profile?.kycStatusCheckId).toBeNull();
+    expect(profile?.readinessCode).toBeNull();
+    expect((await appOf(s.investorId))?.identityStatus).toBe('IN_PROGRESS');
+    const [stale] = await checksOf(s.investorId);
+    expect(stale?.status).toBe('FAILED');
+  });
+
+  it('an in-flight stale check does not reschedule itself after a correction', async () => {
+    const s = await signInWeb(t, '9844600063');
+    await submit(s.cookies, identityFor(63));
+    const spy = vi
+      .spyOn(t.app.get(FpKyc), 'getPreVerification')
+      .mockImplementationOnce(async () => {
+        await submit(s.cookies, { ...identityFor(63), dateOfBirth: '1990-05-15' });
+        return { status: 'accepted' };
+      });
+    const [first] = await checksOf(s.investorId);
+    enqueued.length = 0;
+    await handleCheck(s.investorId, first?.id);
+    spy.mockRestore();
+    const polls = enqueued.filter((e) => (e.data as { checkId: string }).checkId === first?.id);
+    expect(polls).toHaveLength(0);
+    const [stale] = await checksOf(s.investorId);
+    expect(stale?.nextPollAt).toBeNull();
+  });
+
+  it.each([
+    ['completed without a readiness block', { status: 'completed' }, 80],
+    ['status failed', { status: 'failed' }, 81],
+    ['an unknown status', { status: 'mystery' }, 82],
+    ['still accepted', { status: 'accepted' }, 83],
+  ])(
+    '%s: stops after the attempt cap and settles to KYC_UPDATE_NEEDED',
+    async (_label, body, n) => {
+      const s = await signInWeb(t, `98446008${String(n - 80)}0`);
+      await submit(s.cookies, identityFor(n));
+      const answer = () =>
+        t.fakeFp.script('preVerification.get', {
+          status: 200,
+          body: { object: 'pre_verification', id: 'pv_scripted', ...body },
+        });
+      for (let i = 0; i < MAX_POLL_ATTEMPTS; i += 1) {
+        answer();
+        await runPreverify(s.investorId);
+        const [check] = await checksOf(s.investorId);
+        expect(check?.status).toBe('PENDING');
+        expect(check?.nextPollAt).not.toBeNull();
+      }
+      enqueued.length = 0;
+      answer();
+      await runPreverify(s.investorId);
+      const [check] = await checksOf(s.investorId);
+      expect(check?.status).toBe('FAILED');
+      expect(check?.nextPollAt).toBeNull();
+      expect(enqueued).toHaveLength(0);
+      expect((await appOf(s.investorId))?.identityStatus).toBe('BLOCKED');
+      expect((await profileOf(s.investorId))?.kycStatus).toBe('UNKNOWN');
+      expect((await get('/onboarding', s.cookies)).json()).toEqual({
+        stage: 'KYC_UPDATE_NEEDED',
+        readinessCode: null,
+      });
+      // the same data can be submitted again to retry: a new check is created
+      await submit(s.cookies, identityFor(n));
+      expect(await checksOf(s.investorId)).toHaveLength(2);
+      expect((await appOf(s.investorId))?.identityStatus).toBe('IN_PROGRESS');
+    },
+  );
 });
 
 describe('PUT /onboarding/profile', () => {

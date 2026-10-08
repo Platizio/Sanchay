@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { KYC_CHECK_PURPOSES } from '@sanchay/domain';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, ne, or } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
 import { LegalDocs } from '../legal-consent/legal-docs.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
@@ -49,8 +49,15 @@ export class IdentityService {
           column: 'dob_enc',
           rowId: asRowId('investor_profiles', existing.id),
         });
-        if (storedDob === input.dateOfBirth) {
-          // idempotent replay: identity already recorded with the same PAN, name and date of birth
+        const [latest] = await tx
+          .select({ status: kycChecks.status })
+          .from(kycChecks)
+          .where(eq(kycChecks.investorId, investorId))
+          .orderBy(desc(kycChecks.id))
+          .limit(1);
+        // Idempotent replay: identity already recorded with the same PAN, name and date of birth. The
+        // exception is a check that was given up on (FAILED): the same data may be submitted to retry.
+        if (storedDob === input.dateOfBirth && latest?.status !== 'FAILED') {
           return { stage: 'IDENTITY' as const };
         }
       }
@@ -116,6 +123,18 @@ export class IdentityService {
         if (pgConstraintOf(error) === 'investor_profiles_pan_bidx_uq') throw panInUse();
         throw error;
       }
+
+      // A new check supersedes every earlier one still in flight (a pending first poll or a waiting
+      // UNDER_PROCESS recheck): FAILED with no poll due, so a late job or verdict for the old data is ignored.
+      await tx
+        .update(kycChecks)
+        .set({ status: 'FAILED', nextPollAt: null, updatedBy: investorId })
+        .where(
+          and(
+            eq(kycChecks.investorId, investorId),
+            or(eq(kycChecks.status, 'PENDING'), isNotNull(kycChecks.nextPollAt)),
+          ),
+        );
 
       // No FP call here: the worker's PreverifyJob creates and polls the pre-verification.
       const checkId = newId('kyc_checks');

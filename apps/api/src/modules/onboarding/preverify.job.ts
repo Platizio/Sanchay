@@ -40,6 +40,12 @@ const READINESS_TO_KYC_STATUS: Record<string, KycStatus> = {
   kyc_deactivated: 'DEACTIVATED',
 };
 
+/**
+ * Reschedules allowed per check before it settles as given up (FAILED, identity BLOCKED). With the backoffs
+ * below that is about 50 minutes of "accepted" answers and about 5 hours of provider errors.
+ */
+export const MAX_POLL_ATTEMPTS = 12;
+
 const ACCEPTED_BACKOFF_MS = [30_000, 60_000, 5 * MINUTE] as const;
 const TRANSIENT_BACKOFF_MS = [MINUTE, 5 * MINUTE, 30 * MINUTE] as const;
 
@@ -62,6 +68,8 @@ export class PreverifyJob {
     if (check === undefined) return;
     // A settled check with no recheck due (a stale or duplicate job) has nothing left to do.
     if (check.status !== 'PENDING' && check.nextPollAt === null) return;
+    // Superseded by a corrected identity, or already given up: nothing to poll.
+    if (check.status === 'FAILED') return;
 
     let preVerificationId = check.fpPreVerificationId;
     if (preVerificationId === null) {
@@ -99,12 +107,22 @@ export class PreverifyJob {
     const attempt = Math.min(check.attempts, 2);
     // Still being processed (or an answer without a readiness block yet): poll again.
     if (view.status === 'accepted' || view.status === 'unknown' || view.readiness === null) {
-      await this.reschedule(investorId, check, ACCEPTED_BACKOFF_MS[attempt] ?? 5 * MINUTE);
+      await this.pollAgainOrGiveUp(
+        investorId,
+        check,
+        view,
+        ACCEPTED_BACKOFF_MS[attempt] ?? 5 * MINUTE,
+      );
       return;
     }
     const code = view.readiness.code;
     if (view.status === 'failed' || (code !== null && TRANSIENT_CODES.has(code))) {
-      await this.reschedule(investorId, check, TRANSIENT_BACKOFF_MS[attempt] ?? 30 * MINUTE);
+      await this.pollAgainOrGiveUp(
+        investorId,
+        check,
+        view,
+        TRANSIENT_BACKOFF_MS[attempt] ?? 30 * MINUTE,
+      );
       return;
     }
     if (view.readiness.status === 'verified') {
@@ -118,20 +136,56 @@ export class PreverifyJob {
       kycStatus,
       view.readiness.status,
       code,
-      kycStatus === 'UNDER_PROCESS' ? 6 * HOUR : undefined,
+      kycStatus === 'UNDER_PROCESS' ? { recheckInMs: 6 * HOUR } : {},
     );
   }
 
-  private async reschedule(investorId: string, check: KycCheckRow, inMs: number): Promise<void> {
+  /** Past the attempt cap the check settles to a terminal state the investor can see and retry from. */
+  private async pollAgainOrGiveUp(
+    investorId: string,
+    check: KycCheckRow,
+    view: PreVerificationView,
+    inMs: number,
+  ): Promise<void> {
+    if (check.attempts >= MAX_POLL_ATTEMPTS) {
+      await this.settle(
+        investorId,
+        check.id,
+        'UNKNOWN',
+        view.readiness?.status ?? view.status,
+        null,
+        {
+          checkStatus: 'FAILED',
+        },
+      );
+      return;
+    }
+    await this.reschedule(investorId, check.id, inMs);
+  }
+
+  /** Locks the check row; undefined when it is gone or FAILED (superseded by a corrected identity, or given up). */
+  private async lockLiveCheck(tx: DbExecutor, checkId: string): Promise<KycCheckRow | undefined> {
+    const [row] = await tx
+      .select()
+      .from(kycChecks)
+      .where(eq(kycChecks.id, checkId))
+      .limit(1)
+      .for('update');
+    return row === undefined || row.status === 'FAILED' ? undefined : row;
+  }
+
+  private async reschedule(investorId: string, checkId: string, inMs: number): Promise<void> {
     await this.dbh.db.transaction(async (tx) => {
+      const live = await this.lockLiveCheck(tx, checkId);
+      if (live === undefined) return;
       await tx
         .update(kycChecks)
         .set({
-          attempts: check.attempts + 1,
+          attempts: live.attempts + 1,
           nextPollAt: new Date(this.clock.now().getTime() + inMs),
         })
-        .where(eq(kycChecks.id, check.id));
-      await this.enqueuePoll(tx, investorId, check.id, inMs);
+        .where(eq(kycChecks.id, checkId));
+      await this.enqueuePoll(tx, investorId, checkId, inMs);
     });
   }
 
@@ -155,10 +209,13 @@ export class PreverifyJob {
     kycStatus: KycStatus,
     readinessStatus: string,
     readinessCode: string | null,
-    recheckInMs?: number,
+    options: { recheckInMs?: number; checkStatus?: 'PROCESSED' | 'FAILED' } = {},
   ): Promise<void> {
+    const { recheckInMs, checkStatus = 'PROCESSED' } = options;
     const now = this.clock.now();
     await this.dbh.db.transaction(async (tx) => {
+      // A verdict for a check a corrected identity has since superseded must not touch the profile.
+      if ((await this.lockLiveCheck(tx, checkId)) === undefined) return;
       await tx
         .update(investorProfiles)
         .set({ kycStatus, kycStatusCheckId: checkId, readinessCode })
@@ -166,7 +223,7 @@ export class PreverifyJob {
       await tx
         .update(kycChecks)
         .set({
-          status: 'PROCESSED',
+          status: checkStatus,
           readinessStatus,
           readinessCode,
           nextPollAt: recheckInMs === undefined ? null : new Date(now.getTime() + recheckInMs),
