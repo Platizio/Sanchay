@@ -665,3 +665,41 @@ Observed only, not changed:
   5. Wave 7: E13.
   6. Then the final review.
   Before E20-E24: the owner answers R-a, R-b and R-c (and R-j, R-k).
+
+## 17. Session 2026-10-08: Sprint 3 waves 3-7, walkthrough, sandbox probe, final review, draft PR #11
+
+- **Waves 3-7 merged and green:**
+  - **Wave 3:** E5.
+  - **Wave 4:** E6, E8, E9.
+  - **Wave 5:** E7, E10, E12.
+  - **Wave 6:** E11.
+  - **Wave 7:** E13.
+  - **Migrations:** 0017-0025, renumbered by merge order. E1-E17 and Rd are complete. E20-E24 wait for R-a, R-b and R-c.
+- **Local walkthrough** (investor 9000000002, FakeFp, a worker, Mailpit): sign-up reached "Your account is ready", with all nine onboarding stages DONE. Two web blockers forced API calls for some steps:
+  - the email OTP screens sent no Idempotency-Key (428);
+  - the Select/Sheet never opened on web.
+  - The FakeFp never verified a bank (fixed in eec15ef).
+- **Read-only sandbox probe** (`docs/probes/fp-lookup-filters-2026-10-08.md`):
+  - FP filters `investor_profiles?pan=` and the five `?profile=` lists.
+  - FP **ignores** `mf_investment_accounts?primary_investor=`: it returned all 87 tenant accounts, and provisioning adopted `[0]`, another investor's account. `primary_investor_pan=` filters.
+- **Final review** (opus: 4 area reviewers, an adversarial verify, a synthesis): 51 findings, 9 must-fix, none refuted. `docs/delivery/plan-03-execution-review.md` records the review, the fix wave, the smoke run and the re-review.
+- **Fix wave:**
+  - **Lanes:** six parallel lanes FX1-FX6, merged and green. Migrations 0026 (column grant), 0027 (legal document guard), 0028 (stuck runs in `v_onboarding_blocked`).
+  - **Controller fixes:**
+    - b9de7f8: write lock during a re-attest; unlock after an ended attest.
+    - 290731b: the bank screen refreshes the hub's stage.
+    - 6ace460: the router cast removed.
+    - e2ef596: KYC_UPDATE_NEEDED gets a way out (N2).
+    - c574201: a FAILED run keeps what FP holds; FOLIO_DEFAULTS fails visibly; FP's country mapping (N1, N4).
+  - **Errata:** RV-03-57..78.
+- **Onboarding smoke:** green for the first time (6efa1c2). Sign-up to "Your account is ready" runs through the UI, every dropdown included, in 22 s, against `next dev`.
+- **Suites at c574201:** verify 23/23; test:int 47 files, 485 tests; db:check OK; check-brand OK.
+- **Draft PR:** [Platizio/Sanchay#11](https://github.com/Platizio/Sanchay/pull/11) (`feat/plan-03-mvp-onboarding-lumpsum` to `main`). The owner merges.
+- **Open:**
+  - RSK-3: compliance sign-off of the risk questionnaire. Until then the risk step returns 500.
+  - Owner calls: PEP self-correction, country of birth beyond India, the KRA "under process" deadline, name-match normalisation, the nominee PAN to FP, per-document ONB-15 evidence.
+  - Read-only probes: ONB-2/MF-6 and ONB-6/N3.
+  - Backlog: N3 (mismatch hint and the `aadhaar_not_linked` code), the 0027 DELETE guard, the risk Q1 after a DOB fix.
+- **Resume here:**
+  1. Watch PR #11's CI.
+  2. Once the owner answers R-a, R-b and R-c, run E20-E24 with the lanes script (next migration 0029).
