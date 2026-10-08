@@ -82,6 +82,8 @@ export const investors = appSchema.table(
     fpPhoneId: text('fp_phone_id'),
     fpEmailId: text('fp_email_id'),
     fpAddressId: text('fp_address_id'),
+    /** E9: FK to risk_profiles.id is added by the risk_suitability_guards migration (risk_profiles references investors, so no forward reference here). */
+    currentRiskProfileId: uuid('current_risk_profile_id'),
   },
   () => [
     check('investors_status_ck', inList('status', INVESTOR_STATUSES)),

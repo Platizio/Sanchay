@@ -1,0 +1,44 @@
+[
+  {
+    "id": "SUIT-01",
+    "maxRiskometer": "LOW_TO_MODERATE",
+    "schemeRiskometer": "LOW",
+    "outcome": "MATCH"
+  },
+  {
+    "id": "SUIT-02",
+    "maxRiskometer": "LOW_TO_MODERATE",
+    "schemeRiskometer": "LOW_TO_MODERATE",
+    "outcome": "MATCH"
+  },
+  {
+    "id": "SUIT-03",
+    "maxRiskometer": "LOW_TO_MODERATE",
+    "schemeRiskometer": "MODERATE",
+    "outcome": "MISMATCH"
+  },
+  {
+    "id": "SUIT-04",
+    "maxRiskometer": "MODERATELY_HIGH",
+    "schemeRiskometer": "MODERATE",
+    "outcome": "MATCH"
+  },
+  {
+    "id": "SUIT-05",
+    "maxRiskometer": "MODERATELY_HIGH",
+    "schemeRiskometer": "HIGH",
+    "outcome": "MISMATCH"
+  },
+  {
+    "id": "SUIT-06",
+    "maxRiskometer": "VERY_HIGH",
+    "schemeRiskometer": "VERY_HIGH",
+    "outcome": "MATCH"
+  },
+  {
+    "id": "SUIT-07",
+    "maxRiskometer": "HIGH",
+    "schemeRiskometer": "VERY_HIGH",
+    "outcome": "MISMATCH"
+  }
+]

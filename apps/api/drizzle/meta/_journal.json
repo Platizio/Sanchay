@@ -106,6 +106,20 @@
       "when": 1791429888375,
       "tag": "0017_onboarding_core",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791431220737,
+      "tag": "0018_risk_suitability",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791431226846,
+      "tag": "0019_risk_suitability_guards",
+      "breakpoints": true
     }
   ]
 }

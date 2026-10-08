@@ -4,7 +4,7 @@ import { consentsContract } from './consents.js';
 import { healthContract } from './health.js';
 import { meContract } from './me.js';
 import { metaContract } from './meta.js';
-import { onboardingContract } from './onboarding.js';
+import { onboardingContract, riskProfileContract } from './onboarding.js';
 
 export * from './auth.js';
 export * from './catalogue.js';
@@ -24,5 +24,6 @@ export const contract = {
   meta: metaContract,
   consents: consentsContract,
   onboarding: onboardingContract,
+  riskProfile: riskProfileContract,
 };
 export type Contract = typeof contract;
