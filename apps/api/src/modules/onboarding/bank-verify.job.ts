@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { FpKyc } from '../../integrations/fp/fp-kyc.js';
 import {
+  isDefinitiveFpRejection,
   type PreVerificationView,
   parsePreVerification,
 } from '../../integrations/fp/pre-verification.js';
@@ -53,6 +54,28 @@ export class BankVerifyJob {
     const [bank] = await db.select().from(bankAccounts).where(eq(bankAccounts.id, bankId)).limit(1);
     if (bank === undefined || bank.status !== 'PENDING') return;
 
+    let view: PreVerificationView | undefined;
+    try {
+      view = await this.fetchView(investorId, check, bank);
+    } catch (error) {
+      // A 4xx about this account cannot be fixed by retrying: fail it now, or the job dies after its pg-boss
+      // retries and the account is stranded PENDING (ONB-1). Anything else is thrown for pg-boss to retry.
+      if (!isDefinitiveFpRejection(error)) throw error;
+      await this.failPending(check, bank.id, 'VERIFICATION_REJECTED');
+      return;
+    }
+    if (view === undefined) return;
+    await this.apply(investorId, check, bank, view);
+  }
+
+  /** Creates the bank pre-verification on the first run, then reads it. Undefined when the profile is gone. */
+  private async fetchView(
+    investorId: string,
+    check: KycCheckRow,
+    bank: BankRow,
+  ): Promise<PreVerificationView | undefined> {
+    const db = this.dbh.db;
+    const checkId = check.id;
     let preVerificationId = check.fpPreVerificationId;
     if (preVerificationId === null) {
       const [profile] = await db
@@ -60,7 +83,7 @@ export class BankVerifyJob {
         .from(investorProfiles)
         .where(eq(investorProfiles.investorId, investorId))
         .limit(1);
-      if (profile === undefined) return;
+      if (profile === undefined) return undefined;
       const profileAad = (column: string) => ({
         table: 'investor_profiles' as const,
         column,
@@ -86,8 +109,7 @@ export class BankVerifyJob {
         .set({ fpPreVerificationId: preVerificationId })
         .where(eq(kycChecks.id, checkId));
     }
-    const view = parsePreVerification(await this.fpKyc.getPreVerification(preVerificationId));
-    await this.apply(investorId, check, bank, view);
+    return parsePreVerification(await this.fpKyc.getPreVerification(preVerificationId));
   }
 
   private async apply(
@@ -152,6 +174,31 @@ export class BankVerifyJob {
     return row?.status === 'PENDING';
   }
 
+  /** Fails a still-PENDING check and its account in one transaction; a no-op once the check has settled. */
+  private async failPending(check: KycCheckRow, bankId: string | undefined, reason: string) {
+    await this.dbh.db.transaction(async (tx) => {
+      if (!(await this.lockPendingCheck(tx, check.id))) return;
+      await tx
+        .update(kycChecks)
+        .set({ status: 'FAILED', nextPollAt: null })
+        .where(eq(kycChecks.id, check.id));
+      if (bankId === undefined) return;
+      await tx
+        .update(bankAccounts)
+        .set({ status: 'FAILED', failureReason: reason })
+        .where(eq(bankAccounts.id, bankId));
+    });
+  }
+
+  /** The exit of KycChecksSweepJob past MAX_BANK_POLL_ATTEMPTS: the account settles FAILED, the investor adds another. */
+  async giveUp(check: KycCheckRow): Promise<void> {
+    await this.failPending(
+      check,
+      (check.matchDetails as { bankId?: string } | null)?.bankId,
+      'VERIFICATION_TIMEOUT',
+    );
+  }
+
   private async markBankDone(tx: DbExecutor, investorId: string): Promise<void> {
     const [app] = await tx
       .select()
@@ -173,19 +220,12 @@ export class BankVerifyJob {
   ): Promise<void> {
     const inMs =
       POLL_SCHEDULE_MS[Math.min(check.attempts, POLL_SCHEDULE_MS.length - 1)] ?? 30 * MINUTE;
+    if (check.attempts >= MAX_BANK_POLL_ATTEMPTS) {
+      await this.failPending(check, bank.id, 'VERIFICATION_TIMEOUT');
+      return;
+    }
     await this.dbh.db.transaction(async (tx) => {
       if (!(await this.lockPendingCheck(tx, check.id))) return;
-      if (check.attempts >= MAX_BANK_POLL_ATTEMPTS) {
-        await tx
-          .update(kycChecks)
-          .set({ status: 'FAILED', nextPollAt: null })
-          .where(eq(kycChecks.id, check.id));
-        await tx
-          .update(bankAccounts)
-          .set({ status: 'FAILED', failureReason: 'VERIFICATION_TIMEOUT' })
-          .where(eq(bankAccounts.id, bank.id));
-        return;
-      }
       await tx
         .update(kycChecks)
         .set({

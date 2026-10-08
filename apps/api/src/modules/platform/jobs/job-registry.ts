@@ -26,6 +26,7 @@ export const JOB_POLICIES = {
   'fp.event.process': 'stately', // key: the inbound_webhook_events id; re-enqueues itself to retry (E1)
   'onboarding.preverify': 'stately', // key: the kyc_checks id; creates the FP pre-verification once, then re-enqueues itself to poll (E6)
   'onboarding.bank.verify': 'stately', // key: the kyc_checks id; creates the bank pre-verification once, then re-enqueues itself to poll (E7)
+  'onboarding.kyc.sweep': 'stately', // every 5 minutes, keyless; re-enqueues the poll of a PENDING kyc_checks row whose job died (ONB-1)
   'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)
 } as const satisfies Record<string, JobPolicy>;
 
