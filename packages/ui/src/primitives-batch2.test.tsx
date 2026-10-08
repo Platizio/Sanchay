@@ -50,6 +50,20 @@ describe('Sheet', () => {
     await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('closes on the Dismiss backdrop and on Escape', async () => {
+    const user = setupUser();
+    const onClose = vi.fn();
+    render(
+      <Sheet visible title="Choose one" onClose={onClose}>
+        <></>
+      </Sheet>,
+    );
+    await user.click(screen.getByLabelText('Dismiss'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('ProgressSteps', () => {

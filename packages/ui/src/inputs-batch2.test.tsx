@@ -100,6 +100,24 @@ describe('Select', () => {
     await user.click(screen.getByRole('radio', { name: 'Female' }));
     expect(await screen.findByRole('button', { name: 'Gender: Female' })).toBeTruthy();
   });
+
+  // jsdom has no layout, so a click here cannot tell whether the sheet is reachable in a real
+  // browser. What decides that is the stacking context: react-native-web gives every View
+  // position:relative; z-index:0, so a sheet rendered inside the field is confined to the field and
+  // later sibling fields paint over it. The sheet must therefore live outside the field's subtree.
+  it('renders the open sheet outside the field wrapper so later siblings cannot paint over it', async () => {
+    const user = setupUser();
+    const { container } = render(
+      <>
+        <ControlledSelect />
+        <div data-testid="later-sibling" />
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Gender: Choose one' }));
+    const dialog = screen.getByRole('dialog', { name: 'Gender' });
+    expect(container.contains(dialog)).toBe(false);
+    expect(document.body.contains(dialog)).toBe(true);
+  });
 });
 
 describe('AmountInput', () => {
