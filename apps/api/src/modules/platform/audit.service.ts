@@ -60,6 +60,8 @@ export const AUDIT_ACTIONS = {
   CONSENT_DRAFT_ABANDONED: 'CONSENT_DRAFT_ABANDONED',
   /** A saga gave up before any P/M write and moved its CONSUMED challenge to CONSUMED_UNUSED; data.reason says why (E4, RV-03-1). */
   CONSENT_MARKED_UNUSED: 'CONSENT_MARKED_UNUSED',
+  /** A nomination set (or Annexure-B opt-out) was recorded (E8). */
+  ONBOARDING_NOMINATION_SET: 'ONBOARDING_NOMINATION_SET',
   /** ops:invite CLI write (D7). */
   PILOT_INVITE_ADDED: 'PILOT_INVITE_ADDED',
 } as const;

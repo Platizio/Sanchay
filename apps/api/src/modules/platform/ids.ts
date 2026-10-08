@@ -27,6 +27,8 @@ export type TableName =
   | 'market_holidays'
   | 'nav_history'
   | 'nav_sync_runs'
+  | 'nomination_decisions'
+  | 'nominees'
   | 'notification_deliveries'
   | 'notifications'
   | 'onboarding_applications'
