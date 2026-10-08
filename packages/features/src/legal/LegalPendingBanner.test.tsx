@@ -7,6 +7,8 @@ import { renderWithProviders, TEST_API } from '../test-utils';
 import { LegalPendingBanner } from './LegalPendingBanner';
 
 const pending = [{ key: 'TNC', version: '3', title: 'Terms and Conditions' }];
+const onboardingAt = (stage: string) =>
+  http.get(`${TEST_API}/onboarding`, () => HttpResponse.json({ stage, readinessCode: null }));
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -16,6 +18,7 @@ describe('LegalPendingBanner (R-18)', () => {
   it('appears for a new document version and the re-accept sheet records the acceptance', async () => {
     let accepted: unknown;
     server.use(
+      onboardingAt('DONE'),
       // Like the server: the document stops being pending once its acceptance is recorded.
       http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json(accepted ? [] : pending)),
       http.post(`${TEST_API}/legal/pending/accept`, async ({ request }) => {
@@ -41,8 +44,29 @@ describe('LegalPendingBanner (R-18)', () => {
   });
 
   it('renders nothing when no document is pending', async () => {
-    server.use(http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json([])));
+    server.use(
+      onboardingAt('DONE'),
+      http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json([])),
+    );
     const { container } = renderWithProviders(<LegalPendingBanner />);
     await waitFor(() => expect(container.textContent).toBe(''));
+  });
+
+  it('stays hidden while onboarding is not DONE, so a new investor is not offered the declarations out of band', async () => {
+    let pendingReads = 0;
+    server.use(
+      onboardingAt('DECLARATIONS'),
+      // A new investor's pending list holds every required document they have not been asked about yet.
+      http.get(`${TEST_API}/legal/pending`, () => {
+        pendingReads += 1;
+        return HttpResponse.json(pending);
+      }),
+    );
+    const { container } = renderWithProviders(<LegalPendingBanner />);
+    await waitFor(() => expect(container.textContent).toBe(''));
+    // Give the (unwanted) pending read a chance to land before asserting nothing rendered.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Updated terms are available.')).toBeNull();
+    expect(pendingReads).toBe(0);
   });
 });

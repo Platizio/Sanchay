@@ -24,8 +24,12 @@ function shell() {
   const client = createWebApiClient({
     origin: () => TEST_ORIGIN,
     onUnauthenticated: () => undefined,
-    // E13: AppShell's LegalPendingBanner reads GET /legal/pending; answer it here, not on the network.
-    fetchImpl: async () => Response.json([]),
+    // E13: AppShell's LegalPendingBanner reads GET /onboarding (it shows only once DONE) and GET /legal/pending;
+    // answer both here, not on the network.
+    fetchImpl: async (input) =>
+      new URL(input instanceof Request ? input.url : String(input)).pathname.endsWith('/onboarding')
+        ? Response.json({ stage: 'DONE', readinessCode: null })
+        : Response.json([]),
   });
   return (
     <QueryClientProvider client={new QueryClient()}>
