@@ -240,6 +240,11 @@ Later errata (found while writing Plan 04; already applied below):
   - **OTP helper:** it can filter by SMS template, so a login code is not read as the attest code.
   - **Smoke spec:** it uses exact PAN and radio locators, a per-run PAN, a 300 s test timeout and no risk DOB.
   - **Proof:** first green run on 2026-10-08, sign-up to "Your account is ready" through the UI against FakeFp and a worker, in 22 s.
+- **RV-03-76: a FAILED run keeps what FP already holds (E6, E7, E11; fix-wave re-review N1; blocker).** RV-03-60 left every write open after a FAILED run, but the run resumes at its failed step and skips the earlier steps once their FP id is set.
+  - **Identity and profile:** a corrected PAN, name, DOB or address after FP held the profile would never reach FP, leaving the app and FP apart. `assertOnboardingWritable(..., kind)` now refuses them once `investors.fp_investor_profile_id` is set.
+  - **Bank:** a new bank after BANK_ACCOUNTS wedged FOLIO_DEFAULTS with a retried INTERNAL error. A bank is now refused once the run is past BANK_ACCOUNTS, and FOLIO_DEFAULTS fails visibly with `BANK_NOT_PROVISIONED` when the payout bank has no FP id.
+- **RV-03-77: KYC_UPDATE_NEEDED leads back to the identity step (E12; fix-wave re-review N2; blocker).** RV-03-61 and RV-03-62 send more investors to KYC_UPDATE_NEEDED (an FP outage past the sweep cap, a definitive 4xx, a KRA fix). The screen had no button, and Android has no URL bar. The hub now passes `onRetry` ("Check status again"), which opens `/onboarding/identity`, where an identical resubmit runs a fresh check.
+- **RV-03-78: the country-of-birth check uses FP's own mapping (E6; fix-wave re-review N4; minor).** `putProfile` compared case-insensitively, but `fpCountry` accepts only `India` or `IN`. A direct API call with `india` passed, then failed after attest. Both now use `isFpCountrySupported`.
 
 ## Known gaps (fix at the start of the named task, before Step 1)
 

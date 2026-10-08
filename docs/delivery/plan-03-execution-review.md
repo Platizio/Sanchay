@@ -239,3 +239,36 @@ Branch `feat/plan-03-mvp-onboarding-lumpsum` at `ce5adce`. This synthesis draws 
 - LC-8 (H-21 email fallback) and LC-6 are settled before E20.
 - R-a, R-b and R-c are still open for E20 and E21.
 - The owner answers the owner calls listed under section 2 and in ONB-4, MF-6 and MF-9.
+
+## Fix wave, smoke and re-review (2026-10-08)
+
+**Fix wave.** The six lanes (FX1 consent-legal-db, FX2 kyc-checks, FX3 onboarding-writes, FX4 provisioning-risk, FX5 clients-legal, FX6 catalogue-e2e) each ran in their own worktree, with a review and up to two fix rounds. Five came back clean. FX3 reached the round cap with two open findings, because its fix agent could not write to its worktree; the controller fixed both in b9de7f8. One integration fix (1e02139) added the Idempotency-Key that FX3 made mandatory to the FX2 and identity int-test helpers. openapi was regenerated (631f1b8). Migrations 0026-0028 are FX1's. Errata RV-03-57..75.
+
+**Onboarding smoke.** `apps/web/e2e/onboarding.smoke.spec.ts` ran for the first time, against `next dev` with FakeFp and a worker. It found:
+- **A product bug:** the verified bank screen returned to a stale hub (290731b).
+- **Five spec defects:** an ambiguous PAN locator, ambiguous radio labels, a fixed PAN that a second run cannot reuse, Playwright's 30 s default timeout, and a risk DOB step that RSK-1 removed (6efa1c2).
+
+The run then passed from sign-up to "Your account is ready", through every dropdown, in 22 s. That proves MF-3 (email OTP) and UI-4 (Select/Sheet) in a real browser. It was not run against `next start`.
+
+**Scoped re-review (opus, a9367e8..6efa1c2).**
+- **Must-fix verdicts:** MF-1, MF-2, MF-3, MF-7, MF-8 and MF-9 are CLOSED. MF-4 is CLOSED for the reviewed cases. MF-5 and MF-6 were PARTIAL: their server side is done, but they led into N2.
+- **Should-fix:** every item listed above is fixed and tested.
+- **Migrations:** 0026-0028 are safe on an existing database.
+
+New findings and their state:
+- **N1 (must_fix, fixed c574201, RV-03-76):** a FAILED run left identity, profile and bank editable after FP held them.
+- **N2 (must_fix, fixed e2ef596, RV-03-77):** KYC_UPDATE_NEEDED had no way out.
+- **N4 (should_fix, fixed c574201, RV-03-78):** the country-of-birth check was case-insensitive, unlike FP's mapping.
+- **N3 (should_fix, backlog):** a `*_mismatch` readiness code is not shown on IdentityScreen, and `aadhaar_not_linked` is filed as `pan_mismatch` instead of its own blocking code. It waits for the ONB-6 sandbox probe, which decides the real codes.
+- **Defer:**
+  - 0027 guards UPDATE but not DELETE of a published legal document: add `REVOKE DELETE` or a delete guard.
+  - A DOB correction after the risk step leaves Q1 scored from the old DOB.
+  - An UNDER_PROCESS investor creates one FP pre-verification every 6 h with no limit; the deadline is an owner call.
+
+**Suites at c574201:**
+- verify 23/23
+- test:int 47 files, 485 tests
+- db:check OK
+- check-brand OK
+
+**Verdict:** ready for a draft PR to `main`. The pilot conditions in section 3 still stand: RSK-3 sign-off, the owner calls, the ONB-2/ONB-6 probes, and R-a/R-b/R-c for E20-E24.
