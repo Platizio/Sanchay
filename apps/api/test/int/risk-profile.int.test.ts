@@ -232,9 +232,10 @@ describe('riskProfile.questionnaire / get / submit', () => {
 });
 
 describe('Suitability.check (the SuitabilityHook)', () => {
-  const svc = new SuitabilityService();
+  let svc: SuitabilityService;
   let schemeId = '';
   beforeAll(async () => {
+    svc = new SuitabilityService(t.clock);
     const [amc] = await t.db.db
       .insert(amcs)
       .values({ name: 'Test AMC', slug: 'risk-test-amc' })
@@ -328,6 +329,29 @@ describe('Suitability.check (the SuitabilityHook)', () => {
     await expect(
       t.db.db.transaction((tx) => svc.check(tx, args(s.investorId, 'MODERATE'))),
     ).rejects.toMatchObject({ code: 'RISK_PROFILE_EXPIRED' });
+  });
+
+  it('throws RISK_PROFILE_EXPIRED for an ACTIVE row whose expires_at has passed (get never ran)', async () => {
+    const s = await signInWeb(t, '9844600014');
+    await call('PUT', '/risk-profile', s.cookies, { dob: '2000-01-01', ...ANSWERS_AGGRESSIVE });
+    await t.db.db
+      .update(riskProfiles)
+      .set({ expiresAt: new Date(t.clock.now().getTime() - 1000) })
+      .where(eq(riskProfiles.investorId, s.investorId));
+    // The row is still ACTIVE: nobody opened the risk screen, so get() never flipped it.
+    const [before] = await t.db.db
+      .select()
+      .from(riskProfiles)
+      .where(eq(riskProfiles.investorId, s.investorId));
+    expect(before?.status).toBe('ACTIVE');
+    await expect(
+      t.db.db.transaction((tx) => svc.check(tx, args(s.investorId, 'MODERATE'))),
+    ).rejects.toMatchObject({ code: 'RISK_PROFILE_EXPIRED' });
+    const checks = await t.db.db
+      .select()
+      .from(suitabilityChecks)
+      .where(eq(suitabilityChecks.riskProfileId, before?.id ?? ''));
+    expect(checks).toHaveLength(0);
   });
 });
 
