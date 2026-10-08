@@ -272,3 +272,5 @@ New findings and their state:
 - check-brand OK
 
 **Verdict:** ready for a draft PR to `main`. The pilot conditions in section 3 still stand: RSK-3 sign-off, the owner calls, the ONB-2/ONB-6 probes, and R-a/R-b/R-c for E20-E24.
+
+**PR #11 CI, first run (2026-10-08).** `verify` failed only at its last step, `pnpm audit --prod --audit-level=high`, on a new advisory: GHSA-cjq9-62q9-8jv4 (high, Next.js SSRF in Image Optimization, `next` >=16.0.0 <16.3.8). Every code step passed (lint, build, typecheck, unit tests, test:int, db:check, gen:states, gitleaks), and so did `e2e-web`. No component imports `next/image`, but Next serves `/_next/image` by default, so `next` moves 16.3.6 → 16.3.8 (`1161873`). That is an owner-directed exception to the catalog rule, recorded in an ADR-0001 row. The known features search-debounce flake retried in the same run; it is now a backlog item (Plan 03: 5 open).
