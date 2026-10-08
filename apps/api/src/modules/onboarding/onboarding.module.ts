@@ -8,6 +8,7 @@ import { AttestService, buildAttestSnapshot } from './attest.service.js';
 import { BankService } from './bank.service.js';
 import { BankVerifyJob } from './bank-verify.job.js';
 import { IdentityService } from './identity.service.js';
+import { KycChecksSweepJob } from './kyc-checks-sweep.job.js';
 import { NominationService } from './nomination.service.js';
 import { OnboardingQueries } from './onboarding.queries.js';
 import { OnboardingRouter } from './onboarding.router.js';
@@ -27,7 +28,9 @@ CONSENT_SUBJECT_JOBS.ONBOARDING_ATTEST = 'onboarding.provision';
 export class OnboardingModule {
   static forRoot(env: Env): DynamicModule {
     const workerOnly =
-      env.SANCHAY_APP_ROLE === 'worker' ? [PreverifyJob, BankVerifyJob, ProvisionJob] : [];
+      env.SANCHAY_APP_ROLE === 'worker'
+        ? [PreverifyJob, BankVerifyJob, KycChecksSweepJob, ProvisionJob]
+        : [];
     return {
       module: OnboardingModule,
       imports: [LegalConsentModule, IdentityModule],

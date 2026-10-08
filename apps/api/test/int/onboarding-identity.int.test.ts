@@ -463,3 +463,138 @@ describe('PUT /onboarding/profile', () => {
     expect(rows).toHaveLength(1);
   });
 });
+
+describe('onboarding.preverify: recheck semantics (ONB-2)', () => {
+  it('an UNDER_PROCESS recheck creates a NEW pre-verification and resets attempts', async () => {
+    const s = await signInWeb(t, '9844600070');
+    await submit(s.cookies, identityFor(70));
+    const createsBefore = t.fakeFp.calls({ op: 'preVerification.create' }).length;
+    t.fakeFp.script(
+      'preVerification.get',
+      completed({ status: 'failed', code: 'kyc_underprocess' }),
+    );
+    await runPreverify(s.investorId);
+    const first = await identityCheck(s.investorId);
+    expect(first?.status).toBe('PROCESSED');
+    expect(first?.nextPollAt).not.toBeNull();
+    const firstPreVerificationId = first?.fpPreVerificationId;
+    expect(t.fakeFp.calls({ op: 'preVerification.create' })).toHaveLength(createsBefore + 1);
+    // transient errors earlier in the wait must not count against the recheck
+    await t.db.db
+      .update(kycChecks)
+      .set({ attempts: MAX_POLL_ATTEMPTS - 1 })
+      .where(eq(kycChecks.id, first?.id as string));
+
+    t.clock.advance(6 * HOUR);
+    // the recheck must ask FP for a fresh verdict: a completed pre-verification never changes
+    t.fakeFp.script('preVerification.create', {
+      status: 200,
+      body: { object: 'pre_verification', id: 'pv_recheck', status: 'accepted' },
+    });
+    t.fakeFp.script('preVerification.get', completed({ status: 'verified' }));
+    await runPreverify(s.investorId);
+
+    expect(t.fakeFp.calls({ op: 'preVerification.create' })).toHaveLength(createsBefore + 2);
+    const rechecked = await identityCheck(s.investorId);
+    expect(rechecked?.fpPreVerificationId).toBe('pv_recheck');
+    expect(rechecked?.fpPreVerificationId).not.toBe(firstPreVerificationId);
+    expect(rechecked?.status).toBe('PROCESSED');
+    expect(rechecked?.nextPollAt).toBeNull();
+    expect(rechecked?.attempts).toBe(0);
+    expect((await profileOfInvestor(s.investorId))?.kycStatus).toBe('VALIDATED');
+    expect((await appOfInvestor(s.investorId))?.identityStatus).toBe('DONE');
+  });
+
+  it('a recheck that is still waiting keeps polling its new pre-verification without creating another', async () => {
+    const s = await signInWeb(t, '9844600071');
+    await submit(s.cookies, identityFor(71));
+    const createsBefore = t.fakeFp.calls({ op: 'preVerification.create' }).length;
+    t.fakeFp.script(
+      'preVerification.get',
+      completed({ status: 'failed', code: 'kyc_underprocess' }),
+    );
+    await runPreverify(s.investorId);
+    t.clock.advance(6 * HOUR);
+    t.fakeFp.script('preVerification.get', {
+      status: 200,
+      body: { object: 'pre_verification', id: 'pv_scripted', status: 'accepted' },
+    });
+    await runPreverify(s.investorId); // recheck: new pre-verification, still accepted
+    const waiting = await identityCheck(s.investorId);
+    expect(waiting?.status).toBe('PENDING');
+    expect(waiting?.attempts).toBe(1);
+    expect(t.fakeFp.calls({ op: 'preVerification.create' })).toHaveLength(createsBefore + 2);
+
+    t.fakeFp.script('preVerification.get', completed({ status: 'verified' }));
+    await runPreverify(s.investorId); // poll: same pre-verification
+    expect(t.fakeFp.calls({ op: 'preVerification.create' })).toHaveLength(createsBefore + 2);
+    expect((await appOfInvestor(s.investorId))?.identityStatus).toBe('DONE');
+  });
+});
+
+describe('onboarding.preverify: field mismatches under a verified readiness (ONB-6)', () => {
+  const withFields = (fields: Record<string, unknown>) => ({
+    status: 200,
+    body: {
+      object: 'pre_verification',
+      id: 'pv_scripted',
+      status: 'completed',
+      readiness: { status: 'verified' },
+      pan: { status: 'completed' },
+      name: { status: 'completed' },
+      date_of_birth: { status: 'completed' },
+      ...fields,
+    },
+  });
+
+  it.each([
+    ['date_of_birth', { date_of_birth: { status: 'failed', code: 'mismatch' } }, 90],
+    ['name', { name: { status: 'failed', code: 'mismatch' } }, 91],
+    ['pan', { pan: { status: 'failed', code: 'invalid' } }, 92],
+  ])(
+    'a %s failure is not VALIDATED: identityStatus ACTION_REQUIRED, readiness_code <field>_mismatch',
+    async (field, fields, n) => {
+      const s = await signInWeb(t, `98446009${String(n - 90)}0`);
+      await submit(s.cookies, identityFor(n));
+      t.fakeFp.script('preVerification.get', withFields(fields));
+      await runPreverify(s.investorId);
+      const profile = await profileOfInvestor(s.investorId);
+      expect(profile?.kycStatus).toBe('UNKNOWN');
+      expect(profile?.readinessCode).toBe(`${field}_mismatch`);
+      const check = await identityCheck(s.investorId);
+      expect(check?.status).toBe('PROCESSED');
+      expect(check?.readinessCode).toBe(`${field}_mismatch`);
+      expect(check?.nextPollAt).toBeNull();
+      expect((await appOfInvestor(s.investorId))?.identityStatus).toBe('ACTION_REQUIRED');
+      // the investor stays on the identity step to correct the field
+      expect((await get('/onboarding', s.cookies)).json().stage).toBe('IDENTITY');
+    },
+  );
+
+  it('the corrected identity is accepted and re-verified', async () => {
+    const s = await signInWeb(t, '9844600095');
+    await submit(s.cookies, identityFor(95));
+    t.fakeFp.script(
+      'preVerification.get',
+      withFields({ date_of_birth: { status: 'failed', code: 'mismatch' } }),
+    );
+    await runPreverify(s.investorId);
+    await submit(s.cookies, { ...identityFor(95), dateOfBirth: '1990-05-15' });
+    expect((await appOfInvestor(s.investorId))?.identityStatus).toBe('IN_PROGRESS');
+    expect((await profileOfInvestor(s.investorId))?.readinessCode).toBeNull();
+  });
+});
+
+const identityCheck = async (investorId: string) =>
+  (await t.db.db.select().from(kycChecks).where(eq(kycChecks.investorId, investorId)))[0];
+const profileOfInvestor = async (investorId: string) =>
+  (
+    await t.db.db.select().from(investorProfiles).where(eq(investorProfiles.investorId, investorId))
+  )[0];
+const appOfInvestor = async (investorId: string) =>
+  (
+    await t.db.db
+      .select()
+      .from(onboardingApplications)
+      .where(eq(onboardingApplications.investorId, investorId))
+  )[0];

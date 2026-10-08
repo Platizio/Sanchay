@@ -1,10 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { KycStatus } from '@sanchay/domain';
+import type { KycStatus, OnboardingStepStatus } from '@sanchay/domain';
 import { deriveOnboardingStage } from '@sanchay/domain';
 import { eq } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { FpKyc } from '../../integrations/fp/fp-kyc.js';
 import {
+  firstFieldFailure,
+  isDefinitiveFpRejection,
   type PreVerificationView,
   parsePreVerification,
 } from '../../integrations/fp/pre-verification.js';
@@ -63,14 +65,42 @@ export class PreverifyJob {
 
   async handle(job: Job<'onboarding.preverify'>): Promise<void> {
     const { investorId, checkId } = job.data as PreverifyJobData;
-    const db = this.dbh.db;
-    const [check] = await db.select().from(kycChecks).where(eq(kycChecks.id, checkId)).limit(1);
-    if (check === undefined) return;
+    const [found] = await this.dbh.db
+      .select()
+      .from(kycChecks)
+      .where(eq(kycChecks.id, checkId))
+      .limit(1);
+    if (found === undefined) return;
     // A settled check with no recheck due (a stale or duplicate job) has nothing left to do.
-    if (check.status !== 'PENDING' && check.nextPollAt === null) return;
+    if (found.status !== 'PENDING' && found.nextPollAt === null) return;
     // Superseded by a corrected identity, or already given up: nothing to poll.
-    if (check.status === 'FAILED') return;
+    if (found.status === 'FAILED') return;
 
+    // A recheck (PROCESSED with a wait due, e.g. UNDER_PROCESS) must not re-read the pre-verification it already
+    // has: a completed one never changes (ONB-2). It starts over as a fresh PENDING check.
+    const check = found.status === 'PROCESSED' ? await this.startRecheck(checkId) : found;
+    if (check === undefined) return;
+
+    let view: PreVerificationView | undefined;
+    try {
+      view = await this.fetchView(investorId, check);
+    } catch (error) {
+      // A 4xx about this investor's data cannot be fixed by retrying: settle now, or the job dies after its
+      // pg-boss retries and the check is stranded (ONB-1). Anything else is thrown for pg-boss to retry.
+      if (!isDefinitiveFpRejection(error)) throw error;
+      await this.giveUp(investorId, check, 'rejected');
+      return;
+    }
+    if (view === undefined) return;
+    await this.apply(investorId, check, view);
+  }
+
+  /** Creates the pre-verification on the first run, then reads it. Undefined when the profile is gone. */
+  private async fetchView(
+    investorId: string,
+    check: KycCheckRow,
+  ): Promise<PreVerificationView | undefined> {
+    const db = this.dbh.db;
     let preVerificationId = check.fpPreVerificationId;
     if (preVerificationId === null) {
       const [profile] = await db
@@ -78,7 +108,7 @@ export class PreverifyJob {
         .from(investorProfiles)
         .where(eq(investorProfiles.investorId, investorId))
         .limit(1);
-      if (profile === undefined) return;
+      if (profile === undefined) return undefined;
       const aad = (column: string) => ({
         table: 'investor_profiles' as const,
         column,
@@ -93,10 +123,32 @@ export class PreverifyJob {
       await db
         .update(kycChecks)
         .set({ fpPreVerificationId: preVerificationId })
-        .where(eq(kycChecks.id, checkId));
+        .where(eq(kycChecks.id, check.id));
     }
-    const view = parsePreVerification(await this.fpKyc.getPreVerification(preVerificationId));
-    await this.apply(investorId, check, view);
+    return parsePreVerification(await this.fpKyc.getPreVerification(preVerificationId));
+  }
+
+  /**
+   * Turns a PROCESSED check with a wait due into a fresh PENDING one: no pre-verification yet (the next fetch
+   * creates a new one) and no attempts (errors during the earlier wait must not count against it). Undefined when
+   * the check was superseded meanwhile.
+   */
+  private async startRecheck(checkId: string): Promise<KycCheckRow | undefined> {
+    return this.dbh.db.transaction(async (tx) => {
+      const live = await this.lockLiveCheck(tx, checkId);
+      if (live === undefined || live.status !== 'PROCESSED') return live;
+      const [fresh] = await tx
+        .update(kycChecks)
+        .set({
+          status: 'PENDING',
+          fpPreVerificationId: null,
+          attempts: 0,
+          nextPollAt: this.clock.now(),
+        })
+        .where(eq(kycChecks.id, checkId))
+        .returning();
+      return fresh;
+    });
   }
 
   private async apply(
@@ -126,6 +178,20 @@ export class PreverifyJob {
       return;
     }
     if (view.readiness.status === 'verified') {
+      // Readiness is a fact about the PAN at the KRA; a mistyped name or date of birth still comes back verified
+      // with a field code (ONB-6). The investor corrects the field on the identity step.
+      const field = firstFieldFailure(view);
+      if (field !== null) {
+        await this.settle(
+          investorId,
+          check.id,
+          'UNKNOWN',
+          view.readiness.status,
+          `${field}_mismatch`,
+          { identityStatus: 'ACTION_REQUIRED' },
+        );
+        return;
+      }
       await this.settle(investorId, check.id, 'VALIDATED', view.readiness.status, null);
       return;
     }
@@ -148,19 +214,20 @@ export class PreverifyJob {
     inMs: number,
   ): Promise<void> {
     if (check.attempts >= MAX_POLL_ATTEMPTS) {
-      await this.settle(
-        investorId,
-        check.id,
-        'UNKNOWN',
-        view.readiness?.status ?? view.status,
-        null,
-        {
-          checkStatus: 'FAILED',
-        },
-      );
+      await this.giveUp(investorId, check, view.readiness?.status ?? view.status);
       return;
     }
     await this.reschedule(investorId, check.id, inMs);
+  }
+
+  /**
+   * Settles the check as given up (FAILED, kyc_status UNKNOWN, identity BLOCKED), the state the investor sees
+   * and can retry from. Also the exit of KycChecksSweepJob and of a definitive FP rejection.
+   */
+  async giveUp(investorId: string, check: KycCheckRow, readinessStatus: string): Promise<void> {
+    await this.settle(investorId, check.id, 'UNKNOWN', readinessStatus, null, {
+      checkStatus: 'FAILED',
+    });
   }
 
   /** Locks the check row; undefined when it is gone or FAILED (superseded by a corrected identity, or given up). */
@@ -209,7 +276,11 @@ export class PreverifyJob {
     kycStatus: KycStatus,
     readinessStatus: string,
     readinessCode: string | null,
-    options: { recheckInMs?: number; checkStatus?: 'PROCESSED' | 'FAILED' } = {},
+    options: {
+      recheckInMs?: number;
+      checkStatus?: 'PROCESSED' | 'FAILED';
+      identityStatus?: OnboardingStepStatus;
+    } = {},
   ): Promise<void> {
     const { recheckInMs, checkStatus = 'PROCESSED' } = options;
     const now = this.clock.now();
@@ -231,7 +302,12 @@ export class PreverifyJob {
         .where(eq(kycChecks.id, checkId));
       if (recheckInMs !== undefined) await this.enqueuePoll(tx, investorId, checkId, recheckInMs);
       const identityStatus =
-        kycStatus === 'VALIDATED' ? 'DONE' : kycStatus === 'UNDER_PROCESS' ? 'WAITING' : 'BLOCKED';
+        options.identityStatus ??
+        (kycStatus === 'VALIDATED'
+          ? 'DONE'
+          : kycStatus === 'UNDER_PROCESS'
+            ? 'WAITING'
+            : 'BLOCKED');
       const [app] = await tx
         .select()
         .from(onboardingApplications)
