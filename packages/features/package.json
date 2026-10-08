@@ -18,6 +18,7 @@
     "@sanchay/money": "workspace:*",
     "@sanchay/tokens": "workspace:*",
     "@sanchay/ui": "workspace:*",
+    "@sanchay/validation": "workspace:*",
     "react-hook-form": "catalog:",
     "zod": "catalog:"
   },

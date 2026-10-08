@@ -28,12 +28,21 @@ export async function readLatestOtp(
   mobile: string,
   sinceMs: number,
 ): Promise<string> {
+  return readLatestOtpTo(request, `sms-${mobile}@sanchay.local`, sinceMs);
+}
+
+/** The newest six-digit code Mailpit holds for `to`: an email OTP's address, or an SMS mailbox. */
+export async function readLatestOtpTo(
+  request: APIRequestContext,
+  to: string,
+  sinceMs: number,
+): Promise<string> {
   let code = '';
   await expect
     .poll(
       async () => {
         const search = await request.get(`${MAILPIT_URL}/api/v1/search`, {
-          params: { query: `to:"sms-${mobile}@sanchay.local"`, limit: '1' },
+          params: { query: `to:"${to}"`, limit: '1' },
         });
         if (!search.ok()) return '';
         const { messages } = (await search.json()) as MailpitSearch;
@@ -45,7 +54,7 @@ export async function readLatestOtp(
         code = /\b(\d{6})\b/.exec(Text)?.[1] ?? '';
         return code;
       },
-      { timeout: 15_000, message: 'Mailpit never received an OTP SMS for the test mobile' },
+      { timeout: 15_000, message: `Mailpit never received an OTP for ${to}` },
     )
     .toMatch(/^\d{6}$/);
   return code;
