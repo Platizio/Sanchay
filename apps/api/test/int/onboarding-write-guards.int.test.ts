@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  consentChallenges,
   consentRecords,
   legalDocuments,
 } from '../../src/modules/legal-consent/legal-consent.schema.js';
@@ -192,11 +193,97 @@ describe('write guards after attest / provisioning (MF-4, ONB-3)', () => {
     },
   );
 
-  it('a FAILED provisioning (attest not in flight) still allows the profile to be corrected', async () => {
+  it('a FAILED provisioning run still allows identity, profile and bank to be corrected (the product state: attestStatus DONE)', async () => {
     const s = await signedUpWithIdentity('9844800013', 13);
-    await setApp(s.investorId, { provisioningStatus: 'FAILED' });
-    const res = await put('/onboarding/profile', s.cookies, FULL_PROFILE);
-    expect(res.statusCode).toBe(200);
+    expect((await put('/onboarding/profile', s.cookies, FULL_PROFILE)).statusCode).toBe(200);
+    // provision.job sets attestStatus DONE when a run starts and fail() never resets it.
+    await setApp(s.investorId, {
+      attestStatus: 'DONE',
+      provisioningStatus: 'FAILED',
+      provisioningFailedReason: 'FP_REJECTED:investorProfile.create',
+      stage: 'PROVISIONING_FAILED',
+    });
+    const profile = await put('/onboarding/profile', s.cookies, { ...FULL_PROFILE, city: 'Pune' });
+    expect(profile.statusCode).toBe(200);
+    const identity = await post('/onboarding/identity', s.cookies, {
+      ...identityFor(13),
+      name: 'Asha K Rao',
+    });
+    expect(identity.statusCode).toBe(200);
+    expect((await profileOf(s.investorId))?.nameAsPerPan).toBe('Asha K Rao');
+    const bank = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    expect(bank.statusCode).toBe(200);
+  });
+
+  describe('an attest that was started and abandoned', () => {
+    async function withAttestChallenge(
+      mobile: string,
+      n: number,
+      status: 'PENDING' | 'APPROVED',
+      expiresAt: Date,
+    ) {
+      const s = await signedUpWithIdentity(mobile, n);
+      const id = newId('consent_challenges');
+      await t.db.db.insert(consentChallenges).values({
+        id,
+        createdBy: s.investorId,
+        updatedBy: s.investorId,
+        investorId: s.investorId,
+        subjectType: 'ONBOARDING_ATTEST',
+        templateKey: 'TPL_ONBOARDING_ATTEST',
+        snapshotEnc: Buffer.alloc(16, 1),
+        snapshotSha256: Buffer.alloc(32, 2),
+        status,
+        requiredFactors: ['SMS'],
+        moneyParamsVersion: '2026-09-01',
+        expiresAt,
+      });
+      await setApp(s.investorId, { attestStatus: 'IN_PROGRESS', attestChallengeId: id });
+      return s;
+    }
+
+    it('an expired, unapproved challenge no longer locks identity (the investor backed out)', async () => {
+      const s = await withAttestChallenge(
+        '9844800081',
+        81,
+        'PENDING',
+        new Date(t.clock.now().getTime() - 60_000),
+      );
+      const res = await post('/onboarding/identity', s.cookies, {
+        ...identityFor(81),
+        name: 'Asha K Rao',
+      });
+      expect(res.statusCode).toBe(200);
+      expect((await profileOf(s.investorId))?.nameAsPerPan).toBe('Asha K Rao');
+    });
+
+    it('a live unapproved challenge still locks identity', async () => {
+      const s = await withAttestChallenge(
+        '9844800082',
+        82,
+        'PENDING',
+        new Date(t.clock.now().getTime() + 10 * 60_000),
+      );
+      const res = await post('/onboarding/identity', s.cookies, {
+        ...identityFor(82),
+        name: 'Someone Else',
+      });
+      expect(res.statusCode).toBe(409);
+    });
+
+    it('an approved challenge locks identity even when its OTP window has passed', async () => {
+      const s = await withAttestChallenge(
+        '9844800083',
+        83,
+        'APPROVED',
+        new Date(t.clock.now().getTime() - 60_000),
+      );
+      const res = await post('/onboarding/identity', s.cookies, {
+        ...identityFor(83),
+        name: 'Someone Else',
+      });
+      expect(res.statusCode).toBe(409);
+    });
   });
 });
 

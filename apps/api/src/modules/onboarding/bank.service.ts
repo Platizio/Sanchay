@@ -37,7 +37,7 @@ export class BankService {
       if (!app || app.profileStatus !== 'DONE') {
         throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Complete the profile step first' });
       }
-      assertOnboardingWritable(app);
+      await assertOnboardingWritable(tx, this.clock.now(), app);
       // The same account at the same branch, still being verified or already verified, is the same request
       // again (a retry with a fresh key): answer with the existing row instead of a second FP call.
       const [existing] = await tx

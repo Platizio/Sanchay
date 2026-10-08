@@ -11,6 +11,7 @@ import type {
 import { deriveOnboardingStage } from '@sanchay/domain';
 import { eq } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
+import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
 import { asRowId } from '../platform/ids.js';
@@ -41,6 +42,7 @@ export interface PutProfileInput {
 export class ProfileService {
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(CLOCK) private readonly clock: Clock,
     @Inject(Crypto) private readonly crypto: Crypto,
   ) {}
 
@@ -79,7 +81,7 @@ export class ProfileService {
         .limit(1)
         .for('update');
       if (!app) throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Submit identity first' });
-      assertOnboardingWritable(app);
+      await assertOnboardingWritable(tx, this.clock.now(), app);
       // A PEP / related-PEP block is cleared by compliance only; the investor path cannot overwrite the
       // declaration or its recorded reason.
       if (app.profileStatus === 'BLOCKED') {

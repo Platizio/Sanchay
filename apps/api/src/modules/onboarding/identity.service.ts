@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { KYC_CHECK_PURPOSES } from '@sanchay/domain';
 import { and, count, desc, eq, gte, isNotNull, ne, or } from 'drizzle-orm';
-import { DB, type DbHandle } from '../../db/client.js';
+import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
+import { consentChallenges } from '../legal-consent/legal-consent.schema.js';
 import { LegalDocs } from '../legal-consent/legal-docs.service.js';
 import { CLOCK, type Clock, HOUR, MINUTE } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
@@ -35,20 +36,45 @@ const STALE_POLL_GRACE_MS = 2 * MINUTE;
  * MF-4: once attest has started, or provisioning is past NOT_STARTED/FAILED, the identity, profile and bank
  * rows are what FP is (or is about to be) given, so the investor path may not change them. Changes after
  * DONE belong to the profile-change flow (Plan 04). Call it on the row-locked application.
+ *
+ * Two states stay editable although `attestStatus` is not NOT_STARTED:
+ * - provisioning FAILED: provision.job sets attestStatus DONE when a run starts and fail() never resets
+ *   it, so the investor must be able to fix their data and re-attest (runbook provisioning-failed.md).
+ * - attest IN_PROGRESS whose challenge was never approved and has expired: the investor backed out, and
+ *   no OTP can approve it any more (a new attest.start() replaces the challenge).
  */
-export function assertOnboardingWritable(app: {
-  attestStatus: string;
-  provisioningStatus: string;
-}): void {
-  const attestOpen = app.attestStatus === 'IN_PROGRESS' || app.attestStatus === 'DONE';
-  const provisioningOpen =
-    app.provisioningStatus !== 'NOT_STARTED' && app.provisioningStatus !== 'FAILED';
-  if (attestOpen || provisioningOpen) {
-    throw new AppError('CONFLICT_VERSION', {
-      message: 'Onboarding details can no longer be changed once verification has started',
-    });
+export async function assertOnboardingWritable(
+  exec: DbExecutor,
+  now: Date,
+  app: {
+    attestStatus: string;
+    attestChallengeId: string | null;
+    provisioningStatus: string;
+  },
+): Promise<void> {
+  if (app.provisioningStatus === 'FAILED') return;
+  if (app.provisioningStatus !== 'NOT_STARTED') throw writeRefused();
+  if (app.attestStatus === 'DONE') throw writeRefused();
+  if (app.attestStatus === 'IN_PROGRESS') {
+    const [challenge] =
+      app.attestChallengeId === null
+        ? []
+        : await exec
+            .select({ status: consentChallenges.status, expiresAt: consentChallenges.expiresAt })
+            .from(consentChallenges)
+            .where(eq(consentChallenges.id, app.attestChallengeId));
+    const abandoned =
+      challenge !== undefined &&
+      challenge.status === 'PENDING' &&
+      challenge.expiresAt.getTime() <= now.getTime();
+    if (!abandoned) throw writeRefused();
   }
 }
+
+const writeRefused = (): AppError =>
+  new AppError('CONFLICT_VERSION', {
+    message: 'Onboarding details can no longer be changed once verification has started',
+  });
 
 const panInUse = (): AppError =>
   new AppError('VALIDATION_FAILED', {
@@ -81,7 +107,7 @@ export class IdentityService {
         .limit(1)
         .for('update');
       if (!app) throw new Error('IdentityService.submitIdentity: application row vanished');
-      assertOnboardingWritable(app);
+      await assertOnboardingWritable(tx, this.clock.now(), app);
       const [existing] = await tx
         .select()
         .from(investorProfiles)
