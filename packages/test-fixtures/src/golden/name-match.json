@@ -1,0 +1,98 @@
+[
+  {
+    "id": "NM-01",
+    "a": "Rajesh Kumar Sharma",
+    "b": "Rajesh Kumar Sharma",
+    "expected": 100,
+    "verified": true,
+    "note": "identical"
+  },
+  {
+    "id": "NM-02",
+    "a": "MR RAJESH SHARMA",
+    "b": "RAJESH SHARMA",
+    "expected": 100,
+    "verified": true,
+    "note": "MR honorific stripped"
+  },
+  {
+    "id": "NM-03",
+    "a": "rajesh sharma",
+    "b": "RAJESH SHARMA",
+    "expected": 100,
+    "verified": true,
+    "note": "case-insensitive"
+  },
+  {
+    "id": "NM-04",
+    "a": "KUMAR RAM",
+    "b": "RAM KUMAR",
+    "expected": 77,
+    "verified": false,
+    "note": "first/last order swap fails despite the same letters"
+  },
+  {
+    "id": "NM-05",
+    "a": "RAM KUMAR",
+    "b": "RAM KR",
+    "expected": 93,
+    "verified": true,
+    "note": "Kumar vs Kr abbreviation"
+  },
+  {
+    "id": "NM-06",
+    "a": "R KUMAR",
+    "b": "RAM KUMAR",
+    "expected": 83,
+    "verified": true,
+    "note": "initial instead of first name"
+  },
+  {
+    "id": "NM-07",
+    "a": "ANIL KUMAR",
+    "b": "SUNIL KUMAR",
+    "expected": 81,
+    "verified": true,
+    "note": "boundary: just above 80"
+  },
+  {
+    "id": "NM-08",
+    "a": "AAAA",
+    "b": "ZZZZ",
+    "expected": 0,
+    "verified": false,
+    "note": "completely different"
+  },
+  {
+    "id": "NM-09",
+    "a": "",
+    "b": "RAM KUMAR",
+    "expected": 0,
+    "verified": false,
+    "note": "empty guard"
+  },
+  {
+    "id": "NM-10",
+    "a": "DR ANITA RAO",
+    "b": "ANITA RAO",
+    "expected": 100,
+    "verified": true,
+    "note": "DR honorific stripped"
+  },
+  {
+    "id": "NM-11",
+    "a": "RAM MOHAN DAS",
+    "b": "RAM DAS",
+    "expected": 77,
+    "verified": false,
+    "note": "middle name dropped: below 80, so the investor must use the PAN-name account (the 60-79 manual path is EXT E2)"
+  },
+  {
+    "id": "NM-12",
+    "a": "SEETHA",
+    "b": "SEATHA",
+    "expected": 91,
+    "verified": true,
+    "note": "transposed-letter typo"
+  }
+]

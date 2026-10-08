@@ -7,6 +7,7 @@ import { Public } from '../platform/http-decorators.js';
 import { requireIdempotency } from '../platform/idempotency.middleware.js';
 import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
+import { BankService } from './bank.service.js';
 import { IdentityService } from './identity.service.js';
 import { NominationService } from './nomination.service.js';
 import { OnboardingQueries } from './onboarding.queries.js';
@@ -20,6 +21,7 @@ export class OnboardingRouter {
     @Inject(IdentityService) private readonly identity: IdentityService,
     @Inject(ProfileService) private readonly profile: ProfileService,
     @Inject(NominationService) private readonly nomination: NominationService,
+    @Inject(BankService) private readonly bank: BankService,
     @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
     @Inject(RiskProfileService) private readonly riskProfiles: RiskProfileService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
@@ -43,6 +45,20 @@ export class OnboardingRouter {
   putProfile() {
     return implement(contract.onboarding.putProfile).handler(({ input }) =>
       this.profile.putProfile(requireAuth(this.cls).investorId, input),
+    );
+  }
+
+  @Implement(contract.onboarding.addBank)
+  addBank() {
+    return implement(contract.onboarding.addBank).handler(({ input }) =>
+      this.bank.addBank(requireAuth(this.cls).investorId, input),
+    );
+  }
+
+  @Implement(contract.onboarding.listBanks)
+  listBanks() {
+    return implement(contract.onboarding.listBanks).handler(() =>
+      this.bank.listBanks(requireAuth(this.cls).investorId),
     );
   }
 

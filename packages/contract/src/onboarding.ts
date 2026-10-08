@@ -1,6 +1,7 @@
 import { oc } from '@orpc/contract';
 import {
   ADDRESS_NATURES,
+  BANK_ACCOUNT_STATUSES,
   GENDERS,
   INCOME_SLABS,
   OCCUPATIONS,
@@ -8,7 +9,7 @@ import {
   SOURCE_OF_WEALTH,
   TAX_STATUSES,
 } from '@sanchay/domain';
-import { panSchema, pincodeSchema } from '@sanchay/validation';
+import { ifscSchema, panSchema, pincodeSchema } from '@sanchay/validation';
 import { z } from 'zod';
 import { InstantSchema } from './common.js';
 import { COMMON_ERRORS, errorMap, SESSION_ERRORS } from './errors.js';
@@ -113,6 +114,26 @@ export const NominationViewSchema = z.object({
   ),
 });
 
+export const AddBankInputSchema = z.strictObject({
+  accountNumber: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{9,18}$/, 'Enter a valid account number'),
+  ifsc: ifscSchema,
+  holderName: z.string().trim().min(1).max(140),
+});
+
+export const BankAddedSchema = z.object({ bankId: z.uuid(), status: z.literal('PENDING') });
+
+export const BankSummarySchema = z.object({
+  bankId: z.uuid(),
+  ifsc: z.string(),
+  bankName: z.string().nullable(),
+  accountLast4: z.string(),
+  status: z.enum(BANK_ACCOUNT_STATUSES),
+  isPrimary: z.boolean(),
+});
+
 const route = (method: 'GET' | 'POST' | 'PUT', path: `/${string}`, summary: string) =>
   oc.route({ method, path, tags: ['onboarding'], summary });
 
@@ -138,6 +159,17 @@ export const onboardingContract = {
     )
     .input(PutProfileInputSchema)
     .output(StageResultSchema),
+  addBank: route(
+    'POST',
+    '/onboarding/bank-accounts',
+    'Add a bank account for penny-drop verification',
+  )
+    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'ONBOARDING_INCOMPLETE'))
+    .input(AddBankInputSchema)
+    .output(BankAddedSchema),
+  listBanks: route('GET', '/onboarding/bank-accounts', "List this investor's bank accounts")
+    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
+    .output(z.array(BankSummarySchema)),
   getNomination: route(
     'GET',
     '/onboarding/nomination',
