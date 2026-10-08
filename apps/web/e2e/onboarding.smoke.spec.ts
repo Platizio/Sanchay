@@ -9,12 +9,16 @@ import { readLatestOtp, readLatestOtpTo } from './support/otp';
  */
 const mobile = process.env.SANCHAY_E2E_ONBOARDING_MOBILE ?? '';
 const email = `smoke.${mobile}@example.com`;
+// One PAN per investor (a second sign-up may not reuse it), so each run derives its PAN from the mobile.
+const pan = `ABCPK${mobile.slice(-4)}A`;
 
 test('onboarding: identity through provisioning reaches an account that is ready', async ({
   page,
   request,
 }) => {
   test.skip(mobile === '', 'set SANCHAY_E2E_ONBOARDING_MOBILE to a pilot-invited mobile');
+  // Identity, bank and provisioning wait on worker jobs and the hub's 10 s poll.
+  test.setTimeout(300_000);
   await page.goto('/signup');
   await page.getByLabel('Mobile number').fill(mobile);
   let since = Date.now();
@@ -31,7 +35,7 @@ test('onboarding: identity through provisioning reaches an account that is ready
   await expect(page.getByTestId('onboarding-hub')).toBeVisible();
 
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByLabel('PAN').fill('ABCPK1234A');
+  await page.getByLabel('PAN', { exact: true }).fill(pan);
   await page.getByLabel('Full name (as per PAN)').fill('Asha Rao');
   await page.getByLabel('Date of birth').fill('1990-05-12');
   await page.getByRole('checkbox', { name: /verify my KYC/i }).check();
@@ -44,26 +48,26 @@ test('onboarding: identity through provisioning reaches an account that is ready
   });
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByRole('button', { name: /^Gender/ }).click();
-  await page.getByRole('radio', { name: 'Female' }).click();
+  await page.getByRole('radio', { name: 'Female', exact: true }).click();
   await page.getByRole('button', { name: /^Occupation/ }).click();
-  await page.getByRole('radio', { name: 'Private sector service' }).click();
+  await page.getByRole('radio', { name: 'Private sector service', exact: true }).click();
   await page.getByRole('button', { name: /^Annual income/ }).click();
-  await page.getByRole('radio', { name: '₹5,00,000 – ₹10,00,000' }).click();
-  await page.getByRole('radio', { name: 'No, I am not' }).click();
+  await page.getByRole('radio', { name: '₹5,00,000 – ₹10,00,000', exact: true }).click();
+  await page.getByRole('radio', { name: 'No, I am not', exact: true }).click();
   await page.getByRole('button', { name: /^Source of wealth/ }).click();
-  await page.getByRole('radio', { name: 'Salary' }).click();
+  await page.getByRole('radio', { name: 'Salary', exact: true }).click();
   await page.getByRole('button', { name: /^Country of birth/ }).click();
-  await page.getByRole('radio', { name: 'India' }).click();
+  await page.getByRole('radio', { name: 'India', exact: true }).click();
   await page.getByRole('button', { name: /^Nationality/ }).click();
-  await page.getByRole('radio', { name: 'Indian' }).click();
+  await page.getByRole('radio', { name: 'Indian', exact: true }).click();
   await page.getByLabel('Place of birth').fill('Pune');
   await page.getByRole('button', { name: /^Tax status/ }).click();
-  await page.getByRole('radio', { name: 'Resident individual' }).click();
+  await page.getByRole('radio', { name: 'Resident individual', exact: true }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
 
   await page.getByLabel('Address line 1').fill('221B, MG Road');
   await page.getByRole('button', { name: /^Address type/ }).click();
-  await page.getByRole('radio', { name: 'Residential' }).click();
+  await page.getByRole('radio', { name: 'Residential', exact: true }).click();
   await page.getByLabel('Pincode').fill('411001');
   await expect(page.getByLabel('City')).toHaveValue(/.+/);
   await page.getByRole('button', { name: 'Continue' }).click();
@@ -93,13 +97,13 @@ test('onboarding: identity through provisioning reaches an account that is ready
   await page.getByRole('button', { name: 'Add nominee' }).click();
   await page.getByLabel('Full name').fill('Aarav Shah');
   await page.getByRole('button', { name: /^Relationship/ }).click();
-  await page.getByRole('radio', { name: 'Son' }).click();
+  await page.getByRole('radio', { name: 'Son', exact: true }).click();
   await page.getByRole('button', { name: 'Save nomination' }).click();
 
-  // ONB-21/22: Q1 is the date of birth, Q2..Q8 are the seven scored answers.
+  // ONB-21/22: the seven scored answers.
   await activeStage('Risk profile');
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByLabel('Date of birth').fill('1990-05-12');
+  // RSK-1: Q1's age comes from the KYC date of birth, so the screen asks only the seven scored answers.
   for (const [question, answer] of [
     ['When will you need this money?', '3 to 5 years'],
     ['Main goal', 'Balanced growth'],
