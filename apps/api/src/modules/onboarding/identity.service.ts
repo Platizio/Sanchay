@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { KYC_CHECK_PURPOSES } from '@sanchay/domain';
-import { and, desc, eq, isNotNull, ne, or } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, ne, or } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
 import { LegalDocs } from '../legal-consent/legal-docs.service.js';
-import { CLOCK, type Clock } from '../platform/clock.js';
+import { CLOCK, type Clock, HOUR, MINUTE } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
 import { asRowId, newId } from '../platform/ids.js';
@@ -16,6 +16,38 @@ export interface SubmitIdentityInput {
   pan: string;
   name: string;
   dateOfBirth: string;
+}
+
+/** Who is submitting, for the KYC_CONSENT evidence row (the same fields legal.router.ts records). */
+export interface SubmitIdentityContext {
+  ip: string | null;
+  userAgent: string | null;
+  sessionId: string | null;
+}
+
+/** An identical resubmit may start a fresh KRA check at most this many times in `REPLAY_WINDOW_MS`. */
+export const MAX_IDENTITY_CHECKS_PER_DAY = 3;
+const REPLAY_WINDOW_MS = 24 * HOUR;
+/** A PENDING check whose next poll is this far overdue has lost its job (pg-boss ran out of retries). */
+const STALE_POLL_GRACE_MS = 2 * MINUTE;
+
+/**
+ * MF-4: once attest has started, or provisioning is past NOT_STARTED/FAILED, the identity, profile and bank
+ * rows are what FP is (or is about to be) given, so the investor path may not change them. Changes after
+ * DONE belong to the profile-change flow (Plan 04). Call it on the row-locked application.
+ */
+export function assertOnboardingWritable(app: {
+  attestStatus: string;
+  provisioningStatus: string;
+}): void {
+  const attestOpen = app.attestStatus === 'IN_PROGRESS' || app.attestStatus === 'DONE';
+  const provisioningOpen =
+    app.provisioningStatus !== 'NOT_STARTED' && app.provisioningStatus !== 'FAILED';
+  if (attestOpen || provisioningOpen) {
+    throw new AppError('CONFLICT_VERSION', {
+      message: 'Onboarding details can no longer be changed once verification has started',
+    });
+  }
 }
 
 const panInUse = (): AppError =>
@@ -34,10 +66,22 @@ export class IdentityService {
     @Inject(OnboardingQueries) private readonly queries: OnboardingQueries,
   ) {}
 
-  async submitIdentity(investorId: string, input: SubmitIdentityInput) {
+  async submitIdentity(
+    investorId: string,
+    input: SubmitIdentityInput,
+    context: SubmitIdentityContext,
+  ) {
     const panBidx = this.crypto.blindIndex('pan', input.pan);
     return this.dbh.db.transaction(async (tx) => {
-      const app = await this.queries.ensureApplication(tx, investorId);
+      await this.queries.ensureApplication(tx, investorId);
+      const [app] = await tx
+        .select()
+        .from(onboardingApplications)
+        .where(eq(onboardingApplications.investorId, investorId))
+        .limit(1)
+        .for('update');
+      if (!app) throw new Error('IdentityService.submitIdentity: application row vanished');
+      assertOnboardingWritable(app);
       const [existing] = await tx
         .select()
         .from(investorProfiles)
@@ -50,15 +94,43 @@ export class IdentityService {
           rowId: asRowId('investor_profiles', existing.id),
         });
         const [latest] = await tx
-          .select({ status: kycChecks.status })
+          .select({ status: kycChecks.status, nextPollAt: kycChecks.nextPollAt })
           .from(kycChecks)
-          .where(eq(kycChecks.investorId, investorId))
+          .where(and(eq(kycChecks.investorId, investorId), eq(kycChecks.purpose, 'IDENTITY')))
           .orderBy(desc(kycChecks.id))
           .limit(1);
-        // Idempotent replay: identity already recorded with the same PAN, name and date of birth. The
-        // exception is a check that was given up on (FAILED): the same data may be submitted to retry.
-        if (storedDob === input.dateOfBirth && latest?.status !== 'FAILED') {
-          return { stage: 'IDENTITY' as const };
+        if (storedDob === input.dateOfBirth) {
+          // Idempotent replay: identity already recorded with the same PAN, name and date of birth. The
+          // same data starts a fresh check only when the earlier one can no longer settle on its own:
+          // given up (FAILED), stranded PENDING (its poll is overdue), or settled to a KRA verdict that
+          // is not VALIDATED (a completed pre-verification never changes, so only a new one can).
+          const now = this.clock.now().getTime();
+          const stranded =
+            latest?.status === 'PENDING' &&
+            latest.nextPollAt !== null &&
+            latest.nextPollAt.getTime() < now - STALE_POLL_GRACE_MS;
+          const unsettled =
+            latest === undefined ||
+            latest.status === 'FAILED' ||
+            stranded ||
+            (latest.status === 'PROCESSED' && existing.kycStatus !== 'VALIDATED');
+          if (!unsettled) return { stage: 'IDENTITY' as const };
+          const [recent] = await tx
+            .select({ n: count() })
+            .from(kycChecks)
+            .where(
+              and(
+                eq(kycChecks.investorId, investorId),
+                eq(kycChecks.purpose, 'IDENTITY'),
+                gte(kycChecks.createdAt, new Date(now - REPLAY_WINDOW_MS)),
+              ),
+            );
+          if ((recent?.n ?? 0) >= MAX_IDENTITY_CHECKS_PER_DAY) {
+            throw new AppError('RATE_LIMITED', {
+              retryAfterSeconds: 3600,
+              message: 'Too many verification attempts today, try again later',
+            });
+          }
         }
       }
       const [other] = await tx
@@ -74,9 +146,9 @@ export class IdentityService {
         investorId,
         key: 'KYC_CONSENT',
         channel: 'APP',
-        ip: null,
-        userAgent: null,
-        sessionId: null,
+        ip: context.ip,
+        userAgent: context.userAgent,
+        sessionId: context.sessionId,
       });
 
       const profileId = existing
@@ -132,6 +204,7 @@ export class IdentityService {
         .where(
           and(
             eq(kycChecks.investorId, investorId),
+            eq(kycChecks.purpose, 'IDENTITY'),
             or(eq(kycChecks.status, 'PENDING'), isNotNull(kycChecks.nextPollAt)),
           ),
         );
@@ -143,6 +216,8 @@ export class IdentityService {
         investorId,
         createdBy: investorId,
         updatedBy: investorId,
+        // The replay window counts rows by created_at, so stamp it from the clock the service reads.
+        createdAt: this.clock.now(),
         purpose: KYC_CHECK_PURPOSES[0],
         fpPreVerificationId: null,
         status: 'PENDING',

@@ -1,7 +1,7 @@
 import { type ApiClient, toApiError } from '@sanchay/api-client';
 import { messageForError } from '@sanchay/app-core';
 import { space } from '@sanchay/tokens';
-import { AppText, Banner, Button, RadioGroup, Screen, TextField } from '@sanchay/ui';
+import { AppText, Banner, Button, RadioGroup, Screen } from '@sanchay/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -23,7 +23,7 @@ const QuestionsSchema = z.array(
   }),
 );
 
-/** Q1 (age) is derived from the date of birth; Q2..Q8 are the seven scored answers, by question id. */
+/** Q1 (age) comes from the KYC date of birth on the server (RSK-1); Q2..Q8 are the seven scored answers, by question id. */
 const ANSWER_KEY: Record<string, Exclude<keyof RiskAnswers, 'dob'>> = {
   Q2: 'horizon',
   Q3: 'goal',
@@ -44,10 +44,6 @@ function formatExpiry(iso: string): string {
   return `${day} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const isPastDate = (value: string): boolean =>
-  ISO_DATE.test(value) && Date.parse(`${value}T00:00:00Z`) <= Date.now();
-
 /** ONB-21/22: the risk questionnaire. Scoring is the server's (E9); this screen collects and shows the result. */
 export function RiskQuestionnaireScreen() {
   const { client, utils } = useApi();
@@ -63,7 +59,6 @@ export function RiskQuestionnaireScreen() {
     },
   });
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [dob, setDob] = useState('');
 
   if (submit.data) {
     return (
@@ -106,11 +101,10 @@ export function RiskQuestionnaireScreen() {
   }
 
   const scored = parsed.data.filter((q) => q.options && ANSWER_KEY[q.id]);
-  const dobValid = isPastDate(dob);
-  const ready = dobValid && scored.every((q) => answers[q.id]);
+  const ready = scored.every((q) => answers[q.id]);
 
   const send = () => {
-    const body: Record<string, string> = { dob };
+    const body: Record<string, string> = {};
     for (const q of scored) {
       const key = ANSWER_KEY[q.id];
       const value = answers[q.id];
@@ -127,14 +121,7 @@ export function RiskQuestionnaireScreen() {
         <Banner tone="error" message={messageForError(toApiError(submit.error).code)} />
       ) : null}
       <View style={styles.stack}>
-        <TextField
-          label="Date of birth"
-          value={dob}
-          onChangeText={setDob}
-          placeholder="YYYY-MM-DD"
-          hint="Used only to score your age."
-          error={dob !== '' && !dobValid ? 'Enter a past date as YYYY-MM-DD' : undefined}
-        />
+        <AppText tone="muted">Age from your PAN details</AppText>
         {scored.map((q) => (
           <RadioGroup
             key={q.id}

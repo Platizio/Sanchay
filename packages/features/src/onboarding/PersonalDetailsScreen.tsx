@@ -68,6 +68,8 @@ const TAX_STATUS_OPTIONS: { value: TaxStatus; label: string }[] = [
 const PEP_REVIEW_COPY =
   "Based on your answers, we're unable to open an account for you online right now. Our compliance team will be in touch.";
 const NATIONALITY_COPY = 'Sanchay currently supports Indian nationals only.';
+// The server refuses any other country of birth (FP provisioning maps India only), so the client stops it here too.
+const COUNTRY_OF_BIRTH_COPY = 'Indian-born residents only for now.';
 
 /** ONB-05: fields the server never defaults (E6), so Continue stays disabled until all are set. */
 export function PersonalDetailsScreen() {
@@ -86,6 +88,7 @@ export function PersonalDetailsScreen() {
   const [taxStatus, setTaxStatus] = useState<TaxStatus | null>(draft.taxStatus ?? null);
 
   const nationalityUnsupported = nationality !== null && nationality !== 'Indian';
+  const countryUnsupported = countryOfBirth !== null && countryOfBirth !== 'India';
   const place = placeOfBirth.trim();
 
   const continueToAddress = () => {
@@ -99,7 +102,8 @@ export function PersonalDetailsScreen() {
       nationality === null ||
       taxStatus === null ||
       place.length === 0 ||
-      nationalityUnsupported
+      nationalityUnsupported ||
+      countryUnsupported
     ) {
       return;
     }
@@ -127,7 +131,8 @@ export function PersonalDetailsScreen() {
     nationality !== null &&
     place.length > 0 &&
     taxStatus !== null &&
-    !nationalityUnsupported;
+    !nationalityUnsupported &&
+    !countryUnsupported;
 
   return (
     <Screen testID="onboarding-personal-details">
@@ -136,6 +141,7 @@ export function PersonalDetailsScreen() {
         <Banner tone="info" message={PEP_REVIEW_COPY} />
       ) : null}
       {nationalityUnsupported ? <Banner tone="info" message={NATIONALITY_COPY} /> : null}
+      {countryUnsupported ? <Banner tone="info" message={COUNTRY_OF_BIRTH_COPY} /> : null}
       <Select
         label="Gender"
         placeholder="Choose one"

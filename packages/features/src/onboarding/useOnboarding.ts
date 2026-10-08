@@ -3,6 +3,7 @@ import { messageForError } from '@sanchay/app-core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { useApi } from '../api/ApiContext';
+import { newIntentKey } from '../common/intentKey';
 
 /** ONB-00 hub order (spec §5, E5 deriveOnboardingStage). */
 export const ONBOARDING_ACTIVE_STAGES = [
@@ -103,7 +104,7 @@ export type SubmitIdentityInput = Parameters<ApiClient['onboarding']['submitIden
 export function useSubmitIdentity(): OnboardingMutation<SubmitIdentityInput> {
   const { client } = useApi();
   return useOnboardingMutation((input: SubmitIdentityInput) =>
-    client.onboarding.submitIdentity(input),
+    client.onboarding.submitIdentity(input, { context: { idempotencyKey: newIntentKey() } }),
   );
 }
 
@@ -118,7 +119,9 @@ export type AddressNature = PutProfileInput['addressNature'];
 
 export function usePutProfile(): OnboardingMutation<PutProfileInput> {
   const { client } = useApi();
-  return useOnboardingMutation((input: PutProfileInput) => client.onboarding.putProfile(input));
+  return useOnboardingMutation((input: PutProfileInput) =>
+    client.onboarding.putProfile(input, { context: { idempotencyKey: newIntentKey() } }),
+  );
 }
 
 /**

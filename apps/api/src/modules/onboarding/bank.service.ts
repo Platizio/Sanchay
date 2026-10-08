@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
@@ -7,6 +7,7 @@ import { AppError } from '../platform/errors.js';
 import { newId } from '../platform/ids.js';
 import { Jobs } from '../platform/jobs/jobs.service.js';
 import { bankAccounts } from './bank.schema.js';
+import { assertOnboardingWritable } from './identity.service.js';
 import { kycChecks, onboardingApplications } from './onboarding.schema.js';
 
 export interface AddBankInput {
@@ -25,16 +26,35 @@ export class BankService {
   ) {}
 
   async addBank(investorId: string, input: AddBankInput) {
-    const [app] = await this.dbh.db
-      .select()
-      .from(onboardingApplications)
-      .where(eq(onboardingApplications.investorId, investorId))
-      .limit(1);
-    if (!app || app.profileStatus !== 'DONE') {
-      throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Complete the profile step first' });
-    }
     const accountBidx = this.crypto.blindIndex('account_number', input.accountNumber);
     return this.dbh.db.transaction(async (tx) => {
+      const [app] = await tx
+        .select()
+        .from(onboardingApplications)
+        .where(eq(onboardingApplications.investorId, investorId))
+        .limit(1)
+        .for('update');
+      if (!app || app.profileStatus !== 'DONE') {
+        throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Complete the profile step first' });
+      }
+      assertOnboardingWritable(app);
+      // The same account at the same branch, still being verified or already verified, is the same request
+      // again (a retry with a fresh key): answer with the existing row instead of a second FP call.
+      const [existing] = await tx
+        .select({ id: bankAccounts.id, status: bankAccounts.status })
+        .from(bankAccounts)
+        .where(
+          and(
+            eq(bankAccounts.investorId, investorId),
+            eq(bankAccounts.accountNumberBidx, accountBidx),
+            eq(bankAccounts.ifsc, input.ifsc),
+            inArray(bankAccounts.status, ['PENDING', 'VERIFIED']),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        return { bankId: existing.id, status: 'PENDING' as const };
+      }
       const bankId = newId('bank_accounts');
       const checkId = newId('kyc_checks');
       await tx.insert(bankAccounts).values({

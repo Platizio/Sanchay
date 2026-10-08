@@ -39,6 +39,7 @@ afterAll(() => server.close());
 describe('BankScreen (ONB-08/09)', () => {
   it('posts the account with the PAN-name holder, then shows the verification in progress', async () => {
     let body: unknown;
+    let key: string | null = null;
     let added = false;
     server.use(
       http.get(`${TEST_API}/me`, () => HttpResponse.json(me)),
@@ -47,6 +48,7 @@ describe('BankScreen (ONB-08/09)', () => {
       ),
       http.post(`${TEST_API}/onboarding/bank-accounts`, async ({ request }) => {
         body = await request.json();
+        key = request.headers.get('idempotency-key');
         added = true;
         return HttpResponse.json({ bankId: bank('PENDING').bankId, status: 'PENDING' });
       }),
@@ -68,6 +70,7 @@ describe('BankScreen (ONB-08/09)', () => {
       ifsc: 'HDFC0000001',
       holderName: 'Asha Rao',
     });
+    expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
   it('does not post while the two account numbers differ', async () => {

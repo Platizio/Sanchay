@@ -44,6 +44,24 @@ describe('PersonalDetailsScreen (ONB-05)', () => {
     expect(isDisabled(submit)).toBe(false);
   });
 
+  it("blocks a country of birth of 'Other' like the nationality guard, with Continue disabled", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PersonalDetailsScreen />);
+    await chooseSelect(user, /^Gender/, 'Female');
+    await chooseSelect(user, /^Occupation/, 'Private sector service');
+    await chooseSelect(user, /^Annual income/, '₹5,00,000 – ₹10,00,000');
+    await user.click(screen.getByRole('radio', { name: 'No, I am not' }));
+    await chooseSelect(user, /^Source of wealth/, 'Salary');
+    await chooseSelect(user, /^Nationality/, 'Indian');
+    await user.type(screen.getByLabelText('Place of birth'), 'Dubai');
+    await chooseSelect(user, /^Tax status/, 'Resident individual');
+    await chooseSelect(user, /^Country of birth/, 'Other');
+    expect(await screen.findByText(/Indian-born residents only for now/)).toBeTruthy();
+    expect(isDisabled(screen.getByRole('button', { name: 'Continue' }))).toBe(true);
+    await chooseSelect(user, /^Country of birth/, 'India');
+    expect(isDisabled(screen.getByRole('button', { name: 'Continue' }))).toBe(false);
+  });
+
   it('shows blocked copy as soon as PEP or a related PEP is selected', async () => {
     const user = userEvent.setup();
     renderWithProviders(<PersonalDetailsScreen />);

@@ -10,6 +10,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 import { useApi } from '../api/ApiContext';
+import { newIntentKey } from '../common/intentKey';
 import { useNav } from '../nav/NavContext';
 
 const bankFormSchema = z
@@ -31,7 +32,7 @@ const VERIFY_POLL_MS = 3000;
  * settles it PENDING -> VERIFIED | FAILED; this screen only reads the outcome, never forces it).
  */
 export function BankScreen() {
-  const { utils } = useApi();
+  const { client, utils } = useApi();
   const nav = useNav();
   const queryClient = useQueryClient();
   const me = useQuery(utils.me.get.queryOptions());
@@ -40,14 +41,15 @@ export function BankScreen() {
     refetchInterval: (query) =>
       query.state.data?.some((bank) => bank.status === 'PENDING') ? VERIFY_POLL_MS : false,
   });
-  const addBank = useMutation(
-    utils.onboarding.addBank.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: utils.onboarding.listBanks.key() });
-        await queryClient.invalidateQueries({ queryKey: utils.onboarding.get.key() });
-      },
-    }),
-  );
+  // One Idempotency-Key per tap (ONB-7): the server answers a retried key with the first response.
+  const addBank = useMutation({
+    mutationFn: (input: { holderName: string; accountNumber: string; ifsc: string }) =>
+      client.onboarding.addBank(input, { context: { idempotencyKey: newIntentKey() } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: utils.onboarding.listBanks.key() });
+      await queryClient.invalidateQueries({ queryKey: utils.onboarding.get.key() });
+    },
+  });
   const {
     control,
     handleSubmit,

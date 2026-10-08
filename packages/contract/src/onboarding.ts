@@ -159,6 +159,13 @@ export const AttestStartedSchema = z.strictObject({
 });
 export type AttestStarted = z.infer<typeof AttestStartedSchema>;
 
+/** The Idempotency-Key codes every mutating procedure declares (same list as me.ts / consents.ts). */
+const IDEMPOTENCY_ERRORS = [
+  'IDEMPOTENCY_KEY_REQUIRED',
+  'IDEMPOTENCY_KEY_REUSED',
+  'IDEMPOTENCY_IN_PROGRESS',
+] as const;
+
 const route = (method: 'GET' | 'POST' | 'PUT', path: `/${string}`, summary: string) =>
   oc.route({ method, path, tags: ['onboarding'], summary });
 
@@ -171,7 +178,9 @@ export const onboardingContract = {
     '/onboarding/identity',
     'PAN, name, DOB and the KYC_CONSENT acceptance',
   )
-    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
+    .errors(
+      errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'CONFLICT_VERSION', ...IDEMPOTENCY_ERRORS),
+    )
     .input(SubmitIdentityInputSchema)
     .output(StageResultSchema),
   putProfile: route(
@@ -180,7 +189,14 @@ export const onboardingContract = {
     'Personal details, address and FATCA (never defaulted)',
   )
     .errors(
-      errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'ONBOARDING_INCOMPLETE', 'ELIGIBILITY_BLOCKED'),
+      errorMap(
+        ...COMMON_ERRORS,
+        ...SESSION_ERRORS,
+        'ONBOARDING_INCOMPLETE',
+        'ELIGIBILITY_BLOCKED',
+        'CONFLICT_VERSION',
+        ...IDEMPOTENCY_ERRORS,
+      ),
     )
     .input(PutProfileInputSchema)
     .output(StageResultSchema),
@@ -189,7 +205,15 @@ export const onboardingContract = {
     '/onboarding/bank-accounts',
     'Add a bank account for penny-drop verification',
   )
-    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'ONBOARDING_INCOMPLETE'))
+    .errors(
+      errorMap(
+        ...COMMON_ERRORS,
+        ...SESSION_ERRORS,
+        'ONBOARDING_INCOMPLETE',
+        'CONFLICT_VERSION',
+        ...IDEMPOTENCY_ERRORS,
+      ),
+    )
     .input(AddBankInputSchema)
     .output(BankAddedSchema),
   listBanks: route('GET', '/onboarding/bank-accounts', "List this investor's bank accounts")
@@ -212,6 +236,7 @@ export const onboardingContract = {
         ...COMMON_ERRORS,
         ...SESSION_ERRORS,
         'NOMINATION_INVALID',
+        'CONFLICT_VERSION',
         'IDEMPOTENCY_KEY_REQUIRED',
         'IDEMPOTENCY_KEY_REUSED',
         'IDEMPOTENCY_IN_PROGRESS',
@@ -255,16 +280,13 @@ export const onboardingContract = {
     .output(AttestStartedSchema),
 };
 
-/** The Idempotency-Key codes every mutating procedure declares (same list as me.ts / consents.ts). */
-const IDEMPOTENCY_ERRORS = [
-  'IDEMPOTENCY_KEY_REQUIRED',
-  'IDEMPOTENCY_KEY_REUSED',
-  'IDEMPOTENCY_IN_PROGRESS',
-] as const;
-
-/** Q1 (age) is derived from `dob`; the other seven answers are the GAP-03 v1.0.0 option ids. */
+/**
+ * Q1 (age) comes from the KYC date of birth on the server (GAP-03). `dob` stays optional only so an older
+ * client that still sends it validates; the server ignores it. The other seven answers are the GAP-03
+ * v1.0.0 option ids.
+ */
 export const RiskAnswersSchema = z.strictObject({
-  dob: z.iso.date(),
+  dob: z.iso.date().optional(),
   horizon: z.enum(['<1', '1-3', '3-5', '>5']),
   goal: z.enum(['PROTECT_CAPITAL', 'REGULAR_INCOME', 'BALANCED_GROWTH', 'MAXIMUM_GROWTH']),
   incomeStability: z.enum(['NONE_IRREGULAR', 'VARIABLE', 'STABLE', 'STABLE_PLUS_OTHER']),
