@@ -31,6 +31,8 @@ export const MAX_IDENTITY_CHECKS_PER_DAY = 3;
 const REPLAY_WINDOW_MS = 24 * HOUR;
 /** A PENDING check whose next poll is this far overdue has lost its job (pg-boss ran out of retries). */
 const STALE_POLL_GRACE_MS = 2 * MINUTE;
+/** Attest challenge states that can never be approved; APPROVED and CONSUMED* still lock writes. */
+const ENDED_UNAPPROVED: readonly string[] = ['EXPIRED', 'CANCELLED', 'SUPERSEDED'];
 
 /**
  * MF-4: once attest has started, or provisioning is past NOT_STARTED/FAILED, the identity, profile and bank
@@ -40,8 +42,10 @@ const STALE_POLL_GRACE_MS = 2 * MINUTE;
  * Two states stay editable although `attestStatus` is not NOT_STARTED:
  * - provisioning FAILED: provision.job sets attestStatus DONE when a run starts and fail() never resets
  *   it, so the investor must be able to fix their data and re-attest (runbook provisioning-failed.md).
- * - attest IN_PROGRESS whose challenge was never approved and has expired: the investor backed out, and
- *   no OTP can approve it any more (a new attest.start() replaces the challenge).
+ * - attest IN_PROGRESS whose challenge ended without approval (EXPIRED, CANCELLED, SUPERSEDED, or PENDING
+ *   past its expiry): the investor backed out, and no OTP can approve it any more.
+ * A re-attest after a FAILED run (attestStatus IN_PROGRESS, provisioning still FAILED) locks writes while its
+ * challenge is live, as a first attest does.
  */
 export async function assertOnboardingWritable(
   exec: DbExecutor,
@@ -52,9 +56,11 @@ export async function assertOnboardingWritable(
     provisioningStatus: string;
   },
 ): Promise<void> {
-  if (app.provisioningStatus === 'FAILED') return;
-  if (app.provisioningStatus !== 'NOT_STARTED') throw writeRefused();
-  if (app.attestStatus === 'DONE') throw writeRefused();
+  if (app.provisioningStatus !== 'NOT_STARTED' && app.provisioningStatus !== 'FAILED') {
+    throw writeRefused();
+  }
+  // A FAILED run leaves attestStatus DONE (fail() never resets it); that state stays editable.
+  if (app.attestStatus === 'DONE' && app.provisioningStatus === 'NOT_STARTED') throw writeRefused();
   if (app.attestStatus === 'IN_PROGRESS') {
     const [challenge] =
       app.attestChallengeId === null
@@ -65,8 +71,8 @@ export async function assertOnboardingWritable(
             .where(eq(consentChallenges.id, app.attestChallengeId));
     const abandoned =
       challenge !== undefined &&
-      challenge.status === 'PENDING' &&
-      challenge.expiresAt.getTime() <= now.getTime();
+      (ENDED_UNAPPROVED.includes(challenge.status) ||
+        (challenge.status === 'PENDING' && challenge.expiresAt.getTime() <= now.getTime()));
     if (!abandoned) throw writeRefused();
   }
 }

@@ -219,8 +219,9 @@ describe('write guards after attest / provisioning (MF-4, ONB-3)', () => {
     async function withAttestChallenge(
       mobile: string,
       n: number,
-      status: 'PENDING' | 'APPROVED',
+      status: 'PENDING' | 'APPROVED' | 'EXPIRED' | 'CANCELLED' | 'SUPERSEDED',
       expiresAt: Date,
+      provisioningStatus: 'NOT_STARTED' | 'FAILED' = 'NOT_STARTED',
     ) {
       const s = await signedUpWithIdentity(mobile, n);
       const id = newId('consent_challenges');
@@ -238,9 +239,51 @@ describe('write guards after attest / provisioning (MF-4, ONB-3)', () => {
         moneyParamsVersion: '2026-09-01',
         expiresAt,
       });
-      await setApp(s.investorId, { attestStatus: 'IN_PROGRESS', attestChallengeId: id });
+      await setApp(s.investorId, {
+        attestStatus: 'IN_PROGRESS',
+        attestChallengeId: id,
+        provisioningStatus,
+      });
       return s;
     }
+
+    it.each([
+      ['EXPIRED', '9844800084', 84],
+      ['CANCELLED', '9844800085', 85],
+      ['SUPERSEDED', '9844800086', 86],
+    ] as const)(
+      'a %s challenge no longer locks identity (the attest ended without approval)',
+      async (status, mobile, n) => {
+        const s = await withAttestChallenge(
+          mobile,
+          n,
+          status,
+          new Date(t.clock.now().getTime() + 10 * 60_000),
+        );
+        const res = await post('/onboarding/identity', s.cookies, {
+          ...identityFor(n),
+          name: 'Asha K Rao',
+        });
+        expect(res.statusCode).toBe(200);
+      },
+    );
+
+    it('a re-attest after a FAILED run locks identity while its challenge is live', async () => {
+      const s = await withAttestChallenge(
+        '9844800087',
+        87,
+        'PENDING',
+        new Date(t.clock.now().getTime() + 10 * 60_000),
+        'FAILED',
+      );
+      const res = await post('/onboarding/identity', s.cookies, {
+        ...identityFor(87),
+        name: 'Someone Else',
+      });
+      expect(res.statusCode).toBe(409);
+      const bank = await post('/onboarding/bank-accounts', s.cookies, BANK);
+      expect(bank.statusCode).toBe(409);
+    });
 
     it('an expired, unapproved challenge no longer locks identity (the investor backed out)', async () => {
       const s = await withAttestChallenge(
