@@ -3,8 +3,11 @@ import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
 import { ClsService } from 'nestjs-cls';
 import { requireAuth } from '../identity/request-auth.js';
+import { requireIdempotency } from '../platform/idempotency.middleware.js';
+import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
 import { IdentityService } from './identity.service.js';
+import { NominationService } from './nomination.service.js';
 import { OnboardingQueries } from './onboarding.queries.js';
 import { ProfileService } from './profile.service.js';
 
@@ -14,6 +17,8 @@ export class OnboardingRouter {
     @Inject(OnboardingQueries) private readonly queries: OnboardingQueries,
     @Inject(IdentityService) private readonly identity: IdentityService,
     @Inject(ProfileService) private readonly profile: ProfileService,
+    @Inject(NominationService) private readonly nomination: NominationService,
+    @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
@@ -43,5 +48,19 @@ export class OnboardingRouter {
     return implement(contract.me.get).handler(() =>
       this.queries.me(requireAuth(this.cls).investorId),
     );
+  }
+
+  @Implement(contract.onboarding.getNomination)
+  getNomination() {
+    return implement(contract.onboarding.getNomination).handler(() =>
+      this.nomination.getNomination(requireAuth(this.cls)),
+    );
+  }
+
+  @Implement(contract.onboarding.putNomination)
+  putNomination() {
+    return implement(contract.onboarding.putNomination)
+      .use(requireIdempotency(this.idempotency, this.cls))
+      .handler(({ input }) => this.nomination.putNomination(requireAuth(this.cls), input));
   }
 }
