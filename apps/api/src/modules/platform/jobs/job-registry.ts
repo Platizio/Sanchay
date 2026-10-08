@@ -25,6 +25,7 @@ export const JOB_POLICIES = {
   'drafts.abandon': 'stately', // hourly, keyless (E4)
   'fp.event.process': 'stately', // key: the inbound_webhook_events id; re-enqueues itself to retry (E1)
   'onboarding.preverify': 'stately', // key: the kyc_checks id; creates the FP pre-verification once, then re-enqueues itself to poll (E6)
+  'onboarding.bank.verify': 'stately', // key: the kyc_checks id; creates the bank pre-verification once, then re-enqueues itself to poll (E7)
 } as const satisfies Record<string, JobPolicy>;
 
 /**

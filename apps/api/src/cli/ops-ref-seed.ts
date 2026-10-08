@@ -1,7 +1,8 @@
 /**
  * pnpm ops:ref:seed
  * Upserts data/ref-pincodes.csv (pincode,city,state) into app.ref_pincodes, which backs the pincode autofill
- * (ref.pincode). Idempotent: the pincode is the identity.
+ * (ref.pincode), and data/ref-ifsc.csv (ifsc,bank_name,branch_name) into app.ref_ifsc (ref.ifsc). Idempotent: the
+ * pincode and the IFSC are the identities.
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { loadDotEnvFile } from '../config/dotenv.js';
 import { parseEnv } from '../config/env.js';
 import { createDb } from '../db/client.js';
-import { refPincodes } from '../modules/onboarding/ref.schema.js';
+import { refIfsc, refPincodes } from '../modules/onboarding/ref.schema.js';
 import { newId } from '../modules/platform/ids.js';
 
 function parseCsv(raw: string): string[][] {
@@ -38,6 +39,18 @@ async function main(): Promise<void> {
       upserted += 1;
     }
     console.log(`ops:ref:seed: upserted ${upserted} ref_pincodes rows`);
+
+    const ifscRows = parseCsv(await readFile(path.join(dataDir, 'ref-ifsc.csv'), 'utf8'));
+    let ifscUpserted = 0;
+    for (const [ifsc, bankName, branchName] of ifscRows) {
+      if (!ifsc || !bankName || !branchName) continue;
+      await db.db
+        .insert(refIfsc)
+        .values({ id: newId('ref_ifsc'), ifsc, bankName, branchName }) // ref_ifsc has stdColumns() only (RV-03-32)
+        .onConflictDoUpdate({ target: refIfsc.ifsc, set: { bankName, branchName } });
+      ifscUpserted += 1;
+    }
+    console.log(`ops:ref:seed: upserted ${ifscUpserted} ref_ifsc rows`);
   } finally {
     await db.close();
   }

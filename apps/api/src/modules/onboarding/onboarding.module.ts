@@ -1,6 +1,8 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { Env } from '../../config/env.js';
 import { LegalConsentModule } from '../legal-consent/legal-consent.module.js';
+import { BankService } from './bank.service.js';
+import { BankVerifyJob } from './bank-verify.job.js';
 import { IdentityService } from './identity.service.js';
 import { NominationService } from './nomination.service.js';
 import { OnboardingQueries } from './onboarding.queries.js';
@@ -15,7 +17,7 @@ import { SuitabilityService } from './suitability.service.js';
 @Module({})
 export class OnboardingModule {
   static forRoot(env: Env): DynamicModule {
-    const workerOnly = env.SANCHAY_APP_ROLE === 'worker' ? [PreverifyJob] : [];
+    const workerOnly = env.SANCHAY_APP_ROLE === 'worker' ? [PreverifyJob, BankVerifyJob] : [];
     return {
       module: OnboardingModule,
       imports: [LegalConsentModule],
@@ -24,6 +26,7 @@ export class OnboardingModule {
         OnboardingQueries,
         IdentityService,
         ProfileService,
+        BankService,
         NominationService,
         RiskProfileService,
         SuitabilityService,

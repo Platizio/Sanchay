@@ -132,3 +132,6 @@ export type KycCheckPurpose = EnumValue<typeof KYC_CHECK_PURPOSES>;
 /** `kyc_checks.status`: our own polling state, distinct from `investor_profiles.kyc_status` (the KRA readiness verdict) and from the raw provider `readiness_status` text. */
 export const KYC_CHECK_STATUSES = defineEnum(['PENDING', 'PROCESSED', 'FAILED']);
 export type KycCheckStatus = EnumValue<typeof KYC_CHECK_STATUSES>;
+
+export const BANK_ACCOUNT_STATUSES = defineEnum(['PENDING', 'VERIFIED', 'FAILED']);
+export type BankAccountStatus = EnumValue<typeof BANK_ACCOUNT_STATUSES>;
