@@ -1,6 +1,6 @@
 {
-  "id": "fd2ea468-6ebe-4266-b044-1523fc901adb",
-  "prevId": "03f27cb1-ae85-4fb3-a039-6d640c18ab37",
+  "id": "5e750c1a-1046-400e-a4c0-4d45bd980345",
+  "prevId": "2bd3f583-7c6e-46d1-b6b3-89a88ad89534",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2358,6 +2358,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "current_risk_profile_id": {
+          "name": "current_risk_profile_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -4311,6 +4317,282 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "app.risk_profiles": {
+      "name": "risk_profiles",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "investor_id": {
+          "name": "investor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "questionnaire_id": {
+          "name": "questionnaire_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answers": {
+          "name": "answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_score": {
+          "name": "raw_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "caps": {
+          "name": "caps",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_riskometer": {
+          "name": "max_riskometer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ip": {
+          "name": "ip",
+          "type": "inet",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ua": {
+          "name": "ua",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "risk_profiles_investor_completed_idx": {
+          "name": "risk_profiles_investor_completed_idx",
+          "columns": [
+            {
+              "expression": "investor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "completed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "risk_profiles_one_active_uq": {
+          "name": "risk_profiles_one_active_uq",
+          "columns": [
+            {
+              "expression": "investor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'ACTIVE'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "risk_profiles_investor_id_investors_id_fk": {
+          "name": "risk_profiles_investor_id_investors_id_fk",
+          "tableFrom": "risk_profiles",
+          "tableTo": "investors",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "investor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "risk_profiles_questionnaire_id_risk_questionnaires_id_fk": {
+          "name": "risk_profiles_questionnaire_id_risk_questionnaires_id_fk",
+          "tableFrom": "risk_profiles",
+          "tableTo": "risk_questionnaires",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "questionnaire_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "risk_profiles_level_ck": {
+          "name": "risk_profiles_level_ck",
+          "value": "level IN ('CONSERVATIVE', 'MOD_CONSERVATIVE', 'MODERATE', 'MOD_AGGRESSIVE', 'AGGRESSIVE')"
+        },
+        "risk_profiles_max_riskometer_ck": {
+          "name": "risk_profiles_max_riskometer_ck",
+          "value": "max_riskometer IN ('LOW', 'LOW_TO_MODERATE', 'MODERATE', 'MODERATELY_HIGH', 'HIGH', 'VERY_HIGH')"
+        },
+        "risk_profiles_status_ck": {
+          "name": "risk_profiles_status_ck",
+          "value": "status IN ('ACTIVE', 'STALE', 'EXPIRED', 'SUPERSEDED')"
+        },
+        "risk_profiles_source_ck": {
+          "name": "risk_profiles_source_ck",
+          "value": "source IN ('ONBOARDING', 'RETAKE')"
+        },
+        "risk_profiles_score_ck": {
+          "name": "risk_profiles_score_ck",
+          "value": "raw_score BETWEEN 8 AND 32"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.risk_questionnaires": {
+      "name": "risk_questionnaires",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DRAFT'"
+        },
+        "questions_and_scoring": {
+          "name": "questions_and_scoring",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_at": {
+          "name": "effective_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "risk_questionnaires_version_uq": {
+          "name": "risk_questionnaires_version_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "risk_questionnaires_status_ck": {
+          "name": "risk_questionnaires_status_ck",
+          "value": "status IN ('DRAFT', 'PUBLISHED', 'SUPERSEDED')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "app.scheme_navs": {
       "name": "scheme_navs",
       "schema": "app",
@@ -4850,6 +5132,241 @@
         "sebi_categories_volatility_class_ck": {
           "name": "sebi_categories_volatility_class_ck",
           "value": "volatility_class IN ('V_HIGH', 'V_EQUITY', 'V_HYBRID', 'V_DEBT', 'V_CASH')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "app.suitability_acknowledgements": {
+      "name": "suitability_acknowledgements",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "check_id": {
+          "name": "check_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "warning_doc_key": {
+          "name": "warning_doc_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "warning_doc_version": {
+          "name": "warning_doc_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "warning_doc_sha256": {
+          "name": "warning_doc_sha256",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rendered_text_sha256": {
+          "name": "rendered_text_sha256",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "checkbox_at": {
+          "name": "checkbox_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "challenge_id": {
+          "name": "challenge_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consent_record_id": {
+          "name": "consent_record_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "otp_verified_at": {
+          "name": "otp_verified_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notice_delivery_id": {
+          "name": "notice_delivery_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "suitability_acknowledgements_check_id_suitability_checks_id_fk": {
+          "name": "suitability_acknowledgements_check_id_suitability_checks_id_fk",
+          "tableFrom": "suitability_acknowledgements",
+          "tableTo": "suitability_checks",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "check_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "app.suitability_checks": {
+      "name": "suitability_checks",
+      "schema": "app",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plan_id": {
+          "name": "plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scheme_id": {
+          "name": "scheme_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scheme_riskometer": {
+          "name": "scheme_riskometer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fund_facts_as_of": {
+          "name": "fund_facts_as_of",
+          "type": "timestamp (6) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "risk_profile_id": {
+          "name": "risk_profile_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "suitability_checks_scheme_id_schemes_id_fk": {
+          "name": "suitability_checks_scheme_id_schemes_id_fk",
+          "tableFrom": "suitability_checks",
+          "tableTo": "schemes",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "scheme_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "suitability_checks_risk_profile_id_risk_profiles_id_fk": {
+          "name": "suitability_checks_risk_profile_id_risk_profiles_id_fk",
+          "tableFrom": "suitability_checks",
+          "tableTo": "risk_profiles",
+          "schemaTo": "app",
+          "columnsFrom": [
+            "risk_profile_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "suitability_checks_scheme_riskometer_ck": {
+          "name": "suitability_checks_scheme_riskometer_ck",
+          "value": "scheme_riskometer IN ('LOW', 'LOW_TO_MODERATE', 'MODERATE', 'MODERATELY_HIGH', 'HIGH', 'VERY_HIGH')"
+        },
+        "suitability_checks_level_ck": {
+          "name": "suitability_checks_level_ck",
+          "value": "level IN ('CONSERVATIVE', 'MOD_CONSERVATIVE', 'MODERATE', 'MOD_AGGRESSIVE', 'AGGRESSIVE')"
+        },
+        "suitability_checks_outcome_ck": {
+          "name": "suitability_checks_outcome_ck",
+          "value": "outcome IN ('MATCH', 'MISMATCH')"
+        },
+        "suitability_checks_subject_ck": {
+          "name": "suitability_checks_subject_ck",
+          "value": "order_id IS NOT NULL OR plan_id IS NOT NULL"
         }
       },
       "isRLSEnabled": false

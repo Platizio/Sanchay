@@ -74,10 +74,10 @@
       "uniqueConstraints": {
         "amcs_slug_uq": {
           "name": "amcs_slug_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -214,9 +214,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "audit_events_occurred_at_idx": {
           "name": "audit_events_occurred_at_idx",
@@ -229,9 +229,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -357,50 +357,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "revoked_at IS NULL",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "auth_sessions_investor_id_investors_id_fk": {
           "name": "auth_sessions_investor_id_investors_id_fk",
           "tableFrom": "auth_sessions",
+          "tableTo": "investors",
+          "schemaTo": "app",
           "columnsFrom": [
             "investor_id"
           ],
-          "tableTo": "investors",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         },
         "auth_sessions_device_id_investor_devices_id_fk": {
           "name": "auth_sessions_device_id_investor_devices_id_fk",
           "tableFrom": "auth_sessions",
+          "tableTo": "investor_devices",
+          "schemaTo": "app",
           "columnsFrom": [
             "device_id"
           ],
-          "tableTo": "investor_devices",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "auth_sessions_token_hash_uq": {
           "name": "auth_sessions_token_hash_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "token_hash"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -479,27 +479,27 @@
         "category_aliases_category_code_sebi_categories_code_fk": {
           "name": "category_aliases_category_code_sebi_categories_code_fk",
           "tableFrom": "category_aliases",
+          "tableTo": "sebi_categories",
+          "schemaTo": "app",
           "columnsFrom": [
             "category_code"
           ],
-          "tableTo": "sebi_categories",
-          "schemaTo": "app",
           "columnsTo": [
             "code"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "category_aliases_alias_source_uq": {
           "name": "category_aliases_alias_source_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "alias",
             "source"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -591,40 +591,40 @@
         "commission_disclosures_amc_id_amcs_id_fk": {
           "name": "commission_disclosures_amc_id_amcs_id_fk",
           "tableFrom": "commission_disclosures",
+          "tableTo": "amcs",
+          "schemaTo": "app",
           "columnsFrom": [
             "amc_id"
           ],
-          "tableTo": "amcs",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         },
         "commission_disclosures_scheme_id_schemes_id_fk": {
           "name": "commission_disclosures_scheme_id_schemes_id_fk",
           "tableFrom": "commission_disclosures",
+          "tableTo": "schemes",
+          "schemaTo": "app",
           "columnsFrom": [
             "scheme_id"
           ],
-          "tableTo": "schemes",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "commission_disclosures_key_uq": {
           "name": "commission_disclosures_key_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "disclosure_key"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -816,9 +816,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "consent_challenges_pending_expiry_idx": {
           "name": "consent_challenges_pending_expiry_idx",
@@ -831,10 +831,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "status = 'PENDING'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "consent_challenges_consumed_execute_before_idx": {
           "name": "consent_challenges_consumed_execute_before_idx",
@@ -847,10 +847,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "status = 'CONSUMED'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1015,9 +1015,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1025,10 +1025,10 @@
       "uniqueConstraints": {
         "consent_records_challenge_id_uq": {
           "name": "consent_records_challenge_id_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "challenge_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1105,37 +1105,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "consent_subjects_challenge_id_consent_challenges_id_fk": {
           "name": "consent_subjects_challenge_id_consent_challenges_id_fk",
           "tableFrom": "consent_subjects",
+          "tableTo": "consent_challenges",
+          "schemaTo": "app",
           "columnsFrom": [
             "challenge_id"
           ],
-          "tableTo": "consent_challenges",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "consent_subjects_challenge_subject_uq": {
           "name": "consent_subjects_challenge_subject_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "challenge_id",
             "subject_table",
             "subject_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1258,26 +1258,26 @@
         "fund_facts_scheme_id_schemes_id_fk": {
           "name": "fund_facts_scheme_id_schemes_id_fk",
           "tableFrom": "fund_facts",
+          "tableTo": "schemes",
+          "schemaTo": "app",
           "columnsFrom": [
             "scheme_id"
           ],
-          "tableTo": "schemes",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "fund_facts_scheme_uq": {
           "name": "fund_facts_scheme_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "scheme_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1352,25 +1352,25 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "fund_facts_revisions_scheme_id_schemes_id_fk": {
           "name": "fund_facts_revisions_scheme_id_schemes_id_fk",
           "tableFrom": "fund_facts_revisions",
+          "tableTo": "schemes",
+          "schemaTo": "app",
           "columnsFrom": [
             "scheme_id"
           ],
-          "tableTo": "schemes",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1457,9 +1457,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1600,9 +1600,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1610,11 +1610,11 @@
       "uniqueConstraints": {
         "inbound_webhook_events_provider_event_uq": {
           "name": "inbound_webhook_events_provider_event_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "provider",
             "event_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1728,38 +1728,38 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "status = 'CURRENT'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "investor_contacts_investor_id_investors_id_fk": {
           "name": "investor_contacts_investor_id_investors_id_fk",
           "tableFrom": "investor_contacts",
+          "tableTo": "investors",
+          "schemaTo": "app",
           "columnsFrom": [
             "investor_id"
           ],
-          "tableTo": "investors",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "investor_contacts_value_uq": {
           "name": "investor_contacts_value_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "investor_id",
             "kind",
             "value_bidx"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1854,27 +1854,27 @@
         "investor_devices_investor_id_investors_id_fk": {
           "name": "investor_devices_investor_id_investors_id_fk",
           "tableFrom": "investor_devices",
+          "tableTo": "investors",
+          "schemaTo": "app",
           "columnsFrom": [
             "investor_id"
           ],
-          "tableTo": "investors",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "investor_devices_ref_uq": {
           "name": "investor_devices_ref_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "investor_id",
             "device_ref_hash"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2105,9 +2105,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -2115,17 +2115,17 @@
       "uniqueConstraints": {
         "investor_profiles_investor_id_uq": {
           "name": "investor_profiles_investor_id_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "investor_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "investor_profiles_pan_bidx_uq": {
           "name": "investor_profiles_pan_bidx_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "pan_bidx"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2366,31 +2366,31 @@
       "uniqueConstraints": {
         "investors_mobile_bidx_uq": {
           "name": "investors_mobile_bidx_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "mobile_bidx"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "investors_email_bidx_uq": {
           "name": "investors_email_bidx_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "email_bidx"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "investors_fp_investor_profile_id_uq": {
           "name": "investors_fp_investor_profile_id_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "fp_investor_profile_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "investors_fp_mfia_id_uq": {
           "name": "investors_fp_mfia_id_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "fp_mf_investment_account_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2534,9 +2534,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "kyc_checks_pending_poll_idx": {
           "name": "kyc_checks_pending_poll_idx",
@@ -2549,10 +2549,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "status = 'PENDING'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -2667,10 +2667,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "status = 'PUBLISHED'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -2678,11 +2678,11 @@
       "uniqueConstraints": {
         "legal_documents_key_version_uq": {
           "name": "legal_documents_key_version_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "key",
             "version"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2944,16 +2944,16 @@
         "nomination_decisions_investor_id_investors_id_fk": {
           "name": "nomination_decisions_investor_id_investors_id_fk",
           "tableFrom": "nomination_decisions",
+          "tableTo": "investors",
+          "schemaTo": "app",
           "columnsFrom": [
             "investor_id"
           ],
-          "tableTo": "investors",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3112,28 +3112,28 @@
         "nominees_investor_id_investors_id_fk": {
           "name": "nominees_investor_id_investors_id_fk",
           "tableFrom": "nominees",
+          "tableTo": "investors",
+          "schemaTo": "app",
           "columnsFrom": [
             "investor_id"
           ],
-          "tableTo": "investors",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "nominees_set_position_uq": {
           "name": "nominees_set_position_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "investor_id",
             "set_version",
             "position"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3254,25 +3254,25 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "notification_deliveries_notification_id_notifications_id_fk": {
           "name": "notification_deliveries_notification_id_notifications_id_fk",
           "tableFrom": "notification_deliveries",
+          "tableTo": "notifications",
+          "schemaTo": "app",
           "columnsFrom": [
             "notification_id"
           ],
-          "tableTo": "notifications",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3381,35 +3381,35 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "notifications_investor_id_investors_id_fk": {
           "name": "notifications_investor_id_investors_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "investors",
+          "schemaTo": "app",
           "columnsFrom": [
             "investor_id"
           ],
-          "tableTo": "investors",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "notifications_dedupe_uq": {
           "name": "notifications_dedupe_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "dedupe_key"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3585,10 +3585,10 @@
       "uniqueConstraints": {
         "onboarding_applications_investor_id_uq": {
           "name": "onboarding_applications_investor_id_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "investor_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3792,16 +3792,16 @@
             },
             {
               "expression": "coalesce(reference_id, '00000000-0000-0000-0000-000000000000'::uuid)",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "consumed_at IS NULL",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "otp_codes_destination_created_idx": {
           "name": "otp_codes_destination_created_idx",
@@ -3820,9 +3820,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "otp_codes_ip_created_idx": {
           "name": "otp_codes_ip_created_idx",
@@ -3841,9 +3841,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "otp_codes_device_created_idx": {
           "name": "otp_codes_device_created_idx",
@@ -3862,9 +3862,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -3973,10 +3973,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "used_at IS NULL",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -3984,10 +3984,10 @@
       "uniqueConstraints": {
         "pilot_invites_mobile_bidx_uq": {
           "name": "pilot_invites_mobile_bidx_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "mobile_bidx"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4091,9 +4091,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "provider_calls_operation_idx": {
           "name": "provider_calls_operation_idx",
@@ -4112,9 +4112,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -4219,10 +4219,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "status <> 'RESOLVED'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -4378,9 +4378,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -4465,27 +4465,27 @@
         "scheme_returns_scheme_id_schemes_id_fk": {
           "name": "scheme_returns_scheme_id_schemes_id_fk",
           "tableFrom": "scheme_returns",
+          "tableTo": "schemes",
+          "schemaTo": "app",
           "columnsFrom": [
             "scheme_id"
           ],
-          "tableTo": "schemes",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "scheme_returns_scheme_as_of_uq": {
           "name": "scheme_returns_scheme_as_of_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "scheme_id",
             "as_of"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4585,8 +4585,8 @@
           "primaryKey": false,
           "notNull": true,
           "generated": {
-            "type": "stored",
-            "as": "(category_code = 'EQ_ELSS')"
+            "as": "(category_code = 'EQ_ELSS')",
+            "type": "stored"
           }
         },
         "fp_active": {
@@ -4650,15 +4650,15 @@
           "columns": [
             {
               "expression": "\"name\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         },
         "schemes_category_idx": {
           "name": "schemes_category_idx",
@@ -4671,56 +4671,56 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "schemes_amc_id_amcs_id_fk": {
           "name": "schemes_amc_id_amcs_id_fk",
           "tableFrom": "schemes",
+          "tableTo": "amcs",
+          "schemaTo": "app",
           "columnsFrom": [
             "amc_id"
           ],
-          "tableTo": "amcs",
-          "schemaTo": "app",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         },
         "schemes_category_code_sebi_categories_code_fk": {
           "name": "schemes_category_code_sebi_categories_code_fk",
           "tableFrom": "schemes",
+          "tableTo": "sebi_categories",
+          "schemaTo": "app",
           "columnsFrom": [
             "category_code"
           ],
-          "tableTo": "sebi_categories",
-          "schemaTo": "app",
           "columnsTo": [
             "code"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "schemes_isin_uq": {
           "name": "schemes_isin_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "isin"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "schemes_slug_uq": {
           "name": "schemes_slug_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4824,17 +4824,17 @@
       "uniqueConstraints": {
         "sebi_categories_code_uq": {
           "name": "sebi_categories_code_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "code"
-          ],
-          "nullsNotDistinct": false
+          ]
         },
         "sebi_categories_slug_uq": {
           "name": "sebi_categories_slug_uq",
+          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4882,10 +4882,10 @@
   },
   "enums": {},
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

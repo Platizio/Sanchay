@@ -37,10 +37,14 @@ export type TableName =
   | 'provider_calls'
   | 'recon_breaks'
   | 'ref_pincodes'
+  | 'risk_profiles'
+  | 'risk_questionnaires'
   | 'scheme_navs'
   | 'scheme_returns'
   | 'schemes'
   | 'sebi_categories'
+  | 'suitability_acknowledgements'
+  | 'suitability_checks'
   | 'worker_heartbeats';
 
 declare const rowIdBrand: unique symbol;

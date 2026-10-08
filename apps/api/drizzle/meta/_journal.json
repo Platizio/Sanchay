@@ -127,6 +127,20 @@
       "when": 1791431078226,
       "tag": "0020_nominees_set_sum",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791431220737,
+      "tag": "0021_risk_suitability",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791431226846,
+      "tag": "0022_risk_suitability_guards",
+      "breakpoints": true
     }
   ]
 }

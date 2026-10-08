@@ -62,6 +62,8 @@ export const AUDIT_ACTIONS = {
   CONSENT_MARKED_UNUSED: 'CONSENT_MARKED_UNUSED',
   /** A nomination set (or Annexure-B opt-out) was recorded (E8). */
   ONBOARDING_NOMINATION_SET: 'ONBOARDING_NOMINATION_SET',
+  /** The investor submitted the risk questionnaire; data.status carries the resulting level (E9). */
+  ONBOARDING_RISK_PROFILE_SUBMITTED: 'ONBOARDING_RISK_PROFILE_SUBMITTED',
   /** ops:invite CLI write (D7). */
   PILOT_INVITE_ADDED: 'PILOT_INVITE_ADDED',
 } as const;

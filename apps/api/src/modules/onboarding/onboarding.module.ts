@@ -8,6 +8,8 @@ import { OnboardingRouter } from './onboarding.router.js';
 import { PreverifyJob } from './preverify.job.js';
 import { ProfileService } from './profile.service.js';
 import { RefRouter } from './ref.router.js';
+import { RiskProfileService } from './risk-profile.service.js';
+import { SuitabilityService } from './suitability.service.js';
 
 /** Worker-only providers inject D3's FpKyc/FpProvision, which exist only in the worker role. */
 @Module({})
@@ -23,9 +25,11 @@ export class OnboardingModule {
         IdentityService,
         ProfileService,
         NominationService,
+        RiskProfileService,
+        SuitabilityService,
         ...workerOnly,
       ],
-      exports: [OnboardingQueries],
+      exports: [OnboardingQueries, RiskProfileService, SuitabilityService],
     };
   }
 }
