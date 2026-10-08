@@ -18,6 +18,7 @@ import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
 import { reconBreaks } from '../../src/modules/platform/kernel.schema.js';
 import { expectNoPmWritesBeforeConsumed } from './consent-first.js';
 import { bootFpTestApp, type FpTestApp } from './fake-fp.js';
+import { signInWeb } from './flows.js';
 import { webHeaders } from './http.js';
 import { jobOf } from './jobs.js';
 import { type ReadyInvestor, seedReadyInvestor } from './onboarding-seed.js';
@@ -288,6 +289,31 @@ describe('onboarding.provision', () => {
     expect(second.challengeId).not.toBe(first.challengeId);
     await run(second);
     expect(t.fakeFp.calls({ op: 'investorProfile.create' })).toHaveLength(profileCreates);
+    expect((await applicationOf(investor.investorId))?.provisioningStatus).toBe('DONE');
+  });
+
+  it('retries exhausted during an FP outage: IN_PROGRESS blocks a re-attest only while the saga window is open', async () => {
+    const investor = await seedReadyInvestor(t);
+    const first = await attestAndApprove(investor);
+    t.fakeFp.script('bankAccount.create', 'timeout');
+    await expect(run(first)).rejects.toThrow(); // pg-boss would retry; assume it ran out of retries
+    expect(await applicationOf(investor.investorId)).toMatchObject({
+      provisioningStatus: 'IN_PROGRESS',
+      provisioningStep: 'BANK_ACCOUNTS',
+    });
+
+    // A job may still be retrying inside the saga window: no second attest.
+    const early = await attest(investor);
+    expect(early.statusCode).toBe(409);
+    expect(early.json()).toMatchObject({ code: 'CONFLICT_VERSION' });
+
+    // Past the window no job can write any more, so the stuck row must not lock the investor out.
+    t.clock.advance(61 * 60_000);
+    enqueued.length = 0;
+    const again = await signInWeb(t, investor.mobile); // the web session idled out in the meantime
+    const second = await attestAndApprove({ ...investor, cookies: again.cookies });
+    expect(second.challengeId).not.toBe(first.challengeId);
+    await run(second);
     expect((await applicationOf(investor.investorId))?.provisioningStatus).toBe('DONE');
   });
 });

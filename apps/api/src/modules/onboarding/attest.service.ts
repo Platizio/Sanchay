@@ -8,7 +8,11 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
 import { investors } from '../identity/identity.schema.js';
 import { ConsentEngine } from '../legal-consent/consent-engine.js';
-import { DECLARATION_KEYS, legalDocuments } from '../legal-consent/legal-consent.schema.js';
+import {
+  consentChallenges,
+  DECLARATION_KEYS,
+  legalDocuments,
+} from '../legal-consent/legal-consent.schema.js';
 import type { SnapshotBuilder } from '../legal-consent/snapshot-builders.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
@@ -100,7 +104,11 @@ export class AttestService {
       .from(onboardingApplications)
       .where(eq(onboardingApplications.investorId, investorId));
     if (investor === undefined || app === undefined) throw new AppError('ONBOARDING_INCOMPLETE');
-    if (app.provisioningStatus === 'DONE' || app.provisioningStatus === 'IN_PROGRESS') {
+    if (app.provisioningStatus === 'DONE') throw new AppError('CONFLICT_VERSION');
+    // IN_PROGRESS blocks a second attest only while the last attest's saga window is open. A job that ran out of
+    // pg-boss retries (an FP outage) leaves IN_PROGRESS behind and no final-failure hook exists; past the window
+    // the job cannot write any more (useConsumed gives CONSENT_EXPIRED), so the investor must be able to re-attest.
+    if (app.provisioningStatus === 'IN_PROGRESS' && (await this.sagaWindowOpen(exec, app))) {
       throw new AppError('CONFLICT_VERSION');
     }
     const [profile] = await exec
@@ -142,6 +150,20 @@ export class AttestService {
     const pending = await this.declarations.pending({ investorId } as AuthContext);
     if (pending.length > 0) throw new AppError('DECLARATION_OUTDATED');
     return { applicationId: app.id };
+  }
+
+  /** True while the application's last attest challenge may still drive a provisioning run. */
+  private async sagaWindowOpen(
+    exec: DbExecutor,
+    app: { attestChallengeId: string | null },
+  ): Promise<boolean> {
+    if (app.attestChallengeId === null) return false;
+    const [challenge] = await exec
+      .select({ sagaExpiresAt: consentChallenges.sagaExpiresAt })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, app.attestChallengeId));
+    if (challenge === undefined || challenge.sagaExpiresAt === null) return false;
+    return challenge.sagaExpiresAt.getTime() > this.clock.now().getTime();
   }
 
   async start(investorId: string): Promise<{ challengeId: string; expiresInSeconds: number }> {
