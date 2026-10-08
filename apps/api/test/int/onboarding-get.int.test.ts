@@ -1,11 +1,13 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { legalDocuments } from '../../src/modules/legal-consent/legal-consent.schema.js';
+import { nominationDecisions } from '../../src/modules/onboarding/nomination.schema.js';
 import { onboardingApplications } from '../../src/modules/onboarding/onboarding.schema.js';
 import { newId } from '../../src/modules/platform/ids.js';
 import { bootTestApp, type TestApp } from './app.js';
 import { signInWeb } from './flows.js';
 import { webHeaders } from './http.js';
+import { seedReadyInvestor } from './onboarding-seed.js';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -15,8 +17,9 @@ afterAll(async () => {
   await t.close();
 });
 
-const get = (url: string, cookies: Record<string, string>) =>
-  t.app.inject({ method: 'GET', url: `/api/v1${url}`, headers: webHeaders({ cookies }) });
+const getFrom = (app: TestApp, url: string, cookies: Record<string, string>) =>
+  app.app.inject({ method: 'GET', url: `/api/v1${url}`, headers: webHeaders({ cookies }) });
+const get = (url: string, cookies: Record<string, string>) => getFrom(t, url, cookies);
 
 describe('GET /onboarding', () => {
   it('creates the application row on first touch and starts at IDENTITY', async () => {
@@ -146,5 +149,31 @@ describe('GET /me', () => {
         { key: 'RISK_DISCLOSURE', version: '2' },
       ]),
     );
+  });
+});
+
+// Its own database: seedReadyInvestor publishes every legal document, which the cases above insert themselves.
+describe('onboarding stage tracks the live declaration requirement', () => {
+  let t2: TestApp;
+  beforeAll(async () => {
+    t2 = await bootTestApp();
+  });
+  afterAll(async () => {
+    await t2.close();
+  });
+
+  it('derives DECLARATIONS from the live requirement, not the stored flag (MF-7)', async () => {
+    const ready = await seedReadyInvestor(t2); // declarations staged, NOMINATED, everything before attest DONE
+    const before = await getFrom(t2, '/onboarding', ready.cookies);
+    expect(before.json()).toMatchObject({ stage: 'ATTEST' });
+    // An opt-out makes Annexure B required; the flag is still DONE but a document is pending again.
+    await t2.db.db
+      .update(nominationDecisions)
+      .set({ decision: 'OPTED_OUT', effectiveSetVersion: null, displayPreference: null })
+      .where(eq(nominationDecisions.investorId, ready.investorId));
+    const after = await getFrom(t2, '/onboarding', ready.cookies);
+    expect(after.json()).toMatchObject({ stage: 'DECLARATIONS' });
+    const me = await getFrom(t2, '/me', ready.cookies);
+    expect(me.json()).toMatchObject({ stage: 'DECLARATIONS' });
   });
 });

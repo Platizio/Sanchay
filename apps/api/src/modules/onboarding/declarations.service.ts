@@ -7,9 +7,8 @@ import {
   DECLARATION_KEYS,
   type DeclarationKey,
   declarationStagings,
-  legalDocuments,
 } from '../legal-consent/legal-consent.schema.js';
-import { LegalDocs } from '../legal-consent/legal-docs.service.js';
+import { LegalDocs, legalVersionInForceAt } from '../legal-consent/legal-docs.service.js';
 import { AUDIT_ACTIONS, AuditService } from '../platform/audit.service.js';
 import { CLOCK, type Clock } from '../platform/clock.js';
 import { AppError } from '../platform/errors.js';
@@ -147,14 +146,10 @@ export class DeclarationsService {
           isNull(declarationStagings.supersededAt),
         ),
       );
-    const versionAtAcceptance = sql<string | null>`(
-      select ld.version from ${legalDocuments} as ld
-      where ld.key = ${consentRecords}.document_key
-        and ld.status = 'PUBLISHED'
-        and (ld.effective_from is null or ld.effective_from <= ${consentRecords}.consumed_at)
-      order by ld.effective_from desc nulls last
-      limit 1
-    )`;
+    const versionAtAcceptance = legalVersionInForceAt(
+      sql`${consentRecords.documentKey}`,
+      sql`${consentRecords.consumedAt}`,
+    );
     const recorded = await this.dbh.db
       .select({ key: consentRecords.documentKey, version: versionAtAcceptance })
       .from(consentRecords)

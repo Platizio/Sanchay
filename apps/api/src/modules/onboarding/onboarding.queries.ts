@@ -8,6 +8,8 @@ import { maskEmail, maskMobile } from '../identity/masking.js';
 import { consentRecords, legalDocuments } from '../legal-consent/legal-consent.schema.js';
 import { Crypto } from '../platform/crypto.js';
 import { asRowId } from '../platform/ids.js';
+import type { AuthContext } from '../platform/request-context.js';
+import { DeclarationsService } from './declarations.service.js';
 import { investorProfiles, onboardingApplications } from './onboarding.schema.js';
 
 export interface OnboardingGetView {
@@ -38,7 +40,27 @@ export class OnboardingQueries {
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(Crypto) private readonly crypto: Crypto,
+    @Inject(DeclarationsService) private readonly declarations: DeclarationsService,
   ) {}
+
+  /**
+   * The stage, with the declarations step read from the live requirement rather than the stored flag
+   * (MF-7). `declarations_status` is only ever written DONE, so a nomination opt-out after staging, or a
+   * legal document republished before the investor attests, would otherwise leave the hub sending them to
+   * Review, where attest refuses with DECLARATION_OUTDATED. Once attest is done the flag is final: a later
+   * republish is the R-18 banner's job (legal.pending), not a reason to reopen onboarding.
+   */
+  private async stageOf(app: typeof onboardingApplications.$inferSelect): Promise<OnboardingStage> {
+    if (app.declarationsStatus === 'DONE' && app.attestStatus !== 'DONE') {
+      // pending() reads only investorId from its AuthContext argument.
+      const pending = await this.declarations.pending({
+        investorId: app.investorId,
+      } as AuthContext);
+      if (pending.length > 0)
+        return deriveOnboardingStage({ ...app, declarationsStatus: 'IN_PROGRESS' });
+    }
+    return deriveOnboardingStage(app);
+  }
 
   /** Creates the row on first touch (identityStatus stays NOT_STARTED) so `onboarding.get` never 404s for
    * a freshly signed-in investor — ONB-00 is the very first screen after AUTH-05. */
@@ -66,7 +88,7 @@ export class OnboardingQueries {
 
   async get(investorId: string): Promise<OnboardingGetView> {
     const app = await this.ensureApplication(this.dbh.db, investorId);
-    const stage = deriveOnboardingStage(app);
+    const stage = await this.stageOf(app);
     const [profile] = await this.dbh.db
       .select({ readinessCode: investorProfiles.readinessCode })
       .from(investorProfiles)
@@ -153,7 +175,7 @@ export class OnboardingQueries {
         }),
       ),
       emailMasked: email ? maskEmail(email) : null,
-      stage: deriveOnboardingStage(app),
+      stage: await this.stageOf(app),
       profile: profile
         ? {
             nameAsPerPan: profile.nameAsPerPan,

@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConsentSnapshotV2Schema, snapshotSha256 } from '@sanchay/domain';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { seedLegalDocuments } from '../../src/cli/ops-legal-seed.js';
 import {
   consentChallenges,
   consentRecords,
@@ -183,6 +185,25 @@ describe('consent_records', () => {
     expect(insertError).toBeUndefined();
   });
 
+  it('sanchay_app may stamp first_attempt_at (column grant) but still no other column (MF-1)', async () => {
+    const [row] = await ta.db.db
+      .select()
+      .from(consentRecords)
+      .where(eq(consentRecords.documentKey, 'KYC_CONSENT'))
+      .limit(1);
+    if (row === undefined) throw new Error('the previous case seeds a consent_records row');
+    const stamp = await asAppRole(
+      'UPDATE app.consent_records SET first_attempt_at = now() WHERE id = $1',
+      [row.id],
+    );
+    expect(stamp).toBeUndefined();
+    const other = await asAppRole('UPDATE app.consent_records SET channel = $1 WHERE id = $2', [
+      'X',
+      row.id,
+    ]);
+    expect(other?.message).toMatch(/permission denied/i);
+  });
+
   it('refuses a row that sets both or neither of (challenge_id, document_key)', async () => {
     const both = await asAppRole(
       `INSERT INTO app.consent_records (id, created_by, kind, investor_id, challenge_id, document_key, consumed_at)
@@ -196,5 +217,111 @@ describe('consent_records', () => {
       [INVESTOR_ID],
     );
     expect(neither?.message).toMatch(/consent_records_kind_pair_ck/);
+  });
+});
+
+describe('LegalDocs.current tiebreak and the published-undated index (LC-3)', () => {
+  it('refuses a second PUBLISHED undated version of one key', async () => {
+    const insert = (version: string) =>
+      ta.db.db.insert(legalDocuments).values({
+        ...seedDoc('TNC', version, `undated ${version}`),
+        key: 'RISK_DISCLOSURE',
+        status: 'PUBLISHED',
+      });
+    await insert('1');
+    await expect(insert('2')).rejects.toMatchObject({
+      cause: { constraint: 'legal_documents_published_undated_uq' },
+    });
+  });
+
+  it('breaks an effective_from tie with the newest row, deterministically', async () => {
+    const at = new Date(ta.clock.now().getTime() - 3_600_000);
+    const row = (version: string) => ({
+      ...seedDoc('TNC', version, `tie ${version}`),
+      key: 'REGULAR_PLAN_COMMISSION' as const,
+      status: 'PUBLISHED' as const,
+      effectiveFrom: at,
+    });
+    await ta.db.db.insert(legalDocuments).values(row('1'));
+    await ta.db.db.insert(legalDocuments).values(row('2'));
+    const legalDocs = ta.app.get(LegalDocs);
+    expect((await legalDocs.current(ta.db.db, 'REGULAR_PLAN_COMMISSION')).version).toBe('2');
+  });
+});
+
+describe('ops:legal:seed never rewrites a published document (LC-2)', () => {
+  const file = (version: string, status: string, body: string, extra = '') =>
+    `---\nkey: PRIVACY_NOTICE\nversion: '${version}'\nstatus: ${status}${extra}\n---\n${body}\n`;
+  let dir: string;
+  const rowOf = async (version: string) => {
+    const rows = await ta.db.db
+      .select()
+      .from(legalDocuments)
+      .where(eq(legalDocuments.key, 'PRIVACY_NOTICE'));
+    return rows.find((r) => r.version === version);
+  };
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'legal-seed-'));
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('inserts a new version and lets a DRAFT be edited and published', async () => {
+    await writeFile(path.join(dir, 'privacy.md'), file('1', 'DRAFT', 'first draft'));
+    await seedLegalDocuments(ta.db.db, dir);
+    expect((await rowOf('1'))?.status).toBe('DRAFT');
+    await writeFile(path.join(dir, 'privacy.md'), file('1', 'PUBLISHED', 'final text'));
+    await seedLegalDocuments(ta.db.db, dir);
+    expect(await rowOf('1')).toMatchObject({ status: 'PUBLISHED', bodyMarkdown: 'final text' });
+  });
+
+  it('re-seeding the identical file is a no-op', async () => {
+    const before = await rowOf('1');
+    await seedLegalDocuments(ta.db.db, dir);
+    const after = await rowOf('1');
+    expect(after?.updatedAt).toEqual(before?.updatedAt);
+    expect(after?.sha256.equals(before?.sha256 ?? Buffer.alloc(0))).toBe(true);
+  });
+
+  it('throws and leaves the row unchanged when a PUBLISHED body is edited, or it flips back to DRAFT', async () => {
+    const before = await rowOf('1');
+    await writeFile(path.join(dir, 'privacy.md'), file('1', 'PUBLISHED', 'typo fixed'));
+    await expect(seedLegalDocuments(ta.db.db, dir)).rejects.toThrow(/bump the version/);
+    await writeFile(path.join(dir, 'privacy.md'), file('1', 'DRAFT', 'final text'));
+    await expect(seedLegalDocuments(ta.db.db, dir)).rejects.toThrow(/bump the version/);
+    const after = await rowOf('1');
+    expect(after).toMatchObject({ status: 'PUBLISHED', bodyMarkdown: 'final text' });
+    expect(after?.sha256.equals(before?.sha256 ?? Buffer.alloc(0))).toBe(true);
+  });
+
+  it('the database trigger refuses body, sha256, effective_from and back-to-DRAFT edits of a non-DRAFT row', async () => {
+    for (const change of [
+      "body_markdown = 'x'",
+      "sha256 = decode('00', 'hex')",
+      'effective_from = now()',
+      "status = 'DRAFT'",
+    ]) {
+      await expect(
+        ta.db.pool.query(
+          `UPDATE app.legal_documents SET ${change} WHERE key = 'PRIVACY_NOTICE' AND version = '1'`,
+        ),
+      ).rejects.toThrow(/immutable/);
+    }
+  });
+
+  it('requires effective_from on a second PUBLISHED version, and allows PUBLISHED to RETIRED', async () => {
+    await writeFile(path.join(dir, 'privacy.md'), file('2', 'PUBLISHED', 'v2 text'));
+    await expect(seedLegalDocuments(ta.db.db, dir)).rejects.toThrow(/effective_from/);
+    await writeFile(
+      path.join(dir, 'privacy.md'),
+      file('2', 'PUBLISHED', 'v2 text', "\neffective_from: '2027-01-01T00:00:00Z'"),
+    );
+    await seedLegalDocuments(ta.db.db, dir);
+    expect((await rowOf('2'))?.status).toBe('PUBLISHED');
+    await writeFile(path.join(dir, 'privacy.md'), file('1', 'RETIRED', 'final text'));
+    await seedLegalDocuments(ta.db.db, dir);
+    expect((await rowOf('1'))?.status).toBe('RETIRED');
   });
 });

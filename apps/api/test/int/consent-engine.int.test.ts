@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as schema from '../../src/db/schema.js';
 import {
   investorContacts,
   investors,
@@ -416,6 +419,30 @@ describe('ConsentEngine.useConsumed', () => {
       subjectType: 'PURCHASE',
     });
     expect(consent.subjectIds).toHaveLength(1);
+  });
+
+  it('stamps first_attempt_at on a connection that runs as sanchay_app (MF-1: consent_records is append-only)', async () => {
+    const c = await createChallenge();
+    await engine.sendOtp(c.challengeId, 'SMS');
+    await engine.approve(c.challengeId, { smsCode: ta.sms.latestCode('9999999999') ?? '000000' });
+    const pool = new pg.Pool({
+      connectionString: ta.db.url,
+      max: 2,
+      options: '-c role=sanchay_app',
+    });
+    try {
+      const restricted = Object.assign(Object.create(Object.getPrototypeOf(engine)), engine, {
+        dbh: { db: drizzle({ client: pool, schema }), pool, close: () => pool.end() },
+      }) as ConsentEngine;
+      await expect(restricted.useConsumed(c.challengeId, async () => 'ok')).resolves.toBe('ok');
+    } finally {
+      await pool.end();
+    }
+    const [record] = await ta.db.db
+      .select({ firstAttemptAt: consentRecords.firstAttemptAt })
+      .from(consentRecords)
+      .where(eq(consentRecords.challengeId, c.challengeId));
+    expect(record?.firstAttemptAt).not.toBeNull();
   });
 
   it('execute_before missed: the callback never runs, zero P/M writes, CONSUMED_UNUSED after the sweep', async () => {
