@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FpKyc } from '../../src/integrations/fp/fp-kyc.js';
@@ -72,9 +73,19 @@ afterAll(async () => {
 });
 
 const post = (url: string, cookies: Record<string, string>, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url: `/api/v1${url}`, headers: webHeaders({ cookies }), payload });
+  t.app.inject({
+    method: 'POST',
+    url: `/api/v1${url}`,
+    headers: { ...webHeaders({ cookies }), 'idempotency-key': randomUUID() },
+    payload,
+  });
 const put = (url: string, cookies: Record<string, string>, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'PUT', url: `/api/v1${url}`, headers: webHeaders({ cookies }), payload });
+  t.app.inject({
+    method: 'PUT',
+    url: `/api/v1${url}`,
+    headers: { ...webHeaders({ cookies }), 'idempotency-key': randomUUID() },
+    payload,
+  });
 const get = (url: string, cookies: Record<string, string>) =>
   t.app.inject({ method: 'GET', url: `/api/v1${url}`, headers: webHeaders({ cookies }) });
 

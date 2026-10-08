@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { legalDocuments } from '../../src/modules/legal-consent/legal-consent.schema.js';
@@ -71,7 +72,12 @@ const FP_REJECTS = {
 };
 
 const post = (url: string, cookies: Record<string, string>, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url: `/api/v1${url}`, headers: webHeaders({ cookies }), payload });
+  t.app.inject({
+    method: 'POST',
+    url: `/api/v1${url}`,
+    headers: { ...webHeaders({ cookies }), 'idempotency-key': randomUUID() },
+    payload,
+  });
 const get = (url: string, cookies: Record<string, string>) =>
   t.app.inject({ method: 'GET', url: `/api/v1${url}`, headers: webHeaders({ cookies }) });
 
@@ -112,7 +118,7 @@ async function addBank(mobile: string, n: number) {
   const profile = await t.app.inject({
     method: 'PUT',
     url: '/api/v1/onboarding/profile',
-    headers: webHeaders({ cookies: s.cookies }),
+    headers: { ...webHeaders({ cookies: s.cookies }), 'idempotency-key': randomUUID() },
     payload: FULL_PROFILE,
   });
   expect(profile.statusCode).toBe(200);
