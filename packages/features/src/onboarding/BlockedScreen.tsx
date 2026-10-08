@@ -5,12 +5,14 @@ export interface BlockedScreenProps {
   reason: OnboardingBlockedStage;
   readinessCode: string | null;
   onRetry?: (() => void) | undefined;
+  /** PROVISIONING_FAILED: the runbook's remedy is a re-attest, so the hub routes this to the review step. */
+  onTryAgain?: (() => void) | undefined;
 }
 
 const SUPPORT_LINE = 'Write to support@sanchay.in and we will help you from there.';
 
 /** ONB-19: the terminal, non-hard-block-shaped states the ONB-00 hub can land on. */
-export function BlockedScreen({ reason, readinessCode, onRetry }: BlockedScreenProps) {
+export function BlockedScreen({ reason, readinessCode, onRetry, onTryAgain }: BlockedScreenProps) {
   if (reason === 'KYC_UPDATE_NEEDED') {
     return (
       <Screen testID="onboarding-blocked">
@@ -48,6 +50,7 @@ export function BlockedScreen({ reason, readinessCode, onRetry }: BlockedScreenP
         message="We ran into a problem setting up your account. Our team has been notified and will follow up."
       />
       <AppText tone="muted">{SUPPORT_LINE}</AppText>
+      {onTryAgain ? <Button label="Try again" onPress={onTryAgain} /> : null}
     </Screen>
   );
 }

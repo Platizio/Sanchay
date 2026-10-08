@@ -77,7 +77,19 @@ export function ReviewAttestScreen() {
         label="Attest and submit"
         loading={attest.isPending}
         onPress={() => {
-          attest.mutate({}, { onSuccess: (started) => setChallengeId(started.challengeId) });
+          attest.mutate(
+            {},
+            {
+              onSuccess: (started) => setChallengeId(started.challengeId),
+              // A nomination change or a republished legal document leaves declarations to redo; the hub
+              // would send the investor straight back here, so go to the step itself (MF-7).
+              onError: (error) => {
+                if (toApiError(error).code === 'DECLARATION_OUTDATED') {
+                  nav.replace('/onboarding/declarations');
+                }
+              },
+            },
+          );
         }}
       />
       {challengeId ? (

@@ -86,7 +86,13 @@ function OnboardingStages({ onNavigate }: { onNavigate: (path: string) => void }
     );
   }
   if (isBlockedStage(onboarding.stage)) {
-    return <BlockedScreen reason={onboarding.stage} readinessCode={onboarding.readinessCode} />;
+    return (
+      <BlockedScreen
+        reason={onboarding.stage}
+        readinessCode={onboarding.readinessCode}
+        onTryAgain={() => onNavigate('/onboarding/review')}
+      />
+    );
   }
   if (onboarding.stage === 'DONE') {
     return (

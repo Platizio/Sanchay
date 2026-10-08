@@ -144,4 +144,27 @@ describe('ReviewAttestScreen (ONB-16)', () => {
     expect(await screen.findByText('Your bank account is not verified yet.')).toBeTruthy();
     expect(screen.queryByLabelText('SMS code')).toBeNull();
   });
+
+  it('sends an investor whose declarations are outdated back to the declarations step (MF-7)', async () => {
+    answerReads();
+    server.use(
+      http.post(`${TEST_API}/onboarding/attest`, () =>
+        HttpResponse.json(
+          {
+            defined: true,
+            code: 'DECLARATION_OUTDATED',
+            status: 409,
+            message: 'DECLARATION_OUTDATED',
+            data: { retryable: false, requestId: '0190c0de-0000-7000-8000-0000000000bb' },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    const { nav } = renderWithProviders(<ReviewAttestScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Attest and submit' }));
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/onboarding/declarations'));
+    expect(screen.queryByLabelText('SMS code')).toBeNull();
+  });
 });

@@ -1,4 +1,5 @@
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -57,5 +58,18 @@ describe('OnboardingHubScreen', () => {
     // The title and the banner both say it, so assert the heading and the KRA copy separately.
     expect(await screen.findByRole('heading', { name: 'Update your KYC' })).toBeTruthy();
     expect(screen.getByText(/update your KYC with a KRA/i)).toBeTruthy();
+  });
+
+  it('offers Try again to the review step when provisioning failed (PRV-2)', async () => {
+    server.use(
+      http.get(`${TEST_API}/auth/session`, () => HttpResponse.json(session(true))),
+      http.get(`${TEST_API}/onboarding`, () =>
+        HttpResponse.json({ stage: 'PROVISIONING_FAILED', readinessCode: null }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { nav } = renderWithProviders(<OnboardingHubScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+    expect(nav.push).toHaveBeenCalledWith('/onboarding/review');
   });
 });
