@@ -162,6 +162,13 @@
       "when": 1791434929897,
       "tag": "0025_readiness_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791442537362,
+      "tag": "0026_consent_records_first_attempt_grant",
+      "breakpoints": true
     }
   ]
 }

@@ -183,6 +183,25 @@ describe('consent_records', () => {
     expect(insertError).toBeUndefined();
   });
 
+  it('sanchay_app may stamp first_attempt_at (column grant) but still no other column (MF-1)', async () => {
+    const [row] = await ta.db.db
+      .select()
+      .from(consentRecords)
+      .where(eq(consentRecords.documentKey, 'KYC_CONSENT'))
+      .limit(1);
+    if (row === undefined) throw new Error('the previous case seeds a consent_records row');
+    const stamp = await asAppRole(
+      'UPDATE app.consent_records SET first_attempt_at = now() WHERE id = $1',
+      [row.id],
+    );
+    expect(stamp).toBeUndefined();
+    const other = await asAppRole('UPDATE app.consent_records SET channel = $1 WHERE id = $2', [
+      'X',
+      row.id,
+    ]);
+    expect(other?.message).toMatch(/permission denied/i);
+  });
+
   it('refuses a row that sets both or neither of (challenge_id, document_key)', async () => {
     const both = await asAppRole(
       `INSERT INTO app.consent_records (id, created_by, kind, investor_id, challenge_id, document_key, consumed_at)
