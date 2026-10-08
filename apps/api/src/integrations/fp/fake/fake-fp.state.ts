@@ -5,6 +5,8 @@ export interface StoredPreVerification {
   pan: { status: string };
   name: { status: string };
   dateOfBirth: { status: string };
+  /** Present when the create carried bank_accounts; the fake verifies each one. */
+  bankAccounts?: Array<{ status: string; code: string | null }>;
 }
 
 export interface StoredInvestorProfile {

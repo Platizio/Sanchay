@@ -12,7 +12,7 @@ import {
   type FakeSchemeFixture,
   type FpScriptMode,
 } from './fake-fp.scenarios.js';
-import { FakeFpState, type StoredPurchase } from './fake-fp.state.js';
+import { FakeFpState, type StoredPreVerification, type StoredPurchase } from './fake-fp.state.js';
 
 interface FakeReply {
   readonly statusCode: number;
@@ -79,15 +79,16 @@ function schemePlanPayload(fixture: FakeSchemeFixture): Record<string, unknown> 
   };
 }
 
-function preVerificationPayload(id: string, status: string): Record<string, unknown> {
+function preVerificationPayload(record: StoredPreVerification): Record<string, unknown> {
   return {
     object: 'pre_verification',
-    id,
-    status,
+    id: record.id,
+    status: record.status,
     readiness: { status: 'verified' },
     pan: { status: 'completed' },
     name: { status: 'completed' },
     date_of_birth: { status: 'completed' },
+    ...(record.bankAccounts === undefined ? {} : { bank_accounts: record.bankAccounts }),
   };
 }
 
@@ -341,15 +342,19 @@ export class FakeFp {
       }
       case 'preVerification.create': {
         const id = this.state.nextId('pv_');
-        this.state.preVerifications.set(id, {
+        const record: StoredPreVerification = {
           id,
           status: 'completed',
           readiness: { status: 'verified' },
           pan: { status: 'completed' },
           name: { status: 'completed' },
           dateOfBirth: { status: 'completed' },
-        });
-        return { statusCode: 200, data: preVerificationPayload(id, 'completed') };
+          ...(Array.isArray(body.bank_accounts)
+            ? { bankAccounts: body.bank_accounts.map(() => ({ status: 'verified', code: null })) }
+            : {}),
+        };
+        this.state.preVerifications.set(id, record);
+        return { statusCode: 200, data: preVerificationPayload(record) };
       }
       case 'preVerification.get': {
         const record = this.state.preVerifications.get(params.id ?? '');
@@ -365,7 +370,7 @@ export class FakeFp {
             },
           };
         }
-        return { statusCode: 200, data: preVerificationPayload(record.id, record.status) };
+        return { statusCode: 200, data: preVerificationPayload(record) };
       }
       case 'investorProfile.create': {
         const id = this.state.nextId('invp_');
