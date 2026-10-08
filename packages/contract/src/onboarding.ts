@@ -11,7 +11,7 @@ import {
 } from '@sanchay/domain';
 import { ifscSchema, panSchema, pincodeSchema } from '@sanchay/validation';
 import { z } from 'zod';
-import { InstantSchema } from './common.js';
+import { InstantSchema, OkSchema } from './common.js';
 import { COMMON_ERRORS, errorMap, SESSION_ERRORS } from './errors.js';
 
 export const ONBOARDING_STAGE_VALUES = [
@@ -97,6 +97,25 @@ export const PutNominationInputSchema = z.strictObject({
   displayPreference: z.boolean().optional(),
   // Bounded only to cap the payload; the 3-nominee limit is the domain rule, so a 4th is NOMINATION_INVALID (422), not a shape error.
   nominees: z.array(NomineeInputSchema).max(10).optional(),
+});
+
+export const StageDeclarationsInputSchema = z.strictObject({
+  accept: z
+    .array(
+      z.object({
+        key: z.enum([
+          'TNC',
+          'PRIVACY_NOTICE',
+          'RISK_DISCLOSURE',
+          'REGULAR_PLAN_COMMISSION',
+          'EXECUTION_ONLY_DECLARATION',
+          'FATCA_CRS_DECLARATION',
+          'NOMINATION_OPT_OUT_ANNEX_B',
+        ]),
+        version: z.string().min(1),
+      }),
+    )
+    .min(1),
 });
 
 export const NominationViewSchema = z.object({
@@ -194,6 +213,23 @@ export const onboardingContract = {
     )
     .input(PutNominationInputSchema)
     .output(NominationViewSchema),
+  stageDeclarations: route(
+    'POST',
+    '/onboarding/declarations',
+    'Stage the ONB-15 declaration checkboxes at their current document versions',
+  )
+    .errors(
+      errorMap(
+        ...COMMON_ERRORS,
+        ...SESSION_ERRORS,
+        'DECLARATION_OUTDATED',
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'IDEMPOTENCY_KEY_REUSED',
+        'IDEMPOTENCY_IN_PROGRESS',
+      ),
+    )
+    .input(StageDeclarationsInputSchema)
+    .output(OkSchema),
 };
 
 /** The Idempotency-Key codes every mutating procedure declares (same list as me.ts / consents.ts). */

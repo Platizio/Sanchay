@@ -8,6 +8,7 @@ import { requireIdempotency } from '../platform/idempotency.middleware.js';
 import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
 import { BankService } from './bank.service.js';
+import { DeclarationsService } from './declarations.service.js';
 import { IdentityService } from './identity.service.js';
 import { NominationService } from './nomination.service.js';
 import { OnboardingQueries } from './onboarding.queries.js';
@@ -24,6 +25,7 @@ export class OnboardingRouter {
     @Inject(BankService) private readonly bank: BankService,
     @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
     @Inject(RiskProfileService) private readonly riskProfiles: RiskProfileService,
+    @Inject(DeclarationsService) private readonly declarations: DeclarationsService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
@@ -81,6 +83,13 @@ export class OnboardingRouter {
     return implement(contract.onboarding.putNomination)
       .use(requireIdempotency(this.idempotency, this.cls))
       .handler(({ input }) => this.nomination.putNomination(requireAuth(this.cls), input));
+  }
+
+  @Implement(contract.onboarding.stageDeclarations)
+  stageDeclarations() {
+    return implement(contract.onboarding.stageDeclarations)
+      .use(requireIdempotency(this.idempotency, this.cls))
+      .handler(({ input }) => this.declarations.stage(requireAuth(this.cls), input));
   }
 
   @Public()

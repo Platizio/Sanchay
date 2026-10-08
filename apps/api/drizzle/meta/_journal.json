@@ -148,6 +148,13 @@
       "when": 1791433004922,
       "tag": "0023_bank_accounts_ref_ifsc",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791433988973,
+      "tag": "0024_declaration_stagings",
+      "breakpoints": true
     }
   ]
 }

@@ -3,10 +3,22 @@ import {
   type ChallengeStatus,
   CONSENT_SUBJECT_TYPES,
   LEGAL_DOCUMENT_KEYS,
+  type LegalDocumentKey,
 } from '@sanchay/domain';
 import { sql } from 'drizzle-orm';
-import { check, index, inet, jsonb, smallint, text, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  check,
+  index,
+  inet,
+  jsonb,
+  smallint,
+  text,
+  unique,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { actorColumns, appSchema, bytea, inList, stdColumns, tstz } from '../../db/app-schema.js';
+import { investors } from '../identity/identity.schema.js';
 import { newId } from '../platform/ids.js';
 
 export const LEGAL_DOCUMENT_STATUSES = ['DRAFT', 'PUBLISHED', 'RETIRED'] as const;
@@ -170,5 +182,47 @@ export const consentSubjects = appSchema.table(
     check('consent_subjects_status_ck', inList('status', CONSENT_SUBJECT_ROW_STATUSES)),
     unique('consent_subjects_challenge_subject_uq').on(t.challengeId, t.subjectTable, t.subjectId),
     index('consent_subjects_subject_idx').on(t.subjectTable, t.subjectId),
+  ],
+);
+
+/** The seven documents ONB-15 stages. KYC_CONSENT is excluded: E6 already recorded it at ONB-02. */
+export const DECLARATION_KEYS = [
+  'TNC',
+  'PRIVACY_NOTICE',
+  'RISK_DISCLOSURE',
+  'REGULAR_PLAN_COMMISSION',
+  'EXECUTION_ONLY_DECLARATION',
+  'FATCA_CRS_DECLARATION',
+  'NOMINATION_OPT_OUT_ANNEX_B',
+] as const satisfies readonly LegalDocumentKey[];
+export type DeclarationKey = (typeof DECLARATION_KEYS)[number];
+
+/**
+ * The checkbox state of the onboarding declarations, staged until E11's attest seals it into
+ * consent_records (one row per document version). `document_version` is text, like legal_documents.version.
+ * At most one current (superseded_at IS NULL) row per investor and key.
+ */
+export const declarationStagings = appSchema.table(
+  'declaration_stagings',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .$defaultFn(() => newId('declaration_stagings')),
+    createdAt: tstz('created_at').notNull().defaultNow(),
+    investorId: uuid('investor_id')
+      .notNull()
+      .references(() => investors.id, { onDelete: 'restrict' }),
+    documentKey: text('document_key', { enum: DECLARATION_KEYS }).notNull(),
+    documentVersion: text('document_version').notNull(),
+    acceptedAt: tstz('accepted_at').notNull(),
+    ip: inet('ip'),
+    userAgent: text('user_agent'),
+    supersededAt: tstz('superseded_at'),
+  },
+  (t) => [
+    check('declaration_stagings_key_ck', inList('document_key', DECLARATION_KEYS)),
+    uniqueIndex('declaration_stagings_current_uq')
+      .on(t.investorId, t.documentKey)
+      .where(sql`superseded_at IS NULL`),
   ],
 );

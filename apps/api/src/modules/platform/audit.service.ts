@@ -64,6 +64,8 @@ export const AUDIT_ACTIONS = {
   ONBOARDING_NOMINATION_SET: 'ONBOARDING_NOMINATION_SET',
   /** The investor submitted the risk questionnaire; data.status carries the resulting level (E9). */
   ONBOARDING_RISK_PROFILE_SUBMITTED: 'ONBOARDING_RISK_PROFILE_SUBMITTED',
+  /** The investor staged the onboarding declarations at ONB-15 (E10). */
+  ONBOARDING_DECLARATIONS_STAGED: 'ONBOARDING_DECLARATIONS_STAGED',
   /** ops:invite CLI write (D7). */
   PILOT_INVITE_ADDED: 'PILOT_INVITE_ADDED',
 } as const;
