@@ -60,6 +60,24 @@ export const FP_OPERATIONS = {
     audience: 'poa',
     class: 'R',
   },
+  // R -- provisioning lookups (E11 LOOKUP-ADOPT; research:fp-api SS5)
+  'investorProfile.list': {
+    method: 'GET',
+    path: '/v2/investor_profiles',
+    audience: 'fp',
+    class: 'R',
+  },
+  'phoneNumber.list': { method: 'GET', path: '/v2/phone_numbers', audience: 'fp', class: 'R' },
+  'emailAddress.list': { method: 'GET', path: '/v2/email_addresses', audience: 'fp', class: 'R' },
+  'address.list': { method: 'GET', path: '/v2/addresses', audience: 'fp', class: 'R' },
+  'relatedParty.list': { method: 'GET', path: '/v2/related_parties', audience: 'fp', class: 'R' },
+  'bankAccount.list': { method: 'GET', path: '/v2/bank_accounts', audience: 'fp', class: 'R' },
+  'mfInvestmentAccount.list': {
+    method: 'GET',
+    path: '/v2/mf_investment_accounts',
+    audience: 'fp',
+    class: 'R',
+  },
 
   // K -- POA pre-verification (research:fp-api SS5, item 1)
   'preVerification.create': {

@@ -12,12 +12,6 @@ export interface StoredInvestorProfile {
   raw: Record<string, unknown>;
 }
 
-/** Generic stored row for the provisioning objects FakeFp keeps but does not yet model field by field (E11 extends them). */
-export interface StoredRawObject {
-  readonly id: string;
-  raw: Record<string, unknown>;
-}
-
 export interface StoredPurchase {
   readonly id: string;
   readonly oldId: number;
@@ -48,16 +42,22 @@ export class FakeFpState {
 
   readonly preVerifications = new Map<string, StoredPreVerification>();
   readonly investorProfiles = new Map<string, StoredInvestorProfile>();
-  readonly phoneNumbers = new Map<string, StoredRawObject>();
-  readonly emailAddresses = new Map<string, StoredRawObject>();
-  readonly addresses = new Map<string, StoredRawObject>();
-  readonly relatedParties = new Map<string, StoredRawObject>();
-  readonly bankAccounts = new Map<string, StoredRawObject>();
-  readonly mfInvestmentAccounts = new Map<string, StoredRawObject>();
   readonly purchases = new Map<string, StoredPurchase>();
   readonly purchasesByOldId = new Map<number, string>();
   readonly payments = new Map<number, StoredPayment>();
   readonly mandates = new Map<number, StoredMandate>();
+
+  private readonly provisionedByKind = new Map<string, Array<Record<string, unknown>>>();
+
+  /** Phone numbers, emails, addresses, related parties, bank accounts and MF investment accounts, by kind. */
+  provisioned(kind: string): Array<Record<string, unknown>> {
+    let rows = this.provisionedByKind.get(kind);
+    if (rows === undefined) {
+      rows = [];
+      this.provisionedByKind.set(kind, rows);
+    }
+    return rows;
+  }
 
   nextId(prefix: string): string {
     this.sequence += 1;

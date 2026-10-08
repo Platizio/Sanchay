@@ -110,6 +110,9 @@ const FP_REDACT_KEY_PATTERNS: readonly RegExp[] = [
 function redactFp(value: unknown, stringLeaves: boolean, depth = 0): unknown {
   if (depth > 16) return '[DEPTH]';
   if (typeof value === 'string') return stringLeaves ? REDACTED : value;
+  // A plain number in a request body is a value too (a profile's geo_location latitude and longitude, RV-02-84).
+  // Lossless numbers are already decimal strings by now. Booleans and null carry no PII and stay.
+  if (typeof value === 'number') return stringLeaves ? REDACTED : value;
   if (Array.isArray(value)) return value.map((item) => redactFp(item, stringLeaves, depth + 1));
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
@@ -168,8 +171,8 @@ function allowlist(value: unknown, key: string | null, depth = 0): unknown {
 }
 
 /**
- * Request meta: platform `scrub` plus the FP key list, and every string leaf of the body is dropped as well, so
- * an unlisted key can never leak a value; the full request is in `body_enc`. Response meta is an allowlist
+ * Request meta: platform `scrub` plus the FP key list, and every string and number leaf of the body is dropped
+ * as well, so an unlisted key can never leak a value; the full request is in `body_enc`. Response meta is an allowlist
  * (`FP_RESPONSE_ALLOWED_KEYS`) instead; the unredacted response is likewise only in `body_enc`.
  */
 function meta(value: unknown, stringLeaves = false): unknown {
