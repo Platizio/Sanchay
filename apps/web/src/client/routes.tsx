@@ -3,15 +3,21 @@ import {
   AccountScreen,
   AddressScreen,
   AppShell,
+  BankScreen,
   ComingSoonScreen,
+  DeclarationsScreen,
   ExploreScreen,
   FatcaScreen,
   FundScreen,
   HomeScreen,
   IdentityScreen,
   LoginScreen,
+  NomineesScreen,
   OnboardingHubScreen,
   PersonalDetailsScreen,
+  ProvisioningStatusScreen,
+  ReviewAttestScreen,
+  RiskQuestionnaireScreen,
   SearchScreen,
 } from '@sanchay/features';
 import { notFound, usePathname } from 'next/navigation';
@@ -59,6 +65,12 @@ const ONBOARDING_STEP_SCREENS: Record<string, ComponentType> = {
   personal: PersonalDetailsScreen,
   address: AddressScreen,
   fatca: FatcaScreen,
+  bank: BankScreen,
+  nominees: NomineesScreen,
+  risk: RiskQuestionnaireScreen,
+  declarations: DeclarationsScreen,
+  review: ReviewAttestScreen,
+  provisioning: ProvisioningStatusScreen,
 };
 
 export function OnboardingStepRoute({ step }: { step: string }) {

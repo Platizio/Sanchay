@@ -3,6 +3,7 @@ import { AppText, Button } from '@sanchay/ui';
 import { type ReactNode, useSyncExternalStore } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import { useSignOut } from '../auth/useSignOut';
+import { LegalPendingBanner } from '../legal/LegalPendingBanner';
 import { AppNav, type AppTabKey, navLayoutFor } from './AppNav';
 
 export interface AppShellProps {
@@ -45,7 +46,10 @@ export function AppShell({ children, navigation }: AppShellProps) {
       </View>
       <View style={nav && layout === 'sidebar' ? styles.bodyRow : styles.bodyColumn}>
         {layout === 'sidebar' ? nav : null}
-        <View style={styles.content}>{children}</View>
+        <View style={styles.content}>
+          <LegalPendingBanner />
+          {children}
+        </View>
         {layout === 'bottom' ? nav : null}
       </View>
     </View>

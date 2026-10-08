@@ -743,6 +743,9 @@ importers:
       '@sanchay/app-core':
         specifier: workspace:*
         version: link:../app-core
+      '@sanchay/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@sanchay/money':
         specifier: workspace:*
         version: link:../money

@@ -57,6 +57,33 @@ export class LegalRouter {
     );
   }
 
+  /**
+   * R-18: records the acceptance of the updated documents the investor is shown. Only keys that are
+   * pending right now are recorded, so a repeated or stale call writes no duplicate row; the version
+   * accepted is the one in force (E3 `recordAcceptance`), which is the version `legal.pending` listed.
+   */
+  @Implement(contract.legal.acceptPending)
+  acceptPending() {
+    return implement(contract.legal.acceptPending).handler(async ({ input }) => {
+      const auth = requireAuth(this.cls);
+      const pending = new Set<string>((await this.declarations.pending(auth)).map((d) => d.key));
+      const keys = [...new Set(input.keys)].filter((key) => pending.has(key));
+      await this.dbh.db.transaction(async (tx) => {
+        for (const key of keys) {
+          await this.legalDocs.recordAcceptance(tx, {
+            investorId: auth.investorId,
+            key,
+            channel: 'APP',
+            ip: this.cls.get('ip') ?? null,
+            userAgent: this.cls.get('userAgent') ?? null,
+            sessionId: auth.sessionId,
+          });
+        }
+      });
+      return { ok: true as const };
+    });
+  }
+
   @Public()
   @Implement(contract.legal.commissionRates)
   commissionRates() {

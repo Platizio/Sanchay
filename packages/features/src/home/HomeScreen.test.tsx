@@ -36,7 +36,8 @@ const internalError = () =>
     { status: 500 },
   );
 
-const server = setupServer();
+// E13: AppShell's LegalPendingBanner reads GET /legal/pending on every render; this default survives resetHandlers.
+const server = setupServer(http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json([])));
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
