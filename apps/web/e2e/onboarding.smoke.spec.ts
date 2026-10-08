@@ -5,12 +5,15 @@ import { readLatestOtp, readLatestOtpTo } from './support/otp';
  * @smoke, local only (RV-03-49). KYC and provisioning need the worker, which CI's e2e job does not
  * start, and sign-up needs a pilot-invited mobile, so the test is skipped unless
  * SANCHAY_E2E_ONBOARDING_MOBILE names an invited mobile. Run the stack with
- * SANCHAY_PROVIDER_MODE_FP=fake; every code is read from Mailpit (Plan 01 has no fixed OTP).
+ * SANCHAY_PROVIDER_MODE_FP=fake and a worker; every code is read from Mailpit (Plan 01 has no fixed OTP).
  */
 const mobile = process.env.SANCHAY_E2E_ONBOARDING_MOBILE ?? '';
 const email = `smoke.${mobile}@example.com`;
 
-test('onboarding: identity through profile reaches the bank stage', async ({ page, request }) => {
+test('onboarding: identity through provisioning reaches an account that is ready', async ({
+  page,
+  request,
+}) => {
   test.skip(mobile === '', 'set SANCHAY_E2E_ONBOARDING_MOBILE to a pilot-invited mobile');
   await page.goto('/signup');
   await page.getByLabel('Mobile number').fill(mobile);
@@ -69,5 +72,71 @@ test('onboarding: identity through profile reaches the bank stage', async ({ pag
   await page.getByRole('radio', { name: 'No', exact: true }).nth(1).click();
   await page.getByRole('button', { name: 'Continue' }).click();
 
-  await expect(page.getByText('Bank')).toBeVisible();
+  // The hub moves to the next stage once the server settles the previous one.
+  const activeStage = (label: string) =>
+    expect(page.locator('[data-step-state="active"]')).toHaveText(label, { timeout: 60_000 });
+
+  // ONB-08/09: the worker's penny-drop job settles the account (FakeFp), then the hub moves on.
+  await activeStage('Bank');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByLabel('Account number', { exact: true }).fill('50100123456789');
+  await page.getByLabel('Confirm account number').fill('50100123456789');
+  await page.getByLabel('IFSC').fill('HDFC0000001');
+  await page.getByRole('button', { name: 'Save bank account' }).click();
+  await expect(page.getByText(/Verifying your bank account/)).toBeVisible();
+  await expect(page.getByText('Bank account verified')).toBeVisible({ timeout: 60_000 });
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  // ONB-12/13: one nominee takes the whole 100%.
+  await activeStage('Nominees');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Add nominee' }).click();
+  await page.getByLabel('Full name').fill('Aarav Shah');
+  await page.getByRole('button', { name: /^Relationship/ }).click();
+  await page.getByRole('radio', { name: 'Son' }).click();
+  await page.getByRole('button', { name: 'Save nomination' }).click();
+
+  // ONB-21/22: Q1 is the date of birth, Q2..Q8 are the seven scored answers.
+  await activeStage('Risk profile');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByLabel('Date of birth').fill('1990-05-12');
+  for (const [question, answer] of [
+    ['When will you need this money?', '3 to 5 years'],
+    ['Main goal', 'Balanced growth'],
+    ['Income stability', 'Stable'],
+    ['Emergency savings', '3 to 6 months'],
+    ['Share of income going to EMIs', '10 to 30%'],
+    ['Experience', 'Equity mutual funds, less than 3 years'],
+    ['Your portfolio falls 20% in 3 months. You:', 'Hold'],
+  ] as const) {
+    await page
+      .getByRole('radiogroup', { name: question })
+      .getByRole('radio', { name: answer })
+      .click();
+  }
+  await page.getByRole('button', { name: 'See my risk profile' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  // ONB-15: the six declarations an investor who nominated has to accept.
+  await activeStage('Declarations');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  for (const label of [
+    'Terms and Conditions',
+    'Privacy Notice',
+    'Risk Disclosure',
+    'Regular plan commission disclosure',
+    'Execution-only declaration',
+    'FATCA/CRS declaration',
+  ]) {
+    await page.getByRole('checkbox', { name: label }).check();
+  }
+  await page.getByRole('button', { name: 'Continue to review' }).click();
+
+  // ONB-16: CNF-01's two codes, read from Mailpit (RV-03-49; Plan 01 has no fixed OTP).
+  since = Date.now();
+  await page.getByRole('button', { name: 'Attest and submit' }).click();
+  await page.getByLabel('SMS code').fill(await readLatestOtp(request, mobile, since));
+  await page.getByLabel('Email code').fill(await readLatestOtpTo(request, email, since));
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expect(page.getByText('Your account is ready')).toBeVisible({ timeout: 60_000 });
 });

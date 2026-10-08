@@ -157,6 +157,57 @@ describe('legal.commissionRates', () => {
   });
 });
 
+describe('legal.acceptPending (R-18)', () => {
+  const keysOf = (body: Array<{ key: string }>) => body.map((d) => d.key);
+  const acceptances = (investorId: string) =>
+    app.db.db
+      .select()
+      .from(consentRecords)
+      .where(
+        and(
+          eq(consentRecords.investorId, investorId),
+          eq(consentRecords.kind, 'DOCUMENT_ACCEPTANCE'),
+        ),
+      );
+
+  it('records one APP acceptance per pending key, which clears them from legal.pending', async () => {
+    await seedDocs();
+    const { investor, req } = await signedInInvestor(app);
+    expect(keysOf((await req.get('/api/v1/legal/pending')).body)).toEqual(
+      expect.arrayContaining(['TNC', 'PRIVACY_NOTICE']),
+    );
+    const res = await req.post('/api/v1/legal/pending/accept', {
+      keys: ['TNC', 'PRIVACY_NOTICE'],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    const after = keysOf((await req.get('/api/v1/legal/pending')).body);
+    expect(after).not.toContain('TNC');
+    expect(after).not.toContain('PRIVACY_NOTICE');
+    expect(after).toContain('RISK_DISCLOSURE');
+    const rows = await acceptances(investor.id);
+    expect(rows.map((r) => r.documentKey).sort()).toEqual(['PRIVACY_NOTICE', 'TNC']);
+    expect(rows.every((r) => r.channel === 'APP' && r.sessionId !== null)).toBe(true);
+  });
+
+  it('writes no row for a key that is not pending, so a repeat call adds no duplicate', async () => {
+    await seedDocs();
+    const { investor, req } = await signedInInvestor(app);
+    await req.post('/api/v1/legal/pending/accept', { keys: ['TNC'] });
+    const again = await req.post('/api/v1/legal/pending/accept', {
+      keys: ['TNC', 'INVESTOR_CHARTER'],
+    });
+    expect(again.status).toBe(200);
+    expect((await acceptances(investor.id)).map((r) => r.documentKey)).toEqual(['TNC']);
+  });
+
+  it('refuses an empty key list and an unknown key', async () => {
+    const { req } = await signedInInvestor(app);
+    expect((await req.post('/api/v1/legal/pending/accept', { keys: [] })).status).toBe(400);
+    expect((await req.post('/api/v1/legal/pending/accept', { keys: ['NOPE'] })).status).toBe(400);
+  });
+});
+
 // Last in the file: it publishes TNC version 3 into the shared test database ('rejects a stale version
 // acceptance' already turned the first TNC row into version 2).
 describe('legal.pending after a re-accept (R-18)', () => {

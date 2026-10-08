@@ -1,5 +1,6 @@
 import { oc } from '@orpc/contract';
 import { z } from 'zod';
+import { OkSchema } from './common.js';
 import { COMMON_ERRORS, errorMap, SESSION_ERRORS } from './errors.js';
 
 export const LegalDocumentKeySchema = z.enum([
@@ -35,7 +36,12 @@ export const CommissionRateSchema = z.object({
   kind: z.enum(['EXACT', 'RANGE']),
 });
 
-const route = (method: 'GET', path: `/${string}`, summary: string) =>
+export const AcceptPendingInputSchema = z.strictObject({
+  keys: z.array(LegalDocumentKeySchema).min(1),
+});
+export type AcceptPendingInput = z.infer<typeof AcceptPendingInputSchema>;
+
+const route = (method: 'GET' | 'POST', path: `/${string}`, summary: string) =>
   oc.route({ method, path, tags: ['legal'], summary });
 
 export const legalContract = {
@@ -53,4 +59,12 @@ export const legalContract = {
   commissionRates: route('GET', '/legal/commission-rates', 'Regular plan commission disclosure')
     .errors(errorMap(...COMMON_ERRORS))
     .output(z.array(CommissionRateSchema)),
+  acceptPending: route(
+    'POST',
+    '/legal/pending/accept',
+    'Record acceptance of the updated legal document versions that are pending (R-18)',
+  )
+    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
+    .input(AcceptPendingInputSchema)
+    .output(OkSchema),
 };
