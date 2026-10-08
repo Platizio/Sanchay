@@ -118,14 +118,19 @@ const PROVISIONED_CREATES: Partial<
   'mfInvestmentAccount.create': { kind: 'mf_investment_account', prefix: 'mfia_', oldId: true },
 };
 
-/** The lookups LOOKUP-ADOPT runs: each filters its kind by the query parameter that names the owner. */
+/**
+ * The lookups LOOKUP-ADOPT runs: each filters its kind by the query parameter that names the owner.
+ * The sandbox ignores `mf_investment_accounts?primary_investor=` and returns every tenant account
+ * (docs/probes/fp-lookup-filters-2026-10-08.md); only `primary_investor_pan=` filters, so that is the one
+ * owner key listed here and a `primary_investor=` query is deliberately a no-op.
+ */
 const PROVISIONED_LISTS: Partial<Record<FpOperationKey, { kind: string; owner: string }>> = {
   'phoneNumber.list': { kind: 'phone_number', owner: 'profile' },
   'emailAddress.list': { kind: 'email_address', owner: 'profile' },
   'address.list': { kind: 'address', owner: 'profile' },
   'relatedParty.list': { kind: 'related_party', owner: 'profile' },
   'bankAccount.list': { kind: 'bank_account', owner: 'profile' },
-  'mfInvestmentAccount.list': { kind: 'mf_investment_account', owner: 'primary_investor' },
+  'mfInvestmentAccount.list': { kind: 'mf_investment_account', owner: 'primary_investor_pan' },
 };
 
 /**
@@ -311,6 +316,11 @@ export class FakeFp {
         ...(create.oldId ? { old_id: this.state.nextOldId() } : {}),
         ...body,
       };
+      if (op === 'mfInvestmentAccount.create') {
+        // Real FP stamps the owner's PAN on the account; it is the only key the list can filter by.
+        const owner = this.state.investorProfiles.get(String(body.primary_investor));
+        if (owner !== undefined) row.primary_investor_pan = owner.raw.pan;
+      }
       this.state.provisioned(create.kind).push(row);
       return { statusCode: 200, data: row };
     }

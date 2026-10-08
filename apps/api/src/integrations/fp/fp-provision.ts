@@ -33,18 +33,26 @@ export class FpProvision {
     );
   }
 
+  /** Rows of one child collection for a profile; a row that names another profile is dropped (defence in depth). */
   async listForProfile(op: FpProfileListOp, profile: string): Promise<Row[]> {
-    return itemsOf((await this.transport.call(op, { query: { profile } })).body);
+    const rows = itemsOf((await this.transport.call(op, { query: { profile } })).body);
+    return rows.filter((r) => String(r.profile) === profile);
   }
 
-  async mfInvestmentAccountsFor(primaryInvestor: string): Promise<Row[]> {
-    return itemsOf(
+  /**
+   * The sandbox ignores `mf_investment_accounts?primary_investor=` and returns every tenant account
+   * (docs/probes/fp-lookup-filters-2026-10-08.md); only `primary_investor_pan=` filters. Query by PAN and keep
+   * only the rows whose `primary_investor` is this profile, so another investor's account is never returned.
+   */
+  async mfInvestmentAccountsFor(primaryInvestor: string, pan: string): Promise<Row[]> {
+    const rows = itemsOf(
       (
         await this.transport.call('mfInvestmentAccount.list', {
-          query: { primary_investor: primaryInvestor },
+          query: { primary_investor_pan: pan.toUpperCase() },
         })
       ).body,
     );
+    return rows.filter((r) => String(r.primary_investor) === primaryInvestor);
   }
 
   async createInvestorProfile(input: Row, consent: ConsumedConsent): Promise<Row> {

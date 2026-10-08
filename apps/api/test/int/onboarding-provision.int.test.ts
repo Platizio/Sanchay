@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FpTransport } from '../../src/integrations/fp/fp-transport.js';
 import { investors } from '../../src/modules/identity/identity.schema.js';
 import {
   type ConsentApprovedJobData,
@@ -10,10 +11,14 @@ import {
   legalDocuments,
 } from '../../src/modules/legal-consent/legal-consent.schema.js';
 import { bankAccounts } from '../../src/modules/onboarding/bank.schema.js';
-import { nominationDecisions } from '../../src/modules/onboarding/nomination.schema.js';
-import { onboardingApplications } from '../../src/modules/onboarding/onboarding.schema.js';
+import { nominationDecisions, nominees } from '../../src/modules/onboarding/nomination.schema.js';
+import {
+  investorProfiles,
+  onboardingApplications,
+} from '../../src/modules/onboarding/onboarding.schema.js';
 import { ProvisionJob } from '../../src/modules/onboarding/provision.job.js';
-import { newId } from '../../src/modules/platform/ids.js';
+import { Crypto } from '../../src/modules/platform/crypto.js';
+import { asRowId, newId } from '../../src/modules/platform/ids.js';
 import { Jobs } from '../../src/modules/platform/jobs/jobs.service.js';
 import { reconBreaks } from '../../src/modules/platform/kernel.schema.js';
 import { expectNoPmWritesBeforeConsumed } from './consent-first.js';
@@ -224,6 +229,247 @@ describe('onboarding.provision', () => {
     expect(t.fakeFp.calls({ op: 'investorProfile.create' })).toHaveLength(createsBefore);
     expect((await applicationOf(investor.investorId))?.adoptedFpIds).toMatchObject({
       investorProfile: 'invp_existing',
+    });
+  });
+
+  it('MF-2: a foreign account in the tenant list is never adopted, patched or linked (FP ignores primary_investor=)', async () => {
+    const investor = await seedReadyInvestor(t);
+    // The sandbox returns every tenant account for primary_investor=; FakeFp now does the same.
+    t.fakeFp.state.provisioned('mf_investment_account').unshift({
+      object: 'mf_investment_account',
+      id: 'mfia_foreign',
+      old_id: 424242,
+      primary_investor: 'invp_someone_else',
+      primary_investor_pan: 'ZZZZZ9999Z',
+      holding_pattern: 'single',
+    });
+    const createsBefore = t.fakeFp.calls({ op: 'mfInvestmentAccount.create' }).length;
+    await run(await attestAndApprove(investor));
+
+    const row = await investorOf(investor.investorId);
+    expect(row?.fpMfInvestmentAccountId).toMatch(/^mfia_\d+$/);
+    expect(row?.fpMfInvestmentAccountId).not.toBe('mfia_foreign');
+    expect(t.fakeFp.calls({ op: 'mfInvestmentAccount.create' })).toHaveLength(createsBefore + 1);
+    const foreign = t.fakeFp.state
+      .provisioned('mf_investment_account')
+      .find((r) => r.id === 'mfia_foreign');
+    expect(foreign?.folio_defaults).toBeUndefined();
+    const mine = t.fakeFp.state
+      .provisioned('mf_investment_account')
+      .find((r) => r.id === row?.fpMfInvestmentAccountId);
+    expect(mine).toMatchObject({
+      primary_investor: row?.fpInvestorProfileId,
+      primary_investor_pan: investor.pan,
+    });
+    expect(mine?.folio_defaults).toBeDefined();
+    expect((await applicationOf(investor.investorId))?.adoptedFpIds ?? {}).not.toHaveProperty(
+      'mfInvestmentAccount',
+    );
+  });
+
+  it("MF-2: a timeout after the account was created: the retry adopts this investor's own account by PAN", async () => {
+    const investor = await seedReadyInvestor(t);
+    const data = await attestAndApprove(investor);
+    const createsBefore = t.fakeFp.calls({ op: 'mfInvestmentAccount.create' }).length;
+    t.fakeFp.script('mfInvestmentAccount.create', 'timeout');
+    await expect(run(data)).rejects.toThrow();
+    await run(data);
+    expect(t.fakeFp.calls({ op: 'mfInvestmentAccount.create' })).toHaveLength(createsBefore + 1);
+    const row = await investorOf(investor.investorId);
+    expect((await applicationOf(investor.investorId))?.adoptedFpIds).toMatchObject({
+      mfInvestmentAccount: row?.fpMfInvestmentAccountId,
+    });
+    expect((await applicationOf(investor.investorId))?.provisioningStatus).toBe('DONE');
+  });
+
+  it('MF-2 defence in depth: a child row owned by another profile is not adopted', async () => {
+    const investor = await seedReadyInvestor(t);
+    const data = await attestAndApprove(investor);
+    // A lookup that (wrongly) returned a row for another profile must not be linked to this investor.
+    const foreignPhone = {
+      object: 'phone_number',
+      id: 'phone_foreign',
+      profile: 'invp_someone_else',
+      isd: '91',
+      number: investor.mobile.slice(-10),
+    };
+    const transport = t.app.get(FpTransport);
+    const real = transport.call.bind(transport);
+    const spy = vi.spyOn(transport, 'call').mockImplementation(async (op, args) => {
+      const result = await real(op, args);
+      return op === 'phoneNumber.list'
+        ? { ...result, body: { object: 'list', data: [foreignPhone] } }
+        : result;
+    });
+    try {
+      await run(data);
+    } finally {
+      spy.mockRestore();
+    }
+    const row = await investorOf(investor.investorId);
+    expect(row?.fpPhoneId).toMatch(/^phone_\d+$/);
+    expect(row?.fpPhoneId).not.toBe('phone_foreign');
+  });
+
+  it('MF-4 backstop: kyc_status other than VALIDATED at PROFILE fails the run and creates no FP profile', async () => {
+    const investor = await seedReadyInvestor(t);
+    const data = await attestAndApprove(investor);
+    await t.db.db
+      .update(investorProfiles)
+      .set({ kycStatus: 'UNKNOWN' })
+      .where(eq(investorProfiles.investorId, investor.investorId));
+    const createsBefore = t.fakeFp.calls({ op: 'investorProfile.create' }).length;
+    await run(data);
+    expect(t.fakeFp.calls({ op: 'investorProfile.create' })).toHaveLength(createsBefore);
+    expect(await applicationOf(investor.investorId)).toMatchObject({
+      provisioningStatus: 'FAILED',
+      provisioningFailedReason: 'KYC_NOT_VALIDATED',
+      stage: 'PROVISIONING_FAILED',
+    });
+    expect((await investorOf(investor.investorId))?.fpInvestorProfileId).toBeNull();
+  });
+
+  /** What NominationService.write leaves behind: set 1 REPLACED, set 2 CURRENT with no FP ids (the writes lane also resets the step). */
+  async function replaceNominees(
+    investorId: string,
+    rows: Array<{
+      name: string;
+      relationship: 'SON' | 'FATHER' | 'OTHERS';
+      pct: number;
+      minor?: { dob: string; guardian: string };
+    }>,
+    resetStepTo?: string,
+  ) {
+    const crypto = t.app.get(Crypto);
+    await t.db.db
+      .update(nominees)
+      .set({ status: 'REPLACED' })
+      .where(and(eq(nominees.investorId, investorId), eq(nominees.status, 'CURRENT')));
+    const actor = { createdBy: investorId, updatedBy: investorId };
+    const values = rows.map((r, i) => {
+      const id = newId('nominees');
+      const aad = (column: string) => ({
+        table: 'nominees' as const,
+        column,
+        rowId: asRowId('nominees', id),
+      });
+      return {
+        id,
+        investorId,
+        ...actor,
+        setVersion: 2,
+        position: i + 1,
+        nameEnc: crypto.encrypt(r.name, aad('name_enc')),
+        nameLength: r.name.length,
+        relationship: r.relationship,
+        isMinor: r.minor !== undefined,
+        dobEnc: r.minor === undefined ? null : crypto.encrypt(r.minor.dob, aad('dob_enc')),
+        guardianNameEnc:
+          r.minor === undefined ? null : crypto.encrypt(r.minor.guardian, aad('guardian_name_enc')),
+        allocationPct: r.pct,
+      };
+    });
+    await t.db.db.insert(nominees).values(values);
+    await t.db.db
+      .update(nominationDecisions)
+      .set({ effectiveSetVersion: 2 })
+      .where(eq(nominationDecisions.investorId, investorId));
+    if (resetStepTo === undefined) return;
+    await t.db.db
+      .update(onboardingApplications)
+      .set({ provisioningStep: resetStepTo })
+      .where(eq(onboardingApplications.investorId, investorId));
+  }
+
+  it('PRV-4: a corrected relationship and a minor DOB create a NEW related party, not the stale one', async () => {
+    const investor = await seedReadyInvestor(t);
+    const first = await attestAndApprove(investor);
+    t.fakeFp.script('bankAccount.create', {
+      status: 422,
+      body: { error: { status: 422, code: 'X', message: 'x' } },
+    });
+    await run(first); // RELATED_PARTIES created 'Ravi Rao' (spouse); the run then FAILED at BANK_ACCOUNTS
+    const profile = (await investorOf(investor.investorId))?.fpInvestorProfileId;
+    const stale = t.fakeFp.state.provisioned('related_party').filter((r) => r.profile === profile);
+    expect(stale).toHaveLength(1);
+
+    await replaceNominees(
+      investor.investorId,
+      [
+        {
+          name: 'Ravi Rao',
+          relationship: 'SON',
+          pct: 100,
+          minor: { dob: '2015-03-02', guardian: 'Asha Rao' },
+        },
+      ],
+      'RELATED_PARTIES',
+    );
+    enqueued.length = 0;
+    await run(await attestAndApprove(investor));
+
+    const parties = t.fakeFp.state
+      .provisioned('related_party')
+      .filter((r) => r.profile === profile);
+    expect(parties).toHaveLength(2);
+    const [current] = await t.db.db
+      .select()
+      .from(nominees)
+      .where(and(eq(nominees.investorId, investor.investorId), eq(nominees.status, 'CURRENT')));
+    expect(current?.fpRelatedPartyId).not.toBe(stale[0]?.id);
+    expect(parties.find((r) => r.id === current?.fpRelatedPartyId)).toMatchObject({
+      relationship: 'son',
+      date_of_birth: '2015-03-02',
+      guardian_name: 'Asha Rao',
+    });
+    expect((await applicationOf(investor.investorId))?.provisioningStatus).toBe('DONE');
+  });
+
+  it('PRV-4: two identical nominees never adopt the same FP related party after a mid-loop retry', async () => {
+    const investor = await seedReadyInvestor(t);
+    const data = await attestAndApprove(investor);
+    await replaceNominees(investor.investorId, [
+      { name: 'Ravi Rao', relationship: 'OTHERS', pct: 50 },
+      { name: 'Ravi Rao', relationship: 'OTHERS', pct: 50 },
+    ]);
+    // The first create reaches FP but its reply is lost; the retry finds that party by lookup.
+    t.fakeFp.script('relatedParty.create', 'timeout');
+    await expect(run(data)).rejects.toThrow();
+    await run(data);
+    const rows = await t.db.db
+      .select()
+      .from(nominees)
+      .where(and(eq(nominees.investorId, investor.investorId), eq(nominees.status, 'CURRENT')))
+      .orderBy(nominees.position);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.fpRelatedPartyId).toBeTruthy();
+    expect(rows[1]?.fpRelatedPartyId).toBeTruthy();
+    expect(rows[0]?.fpRelatedPartyId).not.toBe(rows[1]?.fpRelatedPartyId);
+    expect((await applicationOf(investor.investorId))?.provisioningStatus).toBe('DONE');
+  });
+
+  it('NOM-1: a current nominee with no FP related party at FOLIO_DEFAULTS fails visibly, not as a retried INTERNAL', async () => {
+    const investor = await seedReadyInvestor(t);
+    const first = await attestAndApprove(investor);
+    t.fakeFp.script('mfInvestmentAccount.update', {
+      status: 422,
+      body: { error: { status: 422, code: 'X', message: 'x' } },
+    });
+    await run(first);
+    expect((await applicationOf(investor.investorId))?.provisioningStep).toBe('FOLIO_DEFAULTS');
+
+    // A new nominee set (fp_related_party_id NULL) while the job resumes past RELATED_PARTIES.
+    await replaceNominees(
+      investor.investorId,
+      [{ name: 'Ravi Rao', relationship: 'FATHER', pct: 100 }],
+      'FOLIO_DEFAULTS',
+    );
+    enqueued.length = 0;
+    await run(await attestAndApprove(investor)); // resolves: StepFailed is handled, INTERNAL would reject
+    expect(await applicationOf(investor.investorId)).toMatchObject({
+      provisioningStatus: 'FAILED',
+      provisioningFailedReason: 'NOMINEES_NOT_PROVISIONED',
+      stage: 'PROVISIONING_FAILED',
     });
   });
 

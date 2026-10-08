@@ -42,6 +42,12 @@ class StepFailed extends Error {
 const str = (value: unknown): string => String(value);
 const norm = (value: unknown): string => str(value).trim().toLowerCase();
 
+/** Two optional text fields agree when both are empty or both hold the same text. */
+function sameOptional(fpValue: unknown, ours: string | undefined): boolean {
+  const theirs = fpValue === undefined || fpValue === null ? '' : str(fpValue);
+  return theirs === (ours ?? '');
+}
+
 /** FP's numeric `old_id` (a LosslessNumber on the wire), or undefined when the row carries none. */
 function oldIdOf(row: Row): number | undefined {
   if (row.old_id === undefined || row.old_id === null) return undefined;
@@ -126,6 +132,9 @@ export class ProvisionJob {
       case 'PROFILE': {
         if (profileId !== null) return;
         const p = await this.profile(investorId);
+        // Backstop for ONB-3: identity can be rewritten after attest, and a rewrite resets kyc_status. FP treats
+        // the profile's PAN, name and date of birth as immutable, so nothing KRA-unverified may reach it.
+        if (p.kycStatus !== 'VALIDATED') throw new StepFailed('KYC_NOT_VALIDATED');
         const aad = (column: string) => ({
           table: 'investor_profiles' as const,
           column,
@@ -252,6 +261,10 @@ export class ProvisionJob {
         if (current.length === 0) return;
         const profile = this.need(profileId);
         const existing = await this.fp.listForProfile('relatedParty.list', profile);
+        // An FP id that a nominee of the current set already holds, or that this run just took, is never adopted twice.
+        const taken = new Set(
+          current.map((n) => n.fpRelatedPartyId).filter((id): id is string => id !== null),
+        );
         for (const n of current) {
           if (n.fpRelatedPartyId !== null) continue;
           const aad = (column: string) => ({
@@ -260,7 +273,6 @@ export class ProvisionJob {
             rowId: asRowId('nominees', n.id),
           });
           const name = this.crypto.decrypt(n.nameEnc, aad('name_enc'));
-          const found = existing.find((r) => str(r.name) === name);
           const input = {
             profile,
             name,
@@ -274,10 +286,20 @@ export class ProvisionJob {
                 ? this.crypto.decrypt(n.guardianNameEnc, aad('guardian_name_enc'))
                 : undefined,
           };
+          // FP related_party fields are immutable: adopt only a party that already holds exactly these values.
+          const found = existing.find(
+            (r) =>
+              !taken.has(str(r.id)) &&
+              str(r.name) === input.name &&
+              norm(r.relationship) === input.relationship &&
+              sameOptional(r.date_of_birth, input.dateOfBirth) &&
+              sameOptional(r.guardian_name, input.guardianName),
+          );
           const id =
             found !== undefined
               ? str(found.id)
               : str((await write((consent) => this.fp.createRelatedParty(input, consent))).id);
+          taken.add(id);
           const sent = Object.entries(input)
             .filter(([, v]) => v !== undefined)
             .map(([k]) => k);
@@ -322,7 +344,14 @@ export class ProvisionJob {
       case 'MF_INVESTMENT_ACCOUNT': {
         if (investor.fpMfInvestmentAccountId !== null) return;
         const profile = this.need(profileId);
-        const found = (await this.fp.mfInvestmentAccountsFor(profile))[0];
+        const p = await this.profile(investorId);
+        const pan = this.crypto.decrypt(p.panEnc, {
+          table: 'investor_profiles',
+          column: 'pan_enc',
+          rowId: asRowId('investor_profiles', p.id),
+        });
+        // FP ignores primary_investor=, so the lookup goes by PAN and keeps only this profile's own accounts.
+        const found = (await this.fp.mfInvestmentAccountsFor(profile, pan))[0];
         const row: Row =
           found ??
           (await write((consent) =>
@@ -349,7 +378,10 @@ export class ProvisionJob {
           payout_bank_account: this.need(bank.fpBankAccountId),
         };
         current.forEach((n, i) => {
-          folioDefaults[`nominee${i + 1}`] = this.need(n.fpRelatedPartyId);
+          // A nominee set replaced after RELATED_PARTIES has no FP ids yet: fail visibly (runbook: re-attest
+          // after the nominees are re-provisioned) instead of an INTERNAL error that pg-boss retries forever.
+          if (n.fpRelatedPartyId === null) throw new StepFailed('NOMINEES_NOT_PROVISIONED');
+          folioDefaults[`nominee${i + 1}`] = n.fpRelatedPartyId;
           folioDefaults[`nominee${i + 1}_allocation_percentage`] = n.allocationPct;
         });
         const id = this.need(fresh.fpMfInvestmentAccountId);
