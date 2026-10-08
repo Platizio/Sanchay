@@ -20,6 +20,7 @@
     "e2e:web": "turbo run e2e:web --filter=@sanchay/web",
     "check-brand": "node scripts/check-brand.ts",
     "ops:legal:seed": "pnpm --filter=@sanchay/api build && pnpm --filter=@sanchay/api exec node dist/cli/ops-legal-seed.js",
+    "ops:ref:seed": "pnpm --filter=@sanchay/api build && pnpm --filter=@sanchay/api exec node dist/cli/ops-ref-seed.js",
     "ops:invite": "pnpm --filter=@sanchay/api ops:invite",
     "ops:catalogue:seed": "pnpm --filter=@sanchay/api ops:catalogue:seed",
     "ops:nav-backfill": "pnpm --filter=@sanchay/api ops:nav-backfill",

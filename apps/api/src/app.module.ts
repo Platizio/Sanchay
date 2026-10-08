@@ -75,7 +75,7 @@ export class AppModule {
         IntegrationsModule.forRoot(env),
         NotificationsModule,
         IdentityModule,
-        OnboardingModule,
+        OnboardingModule.forRoot(env),
         FpWebhooksModule.forRoot(env),
         LegalConsentModule,
         // "Providers are called only from worker jobs": FpModule is never imported in the api role.

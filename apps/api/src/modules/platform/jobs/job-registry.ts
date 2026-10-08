@@ -24,6 +24,7 @@ export const JOB_POLICIES = {
   'consent.expiry.sweep': 'stately', // every 5 minutes, keyless (E4)
   'drafts.abandon': 'stately', // hourly, keyless (E4)
   'fp.event.process': 'stately', // key: the inbound_webhook_events id; re-enqueues itself to retry (E1)
+  'onboarding.preverify': 'stately', // key: the kyc_checks id; creates the FP pre-verification once, then re-enqueues itself to poll (E6)
 } as const satisfies Record<string, JobPolicy>;
 
 /**
