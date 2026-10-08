@@ -153,6 +153,12 @@ export const BankSummarySchema = z.object({
   isPrimary: z.boolean(),
 });
 
+export const AttestStartedSchema = z.strictObject({
+  challengeId: z.uuid(),
+  expiresInSeconds: z.number().int().positive(),
+});
+export type AttestStarted = z.infer<typeof AttestStartedSchema>;
+
 const route = (method: 'GET' | 'POST' | 'PUT', path: `/${string}`, summary: string) =>
   oc.route({ method, path, tags: ['onboarding'], summary });
 
@@ -230,6 +236,23 @@ export const onboardingContract = {
     )
     .input(StageDeclarationsInputSchema)
     .output(OkSchema),
+  attest: route('POST', '/onboarding/attest', 'Attest onboarding and start FP provisioning')
+    .errors(
+      errorMap(
+        ...COMMON_ERRORS,
+        ...SESSION_ERRORS,
+        'ONBOARDING_INCOMPLETE',
+        'KYC_NOT_VALIDATED',
+        'BANK_NOT_VERIFIED',
+        'RISK_PROFILE_EXPIRED',
+        'NOMINATION_INVALID',
+        'DECLARATION_OUTDATED',
+        'CONFLICT_VERSION',
+        'CONSENT_DESTINATION_UNAVAILABLE',
+      ),
+    )
+    .input(z.strictObject({}))
+    .output(AttestStartedSchema),
 };
 
 /** The Idempotency-Key codes every mutating procedure declares (same list as me.ts / consents.ts). */

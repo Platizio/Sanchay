@@ -7,6 +7,7 @@ import { Public } from '../platform/http-decorators.js';
 import { requireIdempotency } from '../platform/idempotency.middleware.js';
 import { IdempotencyService } from '../platform/idempotency.service.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
+import { AttestService } from './attest.service.js';
 import { BankService } from './bank.service.js';
 import { DeclarationsService } from './declarations.service.js';
 import { IdentityService } from './identity.service.js';
@@ -26,6 +27,7 @@ export class OnboardingRouter {
     @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
     @Inject(RiskProfileService) private readonly riskProfiles: RiskProfileService,
     @Inject(DeclarationsService) private readonly declarations: DeclarationsService,
+    @Inject(AttestService) private readonly attestService: AttestService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
   ) {}
 
@@ -90,6 +92,13 @@ export class OnboardingRouter {
     return implement(contract.onboarding.stageDeclarations)
       .use(requireIdempotency(this.idempotency, this.cls))
       .handler(({ input }) => this.declarations.stage(requireAuth(this.cls), input));
+  }
+
+  @Implement(contract.onboarding.attest)
+  attest() {
+    return implement(contract.onboarding.attest).handler(() =>
+      this.attestService.start(requireAuth(this.cls).investorId),
+    );
   }
 
   @Public()
