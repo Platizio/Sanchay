@@ -40,23 +40,30 @@ export class OnboardingRouter {
 
   @Implement(contract.onboarding.submitIdentity)
   submitIdentity() {
-    return implement(contract.onboarding.submitIdentity).handler(({ input }) =>
-      this.identity.submitIdentity(requireAuth(this.cls).investorId, input),
-    );
+    return implement(contract.onboarding.submitIdentity)
+      .use(requireIdempotency(this.idempotency, this.cls))
+      .handler(({ input }) => {
+        const auth = requireAuth(this.cls);
+        return this.identity.submitIdentity(auth.investorId, input, {
+          ip: this.cls.get('ip') ?? null,
+          userAgent: this.cls.get('userAgent') ?? null,
+          sessionId: auth.sessionId,
+        });
+      });
   }
 
   @Implement(contract.onboarding.putProfile)
   putProfile() {
-    return implement(contract.onboarding.putProfile).handler(({ input }) =>
-      this.profile.putProfile(requireAuth(this.cls).investorId, input),
-    );
+    return implement(contract.onboarding.putProfile)
+      .use(requireIdempotency(this.idempotency, this.cls))
+      .handler(({ input }) => this.profile.putProfile(requireAuth(this.cls).investorId, input));
   }
 
   @Implement(contract.onboarding.addBank)
   addBank() {
-    return implement(contract.onboarding.addBank).handler(({ input }) =>
-      this.bank.addBank(requireAuth(this.cls).investorId, input),
-    );
+    return implement(contract.onboarding.addBank)
+      .use(requireIdempotency(this.idempotency, this.cls))
+      .handler(({ input }) => this.bank.addBank(requireAuth(this.cls).investorId, input));
   }
 
   @Implement(contract.onboarding.listBanks)
@@ -120,6 +127,13 @@ export class OnboardingRouter {
   riskProfileSubmit() {
     return implement(contract.riskProfile.submit)
       .use(requireIdempotency(this.idempotency, this.cls))
-      .handler(({ input }) => this.riskProfiles.submit(requireAuth(this.cls), input));
+      .handler(({ input }) =>
+        // RSK-1: `dob` is optional on the wire now. RiskProfileService.submit still types it as required until the
+        // provisioning-risk lane makes the server score Q1 from the KYC date of birth; remove the cast then.
+        this.riskProfiles.submit(
+          requireAuth(this.cls),
+          input as Parameters<RiskProfileService['submit']>[1],
+        ),
+      );
   }
 }

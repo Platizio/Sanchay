@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, type MockInstance, vi } from 'vitest';
 import { legalDocuments } from '../../src/modules/legal-consent/legal-consent.schema.js';
@@ -22,7 +23,8 @@ let t: FpTestApp;
 let job: BankVerifyJob;
 let enqueue: MockInstance<Jobs['enqueue']>;
 beforeAll(async () => {
-  t = await bootFpTestApp();
+  // More sign-ins than the default 20 OTP requests per IP per hour.
+  t = await bootFpTestApp({ env: { SANCHAY_OTP_PER_IP_PER_HOUR: '200' } });
   job = t.app.get(BankVerifyJob);
   enqueue = vi.spyOn(t.app.get(Jobs), 'enqueue').mockResolvedValue('job-id');
   // The KYC_CONSENT checkbox acceptance resolves the PUBLISHED document in force (LegalDocs.current).
@@ -70,8 +72,18 @@ async function runBankVerify(investorId: string): Promise<void> {
   await job.handle(jobOf('onboarding.bank.verify', { investorId, checkId: check?.id as string }));
 }
 
-const post = (url: string, cookies: Record<string, string>, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url: `/api/v1${url}`, headers: webHeaders({ cookies }), payload });
+const post = (
+  url: string,
+  cookies: Record<string, string>,
+  payload: Record<string, unknown>,
+  key: string | null = randomUUID(),
+) =>
+  t.app.inject({
+    method: 'POST',
+    url: `/api/v1${url}`,
+    headers: { ...webHeaders({ cookies }), ...(key === null ? {} : { 'idempotency-key': key }) },
+    payload,
+  });
 const get = (url: string, cookies: Record<string, string>) =>
   t.app.inject({ method: 'GET', url: `/api/v1${url}`, headers: webHeaders({ cookies }) });
 
@@ -108,7 +120,7 @@ async function readyForBank(mobile: string, n: number) {
   const profile = await t.app.inject({
     method: 'PUT',
     url: '/api/v1/onboarding/profile',
-    headers: webHeaders({ cookies: s.cookies }),
+    headers: { ...webHeaders({ cookies: s.cookies }), 'idempotency-key': randomUUID() },
     payload: FULL_PROFILE,
   });
   expect(profile.statusCode).toBe(200);
@@ -403,5 +415,91 @@ describe('onboarding.bank.verify', () => {
     const res = await get('/ref/ifsc/ZZZZ0000000', s.cookies);
     expect(res.statusCode).toBe(404);
     expect(res.json().code).toBe('NOT_FOUND');
+  });
+});
+
+describe('bank write guards, idempotency and identity isolation', () => {
+  const BANK = { accountNumber: '423456789012', ifsc: 'HDFC0000123', holderName: 'Asha Rao' };
+  const bankRows = (investorId: string) =>
+    t.db.db.select().from(bankAccounts).where(eq(bankAccounts.investorId, investorId));
+  const bankChecks = (investorId: string) =>
+    t.db.db
+      .select()
+      .from(kycChecks)
+      .where(and(eq(kycChecks.investorId, investorId), eq(kycChecks.purpose, 'BANK')));
+
+  it('refuses a request without the Idempotency-Key with 428', async () => {
+    const s = await readyForBank('9844700031', 31);
+    const res = await post('/onboarding/bank-accounts', s.cookies, BANK, null);
+    expect(res.statusCode).toBe(428);
+    expect(res.json().code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    expect(await bankRows(s.investorId)).toHaveLength(0);
+  });
+
+  it('the same key twice makes one bank row, one BANK check and one FP pre-verification', async () => {
+    const s = await readyForBank('9844700032', 32);
+    const key = randomUUID();
+    const first = await post('/onboarding/bank-accounts', s.cookies, BANK, key);
+    const second = await post('/onboarding/bank-accounts', s.cookies, BANK, key);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().bankId).toBe(first.json().bankId);
+    expect(await bankRows(s.investorId)).toHaveLength(1);
+    expect(await bankChecks(s.investorId)).toHaveLength(1);
+    const created = t.fakeFp.calls({ op: 'preVerification.create' }).length;
+    t.fakeFp.script('preVerification.get', bankResult('verified'));
+    await runBankVerify(s.investorId);
+    expect(t.fakeFp.calls({ op: 'preVerification.create' })).toHaveLength(created + 1);
+  });
+
+  it('a different key for the same account and IFSC returns the existing PENDING row', async () => {
+    const s = await readyForBank('9844700033', 33);
+    const first = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    const second = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual(first.json());
+    expect(await bankRows(s.investorId)).toHaveLength(1);
+    expect(await bankChecks(s.investorId)).toHaveLength(1);
+  });
+
+  it('the same account is accepted again once the earlier attempt FAILED', async () => {
+    const s = await readyForBank('9844700034', 34);
+    const first = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    t.fakeFp.script('preVerification.get', bankResult('failed'));
+    await runBankVerify(s.investorId);
+    const second = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().bankId).not.toBe(first.json().bankId);
+    expect(await bankRows(s.investorId)).toHaveLength(2);
+  });
+
+  it('a corrected identity resubmit leaves a PENDING BANK check alone, and the bank still verifies', async () => {
+    const s = await readyForBank('9844700035', 35);
+    const added = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    expect(added.statusCode).toBe(200);
+    const corrected = await post('/onboarding/identity', s.cookies, {
+      pan: panFor(35),
+      name: 'Asha Rao',
+      dateOfBirth: '1990-05-15',
+    });
+    expect(corrected.statusCode).toBe(200);
+    const [bankCheck] = await bankChecks(s.investorId);
+    expect(bankCheck?.status).toBe('PENDING');
+    t.fakeFp.script('preVerification.get', bankResult('verified'));
+    await runBankVerify(s.investorId);
+    const [bank] = await bankRows(s.investorId);
+    expect(bank?.status).toBe('VERIFIED');
+  });
+
+  it('addBank is refused 409 once provisioning is DONE', async () => {
+    const s = await readyForBank('9844700036', 36);
+    await t.db.db
+      .update(onboardingApplications)
+      .set({ provisioningStatus: 'DONE' })
+      .where(eq(onboardingApplications.investorId, s.investorId));
+    const res = await post('/onboarding/bank-accounts', s.cookies, BANK);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('CONFLICT_VERSION');
+    expect(await bankRows(s.investorId)).toHaveLength(0);
   });
 });

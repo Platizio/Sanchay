@@ -11,9 +11,11 @@ import type {
 import { deriveOnboardingStage } from '@sanchay/domain';
 import { eq } from 'drizzle-orm';
 import { DB, type DbHandle } from '../../db/client.js';
+import { CLOCK, type Clock } from '../platform/clock.js';
 import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
 import { asRowId } from '../platform/ids.js';
+import { assertOnboardingWritable } from './identity.service.js';
 import { investorProfiles, onboardingApplications } from './onboarding.schema.js';
 
 export interface PutProfileInput {
@@ -40,6 +42,7 @@ export interface PutProfileInput {
 export class ProfileService {
   constructor(
     @Inject(DB) private readonly dbh: DbHandle,
+    @Inject(CLOCK) private readonly clock: Clock,
     @Inject(Crypto) private readonly crypto: Crypto,
   ) {}
 
@@ -48,6 +51,19 @@ export class ProfileService {
     if (input.taxResidentElsewhere || input.usPerson) {
       throw new AppError('ELIGIBILITY_BLOCKED', {
         message: 'A foreign tax residency or US person status cannot be onboarded in the pilot',
+      });
+    }
+    // The pilot is for Indian-born residents: FP's country mapping (fpCountry) throws for anything else, which
+    // would otherwise only surface as PROFILE_NOT_SUPPORTED after the investor has attested.
+    if (input.countryOfBirth.trim().toLowerCase() !== 'india') {
+      throw new AppError('VALIDATION_FAILED', {
+        fields: [
+          {
+            path: 'countryOfBirth',
+            code: 'COUNTRY_NOT_SUPPORTED',
+            message: 'Only Indian-born residents can be onboarded for now',
+          },
+        ],
       });
     }
     return this.dbh.db.transaction(async (tx) => {
@@ -62,8 +78,17 @@ export class ProfileService {
         .select()
         .from(onboardingApplications)
         .where(eq(onboardingApplications.investorId, investorId))
-        .limit(1);
+        .limit(1)
+        .for('update');
       if (!app) throw new AppError('ONBOARDING_INCOMPLETE', { message: 'Submit identity first' });
+      await assertOnboardingWritable(tx, this.clock.now(), app);
+      // A PEP / related-PEP block is cleared by compliance only; the investor path cannot overwrite the
+      // declaration or its recorded reason.
+      if (app.profileStatus === 'BLOCKED') {
+        throw new AppError('ELIGIBILITY_BLOCKED', {
+          message: 'This declaration is with our compliance team',
+        });
+      }
 
       const rowId = asRowId('investor_profiles', profile.id);
       const aad = (column: string) => ({ table: 'investor_profiles' as const, column, rowId });
@@ -77,7 +102,8 @@ export class ProfileService {
           incomeSlab: input.incomeSlab,
           sourceOfWealth: input.sourceOfWealth,
           pepStatus: input.pepStatus,
-          pepBlockedReason: pepBlocked ? `Declared ${input.pepStatus} at onboarding` : null,
+          // never nulled from the investor path: a block is only reachable through the BLOCKED guard above
+          ...(pepBlocked ? { pepBlockedReason: `Declared ${input.pepStatus} at onboarding` } : {}),
           taxStatus: input.taxStatus,
           nationality: input.nationality,
           countryOfBirth: input.countryOfBirth,

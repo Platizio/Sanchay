@@ -77,7 +77,7 @@ async function answer(user: ReturnType<typeof userEvent.setup>, question: string
 }
 
 describe('RiskQuestionnaireScreen', () => {
-  it('asks the date of birth for Q1, scores on the server and shows the level and expiry', async () => {
+  it('takes Q1 from the PAN details, sends no date of birth, and shows the level and expiry', async () => {
     let body: unknown;
     let key: string | null = null;
     server.use(
@@ -92,7 +92,8 @@ describe('RiskQuestionnaireScreen', () => {
     renderWithProviders(<RiskQuestionnaireScreen />);
     const submit = await screen.findByRole('button', { name: 'See my risk profile' });
     expect(submit.getAttribute('aria-disabled')).toBe('true');
-    await user.type(screen.getByLabelText('Date of birth'), '1990-05-12');
+    expect(screen.queryByLabelText('Date of birth')).toBeNull();
+    expect(screen.getByText(/Age from your PAN details/)).toBeTruthy();
     await answer(user, 'When will you need this money?', '3 to 5 years');
     await answer(user, 'Main goal', 'Balanced growth');
     await answer(user, 'Income stability', 'Stable');
@@ -106,7 +107,6 @@ describe('RiskQuestionnaireScreen', () => {
     expect(await screen.findByText('Moderate')).toBeTruthy();
     expect(screen.getByText('Valid until 12 Oct 2028')).toBeTruthy();
     expect(body).toEqual({
-      dob: '1990-05-12',
       horizon: '3-5',
       goal: 'BALANCED_GROWTH',
       incomeStability: 'STABLE',
@@ -126,7 +126,6 @@ describe('RiskQuestionnaireScreen', () => {
     const user = userEvent.setup();
     const { nav } = renderWithProviders(<RiskQuestionnaireScreen />);
     await screen.findByRole('button', { name: 'See my risk profile' });
-    await user.type(screen.getByLabelText('Date of birth'), '1990-05-12');
     await answer(user, 'When will you need this money?', '3 to 5 years');
     await answer(user, 'Main goal', 'Balanced growth');
     await answer(user, 'Income stability', 'Stable');

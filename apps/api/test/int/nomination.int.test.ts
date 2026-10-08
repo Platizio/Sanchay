@@ -9,15 +9,18 @@ import { signedInInvestor } from './signed-in.js';
 let app: TestApp;
 
 beforeAll(async () => {
-  app = await bootTestApp();
+  // More sign-ins than the default 20 OTP requests per IP per hour.
+  app = await bootTestApp({ env: { SANCHAY_OTP_PER_IP_PER_HOUR: '200' } });
 });
 
 afterAll(async () => {
   await app.close();
 });
 
+// Names are letters and spaces only (FP / AMFI), so the position is spelled out.
+const POSITION_WORDS = ['Zero', 'One', 'Two', 'Three', 'Four'] as const;
 const nominee = (position: number, allocationPct?: number) => ({
-  name: `Nominee ${position}`,
+  name: `Nominee ${POSITION_WORDS[position]}`,
   relationship: 'SPOUSE',
   isMinor: false,
   allocationPct,
@@ -184,8 +187,8 @@ describe('onboarding.putNomination / getNomination', () => {
       .from(nominees)
       .where(eq(nominees.investorId, investor.id))
       .orderBy(nominees.position);
-    expect(row?.nameEnc.includes(Buffer.from('Nominee 1'))).toBe(false);
-    expect(row?.nameLength).toBe('Nominee 1'.length);
+    expect(row?.nameEnc.includes(Buffer.from('Nominee One'))).toBe(false);
+    expect(row?.nameLength).toBe('Nominee One'.length);
     const [onboarding] = await app.db.db
       .select()
       .from(onboardingApplications)
@@ -199,8 +202,8 @@ describe('onboarding.putNomination / getNomination', () => {
       setVersion: 1,
     });
     expect(got.body.nominees.map((n: { name: string }) => n.name)).toEqual([
-      'Nominee 1',
-      'Nominee 2',
+      'Nominee One',
+      'Nominee Two',
     ]);
   });
 
@@ -261,6 +264,146 @@ describe('onboarding.putNomination / getNomination', () => {
       payload: { decision: 'OPTED_OUT' },
     });
     expect(put.statusCode).toBe(401);
+  });
+});
+
+describe('provisioning guard (NOM-1)', () => {
+  const setApp = (
+    investorId: string,
+    values: Partial<typeof onboardingApplications.$inferInsert>,
+  ) =>
+    app.db.db
+      .update(onboardingApplications)
+      .set(values)
+      .where(eq(onboardingApplications.investorId, investorId));
+  const appOf = async (investorId: string) =>
+    (
+      await app.db.db
+        .select()
+        .from(onboardingApplications)
+        .where(eq(onboardingApplications.investorId, investorId))
+    )[0];
+  const first = { decision: 'NOMINATED', displayPreference: true, nominees: [nominee(1)] };
+
+  it.each(['DONE', 'IN_PROGRESS'] as const)(
+    'a PUT while provisioning is %s is refused 409 and changes nothing',
+    async (status) => {
+      const { investor, req } = await signedInInvestor(app);
+      expect((await req.put('/api/v1/onboarding/nomination', first)).status).toBe(200);
+      await setApp(investor.id, { provisioningStatus: status });
+      const res = await req.put('/api/v1/onboarding/nomination', {
+        ...first,
+        nominees: [nominee(1), nominee(2)],
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('CONFLICT_VERSION');
+      const rows = await app.db.db
+        .select()
+        .from(nominees)
+        .where(eq(nominees.investorId, investor.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe('CURRENT');
+    },
+  );
+
+  it.each(['FOLIO_DEFAULTS', 'RELATED_PARTIES', 'PROFILE'] as const)(
+    'a PUT while provisioning FAILED at %s resumes from RELATED_PARTIES at the earliest',
+    async (step) => {
+      const { investor, req } = await signedInInvestor(app);
+      await req.put('/api/v1/onboarding/nomination', first);
+      await setApp(investor.id, { provisioningStatus: 'FAILED', provisioningStep: step });
+      const res = await req.put('/api/v1/onboarding/nomination', {
+        ...first,
+        nominees: [nominee(1), nominee(2)],
+      });
+      expect(res.status).toBe(200);
+      expect((await appOf(investor.id))?.provisioningStep).toBe(
+        step === 'PROFILE' ? 'PROFILE' : 'RELATED_PARTIES',
+      );
+    },
+  );
+});
+
+describe('nominee validation (NOM-2)', () => {
+  const clockYear = () => app.clock.now().getUTCFullYear();
+  const put = async (nominees: Array<Record<string, unknown>>) => {
+    const { req } = await signedInInvestor(app);
+    return req.put('/api/v1/onboarding/nomination', {
+      decision: 'NOMINATED',
+      displayPreference: true,
+      nominees,
+    });
+  };
+  const adult = { relationship: 'SPOUSE', isMinor: false };
+
+  it.each([
+    ['an apostrophe', "Mary D'Souza"],
+    ['a digit', 'Nominee 2'],
+    ['a full stop', 'A. Rao'],
+  ])('refuses a nominee name with %s', async (_label, name) => {
+    const res = await put([{ ...adult, name }]);
+    expect(res.status).toBe(422);
+    expect(res.body.message).toBe('NOMINATION_INVALID');
+  });
+
+  it('refuses a guardian name with a digit', async () => {
+    const res = await put([
+      {
+        name: 'Kid Rao',
+        relationship: 'SON',
+        isMinor: true,
+        dob: `${clockYear() - 5}-01-01`,
+        guardianName: 'Guardian 1',
+      },
+    ]);
+    expect(res.status).toBe(422);
+    expect(res.body.message).toBe('NOMINATION_INVALID');
+  });
+
+  it('refuses a minor who is 18 or older', async () => {
+    const res = await put([
+      {
+        name: 'Kid Rao',
+        relationship: 'SON',
+        isMinor: true,
+        dob: `${clockYear() - 30}-01-01`,
+        guardianName: 'Guardian One',
+      },
+    ]);
+    expect(res.status).toBe(422);
+    expect(res.body.message).toBe('NOMINATION_INVALID');
+  });
+
+  it('refuses a minor whose date of birth is in the future', async () => {
+    const res = await put([
+      {
+        name: 'Kid Rao',
+        relationship: 'SON',
+        isMinor: true,
+        dob: `${clockYear() + 1}-01-01`,
+        guardianName: 'Guardian One',
+      },
+    ]);
+    expect(res.status).toBe(422);
+  });
+
+  it('refuses an adult nominee with a future date of birth', async () => {
+    const res = await put([{ ...adult, name: 'Ravi Rao', dob: `${clockYear() + 1}-01-01` }]);
+    expect(res.status).toBe(422);
+  });
+
+  it('accepts a minor under 18 with a letters-only guardian, and a plain adult name', async () => {
+    const res = await put([
+      {
+        name: 'Kid Rao',
+        relationship: 'SON',
+        isMinor: true,
+        dob: `${clockYear() - 5}-01-01`,
+        guardianName: 'Guardian One',
+      },
+      { ...adult, name: 'Ravi Kumar Rao' },
+    ]);
+    expect(res.status).toBe(200);
   });
 });
 
