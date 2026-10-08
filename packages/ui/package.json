@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sanchay/money": "workspace:*",
     "@sanchay/tokens": "workspace:*"
   },
   "peerDependencies": {

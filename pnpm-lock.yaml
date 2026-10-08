@@ -752,6 +752,9 @@ importers:
       '@sanchay/ui':
         specifier: workspace:*
         version: link:../ui
+      '@sanchay/validation':
+        specifier: workspace:*
+        version: link:../validation
       react-hook-form:
         specifier: 'catalog:'
         version: 7.88.0(react@19.2.3)
@@ -874,6 +877,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@sanchay/money':
+        specifier: workspace:*
+        version: link:../money
       '@sanchay/tokens':
         specifier: workspace:*
         version: link:../tokens
