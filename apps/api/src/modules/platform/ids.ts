@@ -14,6 +14,7 @@ export type TableName =
   | 'consent_challenges'
   | 'consent_records'
   | 'consent_subjects'
+  | 'declaration_stagings'
   | 'fund_facts'
   | 'fund_facts_revisions'
   | 'idempotency_keys'

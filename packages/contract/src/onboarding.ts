@@ -10,7 +10,7 @@ import {
 } from '@sanchay/domain';
 import { panSchema, pincodeSchema } from '@sanchay/validation';
 import { z } from 'zod';
-import { InstantSchema } from './common.js';
+import { InstantSchema, OkSchema } from './common.js';
 import { COMMON_ERRORS, errorMap, SESSION_ERRORS } from './errors.js';
 
 export const ONBOARDING_STAGE_VALUES = [
@@ -98,6 +98,25 @@ export const PutNominationInputSchema = z.strictObject({
   nominees: z.array(NomineeInputSchema).max(10).optional(),
 });
 
+export const StageDeclarationsInputSchema = z.strictObject({
+  accept: z
+    .array(
+      z.object({
+        key: z.enum([
+          'TNC',
+          'PRIVACY_NOTICE',
+          'RISK_DISCLOSURE',
+          'REGULAR_PLAN_COMMISSION',
+          'EXECUTION_ONLY_DECLARATION',
+          'FATCA_CRS_DECLARATION',
+          'NOMINATION_OPT_OUT_ANNEX_B',
+        ]),
+        version: z.string().min(1),
+      }),
+    )
+    .min(1),
+});
+
 export const NominationViewSchema = z.object({
   decision: z.enum(['NOT_ASKED', 'NOMINATED', 'OPTED_OUT']),
   displayPreference: z.boolean().nullable(),
@@ -162,6 +181,23 @@ export const onboardingContract = {
     )
     .input(PutNominationInputSchema)
     .output(NominationViewSchema),
+  stageDeclarations: route(
+    'POST',
+    '/onboarding/declarations',
+    'Stage the ONB-15 declaration checkboxes at their current document versions',
+  )
+    .errors(
+      errorMap(
+        ...COMMON_ERRORS,
+        ...SESSION_ERRORS,
+        'DECLARATION_OUTDATED',
+        'IDEMPOTENCY_KEY_REQUIRED',
+        'IDEMPOTENCY_KEY_REUSED',
+        'IDEMPOTENCY_IN_PROGRESS',
+      ),
+    )
+    .input(StageDeclarationsInputSchema)
+    .output(OkSchema),
 };
 
 /** The Idempotency-Key codes every mutating procedure declares (same list as me.ts / consents.ts). */
