@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
@@ -86,5 +86,28 @@ describe('DeclarationsScreen (ONB-15)', () => {
       ),
     ).toBeTruthy();
     expect(nav.replace).not.toHaveBeenCalled();
+  });
+  it('shows the document text and version before acceptance, in a sheet opened from "Read <title>"', async () => {
+    server.use(
+      http.get(`${TEST_API}/legal/pending`, () => HttpResponse.json(pending)),
+      http.get(`${TEST_API}/legal/documents/TNC`, () =>
+        HttpResponse.json({
+          key: 'TNC',
+          version: '3',
+          bodyMarkdown: 'You agree to these terms of service.',
+          sha256: 'abc',
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<DeclarationsScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Read Terms and Conditions' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Terms and Conditions' });
+    expect(await within(dialog).findByText('You agree to these terms of service.')).toBeTruthy();
+    expect(within(dialog).getByText('Version 3')).toBeTruthy();
+    // Reading is not accepting: the checkbox stays unticked.
+    expect(
+      screen.getByRole('checkbox', { name: 'Terms and Conditions' }).getAttribute('aria-checked'),
+    ).toBe('false');
   });
 });

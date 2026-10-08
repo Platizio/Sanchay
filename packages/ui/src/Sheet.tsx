@@ -19,10 +19,11 @@ export interface SheetProps {
  * window on Android, so the sheet always sits above the screen (E12 fix round 1).
  */
 export function Sheet({ visible, title, onClose, children, testID }: SheetProps) {
-  // Unmounted while closed: react-native-web's Modal appends a body node for as long as it is mounted.
-  if (!visible) return null;
+  // The Modal stays mounted and is driven by `visible`: react-native-web renders nothing while it is
+  // not visible, and a Modal first mounted already visible loses its portal container under React
+  // StrictMode (next dev), so no sheet would ever open. The visible false -> true re-render recreates it.
   return (
-    <Modal transparent visible onRequestClose={onClose} {...(testID ? { testID } : {})}>
+    <Modal transparent visible={visible} onRequestClose={onClose} {...(testID ? { testID } : {})}>
       <View style={styles.overlay}>
         <Pressable
           aria-label="Dismiss"

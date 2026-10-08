@@ -177,7 +177,10 @@ describe('legal.acceptPending (R-18)', () => {
       expect.arrayContaining(['TNC', 'PRIVACY_NOTICE']),
     );
     const res = await req.post('/api/v1/legal/pending/accept', {
-      keys: ['TNC', 'PRIVACY_NOTICE'],
+      accept: [
+        { key: 'TNC', version: '1' },
+        { key: 'PRIVACY_NOTICE', version: '1' },
+      ],
     });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
@@ -193,9 +196,12 @@ describe('legal.acceptPending (R-18)', () => {
   it('writes no row for a key that is not pending, so a repeat call adds no duplicate', async () => {
     await seedDocs();
     const { investor, req } = await signedInInvestor(app);
-    await req.post('/api/v1/legal/pending/accept', { keys: ['TNC'] });
+    await req.post('/api/v1/legal/pending/accept', { accept: [{ key: 'TNC', version: '1' }] });
     const again = await req.post('/api/v1/legal/pending/accept', {
-      keys: ['TNC', 'INVESTOR_CHARTER'],
+      accept: [
+        { key: 'TNC', version: '1' },
+        { key: 'NOMINATION_OPT_OUT_ANNEX_B', version: '1' },
+      ],
     });
     expect(again.status).toBe(200);
     expect((await acceptances(investor.id)).map((r) => r.documentKey)).toEqual(['TNC']);
@@ -203,8 +209,11 @@ describe('legal.acceptPending (R-18)', () => {
 
   it('refuses an empty key list and an unknown key', async () => {
     const { req } = await signedInInvestor(app);
-    expect((await req.post('/api/v1/legal/pending/accept', { keys: [] })).status).toBe(400);
-    expect((await req.post('/api/v1/legal/pending/accept', { keys: ['NOPE'] })).status).toBe(400);
+    expect((await req.post('/api/v1/legal/pending/accept', { accept: [] })).status).toBe(400);
+    expect(
+      (await req.post('/api/v1/legal/pending/accept', { accept: [{ key: 'NOPE', version: '1' }] }))
+        .status,
+    ).toBe(400);
   });
 });
 

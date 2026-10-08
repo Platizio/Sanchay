@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
@@ -47,5 +47,25 @@ describe('IdentityScreen (ONB-01/02)', () => {
     expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('aria-disabled')).toBe(
       'true',
     );
+  });
+  it('shows the KYC consent text and version in a sheet before the investor ticks the box', async () => {
+    server.use(
+      http.get(`${TEST_API}/legal/documents/KYC_CONSENT`, () =>
+        HttpResponse.json({
+          key: 'KYC_CONSENT',
+          version: '2',
+          bodyMarkdown: 'We will check your KYC status with the KRA.',
+          sha256: 'abc',
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<IdentityScreen />);
+    await user.click(screen.getByRole('button', { name: 'Read KYC consent' }));
+    const dialog = await screen.findByRole('dialog', { name: 'KYC consent' });
+    expect(
+      await within(dialog).findByText('We will check your KYC status with the KRA.'),
+    ).toBeTruthy();
+    expect(within(dialog).getByText('Version 2')).toBeTruthy();
   });
 });

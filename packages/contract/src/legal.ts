@@ -31,13 +31,20 @@ export const PendingLegalDocsSchema = z.array(
 export const CommissionRateSchema = z.object({
   amcId: z.string().nullable(),
   schemeId: z.string().nullable(),
+  /** The scheme the row is scoped to; null for an AMC-wide row. */
+  schemeName: z.string().nullable(),
+  /** The AMC the row is scoped to, or the AMC that offers the scheme for a scheme-scoped row. */
+  amcName: z.string(),
   minBps: z.number(),
   maxBps: z.number(),
   kind: z.enum(['EXACT', 'RANGE']),
 });
 
+/** Each entry carries the version the investor was shown, so a version published meanwhile is refused (LEG-1). */
 export const AcceptPendingInputSchema = z.strictObject({
-  keys: z.array(LegalDocumentKeySchema).min(1),
+  accept: z
+    .array(z.strictObject({ key: LegalDocumentKeySchema, version: z.string().min(1) }))
+    .min(1),
 });
 export type AcceptPendingInput = z.infer<typeof AcceptPendingInputSchema>;
 
@@ -64,7 +71,7 @@ export const legalContract = {
     '/legal/pending/accept',
     'Record acceptance of the updated legal document versions that are pending (R-18)',
   )
-    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS))
+    .errors(errorMap(...COMMON_ERRORS, ...SESSION_ERRORS, 'DECLARATION_OUTDATED'))
     .input(AcceptPendingInputSchema)
     .output(OkSchema),
 };

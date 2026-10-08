@@ -1,10 +1,16 @@
-import { fetchCommissionRates } from '../../../lib/legal-api';
+import { type CommissionRate, fetchCommissionRates } from '../../../lib/legal-api';
+
+/** legal.commissionRates also returns the names (CAT-2); lib/legal-api's own type still lists only the ids. */
+type DisclosedRate = CommissionRate & { schemeName: string | null; amcName: string };
+
+const scopeLabel = (rate: DisclosedRate): string =>
+  rate.schemeName ?? `All ${rate.amcName} schemes`;
 
 // Rendered per request (data cached for an hour by legal-api): a build-time fetch would need the API up.
 export const dynamic = 'force-dynamic';
 
 export default async function CommissionDisclosurePage() {
-  const rates = await fetchCommissionRates();
+  const rates = (await fetchCommissionRates()) as DisclosedRate[];
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-12">
       <h1 className="text-xl font-bold">Commission disclosure</h1>
@@ -23,7 +29,7 @@ export default async function CommissionDisclosurePage() {
         <tbody>
           {rates.map((rate, i) => (
             <tr key={i} className="border-border border-b">
-              <td className="py-2">{rate.schemeId ?? rate.amcId ?? '—'}</td>
+              <td className="py-2">{scopeLabel(rate)}</td>
               <td className="py-2">
                 {rate.kind === 'EXACT'
                   ? `${rate.minBps / 100}% p.a.`

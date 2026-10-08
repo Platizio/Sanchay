@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useApi } from '../api/ApiContext';
 import { newIntentKey } from '../common/intentKey';
+import { ReadDocumentAction } from '../legal/ReacceptSheet';
 import { useNav } from '../nav/NavContext';
 
 type StageInput = Parameters<ApiClient['onboarding']['stageDeclarations']>[0];
@@ -25,7 +26,7 @@ const DECLARATION_KEYS: readonly DeclarationKey[] = [
 const isDeclarationKey = (key: string): key is DeclarationKey =>
   (DECLARATION_KEYS as readonly string[]).includes(key);
 
-/** ONB-15: one unticked checkbox per pending declaration, staged at its current version. */
+/** ONB-15: one unticked checkbox per pending declaration, each with a "Read" sheet, staged at its current version. */
 export function DeclarationsScreen() {
   const { client, utils } = useApi();
   const nav = useNav();
@@ -91,12 +92,14 @@ export function DeclarationsScreen() {
       ) : null}
       <View style={styles.stack}>
         {documents.map((doc) => (
-          <Checkbox
-            key={doc.key}
-            label={doc.title}
-            checked={accepted[doc.key] ?? false}
-            onChange={(checked) => setAccepted((prev) => ({ ...prev, [doc.key]: checked }))}
-          />
+          <View key={doc.key} style={styles.row}>
+            <Checkbox
+              label={doc.title}
+              checked={accepted[doc.key] ?? false}
+              onChange={(checked) => setAccepted((prev) => ({ ...prev, [doc.key]: checked }))}
+            />
+            <ReadDocumentAction docKey={doc.key} title={doc.title} />
+          </View>
         ))}
         <Button
           label="Continue to review"
@@ -111,4 +114,4 @@ export function DeclarationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({ stack: { gap: space(3) } });
+const styles = StyleSheet.create({ stack: { gap: space(3) }, row: { gap: space(2) } });
