@@ -13,6 +13,16 @@ test('the www landing at /site shows the proposition and regulatory footer witho
     page.getByText('AMFI-registered Mutual Fund Distributor, ARN-000000 (valid till 31 Dec 2099)'),
   ).toBeVisible();
   await expect(page.locator('#react-native-stylesheet')).toHaveCount(0);
+  // H15: the privacy notice, terms and the AMFI commission page are reachable from the footer.
+  const legal = page.getByRole('navigation', { name: 'Legal' });
+  await expect(legal.getByRole('link', { name: 'Privacy notice' })).toHaveAttribute(
+    'href',
+    '/legal/privacy',
+  );
+  await expect(legal.getByRole('link', { name: 'Commission disclosure' })).toHaveAttribute(
+    'href',
+    '/commission-disclosure',
+  );
 });
 
 test('login renders the mobile OTP form under a nonce CSP with noindex', async ({ page }) => {
