@@ -80,22 +80,23 @@ E18 [T2] and E19 [T4] are not committed (they fund E25's protected S2 stack, R-0
 
 ## Migration numbers
 
-Plan 02 ends at `0009_catalogue`. The number is assigned at merge in DAG order; for the order above:
+Corrected 2026-10-09 from the built `apps/api/drizzle/` (flaw audit; E20 errata item 1). Plan 02 ended at `0012_pilot_invites` (D3 added `0010_provider_calls`, D6 `0011_notifications`, D7 `0012_pilot_invites`), so every Plan 03 number moved. E1-E11 and the 2026-10-08 fix wave are built; E20 and E21 take the next free numbers:
 
 | Migration | Task | Kind |
 |---|---|---|
-| `0010_inbound_webhook_events` | E1 | generated |
-| `0011_legal_consent`, `0012_legal_consent_grants` | E3 | generated, custom |
-| `0013_consent_guard` | E4 | custom |
-| `0014_onboarding_core` | E5 | generated |
-| `0015_ref_pincodes` | E6 | generated |
-| `0016_bank_accounts_ref_ifsc` | E7 | generated |
-| `0017_nominees`, `0018_nominees_set_sum` | E8 | generated, custom |
-| `0019_risk_suitability`, `0020_risk_suitability_guards` | E9 | generated, custom |
-| `0021_declaration_stagings` | E10 | generated |
-| `0022_readiness_trigger` | E11 | custom |
-| `0023_orders_folios`, `0024_orders_guard` | E20 | generated, custom |
-| `0025_payment_attempts` | E21 | generated |
+| `0013_inbound_webhook_events` | E1 | generated (built) |
+| `0014_legal_consent`, `0015_legal_consent_grants` | E3 | generated, custom (built) |
+| `0016_consent_guard` | E4 | custom (built) |
+| `0017_onboarding_core` | E5 | generated (built) |
+| `0018_ref_pincodes` | E6 | generated (built) |
+| `0019_nominees`, `0020_nominees_set_sum` | E8 | generated, custom (built) |
+| `0021_risk_suitability`, `0022_risk_suitability_guards` | E9 | generated, custom (built) |
+| `0023_bank_accounts_ref_ifsc` | E7 | generated (built) |
+| `0024_declaration_stagings` | E10 | generated (built) |
+| `0025_readiness_trigger` | E11 | custom (built) |
+| `0026_consent_records_first_attempt_grant`, `0027_legal_documents_guard`, `0028_onboarding_blocked_in_progress` | fix wave FX1 | custom (built) |
+| `0029_orders_folios`, `0030_orders_guard` | E20 | generated, custom |
+| `0031_payment_attempts` | E21 | generated |
 
 Drafts refer to these as `000X`/`<n>`; use the table. If the order changes, regenerate after rebasing; never hand-renumber.
 
@@ -254,7 +255,11 @@ Later errata (found while writing Plan 04; already applied below):
   - FP accepts `amount` as a 2-dp string;
   - the address `nature` and nominee `relationship` values;
   - that `GET /v2/mf_purchases/:id` returns `consent`;
-  - payment `status` casing.
+  - payment `status` casing;
+  - FP's `refund_*` field names, which decide when REFUNDED may become automatic (E21 errata);
+  - the `/api/pg/payments` list envelope, and whether its `amc_order_ids` filter works (E21 errata);
+  - whether FP honours `source_ref_id=`, `plan=` and `folio_number=` on list reads, with made-up values (flaw audit H5; the code filters locally either way, E20 errata item 9).
+- **Audit errata (2026-10-09).** E20–E24 each open with a binding "Audit errata" block from the flaw audit of 2026-10-08 and rulings R-45..R-47. Apply it before Step 1. Its plan line numbers refer to this file as committed with the blocks.
 
 ---
 
@@ -18113,6 +18118,389 @@ git commit -m "feat(explore): add Explore, Search and Fund screens plus commissi
 
 ### Task E20: Lumpsum order saga (H-2 custom checkout) (Dev A, 14 h)
 
+**Audit errata (2026-10-09; binding, apply before Step 1).** These override the text below where they conflict. Sources: flaw audit 2026-10-08, rulings R-45..R-47.
+
+Names were checked against the built code at commit 865ab47. Where the text below uses a different name, the built name wins. This task now also consumes these built symbols:
+- `Suitability.check`, `SuitabilityService` (`modules/onboarding/suitability.service.ts`)
+- `resolveLegalDocument` (`legal-consent/legal-docs.service.ts`)
+- `ConsentDestinationResolver` (`legal-consent/destination-resolver.ts`)
+- `NavService`, `istToday` (`catalogue/nav/nav.service.ts`)
+- `RiskometerLevel` (`catalogue/catalogue.schema.ts`)
+- `Notify` (`notifications/notify.service.ts`, exported by `NotificationsModule`)
+- `ReconBreaks.open` (`platform/runtime-config.ts`; severities `WARNING` and `CRITICAL`)
+- `otpAdvisoryKey`, `istDayStart` (`identity/otp.service.ts`)
+- `formatInr` (`@sanchay/money`)
+
+1. **Migration numbers.** Built migrations end at `0028_onboarding_blocked_in_progress`. The header table ("Migration numbers", corrected with these errata) agrees; the `<n>` at line 19116 is out of date.
+   - E20 creates `0029_orders_folios` (generated) and `0030_orders_guard` (custom). E21 creates `0031_payment_attempts`.
+   - The `db:generate --name=...` lines in Step 4 (19982-19983) assign these numbers. Never rename a migration file by hand.
+   - `0030_orders_guard` holds these statements in order, separated by `--> statement-breakpoint`: the REVOKE; the `CREATE OR REPLACE FUNCTION` (item 11); the `CREATE TRIGGER`; the foreign key (item 5).
+
+2. **R-47 (FpTransport as built).** The text assumes a write can come back with no body (`result.body ?? {}`, lines 19179 and 19185). `toFpPurchaseView` (19145-19158) also turns a missing `id` into `'undefined'` and a missing `old_id` into `NaN`. The built transport behaves like this:
+   - An unreadable 2xx reply to a write throws `FpAmbiguousError` (`UNPARSABLE_2XX`).
+   - A transport error, 3xx, 408, 409, 429 or 5xx throws `FpAmbiguousError`.
+   - A token failure, or a second 401/403, throws `FpUnavailableError`. It is in `fp-errors.ts`, extends `FpAmbiguousError`, and has `reason: 'TOKEN' | 'AUTH'`.
+   - Only the remaining 4xx replies throw `FpRejectedError`.
+   - Every FP number arrives as a `LosslessNumber` (`fp-json.ts:13-15`).
+
+   Changes:
+   - `createPurchase` and `updatePurchase` return `result.body as Record<string, unknown>`.
+   - `toFpPurchaseView(raw: unknown, op = 'purchase.get')` throws `new FpAmbiguousError(op)` unless all of these hold: `raw` is a non-null object, `typeof raw.id === 'string'` and it matches `/^mfp_/`, and `String(raw.old_id)` matches `/^\d{1,15}$/`. Never test `raw.old_id` as a JS number.
+   - The submit job calls it **inside** the `useConsumed` callback, so its throw reaches the catch. Line 19517 is outside the try today:
+     ```ts
+     return toFpPurchaseView(await this.fp.createPurchase({ ... }, consumed), 'purchase.create');
+     ```
+   - The catch (19500-19515) keeps its shape:
+     - every `FpAmbiguousError`, including `FpUnavailableError` and the validation throw, moves SUBMITTING to RECONCILING;
+     - only `FpRejectedError` moves to REJECTED;
+     - a 401/403 never becomes REJECTED.
+
+   Tests:
+   - `fp-purchase.test.ts`: "throws FpAmbiguousError for null, a reply without an mfp_ id, or a non-integer old_id".
+   - `orders.int.test.ts`: "a 2xx create whose body is not an mf_purchase goes to RECONCILING, then is adopted".
+     - Set it up with `t.fakeFp.script('purchase.create', { status: 200, body: { ok: true } })`. FakeFp creates the object, then sends the scripted body.
+     - Run the reconcile job. Expect UNDER_REVIEW, with `fpOrderId` matching `/^mfp_/`.
+
+3. **Theme 1 / ML-6 (compare-and-set).** `moveOrder` (19216-19228) updates by id only, so the submit job can overwrite a cancel. Replace its write with:
+   ```ts
+   const moved = await exec.update(orders).set({ ...values, status: to })
+     .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
+     .returning({ id: orders.id });
+   if (moved.length === 0) throw new AppError('ORDER_STATE_INVALID', { message: `ORDER ${order.id} is no longer ${order.status}` });
+   await exec.insert(orderEvents).values({ orderId: order.id, fromStatus: order.status, toStatus: to, trigger,
+     ...(values.updatedAt === undefined ? {} : { occurredAt: values.updatedAt }) });
+   ```
+   - When a job catches `ORDER_STATE_INVALID`, it re-reads the order. If the status differs from the one the job read, another actor moved it: the job logs and returns. Any other `ORDER_STATE_INVALID` (an illegal edge) is rethrown.
+   - Make this the first branch of the submit job's catch: `if (err instanceof AppError && err.code === 'ORDER_STATE_INVALID' && after?.status !== current.status) return;`.
+   - `cancel` (line 19417) passes the error through as a 409.
+
+   Test: "a cancel that lands between the submit job's read and its SUBMITTING move wins (ML-6)".
+   - `const real = engine.useConsumed.bind(engine)`.
+   - `vi.spyOn(engine, 'useConsumed').mockImplementationOnce(async (id, fn) => { await service.cancel(investorId, orderId); return real(id, fn); })`.
+   - Expect: status CANCELLED, no new `purchase.create` call, and no SUBMITTING row in `order_events`.
+
+4. **ML-9 (one purchase eligibility check).** Gaps in the text:
+   - `createPurchase` (19320-19340) never checks the NAV grade, `fp_bank_old_id`, `fp_active` or the client IP.
+   - A null `thresholds` skips every amount rule (19329).
+   - A non-multiple amount gets VALIDATION_FAILED with field code `AMOUNT_MULTIPLE`, although the catalogue has `AMOUNT_NOT_MULTIPLE`.
+   - `moneyWireSchema` (19718) accepts `-5000.00`, because `MONEY_WIRE_REGEX` is `/^-?\d{1,16}\.\d{2}$/`.
+
+   Create `apps/api/src/modules/orders/purchase-eligibility.ts` with `checkPurchaseEligibility(exec: DbExecutor, clock: Clock, input: { investorId: string; schemeId: string; amount: string; bankAccountId: string | null; userIp: string | null }): Promise<PurchaseEligibility>`. `createPurchase` always passes both as strings. Only E22's quote passes `null`, which skips rule 7 or rule 8.
+   - It reads only and never writes.
+   - It runs the spec §4.2 re-run list (spec line 332) in this order. The first failure wins:
+     1. `orders.enabled` is false: `ORDERS_DISABLED`.
+     2. The amount fails `Money.parse` or is not `isPositive()`: `VALIDATION_FAILED`. The amount is above `pilot.caps.perOrder`: `AMOUNT_ABOVE_MAX` with field code `PILOT_CAP`.
+     3. The investor lacks `can_purchase` or `fp_mf_investment_account_id`: `PURCHASE_BLOCKED`.
+     4. The scheme is missing: `NOT_FOUND`. `SCHEME_NOT_ORDERABLE` unless all of these hold:
+        - status `PUBLISHED`;
+        - `purchase_allowed` and `fp_active`;
+        - non-null `thresholds` with a positive `purchaseMultiple`;
+        - a `fund_facts` row with non-null `riskometer` and `riskometer_as_of`;
+        - a non-null `resolveCommissionLine(exec, scheme.id, scheme.amcId, istToday(clock.now()))` (item 7).
+     5. The amount breaks a threshold: `AMOUNT_BELOW_MIN`, `AMOUNT_ABOVE_MAX` or `AMOUNT_NOT_MULTIPLE`.
+     6. `new NavService(clock).latest(exec, scheme.isin as Isin)` is null or not grade `OK`: `NAV_UNAVAILABLE`. Under R-12 this blocks that scheme only.
+     7. When `bankAccountId` is not null, and the bank is not this investor's, is not `VERIFIED`, or has a null `fp_bank_old_id`: `BANK_NOT_VERIFIED`.
+     8. When `userIp` is not null and `isIPv4(userIp)` (`node:net`) is false: `CLIENT_IP_UNSUPPORTED`. FP's `user_ip` is IPv4 (research fp-api.md:171). The router (19819) passes `this.cls.get('ip') ?? ''`, never `'0.0.0.0'`.
+   - It returns `{ amount, investor, scheme, thresholds, bank, nav, riskometer, riskometerAsOf, commission }`. `bank` is null when `bankAccountId` is null.
+   - `createPurchase` calls it inside its transaction, after `lockPilotDay` (item 13). E22's `quotePurchase` calls the same function, with `bankAccountId: null` and `userIp: null`, instead of keeping a second copy.
+
+   Contract:
+   - `amount: moneyWireSchema.regex(/^\d{1,16}\.\d{2}$/)`.
+   - `createPurchase`'s `errorMap` gains `NOT_FOUND`, `SCHEME_NOT_ORDERABLE`, `AMOUNT_NOT_MULTIPLE`, `NAV_UNAVAILABLE` and `CLIENT_IP_UNSUPPORTED`.
+
+   Tests (describe "eligibility (ML-9)"):
+   - A quarantined `scheme_navs` row gives `NAV_UNAVAILABLE`.
+   - `fpBankOldId: null` gives `BANK_NOT_VERIFIED`.
+   - `thresholds: null` gives `SCHEME_NOT_ORDERABLE`, and so does `fpActive: false`.
+   - `'5000.50'` gives `AMOUNT_NOT_MULTIPLE`.
+   - `userIp: '2001:db8::1'` gives `CLIENT_IP_UNSUPPORTED`.
+   - A POST to `/api/v1/orders/purchases` with a fresh Idempotency-Key and `amount: '-5000.00'` gives 400 `VALIDATION_FAILED`.
+
+5. **H1 + RSK-2 (server-side suitability at draft).** `createPurchase` (19318-19392) never calls `Suitability.check` and never stores an acknowledgement. The input schema (19716-19721) cannot carry one. Sources: audit H1, D-MONEY-094/096, spec §4.1 step 3.
+
+   Schema and contract:
+   - `CreatePurchaseInputSchema` and `CreatePurchaseInput` gain `suitabilityAck: z.strictObject({ warningVersion: z.string().min(1) }).optional()`. This is the `SUITABILITY_WARNING` version that CNF-03 showed.
+   - `orders` gains two generated columns (D-MONEY-096):
+     - `suitabilityCheckId: uuid('suitability_check_id').references(() => suitabilityChecks.id, { onDelete: 'restrict' })`
+     - `suitabilityAckId: uuid('suitability_ack_id').references(() => suitabilityAcknowledgements.id, { onDelete: 'restrict' })`
+   - `0030_orders_guard` adds the deferred foreign key (risk-profile.schema.ts:83-87; precedent 0022):
+     ```sql
+     ALTER TABLE "app"."suitability_checks" ADD CONSTRAINT "suitability_checks_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "app"."orders"("id") ON DELETE restrict;
+     ```
+   - `SuitabilityHookResult` gains `checkId: string`. `SuitabilityService.check` reads it through `.returning({ id: suitabilityChecks.id })`.
+   - `purchase-snapshot.ts` exports:
+     - `SUITABILITY_ACK_CLAUSE` = "I want to proceed with this investment notwithstanding Sanchay's written warning that this scheme's risk is above my risk profile" (DSC-23, D-MONEY-091; E23 line 23076 uses the same words).
+     - `renderSuitabilityWarning(bodyMarkdown: string, f: { schemeName: string; schemeRiskometer: string; level: string; maxRiskometer: string }): string`. It joins two parts with a blank line: `bodyMarkdown` and `` `${f.schemeName}: riskometer ${f.schemeRiskometer}. Your risk profile: ${f.level}, up to ${f.maxRiskometer}.` ``. E22 returns this text as the quote's `suitability.warning.text`. CNF-03 (E23) shows it above the checkbox labelled `SUITABILITY_ACK_CLAUSE`. The clause is not part of the text, so CNF-03 never shows it twice.
+
+   Order inside the `createPurchase` transaction:
+   1. `lockPilotDay`, `checkPurchaseEligibility`, the daily cap (item 13), then the order insert.
+   2. `Suitability.check(tx, { investorId, schemeId, schemeRiskometer: riskometer, fundFactsAsOf: new Date(`${riskometerAsOf}T00:00:00+05:30`), orderId })`.
+      - It throws `RISK_PROFILE_EXPIRED` (including by time, RSK-2), `RISK_PROFILE_STALE` or `ONBOARDING_INCOMPLETE`.
+   3. On `MISMATCH`, read `doc = resolveLegalDocument(tx, 'SUITABILITY_WARNING', now)`. A missing doc, or a version that is not an integer string, is `AppError('INTERNAL')`.
+      - If `suitabilityAck` is missing or `suitabilityAck.warningVersion !== doc.version`: throw `SUITABILITY_CHANGED`. Nothing is written.
+      - Otherwise pre-allocate `challengeId = newId('consent_challenges')`. Insert a `suitability_acknowledgements` row with:
+        - `checkId`, `warningDocKey: 'SUITABILITY_WARNING'`, `warningDocVersion: Number.parseInt(doc.version, 10)`, `warningDocSha256: doc.sha256`;
+        - ``renderedTextSha256: createHash('sha256').update(`${renderSuitabilityWarning(doc.bodyMarkdown, { schemeName, schemeRiskometer, level, maxRiskometer })}\n\n${SUITABILITY_ACK_CLAUSE}`, 'utf8').digest()``. The hash covers the text and the checkbox label the investor ticked;
+        - `checkboxAt: now` and `challengeId`.
+   4. On `MATCH`, any `suitabilityAck` is ignored.
+   5. Update the order with `suitabilityCheckId`, `suitabilityAckId` and `consentChallengeId`, **before** `consent.create({ challengeId, ... })` (item 7). The PURCHASE builder reads these columns.
+
+   `consent_record_id` on the acknowledgement stays null. 0022 revoked UPDATE on that table, and the record is found through `challenge_id`.
+
+   Notification: the submit job wraps the CONSENT_PENDING to CONSENTED move (19472-19475) in `db.transaction`. In that transaction, when `suitabilityAckId` is set, it calls `this.notify.enqueue(tx, 'SUITABILITY_WARNING_COPY', { investorId, data: { schemeName }, dedupeKey: `suitability-copy:${orderId}` })` (D-MONEY-094: a copy by email after confirm). `OrdersModule` imports `NotificationsModule`.
+
+   `createPurchase`'s `errorMap` gains `SUITABILITY_CHANGED`, `RISK_PROFILE_EXPIRED`, `RISK_PROFILE_STALE` and `ONBOARDING_INCOMPLETE`.
+
+   `apps/api/test/int/risk-profile.int.test.ts` passes `orderId: randomUUID()` at line 371, which the new foreign key rejects. In that describe's `beforeAll`, insert one minimal `orders` row: `type 'PURCHASE'`, the seeded `schemeId`, `arn: 'ARN-000000'`, `initiatedVia: 'web'`, `userIp: '203.0.113.10'`, random uuids for `investorId` and `bankAccountId`. Pass its id instead.
+
+   Tests (describe "suitability (H1, RSK-2)"):
+   - MATCH: `suitability_check_id` is set and `suitability_ack_id` is null.
+   - MISMATCH (`seedScheme(t, { riskometer: 'VERY_HIGH' })`, above the seeded `MODERATELY_HIGH` cap) with no ack: `SUITABILITY_CHANGED`, and no new `orders` row.
+   - MISMATCH with `{ warningVersion: '1' }`: one acknowledgement row, whose `challengeId` equals the draft's.
+   - MISMATCH with `{ warningVersion: '0' }`: `SUITABILITY_CHANGED`.
+   - The investor's risk profile `expires_at` set before `t.clock.now()`: `RISK_PROFILE_EXPIRED`.
+   - After approve and submit: exactly one `SUITABILITY_WARNING_COPY` notification for a MISMATCH order, and none for a MATCH order.
+
+6. **H1 at approve, plus ML-15 and ML-16 at approve.** `SUITABILITY_HOOK` is bound to `NOOP_SUITABILITY_HOOK` (legal-consent.module.ts:21). `SuitabilityHook.check(exec, investorId, subjectType)` (consent-engine.ts:65-67) cannot tell which order it is checking. In `consent-engine.ts`:
+   ```ts
+   export interface ApproveRecheckInput { investorId: string; subjectType: ConsentSubjectType; subjects: ConsentSubjectRef[] }
+   export type ApproveRecheck = (tx: Tx, input: ApproveRecheckInput) => Promise<boolean>;
+   export interface SuitabilityHook { check: ApproveRecheck }
+   /** Subject type -> approve-time re-check, registered at module load by its task (E20 PURCHASE, F2 SIP). */
+   export const APPROVE_RECHECKS: Partial<Record<ConsentSubjectType, ApproveRecheck>> = {};
+   export const SUBJECT_SUITABILITY_HOOK: SuitabilityHook = {
+     check: async (tx, input) => (await APPROVE_RECHECKS[input.subjectType]?.(tx, input)) ?? true,
+   };
+   ```
+   - `approve` loads `consent_subjects` first: move lines 323-326 above line 316. It then calls `this.suitability.check(tx, { investorId: row.investorId, subjectType, subjects })`.
+   - `legal-consent.module.ts` binds `SUBJECT_SUITABILITY_HOOK` to the `SUITABILITY_HOOK` token.
+   - `purchase-eligibility.ts` keeps a module-level clock: `let purchaseClock: Clock = new SystemClock()`, set by an exported `setPurchaseClock(clock)`. `PurchaseService`'s constructor calls the setter (the attest.service.ts:27 and :91 pattern). `recheckPurchaseAtApprove` and `buildPurchaseSnapshot` read it.
+   - `orders.module.ts` registers `APPROVE_RECHECKS.PURCHASE = recheckPurchaseAtApprove` (defined in `purchase-eligibility.ts`). It runs these steps in order:
+     1. `orders.enabled` is false: `ORDERS_DISABLED` (ML-15).
+     2. Load the order named by `input.subjects[0]` (table `orders`). Status must be `CONSENT_PENDING`; otherwise `ORDER_STATE_INVALID`.
+     3. `lockPilotDay`, then the daily cap with `excludeOrderId = order.id` (item 13).
+     4. Read the scheme's current `fund_facts` riskometer and `riskometer_as_of`, then call `Suitability.check(tx, { ..., orderId: order.id })` (RSK-2).
+     5. Return `outcome === 'MATCH' || order.suitabilityAckId !== null`. `false` becomes the engine's `SUITABILITY_CHANGED`.
+   - A thrown error rolls back the approve transaction, so the challenge stays PENDING.
+   - `packages/contract/src/consents.ts` adds `ORDERS_DISABLED`, `ORDER_STATE_INVALID`, `AMOUNT_ABOVE_MAX`, `RISK_PROFILE_EXPIRED`, `RISK_PROFILE_STALE` and `ONBOARDING_INCOMPLETE` to `approve`'s `errorMap`.
+   - `apps/api/test/int/consent-engine.int.test.ts` creates PURCHASE challenges for random order ids (102-112). It also pins "no job registered for PURCHASE until E20" (line 174) and deletes `CONSENT_SUBJECT_JOBS.PURCHASE` (line 194).
+     - In `beforeAll`, save four registry entries, then: set `SNAPSHOT_BUILDERS.PURCHASE = genericBuilder('PURCHASE')` (export `genericBuilder` from `snapshot-builders.ts`), and delete `APPROVE_RECHECKS.PURCHASE`, `CONSENT_TEXT_RENDERERS.PURCHASE` and `CONSENT_SUBJECT_JOBS.PURCHASE`.
+     - `afterAll` restores all four.
+     - Its spy on `hook.check` (327-339) still works.
+
+   Tests:
+   - "approve re-checks suitability": after a MATCH draft, raise the scheme's `fund_facts.riskometer` to `VERY_HIGH`. Approve gives `SUITABILITY_CHANGED`, and no `orders.purchase.submit` is enqueued.
+   - "orders.enabled=false at approve gives ORDERS_DISABLED and the challenge stays PENDING". Restore `true` in `finally` (RV-03-6).
+
+7. **H2 (a DB-reading PURCHASE snapshot and the CNF-01 text).** The draft binds only the caller's fields through the generic builder (19380-19388; snapshot-builders.ts:35-46 sets `legalDocuments: []`). Approve's "recompute from the DB" (spec §4.1 step 4) therefore compares the snapshot with itself, and CNF-01 shows no consent text.
+
+   Create `apps/api/src/modules/orders/purchase-snapshot.ts` with `buildPurchaseSnapshot: SnapshotBuilder`:
+   - Register it as `SNAPSHOT_BUILDERS.PURCHASE` when `orders.module.ts` loads. That module loads in every role; approve runs in the api role.
+   - Follow `buildAttestSnapshot` (attest.service.ts:36-81). Spread `ctx.fields` first, then write the live values over them (snapshot-builders.ts:10-13).
+   - Read the check through `orders.suitability_check_id`, never as "the latest row": approve's re-check inserts a newer one.
+   - Bind these `fields`, all as strings (spec line 302):
+
+     | Group | Fields |
+     |---|---|
+     | Order | `amount`, `paymentMethod`, `folio: 'NEW'` |
+     | Scheme | `schemeIsin`, `schemeName`, `amcName`, `categoryCode`, `planType`, `option`, `riskometer` |
+     | Bank | `bankIfsc`, `bankLast4` |
+     | Cut-off | `cutoffClass` (the category's). The expected NAV date is never bound, because spec §4.1 approve step 5 re-renders it. E22 errata item 4 adds that line to `renderPurchaseConsentText`. |
+     | Distribution | `arn` (`orders.arn`), `euin: ''`, `executionOnly: 'true'` |
+     | Commission | `commissionKind`, `commissionMinBps`, `commissionMaxBps` (from `resolveCommissionLine`) |
+     | Suitability | `suitabilityRiskProfileId`, `suitabilityLevel`, `suitabilityMaxRiskometer`, `suitabilityQuestionnaireSha256`, `suitabilitySchemeRiskometer`, `suitabilityOutcome`, `suitabilityAckSha256` (hex of the ack's `rendered_text_sha256`; `''` when there is none) |
+     | Nomination | `nominationDecision`, `nominationSetVersion` (as the attest builder binds them) |
+     | Factors | `requiredFactors` = `requiredFactorsFor('PURCHASE', amount).join(',')` |
+
+   - Bind these `legalDocuments` as `{ key, version, sha256: hex }`: `TPL_PURCHASE`, `EXECUTION_ONLY_DECLARATION`, `REGULAR_PLAN_COMMISSION`, plus `SUITABILITY_WARNING` on MISMATCH. Resolve each with `resolveLegalDocument(exec, key, purchaseClock.now())` (LC-3). A missing document is `AppError('INTERNAL')`.
+   - In `catalogue.queries.ts`, export `resolveCommissionLine` (private at line 111) and widen its first parameter to `DbExecutor`.
+   - `CreateChallengeInput` gains `challengeId?: string`, and `create` uses `input.challengeId ?? newId('consent_challenges')`. The acknowledgement has no foreign key to the challenge, so item 5 can insert it first.
+
+   CNF-01 text:
+   - `ConsentChallengeSchema` gains `consentText: z.string().nullable()` (markdown).
+   - `snapshot-builders.ts` gains `CONSENT_TEXT_RENDERERS: Partial<Record<ConsentSubjectType, (exec: DbExecutor, snapshot: ConsentSnapshotV2) => Promise<string>>>`.
+   - `orders.module.ts` registers `renderPurchaseConsentText` (in `purchase-snapshot.ts`). It reads only the stored snapshot and the documents by the key and version bound in it. It renders, in order:
+     1. the `TPL_PURCHASE` body;
+     2. a facts block: scheme, amount via `formatInr(Money.parse(amount))`, payment method, bank ••last4, new folio, the ARN with "execution-only, no EUIN", and the commission range;
+     3. the `EXECUTION_ONLY_DECLARATION` and `REGULAR_PLAN_COMMISSION` bodies;
+     4. on MISMATCH, `renderSuitabilityWarning(...)` from the bound fields, then `SUITABILITY_ACK_CLAUSE`, the DSC-23 clause CNF-01 must carry (D-MONEY-094).
+   - `consent.router.ts`'s `getChallenge` injects `Crypto`, decrypts `snapshot_enc` as consent-engine.ts:332-336 does, and returns `consentText`. It is null for a subject type with no renderer.
+
+   Tests:
+   - "the PURCHASE snapshot binds bank, scheme, ARN, commission, cut-off, suitability and both declarations": decrypt `snapshot_enc` and check those fields and the three `legalDocuments` keys.
+   - "an amount changed between create and approve gives CONSENT_MISMATCH": run `UPDATE app.orders SET amount = '6000.00'` between create and approve.
+   - "consents.getChallenge returns consentText": GET `/api/v1/consents/challenges/{id}`. It contains the scheme name, `ARN-000000`, and the seeded `# EXECUTION_ONLY_DECLARATION` and `# REGULAR_PLAN_COMMISSION` bodies.
+
+8. **H3 at the E20 site (FP `consent{}` carries only verified channels).** `checkout` (19619-19628) always adds `email`, and two tests pin that (18835 and 18878). A purchase under ₹1,00,000 verifies only the SMS code, so FP would record an email factor that never happened (H-21, spec line 285; D-MONEY-006).
+   - Add `ConsentEngine.verifiedFactors(exec, challengeId): Promise<ReadonlyArray<'SMS' | 'EMAIL'>>`.
+     - Today it returns the CONSUMED challenge's `required_factors`, because approve verifies exactly those (consent-engine.ts:293-314).
+     - Once LC-8 lands, it must return the channels actually verified.
+     - E21 (~21102) and F2 reuse it.
+   - Add `fpConsentFor(factors, to: { mobile: string | null; email: string | null })` to `fp-purchase.ts`.
+     - It adds `{ isd_code: '91', mobile }` only for SMS, and `{ email }` only for EMAIL.
+     - It throws `AppError('INTERNAL')` when the result is empty or a needed value is null.
+   - `checkout` takes the mobile and email from `ConsentDestinationResolver.resolve(db, order.investorId, null)`, where the OTPs went (consent-engine.ts:240-242).
+     - Export the resolver from `legal-consent.module.ts`.
+     - Keep RV-03-7's `.replace(/\D/g, '').slice(-10)` on the mobile.
+     - Drop the `InvestorAccounts` dependency.
+
+   Tests:
+   - Lines 18835 and 18878 expect exactly `{ isd_code: '91', mobile: draft.investor.mobile }`.
+   - New: "a ₹1,00,000.00 order verified by SMS and email carries both in consent{}".
+   - `fp-purchase.test.ts`: "fpConsentFor carries only the verified channels", for SMS only, SMS and EMAIL, and EMAIL only.
+
+9. **H5 + R-46 (LOOKUP-ADOPT never trusts a list filter; nothing is re-POSTed).** The reconcile job lists by `source_ref_id` and adopts `items[0]` (19668-19675). `fp-read.ts` gains a filter FP does not document (19190-19205). FakeFp honours it, so the tests pass even if real FP ignores it.
+
+   Under R-46, an ambiguous create is never re-POSTed. This amends spec §4.1's ladder (line 310). The submit job POSTs only from CONSENTED, and RECONCILING exits only by adoption or FAILED. Rewrite the doc comment at 19647-19652 to say so.
+   - Do not modify `fp-read.ts`. For each RECONCILING order, read the investor's `fp_mf_investment_account_id` (null: log and skip, not a miss). Call the built `FpRead.purchases({ mfInvestmentAccount })` (fp-read.ts:64-75).
+   - If `raw` is not an object with a `data` array, treat the reply as a failed list. `itemsOf` would turn it into `[]`, and R-47 does not make a read's unreadable 2xx ambiguous.
+   - Add `findAdoptablePurchase(items, want: { sourceRefId: string; mfInvestmentAccount: string; scheme: string; amount: string })` to `fp-purchase.ts`. It returns `{ kind: 'adopt'; purchase: FpPurchaseView } | { kind: 'absent' } | { kind: 'mismatch'; ids: string[] }`. Let `ours` be the rows with `String(row.source_ref_id) === want.sourceRefId`:
+     - no rows: `absent`;
+     - exactly one row, with equal `mf_investment_account` and `scheme`, and `Money.parse(String(row.amount)).equals(Money.parse(want.amount))` (a parse failure is no match): `adopt`, via `toFpPurchaseView(row, 'purchase.list')`;
+     - anything else: `mismatch`, with every `ours` id. It is never adopted and never a miss. It opens `ReconBreaks.open(db, { kind: 'ORDER_ADOPT_MISMATCH', entityType: 'orders', entityId: order.id, severity: 'CRITICAL', detail: { ids } })`.
+   - If `fp_order_id` is already set, re-fetch with `FpRead.purchase(id)` instead of listing.
+   - Wrap each order in its own try/catch. A failed list or get, including `FpUnavailableError`, is logged and never counts as an absent check.
+   - In `fake-fp.ts`, `purchase.list` filters only by `mf_investment_account`, the filter FP documents (fp-api.md:159). It ignores `source_ref_id`, `plan` and `folio_number`.
+   - In `fake-fp.test.ts`, the two list cases (92-135) list by `mf_investment_account: 'mfia_1'`. Add the case "purchase.list ignores source_ref_id and plan".
+
+   Tests:
+   - `fp-purchase.test.ts`: "adopts only our row"; "ignores rows for another source_ref_id"; "reports a same-source_ref_id row with another amount as a mismatch".
+   - `orders.int.test.ts`, the absent test (18881-18895): after the deletes, seed a decoy on the same account:
+     ```ts
+     const decoyId = t.fakeFp.state.nextId('mfp_');
+     t.fakeFp.state.purchases.set(decoyId, { id: decoyId, oldId: t.fakeFp.state.nextOldId(), state: 'under_review', amount: '5000.00', scheme: draft.scheme.isin, mfInvestmentAccount: draft.investor.mfiaId, sourceRefId: randomUUID(), folioNumber: null, consent: null });
+     ```
+     The order still ends FAILED, and its `fpOrderId` stays null.
+   - New: "a failed FP list is not an absent check".
+     - Set it up as in the absent test.
+     - Spy so the first run fails only for this order's account: `vi.spyOn(t.app.get(FpRead), 'purchases').mockImplementation(async (p) => p?.mfInvestmentAccount === draft.investor.mfiaId ? Promise.reject(new FpAmbiguousError('purchase.list', { status: 500 })) : real(p))`, where `real` is the bound original. A one-shot `script('purchase.list', ...)` can be used up by another RECONCILING order.
+     - Run, restore, advance 11 minutes, and run again.
+     - The order is still RECONCILING with exactly one `fp.reconcile.nonfinal.miss` row.
+
+10. **ML-10 (backstop for SUBMITTING).** A crash after the SUBMITTING move (19487), which commits on its own, strands the order. The retried job returns at 19476, and the reconcile job reads only RECONCILING (19666).
+    - Inject `CLOCK` into the submit job. The SUBMITTING move passes `updatedAt: this.clock.now()`, because the column's `$onUpdate` uses wall time, which FakeClock cannot move.
+    - `fp.reconcile.nonfinal` first moves every SUBMITTING order with `updated_at < now - 5 minutes` to RECONCILING, trigger `ambiguous` (an existing D5 edge). Compare-and-set skips an order the live job just moved. The same run then applies item 9 to every RECONCILING order.
+
+    Test: "a SUBMITTING order stranded for 5 minutes is reconciled".
+    - Spy on `t.app.get(FpTransact).createPurchase`: call the real method, then throw `new AppError('INTERNAL')`.
+    - `submit` rejects with `INTERNAL`. The order stays SUBMITTING, and the FP object exists.
+    - Restore the spy, advance 6 minutes and run the job.
+    - Expect UNDER_REVIEW, `fpOrderId` set, and `orders.purchase.advance` enqueued.
+
+11. **ML-14 (the execution review's "before E20" conditions).**
+    - **LC-6.** `app.trg_consent_guard()` (0016) accepts a `CONSUMED_UNUSED` challenge, and no path needs that: `useConsumed` refuses it (consent-engine.ts:540). `0030_orders_guard` redefines the function before it attaches the trigger. Only the challenge-status predicate changes. F2's triggers inherit it.
+      ```sql
+      CREATE OR REPLACE FUNCTION app.trg_consent_guard() RETURNS trigger AS $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM app.consent_subjects cs JOIN app.consent_challenges cc ON cc.id = cs.challenge_id
+          WHERE cs.subject_table = TG_TABLE_NAME AND cs.subject_id = NEW.id
+            AND cs.status = 'CONSENTED' AND cc.status = 'CONSUMED'
+        ) THEN
+          RAISE EXCEPTION 'trg_consent_guard: % row % has no CONSUMED consent', TG_TABLE_NAME, NEW.id USING ERRCODE = 'raise_exception';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      ```
+      Test (describe "guards"): "trg_consent_guard refuses SUBMITTING on a CONSUMED_UNUSED challenge (LC-6)".
+      - Approve the draft, then call `engine.markUnused(t.db.db, challengeId, 'test')`.
+      - Expect the raw `UPDATE app.orders SET status = 'SUBMITTING'` to reject with `/trg_consent_guard/`.
+    - **LC-8.** H-21's email code for when SMS is unavailable (spec line 285) is not built. Add to Prerequisites (line 18522): "LC-8 must land before `orders.enabled` is set to true in any pilot environment." E20 neither builds LC-8 nor turns orders on. The same gate requires four documents to be PUBLISHED: `TPL_PURCHASE`, `EXECUTION_ONLY_DECLARATION`, `REGULAR_PLAN_COMMISSION` and `SUITABILITY_WARNING`. All four are `status: DRAFT` in `docs/legal/documents/`. Without them, the PURCHASE builder (item 7) and the MISMATCH path (item 5) fail closed with `INTERNAL`.
+    - **RSK-2.** Every purchase path calls `Suitability.check`: at draft (item 5) and at approve (item 6).
+
+12. **ML-15 / theme 6 (kill switch at submit).** `orders.enabled` is read only at draft (19320), so a queued submit job still POSTs during a freeze. Approve is covered by item 6.
+    - At submit, after the CONSENTED move and before `useConsumed`:
+      ```ts
+      if (!(await RuntimeConfig.get(db, 'orders.enabled'))) {
+        await db.transaction(async (tx) => {
+          await this.consent.markUnused(tx, challengeId, 'orders_disabled');
+          await moveOrder(tx, order, 'CONSENT_EXPIRED', 'orders_disabled', { failureCode: 'ORDERS_DISABLED', finalAt: this.clock.now() });
+        });
+        return;
+      }
+      ```
+    - `packages/domain/src/states/order.ts` gains `{ from: 'CONSENTED', to: 'CONSENT_EXPIRED', trigger: 'orders_disabled' }`. `packages/domain/test/states.test.ts` gains `expect(canTransition('ORDER', 'CONSENTED', 'CONSENT_EXPIRED', 'orders_disabled')).toBe(true)`.
+    - The advance job is not gated: a purchase FP already holds completes or expires on FP's evidence.
+
+    Test: "orders.enabled=false after approve: no purchase.create, status CONSENT_EXPIRED with ORDERS_DISABLED, challenge CONSUMED_UNUSED". Restore `true` in `finally`.
+
+13. **ML-16 (race-free daily cap; drafts and failed payments never block a retry).** The daily sum (19343-19355) has three faults:
+    - It runs under READ COMMITTED with no lock, so two drafts can both pass.
+    - It counts every CONSENT_PENDING draft, so an abandoned draft blocks "Try again".
+    - It compares `created_at`, which the insert (19358) leaves at DB wall time, with the app clock.
+
+    Delete the local `IST_OFFSET_MS`, `NOT_COUNTED` and `istDayStart` (19296-19306). Add to `purchase-eligibility.ts`:
+    - `lockPilotDay(tx, investorId)`:
+      ```ts
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${otpAdvisoryKey(`orders-daycap:${investorId}`).toString()}::bigint)`);
+      ```
+    - `pilotDaySpend(tx, investorId, now, excludeOrderId?)` sums `amount` over the investor's PURCHASE orders where all of these hold:
+      - `created_at >= istDayStart(now)` (from `otp.service.ts`);
+      - `id <> excludeOrderId`, when given;
+      - status not in `CANCELLED`, `CONSENT_EXPIRED`, `FAILED`, `EXPIRED`, `REJECTED`;
+      - `status <> 'CONSENT_PENDING'`, or the order's challenge (left join on `consent_challenge_id`) is `CONSUMED`.
+
+    Use:
+    - `createPurchase` takes the lock and refuses early when `spend + amount > pilot.caps.perInvestorPerDay`.
+    - `recheckPurchaseAtApprove` repeats both steps with `excludeOrderId = order.id`. This is the binding check: approvals for one investor queue on the lock.
+    - The refusal is `AMOUNT_ABOVE_MAX` with field code `PILOT_CAP`.
+    - The order insert sets `createdAt` and `updatedAt` from the app clock (RV-03-4).
+    - Hand-off to E21: an order whose latest payment attempt is FAILED or EXPIRED without `late_auth` must not count either. E21 adds that condition to `pilotDaySpend`, because `payment_attempts` does not exist in E20.
+
+    Tests:
+    - "drafts never count": one investor creates three ₹1,00,000.00 drafts. Approving the first two succeeds; the third gives `AMOUNT_ABOVE_MAX`.
+    - "the window follows the app clock": after 00:00 IST, a new ₹1,00,000.00 draft for that investor can be approved.
+
+14. **ML-19 (UNDER_REVIEW polling).** The advance job re-enqueues itself every 30 s for as long as FP reviews (19555, 19588-19590). Inject `CLOCK`, and read the challenge's `consent_records.first_attempt_at` (fall back to `orders.created_at`) and `saga_expires_at`. While FP says `under_review`:
+    - Poll every 30 s for the first 10 minutes after `first_attempt_at`, every 120 s until 30 minutes, then every 300 s.
+    - From 30 minutes, call `ReconBreaks.open(db, { kind: 'ORDER_REVIEW_SLA', entityType: 'orders', entityId: order.id, severity: 'WARNING' })` (spec line 335). It is idempotent while the break is open.
+    - Once `now > saga_expires_at`, move UNDER_REVIEW to CONSENT_EXPIRED (`saga_expired_under_review`, with `finalAt`) and stop. Under R-17 there are no more FP writes; FP expires its own order.
+
+    Test: "polling backs off, opens the SLA break and stops at the saga window". Check `Jobs.enqueue`'s options:
+    - `startAfter: 30` at the start;
+    - `120` at 11 minutes;
+    - `300` and an open break at 31 minutes;
+    - CONSENT_EXPIRED and no enqueue at 61 minutes.
+
+15. **Test suite, Steps 2, 4 and 5.**
+    - `orders-seed.ts`:
+      - `seedScheme(t, opts?: { riskometer?: RiskometerLevel | null; navDate?: string | null })` also inserts a `fund_facts` row (riskometer `'MODERATE'` by default, `riskometerAsOf: istToday(t.clock.now())`), a `scheme_navs` row (`navDate` defaults to `istToday(t.clock.now())`) and one AMC-level `commission_disclosures` row. `null` skips that row.
+      - `seedInvestableInvestor` sets the bank's `fpBankOldId` to 8001.
+    - `orders.int.test.ts` helpers:
+      - `draftOrder({ amount?, investor?, scheme?, suitabilityAck? })` calls `t.clock.advance(1)` before `createPurchase`.
+      - `approve` sends and enters a code for every factor in `required_factors` (EMAIL via `t.email.latestCode(draft.investor.email)`), then calls `t.clock.advance(1)` (RV-03-51).
+    - Steps 2, 4 and 5 also run:
+      ```
+      pnpm --filter=@sanchay/domain test
+      pnpm --filter=@sanchay/api test fake-fp
+      pnpm --filter=@sanchay/api test:int consent-engine risk-profile
+      ```
+    - Step 4's expected counts grow by the new cases.
+    - Step 5's `biome check` line drops `apps/api/src/integrations/fp/fp-read.ts` and appends:
+      ```
+      apps/api/src/modules/legal-consent apps/api/src/modules/onboarding/suitability.service.ts apps/api/src/modules/catalogue/catalogue.queries.ts apps/api/src/integrations/fp/fake/fake-fp.test.ts packages/domain/src/states/order.ts packages/domain/test/states.test.ts
+      ```
+    - Its `git add` line drops `apps/api/src/integrations/fp/fp-read.ts` and appends:
+      ```
+      apps/api/src/modules/legal-consent/consent-engine.ts apps/api/src/modules/legal-consent/legal-consent.module.ts apps/api/src/modules/legal-consent/snapshot-builders.ts apps/api/src/modules/legal-consent/consent.router.ts apps/api/src/modules/onboarding/suitability.service.ts apps/api/src/modules/catalogue/catalogue.queries.ts apps/api/src/integrations/fp/fake/fake-fp.test.ts apps/api/test/int/consent-engine.int.test.ts apps/api/test/int/risk-profile.int.test.ts packages/domain/src/states/order.ts packages/domain/test/states.test.ts
+      ```
+
+**Files list additions:**
+- Create: `apps/api/src/modules/orders/purchase-eligibility.ts`, `apps/api/src/modules/orders/purchase-snapshot.ts`.
+- Modify:
+  - `apps/api/src/modules/legal-consent/{consent-engine.ts, legal-consent.module.ts, snapshot-builders.ts, consent.router.ts}`
+  - `packages/contract/src/consents.ts`
+  - `apps/api/src/modules/onboarding/suitability.service.ts`
+  - `apps/api/src/modules/catalogue/catalogue.queries.ts`
+  - `packages/domain/src/states/order.ts`, `packages/domain/test/states.test.ts`
+  - `apps/api/src/integrations/fp/fake/fake-fp.test.ts`
+  - `apps/api/test/int/consent-engine.int.test.ts`, `apps/api/test/int/risk-profile.int.test.ts`
+- Remove from Modify: `apps/api/src/integrations/fp/fp-read.ts`.
+
+**Open points for the owner:**
+- No task owns LC-8 (H-21's email fallback when SMS is unavailable). It gates setting `orders.enabled` to true for the pilot (plan-03-execution-review.md:175 and :239). Name the task and its date.
+
 **Files:**
 - **Create:** `apps/api/src/modules/orders/{orders.schema.ts, fp-purchase.ts, fp-purchase.test.ts, purchase.service.ts, purchase-submit.job.ts, purchase-advance.job.ts, reconcile-nonfinal.job.ts, orders.router.ts, orders.module.ts}`
 - **Create:** `apps/api/src/modules/portfolio/folios.schema.ts`
@@ -19624,6 +20012,270 @@ git commit -m "feat(orders): lumpsum saga with consent-first submit, H-2 checkou
 
 ### Task E21: Payments: attempts, return route, polling, events, order emails (Dev A, 8 h)
 
+**Audit errata (2026-10-09; binding, apply before Step 1).** These override the text below where they conflict. Sources: flaw audit 2026-10-08, rulings R-45..R-47.
+
+1. **Migration renumbering.** The header table ("Migration numbers") is corrected with these errata; it listed `0025_payment_attempts`. Built migrations run 0000..0028, and E20 adds `0029_orders_folios` and `0030_orders_guard`. This task's generated migration is therefore `apps/api/drizzle/0031_payment_attempts.sql`. Step 4's `db:generate --name=payment_attempts` produces it. Never hand-renumber. Read line 20281 as that path.
+
+2. **H6 + R-45: schema (20547-20574).** The refund state lives on the attempt that took the money. Spec §2.3 (line 218) and §4.2 (line 342) put `late_auth` and `refund_status` on `payment_attempts`, and Plan 04 F7's `v_refunds_pending` and `ops:refund-utr` read them there. R-45's "the order gets `refund_status`" means this column on the order's paying attempt. Replace the free-text `refundStatus` (20563) and add the columns below. Import `boolean` and `jsonb` from `drizzle-orm/pg-core`, and `REFUND_STATUSES` from `@sanchay/domain`.
+   ```ts
+   export const REFUND_REASONS = ['ORDER_FAILED', 'ORDER_EXPIRED', 'TPV_FAILED', 'LATE_AUTH', 'REVERSAL', 'OTHER'] as const; // D-MONEY-040
+   endedAt: tstz('ended_at'),                 // set by moveAttempt on FAILED/EXPIRED
+   lateAuth: boolean('late_auth').notNull().default(false),
+   lateAuthAt: tstz('late_auth_at'),
+   adoptMissAt: tstz('adopt_miss_at'),        // ML-11: first LOOKUP-ADOPT miss
+   refundStatus: text('refund_status', { enum: REFUND_STATUSES }).notNull().default('NONE'),
+   refundReason: text('refund_reason', { enum: REFUND_REASONS }),
+   refundPendingAt: tstz('refund_pending_at'),
+   refundEvidence: jsonb('refund_evidence').$type<Record<string, unknown>>(),
+   // callback: check('payment_attempts_refund_status_ck', inList('refund_status', REFUND_STATUSES)),
+   //           check('payment_attempts_refund_reason_ck', inList('refund_reason', REFUND_REASONS)),
+   ```
+   `IN_PROGRESS` is no longer a valid value. Do not add `refund_ref` or `refund_recorded_at`, because Plan 04 F7 adds them. Plan 04 re-baseline: F7's tests seed `IN_PROGRESS`, which this CHECK refuses, so they must use `REFUND_PENDING`.
+
+3. **R-47 corrections (20602-20619; the poll).** Since commit 865ab47, FpTransport throws `FpAmbiguousError` (`UNPARSABLE_2XX`) for an empty or non-JSON 2xx on `payment.create`. A readable body with no usable id still passes, and `toFpPaymentView` would then store `"undefined"`.
+   - `createPayment` validates the id. It throws `new FpAmbiguousError('payment.create', { status: result.status })` unless `/^[1-9]\d*$/.test(String(body.id ?? ''))` holds. FP bodies are parsed with lossless-json, so `id` is a `LosslessNumber` or a string, never a JS number. The attempt then stays CREATING, and item 5 adopts it.
+   - Each FP read in the poll (`fpRead.payment`, and item 7's `fpRead.purchase`) can throw one of these:
+     - `FpAmbiguousError`, for a transport error, a 5xx, a 408 or a 429. Its subclass `FpUnavailableError` covers token failures and a second 401/403.
+     - `FpRejectedError`, for any other 4xx.
+   - The poll catches both, re-enqueues itself with the delay from item 7's table for the attempt's current state, and returns. pg-boss's own retries (R-44) give up long before an FP outage may end, so this keeps the chain alive.
+   - No E21 code treats a 401 or 403 as `FpRejectedError`.
+
+4. **H3 at the E21 site (21111-21113).** The replacement `checkout` adds `email` to FP's `consent{}` whenever the investor has one. FP's consent object is immutable and reaches the RTA as 2FA evidence. H-21 and D-MONEY-006 allow it to carry only the channels the consumed challenge verified.
+   - Keep E20's H3 consent PATCH unchanged (E20 errata item 8): `consent: fpConsentFor(await this.consent.verifiedFactors(db, consent.challengeId), destinations)`, with the mobile and email from `ConsentDestinationResolver.resolve`. Do not restate the rule from `required_factors`: `verifiedFactors` is the one place LC-8 will change. E21's replacement text at 21107-21113, with its `InvestorAccounts` reads, gives way to E20's version. E21 replaces only the lines after the PATCH (item 5).
+   - Test: the first `H-2 checkout` case asserts that `t.fakeFp.state.purchases.get(fpOrderId)?.consent` equals `{ isd_code: '91', mobile: investor.mobile }`. A Rs 5000.00 purchase is SMS-only (`requiredFactorsFor('PURCHASE', '5000.00')`).
+
+5. **ML-11: an ambiguous `payment.create` (21114-21116).** Today the retry finds the CREATING attempt through `liveAttempt`, skips creation and PATCHes `confirmed`. The purchase is then submitted with no payment link, and the live-attempt index blocks any new attempt for good. Inject `@Inject(PaymentOutcomes) private readonly outcomes: PaymentOutcomes` into `PurchaseAdvanceJob`. After the consent PATCH, `checkout` runs:
+   ```ts
+   let attempt = await this.payments.liveAttempt(order.id);
+   if (attempt?.status === 'CREATING') attempt = await this.outcomes.adoptCreating(order, attempt, consent.challengeId);
+   if (attempt === undefined) await this.payments.createAttempt(this.fp, consent, order); // ambiguous -> throws; the retry adopts
+   else if (attempt.fpPaymentId === null) return false; // never confirm without an FP payment
+   await this.fp.updatePurchase({ id: purchase.id, state: 'confirmed' }, consent);
+   return true;
+   ```
+   - **`FpRead.payments`** is new in `fp-read.ts`. It uses the existing `payment.list` operation:
+     ```ts
+     async payments(params: { amcOrderIds: readonly number[] }): Promise<FpListEnvelope<Record<string, unknown>>> {
+       const result = await this.transport.call('payment.list', { query: { amc_order_ids: params.amcOrderIds.join(',') } });
+       return { items: itemsOf(result.body), raw: result.body };
+     }
+     ```
+   - **`PaymentOutcomes.adoptCreating(order, attempt, challengeId)`** calls `fpRead.payments({ amcOrderIds: [order.fpOldId] })`. It filters the rows locally and never trusts FP's filter (theme 2). If `raw` is not an object with a `data` array, it throws `new FpAmbiguousError('payment.list')`. The advance job then retries, and the reply never counts as a miss. E20 errata item 9 applies the same rule, because R-47 does not make an unreadable 2xx on a read ambiguous. A thrown read leaves `adopt_miss_at` unchanged. A row matches only if all of these hold:
+     - `(row.amc_order_ids as unknown[]).map(String)` contains `String(order.fpOldId)` (lossless-json gives `LosslessNumber`s);
+     - `String(row.id)` is not the `fp_payment_id` of any other attempt row;
+     - if the row carries `amount`, `fpJson.money(row.amount, 'payment.amount').equals(Money.parse(order.amount))`.
+   - **One match.** One transaction does four things:
+     - stores `fp_payment_id`, and `upi_uri_enc` when the row has `upi.uri`;
+     - moves the attempt CREATING → REDIRECTED (`token_url_or_upi_ready`);
+     - records `PAYMENT_ATTEMPT_CREATED` with `data: { outcome: 'ADOPTED' }`. Only keys in `AUDIT_DATA_ALLOWLIST` survive, and `adopted` is not one;
+     - enqueues the first poll (item 6).
+
+     It returns the updated row. FP's payment object has no `token_url`, so an adopted netbanking attempt has no pay link.
+   - **No match, `adopt_miss_at` null.** Set `adopt_miss_at`. Enqueue `orders.purchase.advance` `{ orderId, challengeId }` with `{ startAfter: 600, singletonKey: order.id }`. Return the row unchanged.
+   - **No match, `adopt_miss_at` at least 10 minutes old.** Move the attempt CREATING → FAILED (`create_failed`, `failure_code` `PROVIDER_OBJECT_ABSENT`). Return `undefined`, so `checkout` creates a new attempt. This is spec §4.1's retry ladder, which runs LOOKUP-ADOPT before each retry (line 310). R-46 amends that ladder only "for these creates", meaning purchase, SIP and redemption. FP also refuses a second payment for the same AMC order (research fp-api §4.1; FakeFp answers 409).
+   - **More than one match.** Open a CRITICAL `PAYMENT_CREATE_UNRESOLVED` break. Enqueue the advance as in the first-miss case. Return the row unchanged. The order waits in CONFIRMING until the advance job sees FP expire the unconfirmed purchase and ends it REJECTED (RV-03-53).
+   - **Tests.** Add a `toPending()` helper. It runs `checkedOut()`'s steps up to and including `t.fakeFp.advance(fpOrderId, 'pending')`, and returns `{ investor, orderId, challengeId }`.
+     - `it.each([['a timeout', 'timeout'], ['a readable 2xx with no id', { status: 200, body: {} }]])`, "after %s, adopts FP's payment by amc_order_ids and confirms only then".
+       - Setup: call `checkedOut()` once, so that another order's FakeFp payment exists as a decoy. Then call `toPending()` and `t.fakeFp.script('payment.create', mode)`.
+       - The first advance rejects with `FpAmbiguousError`. The attempt is CREATING with `fpPaymentId` null, and the FakeFp purchase is still `pending`.
+       - After the second advance, the attempt is REDIRECTED with this order's FakeFp payment id, not the decoy's. The purchase is `submitted`, and the order is AWAITING_PAYMENT.
+     - "absent on two checks 10 minutes apart: FAILED, then a new attempt".
+       - Script `'timeout'`. The first advance rejects. Delete this order's FakeFp payment: the `t.fakeFp.state.payments` entry whose `amcOrderIds` holds the order's `fpOldId`.
+       - The second advance resolves. `adoptMissAt` is set, and `orders.purchase.advance` is enqueued with `startAfter: 600`.
+       - Call `t.clock.advance(10 * MINUTE)`. After the third advance, the first attempt is FAILED with `failureCode: 'PROVIDER_OBJECT_ABSENT'`, a second attempt is REDIRECTED, and the purchase is `submitted`.
+
+6. **H7: payment polling (20295; 20685-20721; 20778; 20827-20894).**
+   - **What counts as paid.** `SUCCESS`, `INITIATED` and `APPROVED` count as paid (spec §4.2 PROCESSING row; research fp-api §4.1).
+     - `fp-payment.ts` exports `PAID_PAYMENT_STATUSES`.
+     - `toFpPaymentView` adds `paid: boolean`, `amcOrderIds: string[]` and `refundEvidence: Record<string, unknown> | null`. `refundEvidence` holds the raw keys that start with `refund_` and have a non-null value, or is null when there are none.
+     - `lateAuth` already reads FP's `late_auth`.
+   - **First poll.** `createAttempt` enqueues `payments.poll` `{ attemptId }` with `{ startAfter: 30, singletonKey: id }`. It does so in the same transaction that moves the attempt to REDIRECTED. `adoptCreating` does the same. A UPI-intent payment may never hit the return route, so this may be its only poll.
+   - **Window expiry** (inside `apply`, item 7). A live attempt (REDIRECTED or PENDING) whose payment is still unpaid after its window moves to EXPIRED.
+     - The window is 30 minutes for UPI and 20 minutes for netbanking, counted from `created_at` (D-MONEY-019).
+     - The trigger is `redirect_window_elapsed` from REDIRECTED and `window_elapsed` from PENDING.
+     - While the attempt is live, the poll stores a newly present `upi.uri` in `upi_uri_enc`.
+   - **Hard cap.** The non-refund chain never schedules a poll later than `created_at` + 7 days (payments spec E12). At the cap, open a WARNING `PAYMENT_POLL_CAPPED` break if the attempt is live or its order is not final. The refund chain has its own 7 days (item 7).
+   - **Pay links.** `forOrder` returns `paymentUrl` and `upiUri` only while the attempt is REDIRECTED and the order is AWAITING_PAYMENT or PAYMENT_PENDING.
+     - Line 20778 also allowed PENDING and ignored the order status. RV-03-43 leaves a REDIRECTED attempt on a FAILED order.
+     - Make the comment at 20989 and line 20298 match.
+     - E24 hides the pay buttons once a payment is pending.
+   - **Tests.**
+     - The first `H-2 checkout` case asserts that `enqueued` holds this poll with these opts.
+     - `it.each(['INITIATED', 'APPROVED'])` "%s counts as paid": the attempt is SUCCESS and the order is PROCESSING.
+     - "a live attempt past its window expires, backs off, then stops" (netbanking):
+       - `t.clock.advance(21 * MINUTE)`, then poll: the attempt is EXPIRED, `endedAt` is set, and the next `payments.poll` has `startAfter: 900`.
+       - `t.clock.advance(61 * MINUTE)`, then poll: the next poll has `startAfter: 3600`.
+       - `t.fakeFp.advance(fpOrderId, 'failed')`, then poll: the order is FAILED (the poll re-read the purchase, item 7), and no `payments.poll` is enqueued.
+     - "the chain stops at 7 days": the payment is FAILED; poll; `t.clock.advance(7 * DAY + MINUTE)`; poll. No `payments.poll` is enqueued, and a WARNING `PAYMENT_POLL_CAPPED` break is open.
+
+7. **H6 + R-45 + ML-20: outcomes, refunds, emails (20296, 20299-20300, 20851-20887, 20898-20945).** Today:
+   - a late success on a FAILED or EXPIRED attempt throws, and polling stops;
+   - a paid order that FP fails never gets a refund flag, an email or a break;
+   - `ORDER_PLACED` is sent whatever the order status;
+   - `ORDER_FAILED` is never sent.
+
+   Move every decision into a new worker-only provider, `PaymentOutcomes`, in `payment-outcomes.ts`.
+   - It injects DB, FpRead, PaymentsService, Notify, AuditService, Jobs and CLOCK.
+   - `PaymentsPollJob.handle` calls `outcomes.pollAttempt(attemptId)`. That method returns early when `fpPaymentId` is null.
+   - Every entry point does its FP reads first, outside any transaction. One transaction then re-reads the attempt and the order `FOR UPDATE` and calls `apply(tx, attempt, order, payment)`.
+   - In the rules below, "money taken" means the attempt is SUCCESS or has `late_auth`.
+
+   `apply` runs these steps in this order:
+   - **Window expiry** (item 6).
+   - **Rule 0.** The payment is paid, and another attempt of the same order already has money taken. Do not change this attempt's status; only set `late_auth` if it is FAILED or EXPIRED. Mark it for refund with reason `OTHER`, and open a CRITICAL `DUPLICATE_PAYMENT` break on it.
+   - **Rule a.** Live attempt, payment paid: move it (REDIRECTED → PENDING →) SUCCESS (`provider_success`) and audit `PAYMENT_SUCCEEDED`.
+   - **Rule b.** FAILED or EXPIRED attempt, payment paid or FP `late_auth`: the status stays, because end states have no exits (D-MONEY-019). Set `late_auth = true` and `late_auth_at` once, and audit `PAYMENT_LATE_AUTH`.
+   - **Rule c.** Live attempt, payment `FAILED`: move it (→ PENDING →) FAILED (`provider_failed`) with `failure_code`. The order stays where it is.
+   - **Rule d.** Money taken, and the order is AWAITING_PAYMENT or PAYMENT_PENDING: move the order to PROCESSING (`attempt_success`; D5 has this edge from both states). Send `ORDER_PLACED` `{ amount: order.amount ?? '', schemeName }`, with `schemeName` from `schemes.name` and dedupe key `order-placed:<orderId>`. Nothing else sends `ORDER_PLACED`.
+   - **Rule e.** Money taken, the order is FAILED, EXPIRED or REJECTED, and `refund_status` is `NONE`: mark it for refund. The reason is `LATE_AUTH` if the attempt has `late_auth`. Otherwise it is `ORDER_FAILED` for FAILED or REJECTED, and `ORDER_EXPIRED` for EXPIRED.
+   - **Rule f.** Money taken, and another order by the same investor in the same scheme, created the same IST day, also has an attempt with money taken: open a CRITICAL `DUPLICATE_PAYMENT` break on this attempt (R-45; D-MONEY-040 P1). The same day is the window because FP ends an unpaid ONDC order at 23:00 IST that day (P-07).
+   - **Marking a refund** (only from `NONE`):
+     - set `refund_status = 'REFUND_PENDING'`, `refund_reason` and `refund_pending_at`;
+     - audit `REFUND_STATUS_CHANGED` with `data: { status: 'REFUND_PENDING', reason }`;
+     - call `Notify.enqueue(tx, 'REFUND_IN_PROGRESS', { investorId, data: { amount: order.amount ?? '', schemeName }, dedupeKey: `refund:${attemptId}` })`. The template gives no date, as R-45 requires until Cybrilla answers G1;
+     - call `ReconBreaks.open(tx, { kind: 'REFUND_PENDING', entityType: 'payment_attempts', entityId: attemptId, severity: 'CRITICAL', detail: { orderId, reason } })`.
+
+     E21 never sets REFUNDED. Until a sandbox probe names FP's `refund_*` fields, REFUNDED comes only from Plan 04 F7's two-founder `ops:refund-utr` (D-MONEY-040).
+   - **Next poll.** `apply` returns a delay. The caller enqueues `payments.poll` in the same transaction with `singletonKey: attemptId`. The first matching row wins:
+
+     | Attempt state | Delay |
+     |---|---|
+     | `REFUND_PENDING`, under 7 days since `refund_pending_at`, no evidence stored | 86 400 s |
+     | Live | 30 s, 60 s, then 120 s (by `poll_attempts`) |
+     | FAILED or EXPIRED, no money taken, order AWAITING_PAYMENT or PAYMENT_PENDING | 900 s while `now - ended_at` is under 1 h, then 3600 s |
+     | Anything else | none |
+
+   - **The poll re-reads the purchase.** For a FAILED or EXPIRED attempt whose order is AWAITING_PAYMENT or PAYMENT_PENDING, `pollAttempt` also reads `fpRead.purchase(order.fpOrderId)`. If FP says `failed` or `expired`, it calls `endOrder(order, 'FAILED' | 'EXPIRED', 'fp_failed' | 'fp_expired', { fpState, failureCode })` instead of running the plain transaction. R-45's "while the FP order is live" refers to FP's state. Without this read, a lost `mf_purchase` webhook keeps the order open for 7 days.
+   - **Each `REFUND_PENDING` poll** does the following, in this order:
+     1. If `refundEvidence` is not null, store it in `refund_evidence`, audit `REFUND_EVIDENCE_RECORDED` and stop polling. The CRITICAL break stays open for ops.
+     2. Otherwise, open a WARNING `REFUND_OVERDUE` break once `businessDaysAge(<IST date of refund_pending_at>, <IST date of now>, holidays) >= 5`. The function is built in `catalogue/publish-gate.ts:75`, and `holidays` comes from `market_holidays`. Also open it on the last poll at day 7 if it is not open yet, because a holiday week can push the fifth working day past day 7.
+     3. Stop 7 days after `refund_pending_at`.
+   - Delete the "FAILED after SUCCESS" branch (20871-20876). Rule e covers a paid order that FP fails.
+   - **`endOrder(order, to: 'FAILED' | 'EXPIRED' | 'REJECTED', trigger, values)`.** It first reads `fpRead.payment` for each of the order's attempts that has an `fp_payment_id`. A failed read throws, so the caller's job retries; no order ends without the read. It then runs one transaction:
+     - re-read the order `FOR UPDATE`;
+     - if the order is not final yet, run E20's compare-and-set `moveOrder`;
+     - run `apply` for each attempt;
+     - call `Notify.enqueue(tx, 'ORDER_FAILED', { investorId, data: { schemeName, ...(moneyTaken ? { reason: 'Any money taken will be refunded to your bank account.' } : {}) }, dedupeKey: `order-failed:${orderId}` })`.
+   - **Who calls `endOrder`.**
+     - `handleMfPurchaseEvent` becomes `PaymentOutcomes.applyPurchaseEvent(ctx: FpEventHandlerContext)`. It keeps the filters at 20916-20928. FAILED and EXPIRED go through `endOrder`; the other moves keep `moveOrder`.
+     - `fp-events.ts` keeps only `paymentEventHandler`.
+     - The two `mf_purchase events` tests (20470, 20486; the import is at 20319) call `t.app.get(PaymentOutcomes).applyPurchaseEvent({ db: t.db.db, fpRead, event })`.
+     - E21 routes E20's moves to REJECTED or FAILED through `endOrder`: `purchase-advance.job.ts` line 19581, and `reconcile-nonfinal.job.ts` line 19689 (`ReconcileNonfinalJob` injects `PaymentOutcomes`). E20's ML-10 backstop is not one of them: it moves SUBMITTING to RECONCILING (trigger `ambiguous`) and never ends an order.
+     - Plan 04 F4's replacement `mf_purchase` handler must keep calling `endOrder`.
+   - **Tests** (`describe('late payments and refunds (R-45)')`).
+     - Spies and assertions:
+       - `beforeAll` spies `Notify.enqueue` and lets it call through. `beforeEach` clears the spy.
+       - `Notify` enqueues `notifications.send` through the mocked `Jobs`, so a "no poll" assertion checks only the `payments.poll` entries.
+       - The FakeClock is shared across the file, so the describe blocks that advance it by hours or days run last.
+     - "late success on a FAILED attempt while the FP order is live":
+       - Steps: the payment is FAILED; poll; the payment becomes SUCCESS; poll.
+       - Expect: the attempt stays FAILED with `lateAuth: true`, the order is PROCESSING, and exactly one `ORDER_PLACED` is sent.
+     - "late success after the FP order ended":
+       - Steps: as above, but before the SUCCESS, FP fails the order (`t.fakeFp.advance(fpOrderId, 'failed')`, then `applyPurchaseEvent`).
+       - Expect: the order stays FAILED, and the attempt is `REFUND_PENDING` with reason `LATE_AUTH`.
+       - Expect: `REFUND_IN_PROGRESS` is sent, `ORDER_PLACED` is not, and a CRITICAL `REFUND_PENDING` break is open.
+     - "FP fails a paid order":
+       - Steps: the payment is SUCCESS; poll (the order is now PROCESSING); `t.fakeFp.advance(fpOrderId, 'failed')`; `applyPurchaseEvent`.
+       - Expect: `fpRead.payment` was called with the attempt's FP payment id, and the order is FAILED.
+       - Expect: the attempt is `REFUND_PENDING` with reason `ORDER_FAILED`, and both `REFUND_IN_PROGRESS` and `ORDER_FAILED` are sent.
+       - Expect: the CRITICAL break is open, and the next `payments.poll` has `startAfter: 86400`.
+     - "refund evidence stops the daily poll" (same setup as the previous case):
+       - Steps: `t.clock.advance(DAY)`, then poll.
+       - Expect: the next `payments.poll` has `startAfter: 86400`.
+       - Steps: the FakeFp payment gains `refund: { refund_reference: 'RFND-1' }`; poll.
+       - Expect: `refundEvidence` is stored, the status is still `REFUND_PENDING`, and no `payments.poll` is enqueued.
+     - "no refund evidence after 7 days" (same setup):
+       - Steps: `t.clock.advance(7 * DAY)`, then poll.
+       - Expect: a WARNING `REFUND_OVERDUE` break is open, and no `payments.poll` is enqueued.
+     - "DUPLICATE_PAYMENT":
+       - Steps: order A's payment fails. Order B, for the same investor and scheme (`checkedOut({ investor, scheme })`), succeeds. Then A's payment succeeds late.
+       - Expect: A is PROCESSING with `lateAuth`, and a CRITICAL `DUPLICATE_PAYMENT` break is open on A's attempt.
+     - The existing SUCCESS case also asserts exactly one `ORDER_PLACED` with `data: { amount: '5000.00', schemeName: 'Test Flexi Cap Fund - Regular Growth' }`.
+     - The RV-03-43 case also asserts that `fpRead.payment` was called, that exactly one `ORDER_FAILED` was sent and that no `REFUND_IN_PROGRESS` was sent.
+
+8. **Theme 1 / ML-6 (20794-20805).** `moveAttempt` is compare-and-set:
+   ```ts
+   const moved = await exec.update(paymentAttempts)
+     .set({ ...values, status: to, ...(to === 'FAILED' || to === 'EXPIRED' ? { endedAt: this.clock.now() } : {}) })
+     .where(and(eq(paymentAttempts.id, attempt.id), eq(paymentAttempts.status, attempt.status)))
+     .returning({ id: paymentAttempts.id });
+   if (moved.length !== 1) throw new AppError('ORDER_STATE_INVALID', { message: `PAYMENT_ATTEMPT ${attempt.id} is no longer ${attempt.status}` });
+   ```
+   - Use the same error that E20's compare-and-set `moveOrder` throws on a miss.
+   - `resolveReturn`, `pollAttempt` and `endOrder` all read the attempt `FOR UPDATE` inside their transactions. A race therefore ends in a retry, not a lost write.
+   - Test "moveAttempt is compare-and-set (ML-6)": after `checkedOut()`, `t.app.get(PaymentsService).moveAttempt(t.db.db, { id: attemptId, status: 'CREATING' }, 'REDIRECTED', 'token_url_or_upi_ready')` rejects with `ORDER_STATE_INVALID`, and the row is unchanged.
+
+9. **ML-18 server side, and the return targets (20294, 20726-20744, 20412-20426).** Today a refresh of a used return link gets a raw 404.
+   - `resolveReturn` looks the ref up by its hash alone, `FOR UPDATE`:
+     - unknown ref → NOT_FOUND;
+     - unused and unexpired → today's marking: set the ref used, move the attempt REDIRECTED → PENDING and the order AWAITING_PAYMENT → PAYMENT_PENDING;
+     - used or expired → no state change.
+   - Every known ref enqueues the poll and answers 303 to the return page below (`/r/payment?ref=<attemptId>`), never to `/result/...`.
+   - The redirect targets use the configured origin:
+     - WEB goes to `${env.SANCHAY_APP_ORIGIN}/r/payment?ref=<attemptId>`.
+     - APP goes to `${env.SANCHAY_APP_ORIGIN}/app/r/payment?ref=<attemptId>`, the App Link from H-1.
+     - The relative `/app/r/...` at 20742 resolves against the api host, where HostGuard answers 404. The hardcoded `https://app.sanchay.in` is wrong outside prod.
+   - Test changes:
+     - expect `Location` to be `${TEST_APP_ORIGIN}/r/payment?ref=${attemptId}`, importing `TEST_APP_ORIGIN` from `./env.js`;
+     - the second GET returns 303 with the same `Location`, the attempt is still PENDING, and `order_events` holds exactly one row with trigger `payment_postback_or_return`;
+     - after the return, `payments.forOrder` gives `paymentUrl: null`. Also, the `get` route in `packages/contract/src/payments.ts` adds `'NOT_FOUND'` to its `errorMap`, as `forOrder` does. `PaymentsService.get` throws it for an unknown or another investor's attempt, and E24's payment-return screen (ML-18) relies on that 404.
+
+10. **ML-13: the suite as written fails.**
+    - **Host header.** Every return-route inject, the unknown-ref case included, carries `headers: { host: apiHost() }` (from `./http.js`). The route is `@InfraRoute('API_HOST')`, and HostGuard returns 404 for any other host, the app host included (`host.guard.ts:36-37`).
+    - **Bank seed.** `createAttempt` throws `BANK_NOT_VERIFIED` without `fp_bank_old_id`. E20 errata item 15 makes `seedInvestableInvestor` set it to 8001, and E20's eligibility check refuses a draft without it. `checkedOut()` and `toPending()` therefore need no update of their own.
+    - **RV-03-51 clock steps.** `checkedOut()` calls `t.clock.advance(1)` before `createPurchase` and again after `engine.approve`.
+      - It also returns `challengeId` and `scheme`, and accepts an optional `{ investor, scheme }`.
+      - The first `H-2 checkout` case asserts `await expectNoPmWritesBeforeConsumed(t, challengeId)`, imported from `./consent-first.js`.
+    - **Jobs mock.** The `Jobs.enqueue` mock records `opts` (`enqueued.push({ name, data, opts })`), with the array type widened to match. The "still PENDING" case expects `[{ name: 'payments.poll', data: { attemptId }, opts: { startAfter: 30, singletonKey: attemptId } }]`.
+
+11. **PAY-01 fields for R-45 and H6(c) (20298, 20658-20667, 20990-20999).** E24 reads these. `PaymentForOrder` and `PaymentForOrderSchema` gain three fields:
+    - `retryAfter: InstantSchema.nullable()`: `ended_at` + 30 minutes when the latest attempt is FAILED or EXPIRED, otherwise null. It drives the pay screen's "bank is being checked" hold. The router maps it with `toISOString()`.
+    - `refundStatus: z.enum(REFUND_STATUSES)`: the first refund status other than `NONE` among the order's attempts, otherwise `NONE`.
+    - `paymentEvidence: z.enum(['PAID', 'NOT_PAID', 'UNKNOWN'])`, computed over all the order's attempts:
+      - PAID if any attempt has money taken or a refund status other than NONE;
+      - NOT_PAID if none does and the order is FAILED, EXPIRED or REJECTED, because `endOrder` re-fetched every payment first;
+      - UNKNOWN otherwise.
+
+    E24 shows "no money was taken" only for NOT_PAID. The `forOrder` test also asserts `refundStatus: 'NONE'`, `retryAfter: null` and `paymentEvidence: 'UNKNOWN'`.
+
+12. **ML-16 hand-off from E20 (the daily cap).** E20 errata item 13 leaves one condition to this task, because `payment_attempts` does not exist in E20. Without it, an order whose payment failed still counts towards `pilot.caps.perInvestorPerDay` until FP fails it at 23:00 IST, so E24's "Try again" can be refused with `AMOUNT_ABOVE_MAX`.
+    - In `apps/api/src/modules/orders/purchase-eligibility.ts`, `pilotDaySpend` also skips an order whose newest `payment_attempts` row (by `created_at`) is `FAILED` or `EXPIRED` with `late_auth = false`. Use a `NOT EXISTS` subquery. If `late_auth` is set later, the order counts again.
+    - Test "a failed payment never blocks Try again (ML-16)":
+      - Upsert `app_config` `pilot.caps.perInvestorPerDay = '10000.00'`, the way the suite's `beforeAll` upserts `orders.enabled`. Restore `'200000.00'` in `finally`.
+      - Check out order A (`'5000.00'`). Make its FakeFp payment FAILED and poll. The attempt is FAILED, and the order stays AWAITING_PAYMENT.
+      - Check out order B (`'5000.00'`, same investor and scheme).
+      - Expect: order C (`'5000.00'`) drafts and approves. Without the condition, C's draft gives `AMOUNT_ABOVE_MAX`.
+      - Put this case before the describe blocks that advance the clock by hours or days, so all three orders fall on one IST day.
+
+13. **FakeFp, module, Step 4 and Step 5.**
+    - **FakeFp.**
+      - In `fake-fp.state.ts`, `StoredPayment.status` also allows `'INITIATED' | 'APPROVED'`, and the type gains `lateAuth?: boolean` and `refund?: Record<string, unknown>`.
+      - `payment.get` (20623-20629) returns `{ id, status, amc_order_ids, late_auth: payment.lateAuth ?? false, upi: null, ...payment.refund }`.
+      - A new `payment.list` case returns `{ object: 'list', data: [...] }`, with every stored payment in that shape. It ignores `amc_order_ids` (theme 2).
+    - **`PaymentsModule.forRoot`.**
+      - The worker providers are `[PaymentsPollJob, PaymentOutcomes]`, and the exports are `[PaymentsService, ...(worker ? [PaymentOutcomes] : [])]`.
+      - `PaymentOutcomes.onModuleInit` registers the `mf_purchase` and `payment` handlers, because `fp.event.process` runs only in the worker.
+      - `PaymentsModule.onModuleInit` keeps only the form parser, and its constructor drops `DB` and `Jobs`.
+    - **Audit actions.** The key-level edit to `audit.service.ts` also appends `PAYMENT_LATE_AUTH` and `REFUND_EVIDENCE_RECORDED` to `AUDIT_ACTIONS`.
+    - **Step 4.** `payments.int.test.ts` expects 27/27: the 12 existing tests plus 15 new ones (ML-6: 1, ML-11: 3, H7: 4, R-45: 6, ML-16: 1). E20's `orders.int.test.ts` keeps the count it has after E20's errata.
+    - **Step 5.** The `git add` also lists `apps/api/src/integrations/fp/fp-read.ts` and `apps/api/src/integrations/fp/fake/fake-fp.state.ts`.
+
+**Files list additions:**
+- **Create:** `apps/api/src/modules/payments/payment-outcomes.ts`.
+- **Create (migration, generated):** `apps/api/drizzle/0031_payment_attempts.sql`, replacing "payment_attempts".
+- **Modify:**
+  - `apps/api/src/integrations/fp/fp-read.ts` (`payments`);
+  - `apps/api/src/integrations/fp/fake/fake-fp.state.ts` (`StoredPayment`);
+  - `apps/api/src/modules/orders/reconcile-nonfinal.job.ts` (`endOrder`);
+  - `apps/api/src/modules/orders/purchase-eligibility.ts` (E20's file; `pilotDaySpend`, item 12).
+
+**Sandbox checks (also listed in the header's "Confirm in the FP sandbox" list, line 254):**
+- FP's `refund_*` field names. They decide when REFUNDED may become automatic.
+- The `/api/pg/payments` list envelope, and whether its `amc_order_ids` filter works.
+
+**Open points for the owner:**
+- `DUPLICATE_PAYMENT` across orders (R-45 gives no window). This block flags two paid orders by the same investor in the same scheme on the same IST day. That also raises a CRITICAL break on a deliberate second purchase that day. Confirm, or narrow it to an order created while an earlier order in the same scheme was still unpaid (the "Try again" case).
+
 **Files:**
 - **Create:** `apps/api/src/modules/payments/{payments.schema.ts, fp-payment.ts, payments.service.ts, pg-return.controller.ts, payments-poll.job.ts, fp-events.ts, payments.router.ts, payments.module.ts}`, `packages/contract/src/payments.ts`, `apps/api/test/int/payments.int.test.ts`
 - **Create (migration, generated):** `payment_attempts`
@@ -20495,6 +21147,176 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 ---
 
 ### Task E22: `quotePurchase`, cut-off engine, stamp duty (Dev B, 6 h)
+
+**Audit errata (2026-10-09; binding, apply before Step 1).** These override the text below where they conflict. Sources: flaw audit 2026-10-08, rulings R-45..R-47.
+
+E22 makes no FP call. The quote, its adapters and the createPurchase NAV-date edit read only the DB, so R-45..R-47 change nothing here. E22 adds no migration.
+
+1. **CS-6: the LIQUID/OVERNIGHT NAV date is one day late** (flaw-audit:106).
+   - **What is wrong:** `expectedNavDate` (21902-21911, described at 21358) applies the STANDARD rule to every class. The correct rule comes from GAP-05 row 1a (gap-rulings.md:404), D-MONEY-023 and TESTING NC-003:
+     - A LIQUID or OVERNIGHT purchase before 13:30 IST on a business day gets the previous calendar day's NAV.
+     - At or after 13:30, or on a non-business day, it gets the NAV of the calendar day before the next business day.
+     - Liquid and overnight funds publish a NAV for every calendar day, so the NAV date can fall on a weekend or a holiday. That is correct.
+   - **Vectors** (`cutoff-matrix.json`, 21388-21400). The audit lists CO-04/05/08/14/16. CO-06 and CO-15 are wrong for the same reason. Change `expectedNavDate` as follows:
+     - CO-04: 2026-10-12 becomes 2026-10-11.
+     - CO-05: 2026-10-13 becomes 2026-10-12.
+     - CO-06: 2026-10-13 becomes 2026-10-12.
+     - CO-08: 2026-10-19 becomes 2026-10-18.
+     - CO-14: 2026-11-11 becomes 2026-11-10.
+     - CO-15: 2026-10-12 becomes 2026-10-11.
+     - CO-16: 2026-10-13 becomes 2026-10-12.
+   - **Step 1:** append two vectors. CO-17 is a Friday after the cut-off, so it lands on a Sunday. CO-18 is placed before the cut-off on the day after a holiday, so it gets the holiday's NAV.
+     ```json
+     { "id": "CO-17", "cutoffClass": "LIQUID", "atIso": "2026-10-16T08:01:00.000Z", "holidays": [], "expectedNavDate": "2026-10-18", "expectedDisplayCutoff": "13:00" },
+     { "id": "CO-18", "cutoffClass": "LIQUID", "atIso": "2026-11-11T07:00:00.000Z", "holidays": ["2026-11-10"], "expectedNavDate": "2026-11-10", "expectedDisplayCutoff": "13:00" }
+     ```
+     - `golden.test.ts` (21512-21517) pins `toHaveLength(18)` and `length: 18`, and its title says CO-01..CO-18. The `describe` title at 21539 also says CO-01..CO-18.
+   - **Step 3:** STANDARD keeps the effective business day; LIQUID and OVERNIGHT take the calendar day before it. Make the same change to the description at 21358.
+     ```ts
+     const PREVIOUS_CALENDAR_DAY_NAV: ReadonlySet<ExpectedNavDateInput['cutoffClass']> = new Set(['LIQUID', 'OVERNIGHT']);
+
+     export function expectedNavDate(input: ExpectedNavDateInput): ExpectedNavDateResult {
+       const times = CUTOFF_TIMES[input.cutoffClass];
+       const { isoDate, minutesOfDay } = istParts(input.at);
+       const sameDay = isBusinessDay(isoDate, input.holidays) && minutesOfDay < times.regulatoryMinutesOfDay;
+       const effectiveDay = sameDay ? isoDate : nextBusinessDay(isoDate, input.holidays);
+       return {
+         navDate: PREVIOUS_CALENDAR_DAY_NAV.has(input.cutoffClass) ? addIsoDays(effectiveDay, -1) : effectiveDay,
+         displayCutoff: times.displayCutoff,
+       };
+     }
+     ```
+   - **Unaffected:** Plan 04's ELSS vectors use STANDARD, and F5 has its own redemption rule (Plan 04:10485).
+
+2. **ML-9: one eligibility rule for the quote and the order** (flaw-audit:132).
+   - **What is wrong:** `quotePurchase` (22035-22074) and four adapters (22152-22284) copy the readiness, threshold, amount-limit, pilot-cap and NAV-grade rules. The copy has already drifted:
+     - `DrizzleQuoteThresholdsAdapter` (22170) ignores `schemes.fp_active`.
+     - `DrizzleQuoteBankAdapter` (22271) accepts any VERIFIED bank, but E21 can pay only from a bank with `fp_bank_old_id` (20688).
+     - The input `amount: moneyWireSchema` (22318) accepts `-5000.00`. The built `MONEY_WIRE_REGEX` is `/^-?\d{1,16}\.\d{2}$/` (`packages/validation/src/patterns.ts:14`).
+     - The quote refuses a bad multiple with `AMOUNT_NOT_MULTIPLE`. E20's createPurchase refuses it with `VALIDATION_FAILED` / `AMOUNT_MULTIPLE` (19332-19334).
+   - **Remove** the items below. Plan 04 imports none of them; it uses only `expectedNavDate` and `CutoffHolidays` (Plan 04:80). This supersedes the Files note at 21331, Interfaces 21364-21367 and RV-03-3 at 21373.
+     - The ports `QuoteThresholdsPort`, `QuoteNavGradePort`, `QuoteReadinessPort` and `QuotePilotCapsPort`, their tokens, `QuoteSchemeThresholds` and `BLOCKING_NAV_GRADES` (22018).
+     - The adapters `DrizzleQuoteThresholdsAdapter`, `DrizzleQuoteNavGradeAdapter`, `DrizzleQuoteReadinessAdapter` and `RuntimeConfigPilotCapsAdapter`.
+     - Remove by hand the imports these deletions leave unused. Biome's `noUnusedImports` has no safe fix (21379).
+   - **Add to `quote.service.ts`:** a port over E20's `checkPurchaseEligibility` (`apps/api/src/modules/orders/purchase-eligibility.ts`, E20 errata item 4). `QuoteCutoffClass` moves here. `navDateFor` (22090) takes `QuoteCutoffClass`. `quote.adapters.ts` imports the type and deletes its own alias (22133).
+     ```ts
+     export type QuoteCutoffClass = 'STANDARD' | 'LIQUID' | 'OVERNIGHT';
+     export interface QuoteEligibilityPort {
+       /** E20's shared purchase eligibility check, read-only, no bank chosen; throws its AppError codes unchanged. */
+       check(input: { investorId: string; schemeId: string; amount: Money }): Promise<{ cutoffClass: QuoteCutoffClass }>;
+     }
+     export const QUOTE_ELIGIBILITY_PORT = Symbol('QUOTE_ELIGIBILITY_PORT');
+     ```
+   - **E20's check already meets these conditions** (E20 errata item 4). Never re-add a rule to the quote.
+     - It covers readiness, the per-order pilot cap, scheme orderability (PUBLISHED, `purchase_allowed`, `fp_active`, non-null thresholds), min/max/multiple and the NAV grade (it refuses STALE and UNAVAILABLE).
+     - It tests readiness before any scheme, threshold, NAV or bank rule. E20's order is: `ORDERS_DISABLED`, then the amount and per-order cap, then readiness, then the scheme rules. Otherwise INV-02 shows a scheme error to an investor who cannot buy anything.
+     - It is a free function over a `DbExecutor` (plus `Clock` for the NAV age), not a `PurchaseService` method. This task makes `PurchaseService` inject `QuoteService`, so an adapter that injects `PurchaseService` creates a Nest circular dependency.
+     - It takes `bankAccountId: string | null` and `userIp: string | null`. The quote passes `null` for both. That skips the bank rule, which `DrizzleQuoteBankAdapter` applies per bank, and the IPv4 rule.
+   - **`QuoteService`:**
+     - The constructor becomes `(QUOTE_ELIGIBILITY_PORT, QUOTE_SUITABILITY_PORT, QUOTE_BANK_PORT, QUOTE_HOLIDAYS_PORT)`. `QuotePurchaseInput` drops `cutoffClass`.
+     - `quotePurchase` runs, in order: `eligibility.check`, then `banks.eligibleBanks` (an empty list throws `BANK_NOT_VERIFIED`), then `suitability.check`, then `navDateFor(cutoffClass, at)`.
+     - `navGrade` stays on the wire and is always `'OK'`, because the shared check refuses STALE and UNAVAILABLE (R-12).
+   - **New `PurchaseEligibilityQuoteAdapter`** (in `quote.adapters.ts`; it injects `DB` and `CLOCK`, because the check takes a `Clock`):
+     - It throws `ORDERS_DISABLED` while `orders.enabled` is false. The shared check's rule 1 throws it, so the adapter adds no check of its own. `ORDERS_DISABLED` is E20's catalogue addition (403, 18516), not a built code.
+     - It calls `checkPurchaseEligibility(this.dbh.db, this.clock, { investorId, schemeId, amount: amount.toWire(), bankAccountId: null, userIp: null })`.
+     - It then calls `schemeCutoffClass(this.dbh.db, schemeId)`; null throws `SCHEME_NOT_ORDERABLE`.
+   - **`DrizzleQuoteBankAdapter`** returns only banks that can pay. `QuoteEligibleBank` drops `tpvVerified`, and the `.filter` at 22071 goes. Import `and` and `isNotNull` from `drizzle-orm`.
+     ```ts
+     .where(and(eq(bankAccounts.investorId, investorId), eq(bankAccounts.status, 'VERIFIED'), isNotNull(bankAccounts.fpBankOldId)))
+     ```
+   - **Router** (22345, 22347, 22354, 22364): stop calling `schemeCutoffClass` and drop the `DB` import and injection. Call `this.quote.quotePurchase({ investorId, schemeId: input.schemeId, amount: Money.parse(input.amount), at: this.clock.now() })`.
+   - **Module:** register `QuoteService` plus four providers: `QUOTE_ELIGIBILITY_PORT` → `PurchaseEligibilityQuoteAdapter`, then the SUITABILITY, BANK and HOLIDAYS providers as before.
+   - **Contract** (22302-22320):
+     - `amount` is `moneyWireSchema.regex(/^\d{1,16}\.\d{2}$/)`, the same refinement E20 gives `createPurchase`. A negative or zero amount returns 400 `VALIDATION_FAILED`.
+     - `.errors(...)` declares every code the shared check throws: `ORDERS_DISABLED`, `PURCHASE_BLOCKED`, `NOT_FOUND` (a missing scheme, E20 rule 4), `SCHEME_NOT_ORDERABLE`, `AMOUNT_BELOW_MIN`, `AMOUNT_ABOVE_MAX`, `AMOUNT_NOT_MULTIPLE`, `NAV_UNAVAILABLE` and `BANK_NOT_VERIFIED`, plus item 3's three codes. `CLIENT_IP_UNSUPPORTED` is not declared, because the quote passes no IP.
+   - **Unit tests** (`quote.service.test.ts`, 6 cases):
+     - `makeService` builds `eligibility` (stub returns `{ cutoffClass: 'STANDARD' }`), `suitability`, `banks` (the stub and its override type drop `tpvVerified`) and `holidays`. It calls `new QuoteService(eligibility, suitability, banks, holidays)` (21631). No input passes `cutoffClass`.
+     - "quote never writes" (21636-21638) loops over `[eligibility, suitability, banks]`.
+     - Delete the blocked-investor, below-minimum, pilot-cap and STALE-NAV cases (21681-21719). E20 tests those rules.
+     - Add "propagates the shared check's refusal". The stub throws `new AppError('NAV_UNAVAILABLE')`, the call rejects with that code, and neither `banks.eligibleBanks` nor `suitability.check` is called.
+     - Add "passes investorId, schemeId and amount to the shared check" (`toHaveBeenCalledWith`).
+     - The BANK_NOT_VERIFIED case (21721) uses `banks: []`.
+   - **Int setup** (`orders-quote.int.test.ts`):
+     - Copy E20's local `setOrdersEnabled` (18726-18731; `appConfig` from `../../src/modules/platform/kernel.schema.js`), and call `setOrdersEnabled(true)` in `beforeAll`.
+     - Add `readyFixture(riskometer: Riskometer = 'MODERATELY_HIGH')`. It calls `seedInvestableInvestor` and `seedScheme`, makes three writes, and returns `{ investor, scheme }`. The writes work whether or not E20's revised seed already sets these values:
+       - `fundFacts` `.onConflictDoUpdate({ target: fundFacts.schemeId, set: { riskometer } })`;
+       - `schemeNavs` `.onConflictDoUpdate({ target: schemeNavs.isin, set: { nav, navDate } })`, with navDate `'2026-10-11'`;
+       - `bankAccounts.fpBankOldId = 8001` on `investor.bankId`.
+     - These writes replace the plain inserts at 21778-21779; a second plain insert would violate `fund_facts_scheme_uq`. The case at 21774 uses `readyFixture()`, and its title drops "seven".
+   - **New int cases:**
+     - **Parity** (`it.each`, six rows). Each row calls `readyFixture()`, applies its change, and asserts that the quote's `res.json().code` equals the code of the rejection from `t.app.get(PurchaseService).createPurchase(...)`. Use E20's `draftOrder` inputs (18751-18759) with the row's amount (default `'5000.00'`). If E20's check uses another code for a row, both sides use E20's code; what matters is that they agree.
+
+       | Change | Code |
+       |---|---|
+       | `schemes.fpActive = false` | `SCHEME_NOT_ORDERABLE` |
+       | `schemes.thresholds = null` | `SCHEME_NOT_ORDERABLE` |
+       | `scheme_navs.nav_date` 8 IST days before `t.clock.now()` | `NAV_UNAVAILABLE` |
+       | `bank_accounts.fp_bank_old_id = null` | `BANK_NOT_VERIFIED` |
+       | amount `'100001.00'` (above `pilot.caps.perOrder`) | `AMOUNT_ABOVE_MAX` |
+       | amount `'5000.50'` (not a ₹1 multiple) | `AMOUNT_NOT_MULTIPLE` |
+
+     - **Negative amount:** `'-5000.00'` returns 400 `VALIDATION_FAILED` from `POST /api/v1/orders/purchases/quote`. E20 errata item 4 already tests `POST /api/v1/orders/purchases`, so this case does not repeat it.
+     - **Kill switch:** with `orders.enabled = false`, the quote returns 403 `ORDERS_DISABLED`. Restore `true` in `finally`.
+     - **Unready investor:** the case at 21761 still expects `PURCHASE_BLOCKED`, because readiness is tested first.
+
+3. **H1 at E22, including RSK-2 in the quote's copy of the rule** (flaw-audit:55; execution review:190).
+   - **What is wrong:**
+     - (a) The comment at 22417-22418 and RV-03-3 (21377; header line 145) say createPurchase leaves suitability, the NAV-age refusal and the bank check to INV-02. Under H1 and ML-9, createPurchase runs E20's shared check and the built `Suitability.check`.
+     - (b) `DrizzleQuoteSuitabilityAdapter` (22202-22232) is a third copy of E9's rule. It misses the time test in the built `SuitabilityService.check` (`apps/api/src/modules/onboarding/suitability.service.ts:50-52`). An ACTIVE profile past `expires_at` gets a normal quote, while createPurchase refuses it with `RISK_PROFILE_EXPIRED`.
+     - (c) The quote returns the verdict (22013, 22082) but no warning text. CNF-03 hard-codes its own copy (23071-23074), so E20 cannot record which `SUITABILITY_WARNING` version was acknowledged (`suitability_acknowledgements.warning_doc_key/_version/_sha256`).
+   - **`suitability.service.ts`** (built; add to Files): split the read from the write so that the quote and createPurchase share one rule. E20 adds no read-only verdict. It only makes `check` return `checkId` (E20 errata item 5), and this split keeps that.
+     ```ts
+     export type SuitabilityEvaluate = (
+       exec: DbExecutor,
+       args: { investorId: string; schemeRiskometer: Riskometer },
+     ) => Promise<Omit<SuitabilityHookResult, 'checkId'>>;
+     // evaluate = today's check body up to compareRiskometer (profile lookup and the lapsed/EXPIRED/STALE/
+     // not-ACTIVE refusals), with no insert; check = evaluate, then the suitabilityChecks insert with .returning({ id }), returning { ...verdict, checkId } as E20 requires.
+     // onModuleInit also sets Suitability.evaluate; the facade becomes { check; evaluate }, both throwing until wired.
+     ```
+     - `DbExecutor` comes from `../../db/client.js`.
+     - The built Suitability cases in `risk-profile.int.test.ts` (324-446) stay green with no change.
+   - **`DrizzleQuoteSuitabilityAdapter`** injects `DB` and `LegalDocs`. `LegalConsentModule` exports `LegalDocs`, and `OrdersModule` already imports that module (19867). The adapter writes nothing. In order, it:
+     - reads `fund_facts.riskometer`; null throws `SCHEME_NOT_ORDERABLE`;
+     - calls `Suitability.evaluate(this.dbh.db, { investorId, schemeRiskometer })`;
+     - on MATCH sets `warning: null`. On MISMATCH it calls `this.legal.current(this.dbh.db, 'SUITABILITY_WARNING')`, reads `schemes.name`, and builds `warning` field by field: `{ key: 'SUITABILITY_WARNING', version, sha256, text: renderSuitabilityWarning(doc.bodyMarkdown, { schemeName, schemeRiskometer, level: verdict.level, maxRiskometer: verdict.maxRiskometer }) }`. Passing the built `CurrentLegalDocument` directly fails typecheck, because its `key` is typed `LegalDocumentKey`.
+   - **Types and contract:**
+     - `QuoteSuitabilityResult` gains `warning: { key: 'SUITABILITY_WARNING'; version: string; sha256: string; text: string } | null`. `text` is E20's `renderSuitabilityWarning(doc.bodyMarkdown, { schemeName, schemeRiskometer, level, maxRiskometer })`, exported from `purchase-snapshot.ts`. CNF-03 therefore shows exactly the text whose hash E20 stores in `suitability_acknowledgements.rendered_text_sha256`.
+     - The output `suitability` object (22327-22333) adds `warning: z.object({ key: z.literal('SUITABILITY_WARNING'), version: z.string(), sha256: z.string().regex(/^[0-9a-f]{64}$/), text: z.string() }).nullable()`.
+     - The errors add `ONBOARDING_INCOMPLETE`, `RISK_PROFILE_EXPIRED` and `RISK_PROFILE_STALE`. All three are 409 in the built catalogue, and the adapter already throws them.
+   - **Tests:**
+     - **Unit:** the suitability stub returns `warning: null` on MATCH. On MISMATCH it returns `{ key: 'SUITABILITY_WARNING', version: '1', sha256: '0'.repeat(64), text: '# W' }`. The clean case (21657) expects `warning: null`. The MISMATCH case (21668) expects that object.
+     - **Int (i), MISMATCH:** `readyFixture('VERY_HIGH')` against the seed's `MODERATELY_HIGH` (`onboarding-seed.ts:116`). Expect 200 with `suitability: { outcome: 'MISMATCH', ackRequired: true, warning: { key: 'SUITABILITY_WARNING', version: '1' } }`, and 0 `suitability_checks` rows for `scheme.id`.
+     - **Int (ii), lapsed profile:** after `readyFixture()`, set `risk_profiles.expires_at` to one day before `t.clock.now()` and keep the status ACTIVE. The readiness trigger fires only on `UPDATE OF status`, so `can_purchase` stays true. Expect 409 `RISK_PROFILE_EXPIRED`.
+     - No legal seeding is needed: `seedReadyInvestor` publishes every key at version '1' (`onboarding-seed.ts:51-67, 133`).
+   - **`purchase.service.ts` edit** (22415-22427):
+     - Put E22's lines inside E20's `createPurchase` transaction, after `checkPurchaseEligibility` and the daily cap and before the `orders` insert (E20 errata item 5, step 1). Use `schemeCutoffClass(tx, input.schemeId)`, not `db`. The `if (bank === undefined)` anchor no longer exists, because E20 moved the bank rule into `checkPurchaseEligibility`. `Suitability.check` runs after the insert, because it needs the order id.
+     - Replace the comment with `// E22: stamp the cut-off profile and expected NAV date; eligibility (ML-9) is E20's check above; suitability (H1) runs after the insert.`
+     - createPurchase still does not call `quotePurchase`.
+   - **Prerequisite:** `docs/legal/documents/suitability-warning.md` is still DRAFT. Until it is published, `LegalDocs.current` throws `INTERNAL`, so a MISMATCH quote returns 500. That fails closed. Publishing it is part of E20's pre-pilot gate (E20 errata item 11, together with LC-8 and the three PURCHASE documents).
+   - **Effect on E23 (H1 client side):**
+     - CNF-03 renders `warning.text` and sends `suitabilityAck: { warningVersion: warning.version }` to `createPurchase`. E20's input is a `strictObject` that holds only `warningVersion`, so `sha256` is never sent.
+     - E23's quote fixtures (22732, 22779) gain `warning`.
+     - INV-02 shows E20's `ORDERS_DISABLED` copy when the quote returns it.
+
+4. **The NAV-date line on CNF-01 (E20 hand-off).** E20 errata item 7 binds only `cutoffClass` and leaves this line to E22. Spec §4.1 approve step 5 re-renders the NAV-date line instead of binding it, and decision-register-money.md:311 puts the expected NAV date on CNF-01.
+   - Move the `market_holidays` read out of `MarketHolidaysAdapter.load` into `loadCutoffHolidays(exec: DbExecutor): Promise<CutoffHolidays>`, exported from `purchase-snapshot.ts`. The adapter calls it. `quote.adapters.ts` already imports `purchase-snapshot.ts` for `renderSuitabilityWarning`, so this adds no import cycle.
+   - When `cutoffClass` is STANDARD, LIQUID or OVERNIGHT, `renderPurchaseConsentText` adds one line after its facts block: `` `Expected NAV date: ${navDate} (cut-off ${displayCutoff} IST).` `` It computes both values with `expectedNavDate({ cutoffClass, at: purchaseClock.now(), holidays: await loadCutoffHolidays(exec) })`.
+   - The snapshot gains no NAV-date field. A cut-off that passes between create and approve is therefore not a `CONSENT_MISMATCH`.
+   - Test (`orders-quote.int.test.ts`): "CNF-01's consent text carries the expected NAV date". After `readyFixture()`, get a quote and draft at the same clock. The `consentText` from `GET /api/v1/consents/challenges/{id}` contains `Expected NAV date: ${quote.navDate}`.
+
+5. **Steps 2, 4 and 5.**
+   - **Step 2:** every quote int case fails with 404 (no route yet). The parity cases fail because 404 differs from createPurchase's code.
+   - **Step 4:** expect these results:
+     - `cutoff.test.ts`: 18 passed; `stamp-duty.test.ts`: 6 passed.
+     - `quote.service.test.ts`: 6 passed; `orders-quote.int.test.ts`: 14 passed (item 4 adds one).
+     - `risk-profile.int.test.ts`, `orders.int.test.ts` and `payments.int.test.ts` stay green.
+   - **Step 5:** add `apps/api/src/modules/onboarding/suitability.service.ts` to the `biome check` and `git add` lines. E20's `purchase-eligibility.ts` and `purchase-snapshot.ts` are inside `apps/api/src/modules/orders`, which both lines already cover.
+
+**Files list additions:**
+- Modify `apps/api/src/modules/onboarding/suitability.service.ts` (`evaluate` and `Suitability.evaluate`). E20 has already made `check` return `checkId`; keep that.
+- Modify `apps/api/src/modules/orders/purchase-snapshot.ts` (E20's file) to add `loadCutoffHolidays` and the NAV-date line (item 4). E20's `purchase-eligibility.ts` is used unchanged.
+- No new files. `quote.adapters.ts` loses four adapters and gains `PurchaseEligibilityQuoteAdapter`.
 
 **Files:**
 - Create:
@@ -21647,6 +22469,98 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 
 ### Task E23: INV-01/02, CNF-01 for the purchase, CNF-02/03 screens (Dev B, 8 h)
 
+**Audit errata (2026-10-09; binding, apply before Step 1).** These override the text below where they conflict. Sources: flaw audit 2026-10-08, rulings R-45..R-47.
+
+1. **H1 (client side; GAP-03 §4).** The CNF-03 acknowledgement never leaves the client. Its text is client copy, and a suitability refusal leaves the investor stuck.
+   - **What is wrong:**
+     - `SuitabilityWarning` hard-codes its paragraph (line 23073; signature at line 22600). GAP-03 §4 says CNF-03 shows the server-rendered `SUITABILITY_WARNING` document.
+     - `createPurchase` posts only `{schemeId, amount, paymentMethod, bankAccountId}` (lines 23197-23205; asserted at line 22817).
+     - E20's approve-time re-check answers `consents.approve` with 409 `SUITABILITY_CHANGED`. The sheet shows that copy, and Continue reopens the same dead challenge (line 23189).
+     - INV-02 has no "Your profile vs this fund" row (GAP-03 review-screen rule).
+   - **Names owned by other tasks.** If E20's or E22's errata name these differently, use their names.
+     - E22: the quote's `suitability` gains `warning: { key: 'SUITABILITY_WARNING'; version: string; sha256: string; text: string } | null` (E22 errata item 3). It holds the in-force `SUITABILITY_WARNING` version and its rendered text, and it is non-null exactly when `ackRequired` is true.
+     - E20: `CreatePurchaseInputSchema` (line 19716) gains `suitabilityAck: z.strictObject({ warningVersion: z.string().min(1) }).optional()`, which is required on MISMATCH. A missing or stale ack is 409 `SUITABILITY_CHANGED`. That code is already built in `packages/contract/src/errors.ts` and in `messageForError`.
+   - **`SuitabilityWarning` becomes a controlled component:**
+     - Props: `SuitabilityWarningProps = { text: string; acknowledged: boolean; onAcknowledge(acknowledged: boolean): void }`.
+     - It renders the heading "Above your risk profile", then `text` exactly as the server sent it, then the existing `Checkbox` with `checked={acknowledged}` and `onChange={onAcknowledge}`.
+     - It keeps no state of its own.
+   - **INV-02:**
+     - Render `<SuitabilityWarning text={q.suitability.warning?.text ?? ''} acknowledged={acknowledged} onAcknowledge={setAcknowledged} />`.
+     - Add the review row `<ListRow label="Your profile vs this fund" value={`${riskLevelLabel(q.suitability.level)} · ${riskometerLabel(q.suitability.schemeRiskometer)}`} />`.
+       - `riskLevelLabel` is built, in `../onboarding/riskLevelLabel`.
+       - `riskometerLabel(level: string): string` is a new export of `packages/features/src/explore/Disclosures.tsx`. It reads that file's `RISKOMETER_LABELS` and shows an unknown code as it came.
+     - Build the request body like this. The input is a `strictObject`, so the key must be absent on MATCH.
+       ```ts
+       ...(q.suitability.ackRequired && q.suitability.warning !== null
+         ? { suitabilityAck: { warningVersion: q.suitability.warning.version } }
+         : {}),
+       ```
+     - `createPurchase` can answer `SUITABILITY_CHANGED`. It is a final 4xx, so line 23210 still drops the key. INV-02 also calls `setAcknowledged(false)` and `void quote.refetch()`.
+   - **`ConsentOtpSheet` and `UseConsentChallengeOptions` gain an optional `onRefused?(code: string): void`.**
+     - `useConsentChallenge` holds it in a ref that every render updates: `const refused = useRef(onRefused); refused.current = onRefused;`. The load effect's dependencies stay `[api, challengeId, now]`. With an inline handler in the dependencies, the effect would refetch the challenge and resend the OTPs on every render.
+     - It calls `refused.current?.(code)` in two places:
+       - in `approve`'s `catch`, when the code is `SUITABILITY_CHANGED`, `CONSENT_EXPIRED` or `CONSENT_MISMATCH` (the engine marks a mismatched challenge SUPERSEDED, `consent-engine.ts:354-366`). It does the same for the codes E20's approve-time re-check adds (E20 errata item 6): `ORDERS_DISABLED`, `ORDER_STATE_INVALID`, `AMOUNT_ABOVE_MAX`, `RISK_PROFILE_EXPIRED`, `RISK_PROFILE_STALE` and `ONBOARDING_INCOMPLETE`. Each leaves the challenge PENDING, but another approve of it fails the same way;
+       - after `getChallenge`, with `'CONSENT_EXPIRED'`, when the status is `EXPIRED`, `SUPERSEDED` or `CANCELLED`. Confirm is disabled for such a challenge, so approve can never report it.
+     - INV-02's handler:
+       - `setSheetOpen(false)`, `setDrafted(null)`, `idempotencyKey.current = null` and `setAcknowledged(false)`;
+       - `setError(messageForError(code))`;
+       - `void quote.refetch()`.
+     - The next Continue drafts a new order. E20's ML-16 fix keeps the abandoned draft from blocking it.
+   - **Step 1, `LumpsumReviewScreen.test.tsx`:**
+     - `quoteReply`'s default `suitability` gains `warning: null`.
+     - The mismatch case's quote carries `warning: { key: 'SUITABILITY_WARNING', version: '1', sha256: '0'.repeat(64), text: 'Test Flexi Cap Fund - Regular Growth is rated High; your profile allows up to Low to Moderate.' }`. The case also asserts that text and the row value `'Conservative · High'`.
+     - The `vi.mock` stand-in also takes `onRefused?(code: string): void`. It returns a fragment with a second button: `<button type="button" onClick={() => onRefused?.('SUITABILITY_CHANGED')}>{`Refuse ${challengeId}`}</button>`.
+     - New case `'sends the suitability acknowledgement with the purchase (H1)'`: MISMATCH, then UPI, tick, Continue. The posted body is `toEqual({ schemeId, amount: '5000.00', paymentMethod: 'UPI_INTENT', bankAccountId, suitabilityAck: { warningVersion: '1' } })`. The existing MATCH case's exact `toEqual` already proves that no `suitabilityAck` is sent on MATCH.
+     - New case `'refetches the quote after SUITABILITY_CHANGED and asks for the acknowledgement'`: the quote answers MATCH, then MISMATCH. `createPurchase` answers `errorReply('SUITABILITY_CHANGED', 409)`. After Continue, the heading "Above your risk profile" is shown and Continue is disabled.
+     - New case `'drafts a new order after CNF-01 refuses with SUITABILITY_CHANGED'`: Continue, Refuse, then Continue again. `posted` has 2 entries, and their keys differ.
+   - **Step 1, `ConsentOtpSheet.test.tsx`:**
+     - New case `it.each(['SUITABILITY_CHANGED', 'RISK_PROFILE_EXPIRED'])('calls onRefused when approve answers %s')`: approve returns that 409. `onRefused` is called with the code, and `onApproved` is not called.
+     - New case `'calls onRefused for a challenge that can no longer be approved'`: `getChallenge` answers with `status: 'EXPIRED'`, and `onRefused` is called with `'CONSENT_EXPIRED'`.
+
+2. **H2 (client side).** CNF-01 shows only the OTP inputs: the built `packages/features/src/consent/ConsentOtpSheet.tsx` is consumed unchanged (line 22593). So the investor approves a purchase without seeing what they consent to.
+   - **Name owned by E20:** `ConsentChallengeSchema` (`packages/contract/src/consents.ts`) gains `consentText: z.string().nullable()` (E20 errata item 7). It is the PURCHASE consent text that E20's `renderPurchaseConsentText` builds from the stored snapshot. On a MISMATCH it ends with the DSC-23 "notwithstanding" clause (D-MONEY-091 renumbered GAP-03's DSC-21 to DSC-23; DSC-21 is the grievance text). It is null for a subject type with no renderer, such as ONBOARDING_ATTEST.
+   - **Change:**
+     - `ConsentChallenge` (`useConsentChallenge.ts`) gains `consentText: string | null`.
+     - `consentsApiFrom` (`consentsApi.ts`) maps `consentText: challenge.consentText ?? null`, so ATTEST challenges and older replies give `null`.
+     - `ConsentOtpSheet` renders `<AppText testID="consent-text">{challenge.consentText}</AppText>` above the first `OtpInput` when the text is non-null. When it is null, nothing is added (ReviewAttestScreen looks as it does today).
+   - **Step 1, `ConsentOtpSheet.test.tsx`:**
+     - The shared `challenge` fixture gains `consentText: null`, so the 4 existing cases are unchanged.
+     - New case `'shows the rendered consent text before the OTP inputs (H2)'`: the reply carries `consentText: 'I confirm a lumpsum purchase of ₹5,000.00 in Test Flexi Cap Fund - Regular Growth.'`. The test finds that text, and `text.compareDocumentPosition(screen.getByLabelText('SMS code')) & Node.DOCUMENT_POSITION_FOLLOWING` is non-zero.
+
+3. **CS-4 (lumpsum).** INV-02 (lines 23223-23253) has no Regular-plan notice, no commission line and no link to the commission-rates page. No screen in the app links to `/site/commission-disclosure`.
+   - **New component.** Append `CommissionNotice({ scheme }: { scheme: SchemeDetailView | null })` to the built `packages/features/src/explore/Disclosures.tsx`.
+     - Import the type from `../invest/useSchemeFacts`, so `features` needs no new dependency.
+     - It calls `usePlatform()` and imports `ListRow` from `@sanchay/ui` and `Linking` from `react-native`.
+     - It renders `REGULAR_PLAN_NOTICE` (already imported there from `@sanchay/app-core/copy`).
+     - When `scheme?.commissionLine` is non-null, it renders FundScreen's commission sentence, worded exactly as `FundScreen.tsx:124`.
+     - It renders `<ListRow label="Commission rates of all schemes" value="View" onPress={() => void Linking.openURL(platform.commissionDisclosureUrl)} />`.
+   - **New platform URL.** `PlatformAdapters` gains `commissionDisclosureUrl: string`, added key-level after `privacyNoticeUrl`. Each provider supplies it:
+     - `makePlatform` (`test-utils.tsx`): `'https://www.sanchay.in/commission-disclosure'`.
+     - `WebAppProviders`: a new required prop. The `platform` memo adds it to its value and its dependency list. `(app)/layout.tsx` and `(auth)/layout.tsx` pass `wwwUrl(site, '/commission-disclosure')`.
+     - Mobile `AppProviders`: `` `${mobileConfig.wwwOrigin}/commission-disclosure` ``.
+     - E24 adds `androidStoreUrl` after this key.
+   - **INV-02** calls `const scheme = useSchemeFacts(schemeId);` at the top, before any early return. It renders `<CommissionNotice scheme={scheme} />` above Continue.
+   - **Step 1:** new case `'shows the Regular-plan notice, the commission line and the commission-rates link (CS-4)'`.
+     - `DraftHarness` also seeds FUND-01's detail into the cache, as `LumpsumAmountScreen.test.tsx`'s `FromFundPage` does. The fixture uses `commissionLine: { kind: 'EXACT', trailMinBps: 75, trailMaxBps: 75 }`.
+     - It asserts that `REGULAR_PLAN_NOTICE` is shown.
+     - It asserts that `'Sanchay receives a commission from Test AMC for this scheme (0.75% p.a. trail).'` is shown.
+     - Pressing the button named `'Commission rates of all schemes: View'` calls `vi.spyOn(Linking, 'openURL')` with `'https://www.sanchay.in/commission-disclosure'`.
+   - **Not done here:** no E23 screen renders the distributor's identity, so this task adds no ARN line (see the open points).
+
+4. **Steps 2, 4 and 5.**
+   - **Step 2:** `ConsentOtpSheet.test.tsx` also fails its 4 new cases.
+   - **Step 4:** expect `LumpsumReviewScreen.test.tsx` 8 passed, `ConsentOtpSheet.test.tsx` 8, `LumpsumAmountScreen.test.tsx` 2 and `ConsentStatusScreen.test.tsx` 2. The web and mobile typechecks cover the provider changes.
+   - **Step 5:** add `packages/features/src/explore/Disclosures.tsx packages/features/src/platform/PlatformContext.tsx packages/features/src/test-utils.tsx apps/web/src/client/WebAppProviders.tsx "apps/web/src/app/(app)/layout.tsx" "apps/web/src/app/(auth)/layout.tsx" apps/mobile/src/native/AppProviders.tsx` to both the `biome check --write` line and the `git add` line. `packages/features/src/consent` is already on both lines.
+
+**Files list additions:**
+- Modify: `packages/features/src/consent/ConsentOtpSheet.tsx`, `packages/features/src/consent/ConsentOtpSheet.test.tsx`, `packages/features/src/consent/useConsentChallenge.ts`, `packages/features/src/consent/consentsApi.ts`, `packages/features/src/explore/Disclosures.tsx`, `packages/features/src/platform/PlatformContext.tsx`, `packages/features/src/test-utils.tsx`, `apps/web/src/client/WebAppProviders.tsx`, `apps/web/src/app/(app)/layout.tsx`, `apps/web/src/app/(auth)/layout.tsx`, `apps/mobile/src/native/AppProviders.tsx`.
+- Prerequisites gain:
+  - E20: `suitabilityAck`, `consentText`, and 409 `SUITABILITY_CHANGED` from `createPurchase` and approve;
+  - E22: `suitability.warning`.
+
+**Open points for the owner:**
+- CS-4 also found that the app has no DSC-02 line (the ARN and "AMFI-registered Mutual Fund Distributor"; `dsc02()` in `packages/domain/src/legal-entity.ts`). It also found that FUND-01 shows its commission line with no commission-rates link. No E23 or E24 screen renders DSC-02. CNF-01 shows only the ARN with "execution-only, no EUIN", inside E20's `consentText` (E20 errata item 7). Decide which task adds both, for example the web AppShell footer, Account on Android, and FundScreen reusing `CommissionNotice`.
+
 **Files:**
 - Create:
   - `packages/features/src/invest/useLumpsumDraft.ts`
@@ -22563,6 +23477,139 @@ git commit -m "feat(payments): H-2 payment before confirm, single-use return rou
 ---
 
 ### Task E24: PAY-01, returns, result, ORD-01/02, SYS-01 (Dev B, 12 h + 2 h for R-18)
+
+**Audit errata (2026-10-09; binding, apply before Step 1).** These override the text below where they conflict. Sources: flaw audit 2026-10-08, rulings R-45..R-47.
+
+1. **H6(c) and R-45 (result copy).** `ResultScreen` (lines 24091-24116) shows "no money was taken" for `fp_payment_url_unused` whether or not the order was paid, and it has no refund state. R-45 allows "No money was taken" only with payment evidence. Its refund copy is "Refund of ₹X in progress", with no date.
+   - **Names owned by E21.** E21 extends `PaymentForOrderSchema` (line 20990) with the fields below (E21 errata item 11). E24 reads only these. The wire has no `lateAuth` or `endedAt` field.
+     - `retryAfter: InstantSchema.nullable()`: `ended_at` + 30 minutes when the latest attempt is FAILED or EXPIRED, otherwise null. This is R-45's hold;
+     - `paymentEvidence: 'PAID' | 'NOT_PAID' | 'UNKNOWN'`, computed over all the order's attempts. PAID when any attempt has money taken (SUCCESS or `late_auth`) or a refund status. NOT_PAID only for an ended order whose payments `endOrder` re-fetched. UNKNOWN otherwise;
+     - `refundStatus: z.enum(REFUND_STATUSES)`, with the values `NONE`, `REFUND_PENDING`, `REFUNDED` and `REFUND_FAILED` (built in `packages/domain/src/transactions.ts:67`). `NONE` is sent as `'NONE'`, never as null.
+   - **New query.** `ResultScreen` adds a second query. It is enabled only once the order's `status` is FAILED, EXPIRED or REJECTED. It uses its own key, because its data can be `'NONE'`:
+     ```ts
+     queryKey: ['orderPaymentEvidence', orderId],
+     queryFn: async () => {
+       try { return await client.payments.forOrder({ orderId }); }
+       catch (err) { if (toApiError(err).code === 'NOT_FOUND') return 'NONE' as const; throw err; }
+     },
+     ```
+     `'NONE'` means the order has no attempt, so no payment link was ever issued.
+   - **Copy for an ended order.** `amount` is `formatInr(order.amount === null ? null : Money.parse(order.amount))`. The first matching row wins.
+
+     | Payment read | Copy |
+     |---|---|
+     | Still loading | "Checking your payment…" |
+     | `refundStatus === 'REFUNDED'` | `` `Refund of ${amount} completed` `` |
+     | Any other `refundStatus` except `'NONE'` | `` `Refund of ${amount} in progress` `` |
+     | `'NONE'` (no attempt), or `paymentEvidence === 'NOT_PAID'` | today's `FAILURE_COPY[order.failureCode] ?? TERMINAL_COPY[order.status]` |
+     | Anything else, including a read error | "This order couldn't go through. If money left your account, it will be refunded." |
+   - **Step 1:** create `packages/features/src/pay/ResultScreen.test.tsx` (MSW for `GET /orders/{orderId}` and `GET /orders/{orderId}/payment`).
+     - `'says no money was taken only with payment evidence (H6c)'`: the order is FAILED with `failureCode: 'fp_payment_url_unused'`. The attempt is EXPIRED, with `paymentEvidence: 'NOT_PAID'` and `refundStatus: 'NONE'`. The "Payment not completed. … no money was taken …" text is shown.
+     - `'never claims no money was taken without evidence'`: the same order, with `paymentEvidence: 'UNKNOWN'` and `refundStatus: 'NONE'`. The fallback text is shown, and `queryByText(/no money was taken/)` is null.
+     - `'shows the refund in progress with no date (R-45)'`: the attempt has `refundStatus: 'REFUND_PENDING'`, and the exact text `Refund of ₹5,000.00 in progress` is shown.
+
+2. **R-45 (pay screen) and H7 (client side).** There are three problems:
+   - `PayScreen` (lines 24065-24070) shows both pay buttons whenever a link is present, and ignores the attempt's status. Line 20298 returned links for a PENDING attempt; E21 errata item 6 now returns them only for a REDIRECTED attempt on an open order. PAY-01 must check the status as well, so a cached link never offers "Pay" after the investor has paid.
+   - Line 24051 leaves PAY-01 on `next === 'DONE'`. E20's `orderNextStep` (lines 19241-19259) returns DONE already at PAYMENT_PENDING, and E21 leaves the order PAYMENT_PENDING after a failed attempt (line 20880). So an investor who came back through the return route lands on a result screen that says "Confirming your investment…" until FP fails the order at 23:00, and never sees the R-45 hold or "Try again".
+   - After a failed attempt the screen says nothing.
+   - **Stay on PAY-01 while the payment is open:**
+     - `PayScreen` computes `const leave = order.data?.next === 'DONE' && order.data.status !== 'PAYMENT_PENDING';`.
+     - It calls `` nav.replace(`/result/${orderId}`) `` only when `leave` is true.
+     - Both of its queries keep the 5 s `refetchInterval` until `leave`.
+     - `ResultScreen` calls `useNav()`. When the order's `status` is AWAITING_PAYMENT or PAYMENT_PENDING, it calls `` nav.replace(`/pay/${orderId}`) `` in a `useEffect`. The two screens share the `['orderStatus', orderId]` cache and statuses only move forward, so they never bounce between each other.
+   - **What PAY-01 shows, by the attempt's `status`:**
+
+     | Attempt | Screen |
+     |---|---|
+     | REDIRECTED | "Pay with a UPI app" and "Continue to payment" (the only state with pay buttons) |
+     | PENDING or SUCCESS | "We're confirming your payment with your bank." and no pay button |
+     | FAILED or EXPIRED, with `paymentEvidence === 'PAID'` | "Your bank confirmed the payment late. We're confirming it with the fund house." and no "Try again" |
+     | FAILED or EXPIRED, not PAID, `retryAfter` still in the future | "We're checking with your bank. This can take up to 30 minutes." |
+     | FAILED or EXPIRED, not PAID, `retryAfter` passed | the banner and "Try again" button below |
+     | CREATING, no attempt yet (`NOT_FOUND`) or still loading | "Getting your payment ready." and no pay button |
+   - **No client constant:** the 30-minute hold comes from the server's `retryAfter` (R-45; E21 errata item 11).
+   - **After the 30 minutes:**
+     - `<Banner tone="info" message="If money already left your account, it will either complete this order or be refunded." />`
+     - `` <Button label="Try again" onPress={() => nav.push(`/invest/${order.data.schemeId}/lumpsum`)} /> ``. Per spec §4.2, "Try again" means a new order with a new consent.
+     - INV-01 shows its cold-open copy when FUND-01's detail has left the cache. `createQueryClient` sets no `gcTime`, so React Query's 5-minute default applies. This is expected.
+   - **Clock.** Add a `now` state that a `setInterval` refreshes every 15 s. Without it, the 30-minute switch never happens while the screen is open and the polled data is unchanged.
+   - **Step 1:** create `packages/features/src/pay/PayScreen.test.tsx`. Use MSW for `GET /orders/{orderId}` and `GET /orders/{orderId}/payment`, and compute `retryAfter` from `Date.now()`. Unless a case says otherwise, the order is AWAITING_PAYMENT with `next: 'PAYMENT'`.
+     - `'offers both pay actions while the attempt is REDIRECTED'`.
+     - `'hides the pay buttons once the payment is pending (H7)'`: the attempt is PENDING and both links are non-null. No button is named "Pay with a UPI app" or "Continue to payment", and the confirming text is shown.
+     - `'says the bank is being checked for 30 minutes after a failed attempt (R-45)'`:
+       - the order is PAYMENT_PENDING with `next: 'DONE'`;
+       - the attempt is FAILED, with `retryAfter` 25 minutes ahead;
+       - the checking text is shown, there is no "Try again", and `nav.replace` is not called.
+     - `'offers Try again with the warning after 30 minutes (R-45)'`: the attempt is EXPIRED, with `retryAfter` 1 minute ago. The banner is shown, and "Try again" calls `nav.push('/invest/<schemeId>/lumpsum')`.
+     - `'never offers Try again after a late authorisation'`: the attempt is FAILED, with `paymentEvidence: 'PAID'` and `retryAfter` 10 minutes ago. There is no "Try again".
+   - **Step 1, `ResultScreen.test.tsx`:** also add `'sends an order whose payment is still open back to PAY-01'`. The order is PAYMENT_PENDING, and `nav.replace` is called with `'/pay/<orderId>'`.
+
+3. **ML-18 (client side).** Every PG return lands on `/r/payment?ref=<attemptId>`: E21's 303 sends it there (line 20294), and the web proxy turns `/app/r/…` into `/r/…`.
+   - **What is wrong:**
+     - The web page shows only the "Open Sanchay" fallback (lines 23937-23946).
+     - The mobile route shows a static line with an empty `AppState` handler (lines 23982-24006).
+     - Neither one takes the investor anywhere. E21 now redirects a reused single-use link instead of answering 404. That redirect always lands here, on `/r/payment?ref=<attemptId>` (E21 errata item 9).
+   - **New screen.** Create `packages/features/src/pay/PaymentReturnScreen.tsx` with `PaymentReturnScreen({ attemptId }: { attemptId: string })`:
+     - If `z.uuid().safeParse(attemptId)` fails, it makes no call.
+     - Otherwise it runs `useQuery` on `client.payments.get({ attemptId })` with `retry: false`.
+     - When data arrives, a `useEffect` calls `` nav.replace(`/result/${data.orderId}`) ``. ResultScreen forwards an open payment to PAY-01 (item 2).
+     - While loading, it shows "Confirming your payment…".
+     - On an error or a non-UUID ref, it shows "We could not find this payment. Your orders show its status." and `<Button label="Go to my orders" onPress={() => nav.replace('/portfolio/orders')} />`.
+   - **Web route** `r/[kind]/page.tsx`:
+     - Read `ref` from `searchParams` as well.
+     - When `kind === 'payment'`, `ref` is a string and `hasSessionCookie(await cookies())` is true, render `<PaymentReturnRoute attemptId={ref} />`.
+       - `hasSessionCookie` comes from `../../../../lib/routing`; `cookies` comes from `next/headers`.
+       - The session cookie is SameSite=Lax, so it arrives on the 303's top-level GET.
+       - Without a web session (an Android return whose App Link did not open), the client's 401 handler would jump to `/login`. In that case, and in every other case, keep `OpenSanchayFallback`. Its 2 tests stand.
+     - Append `PaymentReturnRoute` to `apps/web/src/client/routes.tsx`, and add `PaymentReturnScreen` to that file's `@sanchay/features` import.
+   - **Mobile route** `r/[kind].tsx`: render `<NativeScreen><PaymentReturnScreen attemptId={ref ?? ''} /></NativeScreen>`, and drop the `AppState` listener.
+   - **Other changes:**
+     - In `lumpsum-return.yaml`, the last step (lines 24552-24554) becomes `visible: '(Confirming your payment.*|We could not find this payment.*)'`, because `maestro-local-ref` is not an attempt id.
+     - The `index.ts` append (lines 24253-24260; Files list line 23644) gains `PaymentReturnScreen`, so it adds 6 exports, not 5.
+   - **Step 1:** create `packages/features/src/pay/PaymentReturnScreen.test.tsx`:
+     - `'sends a payment return to the order result (ML-18)'`: `GET /payments/{attemptId}` answers `{ attemptId, orderId, status: 'PENDING', method: 'UPI' }`, and `nav.replace` is called with `'/result/<orderId>'`.
+     - `'offers the orders list when the payment cannot be read'`: the read answers 404. The copy is shown, and "Go to my orders" calls `nav.replace('/portfolio/orders')`.
+
+4. **NAV-1 (partly present).**
+   - **What is wrong:**
+     - The `_layout.tsx` edit (lines 23869-23879) puts the onboarding and Plan 03 routes inside the signed-in `Stack.Protected`. E17's built `explore/search`, `explore/category/[slug]` and `funds/[schemeSlug]` stay outside it, although on web they are signed-in pages.
+     - Nothing routes a new investor from Home to `/onboarding`: the built `HomeScreen.tsx` reads only the session.
+   - **Mobile layout:** add `<Stack.Screen name="explore/search" />`, `<Stack.Screen name="explore/category/[slug]" />` and `<Stack.Screen name="funds/[schemeSlug]" />` to the same block.
+   - **Home.** `HomeScreen` calls `useNav()` and `useOnboarding()`. When `stage` is neither null nor `'DONE'`, it replaces the "Your investments" card with Plan 04 F14's HOME-01 card (Plan 04 lines 29793 and 32028-32042), so F14's rewrite keeps it. Let `blocked = isBlockedStage(stage)`. The card is `<Card testID="home-setup">` and holds:
+     - an `AppText variant="heading"`: "Your account needs attention" when `blocked`, otherwise "Complete your setup";
+     - an `AppText tone="muted"`: "We need a little more from you before you can invest." when `blocked`, otherwise "Finish a few steps to start investing in mutual funds.";
+     - a `Button` labelled "See what to do" when `blocked`, otherwise "Continue setup", with `onPress={() => nav.push('/onboarding')}`.
+   - **Step 1, `HomeScreen.test.tsx`.** Its default `GET /onboarding` handler answers DONE, so the six existing cases stand.
+     - `'sends an investor who has not finished onboarding to ONB-00 (NAV-1)'`: stage `'BANK'`. The heading "Complete your setup" is shown, "Continue setup" calls `nav.push('/onboarding')`, and there is no "Your investments" heading.
+     - `'names a blocked stage'`: stage `'KYC_UPDATE_NEEDED'`. The heading "Your account needs attention" is shown, and "See what to do" calls `nav.push('/onboarding')`.
+
+5. **UI-5 (missing).** No E24 text resets the module-level profile draft (the built `resetProfileDraft()`, `useOnboarding.ts:143`). So an address and a place of birth survive a sign-out in the same JS runtime.
+   - **Change:**
+     - Call `resetProfileDraft()` (from `../onboarding/useOnboarding`) next to `queryClient.clear()` in both `useSignOut` and `useSignOutEverywhere` (`packages/features/src/auth/useSignOut.ts`).
+     - Call it in mobile `SessionProvider`'s `signOut` (`apps/mobile/src/native/SessionProvider.tsx`; import it from `@sanchay/features`). That also covers the 401 path in `AppProviders` and `AppLockGate`'s sign-out.
+     - The web 401 path calls `location.assign`, which reloads the runtime, so it needs no change.
+   - **Step 1:** create `packages/features/src/auth/useSignOut.test.tsx` with 2 cases, one per hook.
+     - Each case calls `updateProfileDraft({ placeOfBirth: 'Pune', addressLine1: '1 MG Road' })` and runs the hook in a small harness.
+     - MSW answers `POST /auth/logout` with `{ ok: true }` and `POST /auth/sessions/revoke-all` with `{ revoked: 1 }`.
+     - Each case ends with `expect(getProfileDraft()).toEqual({})`.
+     - `SessionProvider` has no mobile test harness (the mobile tests cover only `src/lib`), so the mobile typecheck covers that edit.
+
+6. **Steps 2, 4 and 5.**
+   - **Step 2 (`features`):**
+     - `PayScreen.test.tsx`, `ResultScreen.test.tsx` and `PaymentReturnScreen.test.tsx` fail to collect (`Cannot find module './PayScreen'`, `'./ResultScreen'`, `'./PaymentReturnScreen'`).
+     - `HomeScreen.test.tsx` fails its 2 new cases.
+     - `useSignOut.test.tsx` fails on the draft assertion.
+   - **Step 4:** expect `PayScreen.test.tsx` 5, `ResultScreen.test.tsx` 4, `PaymentReturnScreen.test.tsx` 2, `HomeScreen.test.tsx` 8, `useSignOut.test.tsx` 2 and `UpdateRequiredScreen.test.tsx` 1.
+   - **Step 5:**
+     - Add `packages/features/src/home packages/features/src/auth` to the `biome check --write` line. It already covers `apps/mobile/src`.
+     - Add `packages/features/src/home packages/features/src/auth apps/mobile/src/native/SessionProvider.tsx` to the `git add` line.
+   - **Placement of `androidStoreUrl`:** put it after E23's `commissionDisclosureUrl`, not after `privacyNoticeUrl` (line 23851).
+
+**Files list additions:**
+- Create: `packages/features/src/pay/PayScreen.test.tsx`, `packages/features/src/pay/ResultScreen.test.tsx`, `packages/features/src/pay/PaymentReturnScreen.tsx`, `packages/features/src/pay/PaymentReturnScreen.test.tsx`, `packages/features/src/auth/useSignOut.test.tsx`.
+- Modify: `packages/features/src/home/HomeScreen.tsx`, `packages/features/src/home/HomeScreen.test.tsx`, `packages/features/src/auth/useSignOut.ts`, `apps/mobile/src/native/SessionProvider.tsx`.
+- `apps/web/src/client/routes.tsx` also appends `PaymentReturnRoute`.
+- Prerequisites gain E21: the `PaymentForOrderSchema` fields `retryAfter`, `refundStatus` and `paymentEvidence`, and the redirect of a reused return ref.
 
 **Files:**
 - Create:

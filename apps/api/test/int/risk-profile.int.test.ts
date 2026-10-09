@@ -14,6 +14,7 @@ import {
 } from '../../src/modules/onboarding/risk-profile.schema.js';
 import { seedRiskQuestionnaire } from '../../src/modules/onboarding/risk-profile.service.js';
 import { SuitabilityService } from '../../src/modules/onboarding/suitability.service.js';
+import { orders } from '../../src/modules/orders/orders.schema.js';
 import { Crypto } from '../../src/modules/platform/crypto.js';
 import { asRowId, newId } from '../../src/modules/platform/ids.js';
 import { auditEvents } from '../../src/modules/platform/platform.schema.js';
@@ -324,6 +325,7 @@ describe('riskProfile.questionnaire / get / submit', () => {
 describe('Suitability.check (the SuitabilityHook)', () => {
   let svc: SuitabilityService;
   let schemeId = '';
+  let orderId = '';
   beforeAll(async () => {
     svc = new SuitabilityService(t.clock);
     const [amc] = await t.db.db
@@ -362,13 +364,29 @@ describe('Suitability.check (the SuitabilityHook)', () => {
       })
       .returning();
     schemeId = scheme?.id ?? '';
+    // suitability_checks.order_id references orders (E20's 0030_orders_guard): one minimal order to point at.
+    const [order] = await t.db.db
+      .insert(orders)
+      .values({
+        createdBy: 'test',
+        updatedBy: 'test',
+        investorId: randomUUID(),
+        type: 'PURCHASE',
+        schemeId,
+        bankAccountId: randomUUID(),
+        arn: 'ARN-000000',
+        initiatedVia: 'web',
+        userIp: '203.0.113.10',
+      })
+      .returning({ id: orders.id });
+    orderId = order?.id ?? '';
   });
   const args = (investorId: string, schemeRiskometer: 'MODERATE' | 'VERY_HIGH') => ({
     investorId,
     schemeId,
     schemeRiskometer,
     fundFactsAsOf: new Date('2026-10-01T00:00:00Z'),
-    orderId: randomUUID(),
+    orderId,
   });
 
   it('throws ONBOARDING_INCOMPLETE when the investor has no risk profile', async () => {
@@ -400,6 +418,9 @@ describe('Suitability.check (the SuitabilityHook)', () => {
       .from(suitabilityChecks)
       .where(eq(suitabilityChecks.riskProfileId, match.riskProfileId));
     expect(rows.map((r) => r.outcome).sort()).toEqual(['MATCH', 'MISMATCH']);
+    // E20: the result names the row it wrote (orders.suitability_check_id points at it).
+    expect(rows.find((r) => r.id === match.checkId)?.outcome).toBe('MATCH');
+    expect(rows.find((r) => r.id === mismatch.checkId)?.outcome).toBe('MISMATCH');
   });
 
   it('throws RISK_PROFILE_EXPIRED / RISK_PROFILE_STALE for those statuses', async () => {

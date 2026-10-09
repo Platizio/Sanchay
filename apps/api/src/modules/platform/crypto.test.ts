@@ -25,6 +25,7 @@ const localRaw: Record<string, string> = {
   DATABASE_URL: 'postgres://sanchay:sanchay_local_only@localhost:55432/sanchay',
   SANCHAY_APP_ORIGIN: 'https://app.sanchay.test',
   SANCHAY_API_ORIGIN: 'https://api.sanchay.test',
+  SANCHAY_PLATFORM_ARN: 'ARN-000000',
   SANCHAY_LOCAL_PII_KEY: k(1),
   SANCHAY_LOCAL_BIDX_KEY: k(2),
   SANCHAY_OTP_PEPPER: k(3),

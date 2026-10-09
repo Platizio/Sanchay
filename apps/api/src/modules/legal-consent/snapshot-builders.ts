@@ -32,7 +32,7 @@ export type SnapshotBuilder = (
  * then every CONSENT_SUBJECT_TYPES key uses this shared builder so ConsentEngine (E4) has a total map.
  * `legalDocuments` is [] here although `ConsentSnapshotV2Schema` says `.min(1)`: builder output is never
  * schema-parsed (RV-03-1), and a subject task's own builder lists the documents it binds. */
-function genericBuilder(subjectType: ConsentSubjectType): SnapshotBuilder {
+export function genericBuilder(subjectType: ConsentSubjectType): SnapshotBuilder {
   return async (_exec, ctx) => ({
     version: SNAPSHOT_VERSION,
     subjectType,
@@ -48,3 +48,16 @@ function genericBuilder(subjectType: ConsentSubjectType): SnapshotBuilder {
 export const SNAPSHOT_BUILDERS: Record<ConsentSubjectType, SnapshotBuilder> = Object.fromEntries(
   CONSENT_SUBJECT_TYPES.map((subjectType) => [subjectType, genericBuilder(subjectType)]),
 ) as Record<ConsentSubjectType, SnapshotBuilder>;
+
+/**
+ * CNF-01's consent text (markdown) for a subject type, rendered by `consents.getChallenge` (E20 item 7). A
+ * renderer reads only the stored snapshot and the legal documents by the key and version bound in it, so the
+ * investor reads exactly what the hash covers. Registered at module load by the owning task (E20 PURCHASE); a
+ * subject type with no renderer gets `consentText: null`.
+ */
+export type ConsentTextRenderer = (
+  exec: DbExecutor,
+  snapshot: ConsentSnapshotV2,
+) => Promise<string>;
+
+export const CONSENT_TEXT_RENDERERS: Partial<Record<ConsentSubjectType, ConsentTextRenderer>> = {};

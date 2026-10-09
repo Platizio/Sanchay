@@ -286,7 +286,6 @@ export class SanchayMvpStack extends Stack {
         SANCHAY_APP_ROLE: 'api',
         HOST: '0.0.0.0',
         PORT: String(API_PORT),
-        SANCHAY_SMS_RETRIEVER_HASH: config.smsRetrieverHash,
       },
       secrets: {
         ...dbPassword(appDbLogin.secret),

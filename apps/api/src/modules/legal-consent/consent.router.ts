@@ -1,16 +1,20 @@
 import { Controller, Inject } from '@nestjs/common';
 import { Implement, implement } from '@orpc/nest';
 import { contract } from '@sanchay/contract';
+import type { ConsentSnapshotV2, ConsentSubjectType } from '@sanchay/domain';
 import { and, eq } from 'drizzle-orm';
 import { ClsService } from 'nestjs-cls';
 import { DB, type DbHandle } from '../../db/client.js';
 import { requireAuth } from '../identity/request-auth.js';
+import { Crypto } from '../platform/crypto.js';
 import { AppError } from '../platform/errors.js';
 import { requireIdempotency } from '../platform/idempotency.middleware.js';
 import { IdempotencyService } from '../platform/idempotency.service.js';
+import { asRowId } from '../platform/ids.js';
 import type { SanchayClsStore } from '../platform/request-context.js';
 import { ConsentEngine } from './consent-engine.js';
 import { consentChallenges } from './legal-consent.schema.js';
+import { CONSENT_TEXT_RENDERERS } from './snapshot-builders.js';
 
 @Controller()
 export class ConsentRouter {
@@ -19,6 +23,7 @@ export class ConsentRouter {
     @Inject(DB) private readonly dbh: DbHandle,
     @Inject(IdempotencyService) private readonly idem: IdempotencyService,
     @Inject(ClsService) private readonly cls: ClsService<SanchayClsStore>,
+    @Inject(Crypto) private readonly crypto: Crypto,
   ) {}
 
   /** BOLA: the challenge must belong to the signed-in investor. */
@@ -35,6 +40,23 @@ export class ConsentRouter {
     return row;
   }
 
+  /**
+   * CNF-01's text (E20 item 7): the subject type's renderer over the stored snapshot (decrypted as approve
+   * does), so the investor reads what the hash covers. Null for a subject type with no renderer.
+   */
+  private async consentTextOf(row: typeof consentChallenges.$inferSelect): Promise<string | null> {
+    const render = CONSENT_TEXT_RENDERERS[row.subjectType as ConsentSubjectType];
+    if (render === undefined) return null;
+    const snapshot = JSON.parse(
+      this.crypto.decrypt(row.snapshotEnc, {
+        table: 'consent_challenges',
+        column: 'snapshot_enc',
+        rowId: asRowId('consent_challenges', row.id),
+      }),
+    ) as ConsentSnapshotV2;
+    return render(this.dbh.db, snapshot);
+  }
+
   @Implement(contract.consents.getChallenge)
   getChallenge() {
     return implement(contract.consents.getChallenge).handler(async ({ input }) => {
@@ -44,6 +66,7 @@ export class ConsentRouter {
         status: row.status,
         requiredFactors: row.requiredFactors,
         expiresAt: row.expiresAt.toISOString(),
+        consentText: await this.consentTextOf(row),
       };
     });
   }

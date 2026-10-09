@@ -60,6 +60,8 @@ export const ORDER_TRANSITIONS: readonly Transition<OrderStatus>[] = [
   { from: 'CONSENTED', to: 'CANCELLED', trigger: 'local_cancel' },
   { from: 'CONSENTED', to: 'SUBMITTING', trigger: 'submit_job' },
   { from: 'CONSENTED', to: 'CONSENT_EXPIRED', trigger: 'execute_before_missed' },
+  // ML-15: orders.enabled was turned off after approve; the submit job gives up before any FP write (E20).
+  { from: 'CONSENTED', to: 'CONSENT_EXPIRED', trigger: 'orders_disabled' },
   { from: 'SUBMITTING', to: 'UNDER_REVIEW', trigger: 'fp_under_review' },
   { from: 'SUBMITTING', to: 'REJECTED', trigger: 'live_check_failed' },
   { from: 'SUBMITTING', to: 'RECONCILING', trigger: 'ambiguous' },

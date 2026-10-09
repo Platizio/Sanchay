@@ -58,6 +58,10 @@ describe('state machine registry', () => {
     }
   });
 
+  it('the orders.enabled kill switch ends a CONSENTED order before submit (E20 ML-15)', () => {
+    expect(canTransition('ORDER', 'CONSENTED', 'CONSENT_EXPIRED', 'orders_disabled')).toBe(true);
+  });
+
   it('every transition named in spec §4.3 (SIP with mandate) is allowed', () => {
     expect(canTransition('PLAN', 'CONSENT_PENDING', 'CONSENTED', 'approve')).toBe(true);
     expect(canTransition('PLAN', 'CONSENTED', 'MANDATE_SETUP', 'new_mandate')).toBe(true);

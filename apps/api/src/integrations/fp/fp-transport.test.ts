@@ -1,12 +1,14 @@
+import { Logger } from '@nestjs/common';
 import type { ClsService } from 'nestjs-cls';
 import { type Dispatcher, MockAgent } from 'undici';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SanchayClsStore } from '../../modules/platform/request-context.js';
 import type { ConsumedConsent } from './consumed-consent.js';
 import {
   ConsentNotConsumedError,
   FpAmbiguousError,
   FpRejectedError,
+  FpUnavailableError,
   ProviderCallInTransactionError,
 } from './fp-errors.js';
 import { FpTokenCache } from './fp-token-cache.js';
@@ -418,6 +420,221 @@ describe('FpTransport.call', () => {
     const { responseMeta } = entries[0] as { responseMeta: unknown };
     expect(responseMeta).toEqual({
       error: { status: '400', code: 'INVALID_SCHEME', message: '[REDACTED]' },
+    });
+  });
+
+  describe('R-47 transport fixes (owner ruling 2026-10-09)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** An agent whose fp token endpoint hands out `tok-1`, `tok-2`, ... and counts the fetches. */
+    function agentWithFreshTokens(): { agent: MockAgent; tokenCalls: () => number } {
+      const agent = new MockAgent();
+      agent.disableNetConnect();
+      let calls = 0;
+      agent
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/auth/sanchay/token', method: 'POST' })
+        .reply(() => {
+          calls += 1;
+          return { statusCode: 200, data: { access_token: `tok-${calls}`, expires_in: 1800 } };
+        })
+        .persist();
+      return { agent, tokenCalls: () => calls };
+    }
+
+    function transportOn(agent: MockAgent, record = recorder().record): FpTransport {
+      return new FpTransport(
+        BASE_URLS,
+        new FpTokenCache(BASE_URLS, CREDENTIALS, agent),
+        agent,
+        clsWith(false),
+        record,
+      );
+    }
+
+    const purchase = (transport: FpTransport) =>
+      transport
+        .call('purchase.create', { body: { source_ref_id: 'o-1' }, consent: consent() })
+        .catch((error: unknown) => error);
+
+    it.each([
+      ['a token endpoint 500', 500, JSON.stringify({ error: 'down' })],
+      ['a token reply with no access_token', 200, JSON.stringify({ expires_in: 1800 })],
+      ['a token reply that is not JSON', 200, '<html>login</html>'],
+    ])(
+      '(1) %s records one TOKEN_ERROR row and throws FpUnavailableError, never sending "Bearer undefined"',
+      async (_label, statusCode, data) => {
+        const agent = new MockAgent();
+        agent.disableNetConnect();
+        agent
+          .get('https://fp.fake.local')
+          .intercept({ path: '/v2/auth/sanchay/token', method: 'POST' })
+          .reply(statusCode, data);
+        const purchases = vi.fn(() => ({ statusCode: 201, data: { id: 'mfp_1' } }));
+        agent
+          .get('https://fp.fake.local')
+          .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+          .reply(purchases)
+          .persist();
+        const { record, entries } = recorder();
+        const failure = await purchase(transportOn(agent, record));
+        expect(failure).toBeInstanceOf(FpUnavailableError);
+        expect(failure).toBeInstanceOf(FpAmbiguousError);
+        expect(failure).not.toBeInstanceOf(FpRejectedError);
+        expect((failure as FpUnavailableError).reason).toBe('TOKEN');
+        expect(purchases).not.toHaveBeenCalled();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({
+          operation: 'purchase.create',
+          errorCode: 'TOKEN_ERROR',
+          httpStatus: null,
+        });
+      },
+    );
+
+    it.each([401, 403])(
+      '(2) a %i evicts the token and retries once with a fresh one',
+      async (status) => {
+        const { agent, tokenCalls } = agentWithFreshTokens();
+        const pool = agent.get('https://fp.fake.local');
+        pool
+          .intercept({
+            path: '/v2/mf_purchases',
+            method: 'POST',
+            headers: { authorization: 'Bearer tok-1' },
+          })
+          .reply(status, { error: { status, code: 'UNAUTHORIZED', message: 'token revoked' } });
+        pool
+          .intercept({
+            path: '/v2/mf_purchases',
+            method: 'POST',
+            headers: { authorization: 'Bearer tok-2' },
+          })
+          .reply(201, { id: 'mfp_1', object: 'mf_purchase', state: 'pending' });
+        const { record, entries } = recorder();
+        const result = await purchase(transportOn(agent, record));
+        expect(result).toMatchObject({ status: 201, body: { id: 'mfp_1' } });
+        expect(tokenCalls()).toBe(2);
+        expect(entries).toHaveLength(2);
+        expect(entries[0]).toMatchObject({ httpStatus: status, errorCode: 'AUTH_REJECTED' });
+        expect(entries[1]).toMatchObject({ httpStatus: 201, errorCode: null });
+      },
+    );
+
+    it.each([401, 403])(
+      '(2) a second %i throws FpUnavailableError (retryable), never FpRejectedError',
+      async (status) => {
+        const { agent, tokenCalls } = agentWithFreshTokens();
+        agent
+          .get('https://fp.fake.local')
+          .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+          .reply(status, { error: { status, code: 'FORBIDDEN', message: 'no' } })
+          .times(2);
+        const { record, entries } = recorder();
+        const failure = await purchase(transportOn(agent, record));
+        expect(failure).toBeInstanceOf(FpUnavailableError);
+        expect(failure).not.toBeInstanceOf(FpRejectedError);
+        expect((failure as FpUnavailableError).reason).toBe('AUTH');
+        expect((failure as FpUnavailableError).httpStatus).toBe(status);
+        expect(tokenCalls()).toBe(2);
+        expect(entries).toHaveLength(2);
+        for (const entry of entries) {
+          expect(entry).toMatchObject({ httpStatus: status, errorCode: 'AUTH_REJECTED' });
+        }
+      },
+    );
+
+    it.each([
+      ['a body that is not JSON', '<html>ok</html>'],
+      ['an empty body', ''],
+    ])('(3) a 2xx write with %s is ambiguous (UNPARSABLE_2XX)', async (_label, data) => {
+      const { agent } = agentWithFreshTokens();
+      agent
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+        .reply(201, data);
+      const { record, entries } = recorder();
+      const failure = await purchase(transportOn(agent, record));
+      expect(failure).toBeInstanceOf(FpAmbiguousError);
+      expect(failure).not.toBeInstanceOf(FpUnavailableError);
+      expect((failure as FpAmbiguousError).httpStatus).toBe(201);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ httpStatus: 201, errorCode: 'UNPARSABLE_2XX' });
+    });
+
+    it('(3) a 2xx read with an empty body still resolves: reads have no side effect to lose', async () => {
+      const { agent } = agentWithFreshTokens();
+      agent
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/mf_scheme_plans/cybrillapoa/INF209KA1K47', method: 'GET' })
+        .reply(200, '');
+      const result = await transportOn(agent).call('schemePlans.get', {
+        pathParams: { isin: 'INF209KA1K47' },
+      });
+      expect(result).toEqual({ status: 200, body: undefined });
+    });
+
+    it("(4) a failed provider-calls write is logged and never replaces FP's success", async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { agent } = agentWithFreshTokens();
+      agent
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+        .reply(201, { id: 'mfp_1', object: 'mf_purchase' });
+      const failingRecord = vi.fn(async () => {
+        throw new Error('connection terminated');
+      });
+      const result = await purchase(transportOn(agent, failingRecord));
+      expect(result).toMatchObject({ status: 201, body: { id: 'mfp_1' } });
+      expect(failingRecord).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(String(errorLog.mock.calls[0]?.[0])).toContain('purchase.create');
+    });
+
+    it("(4) a failed provider-calls write never replaces FP's rejection or ambiguity", async () => {
+      vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const failingRecord = vi.fn(async () => {
+        throw new Error('connection terminated');
+      });
+      const rejected = agentWithFreshTokens().agent;
+      rejected
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+        .reply(400, { error: { status: 400, code: 'INVALID_SCHEME', message: 'unknown' } });
+      expect(await purchase(transportOn(rejected, failingRecord))).toBeInstanceOf(FpRejectedError);
+      const timedOut = agentWithFreshTokens().agent;
+      timedOut
+        .get('https://fp.fake.local')
+        .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+        .replyWithError(new Error('simulated timeout'));
+      expect(await purchase(transportOn(timedOut, failingRecord))).toBeInstanceOf(FpAmbiguousError);
+    });
+
+    it('(5) a 3xx is ambiguous on a write and an error on a read (UNEXPECTED_3XX), never followed', async () => {
+      const { agent } = agentWithFreshTokens();
+      const pool = agent.get('https://fp.fake.local');
+      pool
+        .intercept({ path: '/v2/mf_purchases', method: 'POST' })
+        .reply(302, '', { headers: { location: 'https://fp.fake.local/login' } });
+      pool
+        .intercept({ path: '/v2/mf_scheme_plans/cybrillapoa/INF209KA1K47', method: 'GET' })
+        .reply(301, '', { headers: { location: 'https://fp.fake.local/moved' } });
+      const { record, entries } = recorder();
+      const transport = transportOn(agent, record);
+      const write = await purchase(transport);
+      expect(write).toBeInstanceOf(FpAmbiguousError);
+      expect((write as FpAmbiguousError).httpStatus).toBe(302);
+      const read = await transport
+        .call('schemePlans.get', { pathParams: { isin: 'INF209KA1K47' } })
+        .catch((error: unknown) => error);
+      expect(read).toBeInstanceOf(FpAmbiguousError);
+      expect((read as FpAmbiguousError).httpStatus).toBe(301);
+      expect(entries).toEqual([
+        expect.objectContaining({ httpStatus: 302, errorCode: 'UNEXPECTED_3XX' }),
+        expect.objectContaining({ httpStatus: 301, errorCode: 'UNEXPECTED_3XX' }),
+      ]);
     });
   });
 });

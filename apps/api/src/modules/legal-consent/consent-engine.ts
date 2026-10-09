@@ -5,7 +5,7 @@ import { canonicalize, type JcsValue, requiredFactorsFor, snapshotSha256 } from 
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { AppConfig } from '../../config/app-config.js';
-import { DB, type DbExecutor, type DbHandle } from '../../db/client.js';
+import { DB, type DbExecutor, type DbHandle, type Tx } from '../../db/client.js';
 import { assertConsumed, type ConsumedConsent } from '../../integrations/fp/consumed-consent.js';
 import type { ConsentSms } from '../../integrations/sms/templates.js';
 import { otpCodes } from '../identity/identity.schema.js';
@@ -62,18 +62,42 @@ export interface ConsentApprovedJobData {
 
 export const SUITABILITY_HOOK = Symbol('SUITABILITY_HOOK');
 
-export interface SuitabilityHook {
-  check(exec: DbExecutor, investorId: string, subjectType: ConsentSubjectType): Promise<boolean>;
-}
-
-export const NOOP_SUITABILITY_HOOK: SuitabilityHook = { check: async () => true };
-
 export interface ConsentSubjectRef {
   table: string;
   id: string;
 }
 
+/** What `approve` hands a subject type's re-check: the challenge's investor, subject type and subjects. */
+export interface ApproveRecheckInput {
+  investorId: string;
+  subjectType: ConsentSubjectType;
+  subjects: ConsentSubjectRef[];
+}
+
+/**
+ * An approve-time re-check, run inside approve's transaction before the snapshot recompute (spec §4.1 approve
+ * step 3). `false` is SUITABILITY_CHANGED; a thrown AppError rolls approve back, so the challenge stays PENDING.
+ */
+export type ApproveRecheck = (tx: Tx, input: ApproveRecheckInput) => Promise<boolean>;
+
+export interface SuitabilityHook {
+  check: ApproveRecheck;
+}
+
+/** Subject type -> approve-time re-check, registered at module load by its task (E20 PURCHASE, F2 SIP). */
+export const APPROVE_RECHECKS: Partial<Record<ConsentSubjectType, ApproveRecheck>> = {};
+
+/** The SUITABILITY_HOOK binding: dispatches to the subject type's registered re-check; none registered passes. */
+export const SUBJECT_SUITABILITY_HOOK: SuitabilityHook = {
+  check: async (tx, input) => (await APPROVE_RECHECKS[input.subjectType]?.(tx, input)) ?? true,
+};
+
 export interface CreateChallengeInput {
+  /**
+   * A caller-allocated id (E20 item 5): the caller writes rows that name the challenge (an order's
+   * consent_challenge_id, a suitability acknowledgement) before `create`, so the builder can read them.
+   */
+  challengeId?: string;
   investorId: string;
   subjectType: ConsentSubjectType;
   subjects: ConsentSubjectRef[];
@@ -157,7 +181,10 @@ export class ConsentEngine {
     });
     const canonical = canonicalize(snapshot as unknown as JcsValue);
     const shaHex = await snapshotSha256(snapshot);
-    const id = newId('consent_challenges');
+    const id =
+      input.challengeId === undefined
+        ? newId('consent_challenges')
+        : asRowId('consent_challenges', input.challengeId);
     const expiresAt = new Date(now.getTime() + CHALLENGE_EXPIRY_MS);
     const requiredFactors = requiredFactorsFor(input.subjectType, input.amount ?? null);
 
@@ -313,17 +340,18 @@ export class ConsentEngine {
         await this.otp.verify(tx, { challengeId: otpRow.id, purpose: 'CONSENT', code });
       }
 
-      const suitabilityOk = await this.suitability.check(
-        tx,
-        row.investorId,
-        row.subjectType as ConsentSubjectType,
-      );
-      if (!suitabilityOk) return { kind: 'suitability_changed' as const };
-
       const subjects = await tx
         .select()
         .from(consentSubjects)
         .where(eq(consentSubjects.challengeId, challengeId));
+      // H1 (E20 item 6): the subject type's own re-check, told which subjects it is checking.
+      const suitabilityOk = await this.suitability.check(tx, {
+        investorId: row.investorId,
+        subjectType: row.subjectType as ConsentSubjectType,
+        subjects: subjects.map((s) => ({ table: s.subjectTable, id: s.subjectId })),
+      });
+      if (!suitabilityOk) return { kind: 'suitability_changed' as const };
+
       // RV-03-1: rebuild from what `create` hashed. The masks and the caller's fields live only in the
       // encrypted snapshot. A builder that reads subject rows still overwrites the echoed fields with
       // live values, so a changed subject still fails the hash below.
@@ -511,6 +539,28 @@ export class ConsentEngine {
       entityId: challengeId,
       data: { challengeId, reason },
     });
+  }
+
+  /**
+   * The channels the investor verified for a CONSUMED challenge (H3, H-21): FP's `consent{}` carries only these.
+   * Today that is the challenge's `required_factors`, because approve verifies exactly those. Once LC-8 lands
+   * (an EMAIL code standing in for an unavailable SMS) it must return the channels actually verified. E20's
+   * checkout reads it; E21 and F2 reuse it. Any other status is CONSENT_REQUIRED.
+   */
+  async verifiedFactors(
+    exec: DbExecutor,
+    challengeId: string,
+  ): Promise<ReadonlyArray<'SMS' | 'EMAIL'>> {
+    const [row] = await exec
+      .select({
+        status: consentChallenges.status,
+        requiredFactors: consentChallenges.requiredFactors,
+      })
+      .from(consentChallenges)
+      .where(eq(consentChallenges.id, challengeId))
+      .limit(1);
+    if (row?.status !== 'CONSUMED') throw new AppError('CONSENT_REQUIRED');
+    return row.requiredFactors;
   }
 
   /** Worker only. P/M writes run only inside `useConsumed`, and `fn` runs with no open transaction, so an

@@ -1,6 +1,17 @@
 import { dsc02, MARKET_RISK_WARNING, REGULAR_PLAN_NOTICE } from '@sanchay/app-core/copy';
 import { readSiteConfig } from '../../lib/site-config';
 
+/** Footer links: the legal pages (H15), the AMFI commission hyperlink and the Play account-deletion page. */
+const FOOTER_LINKS: ReadonlyArray<readonly [string, string]> = [
+  ['/legal/privacy', 'Privacy notice'],
+  ['/legal/terms', 'Terms of use'],
+  ['/legal/risk-disclosure', 'Risk disclosure'],
+  ['/commission-disclosure', 'Commission disclosure'],
+  ['/legal/investor-charter', 'Investor charter'],
+  ['/grievance', 'Grievances'],
+  ['/account/delete', 'Delete your account'],
+];
+
 /** www landing (PUB-01). Static: the ARN and its validity date are read at build time. */
 export default function SiteHomePage() {
   const site = readSiteConfig();
@@ -31,6 +42,13 @@ export default function SiteHomePage() {
       </main>
       <footer className="border-t border-border bg-surface">
         <div className="mx-auto max-w-5xl space-y-2 px-4 py-6 text-sm text-muted">
+          <nav aria-label="Legal" className="flex flex-wrap gap-x-4 gap-y-2">
+            {FOOTER_LINKS.map(([href, label]) => (
+              <a key={href} className="font-semibold text-primary underline" href={href}>
+                {label}
+              </a>
+            ))}
+          </nav>
           <p>{MARKET_RISK_WARNING}</p>
           <p>{dsc02(site.platformArn, site.platformArnValidTill)}</p>
           <p>{REGULAR_PLAN_NOTICE}</p>

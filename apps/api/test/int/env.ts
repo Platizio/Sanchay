@@ -12,6 +12,7 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
     DATABASE_URL: databaseUrl,
     SANCHAY_APP_ORIGIN: TEST_APP_ORIGIN,
     SANCHAY_API_ORIGIN: TEST_API_ORIGIN,
+    SANCHAY_PLATFORM_ARN: 'ARN-000000',
     SANCHAY_CLIENT_IP_SOURCE: 'socket',
     SANCHAY_KEY_SERVICE: 'local',
     SANCHAY_LOCAL_PII_KEY: key(1),

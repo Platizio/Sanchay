@@ -18,6 +18,11 @@ export const ConsentChallengeSchema = z.object({
   ]),
   requiredFactors: z.array(z.enum(['SMS', 'EMAIL'])),
   expiresAt: InstantSchema,
+  /**
+   * CNF-01's consent text (markdown), rendered from the stored snapshot and the document versions bound in
+   * it (E20 item 7). Null for a subject type with no renderer.
+   */
+  consentText: z.string().nullable(),
 });
 
 export const SendConsentOtpInputSchema = z.strictObject({
@@ -87,6 +92,13 @@ export const consentsContract = {
         'CONSENT_MISMATCH',
         'CONSENT_ALREADY_USED',
         'SUITABILITY_CHANGED',
+        // The subject type's approve-time re-check (E20 item 6: PURCHASE).
+        'ORDERS_DISABLED',
+        'ORDER_STATE_INVALID',
+        'AMOUNT_ABOVE_MAX',
+        'RISK_PROFILE_EXPIRED',
+        'RISK_PROFILE_STALE',
+        'ONBOARDING_INCOMPLETE',
       ),
     )
     .input(z.strictObject({ id: ConsentChallengeIdSchema, ...ApproveConsentInputSchema.shape }))

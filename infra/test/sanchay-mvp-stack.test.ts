@@ -15,10 +15,9 @@ import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
 
-/** Fake deploy inputs: E21's test ARN and B2's test retriever hash. */
+/** Fake deploy input: E21's test ARN. */
 const DEPLOY_INPUTS = {
   SANCHAY_PLATFORM_ARN: 'ARN-000000',
-  SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
 };
 /** What a real deploy also passes: the repository the deploy role trusts (a fake owner). */
 const WITH_REPO = { ...DEPLOY_INPUTS, SANCHAY_GITHUB_REPOSITORY: 'example-org/sanchay' };
@@ -359,8 +358,10 @@ describe('SanchayMvpStack-prod (E25, R-31)', () => {
       });
     }
     expect(envOf(migrate)).not.toHaveProperty('SANCHAY_PROVIDER_MODE_SMS');
-    expect(envOf(api).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
-    expect(envOf(worker)).not.toHaveProperty('SANCHAY_SMS_RETRIEVER_HASH');
+    // H16: the DLT templates carry no SMS Retriever hash line, so no container gets the hash.
+    for (const container of [api, worker, migrate]) {
+      expect(envOf(container)).not.toHaveProperty('SANCHAY_SMS_RETRIEVER_HASH');
+    }
     expect(envOf(worker).SANCHAY_FP_BASE_URL).toBe('https://api.fintechprimitives.com');
     expect(envOf(api)).not.toHaveProperty('SANCHAY_FP_BASE_URL');
     expect(secretNamesOf(api)).toEqual([
@@ -493,21 +494,17 @@ describe('SanchayMvpStack-prod (E25, R-31)', () => {
 });
 
 describe('loadStackConfig (E25)', () => {
-  it('refuses to synthesise without the two deploy inputs, naming each', () => {
+  it('refuses to synthesise without the platform ARN, and no longer asks for a retriever hash (H16)', () => {
     const message = refusal(() => loadStackConfig('prod', {}));
     expect(message).toContain('SANCHAY_PLATFORM_ARN is required');
-    expect(message).toContain('SANCHAY_SMS_RETRIEVER_HASH is required');
+    expect(message).not.toContain('SANCHAY_SMS_RETRIEVER_HASH');
+    expect(loadStackConfig('prod', DEPLOY_INPUTS)).not.toHaveProperty('smsRetrieverHash');
   });
 
-  it('refuses a malformed platform ARN or retriever hash', () => {
+  it('refuses a malformed platform ARN', () => {
     expect(
       refusal(() => loadStackConfig('prod', { ...DEPLOY_INPUTS, SANCHAY_PLATFORM_ARN: '12345' })),
     ).toContain('ARN-<digits>');
-    expect(
-      refusal(() =>
-        loadStackConfig('prod', { ...DEPLOY_INPUTS, SANCHAY_SMS_RETRIEVER_HASH: 'short' }),
-      ),
-    ).toContain('11 characters');
   });
 
   it('reads SANCHAY_GITHUB_REPOSITORY, refuses a malformed one, and a real deploy needs it', () => {

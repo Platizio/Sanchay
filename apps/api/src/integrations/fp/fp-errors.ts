@@ -27,6 +27,28 @@ export class FpAmbiguousError extends Error {
   }
 }
 
+/**
+ * FP could not be reached with a valid token (R-47): the token endpoint failed or sent an unusable reply
+ * (`TOKEN`), or FP refused a fresh token after the first was evicted (`AUTH`, a second 401/403). The request
+ * was never sent or was refused before FP acted on it, but nothing proves that, so it stays an
+ * FpAmbiguousError to every caller: the job retries, nothing becomes REJECTED, and LOOKUP-ADOPT finds
+ * nothing to adopt.
+ */
+export class FpUnavailableError extends FpAmbiguousError {
+  override name = 'FpUnavailableError';
+  readonly reason: 'TOKEN' | 'AUTH';
+
+  constructor(
+    op: string,
+    reason: 'TOKEN' | 'AUTH',
+    options: { status?: number; cause?: unknown } = {},
+  ) {
+    super(op, options);
+    this.reason = reason;
+    this.message = `FP call ${op} could not authenticate (${reason}${options.status === undefined ? '' : `, HTTP ${options.status}`})`;
+  }
+}
+
 export class FpRejectedError extends Error {
   override name = 'FpRejectedError';
   readonly op: string;

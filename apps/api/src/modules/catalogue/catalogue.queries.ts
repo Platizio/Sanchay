@@ -1,7 +1,7 @@
 import type { ListSchemesInput } from '@sanchay/contract';
 import { LAUNCH_SCHEME_OPTIONS } from '@sanchay/domain';
 import { and, asc, desc, eq, gt, inArray, lte, or, sql } from 'drizzle-orm';
-import type { Database } from '../../db/client.js';
+import type { Database, DbExecutor } from '../../db/client.js';
 import {
   amcs,
   commissionDisclosures,
@@ -106,10 +106,16 @@ export async function listAmcs(db: Database) {
  * Prefers a scheme-scoped disclosure over an AMC-scoped one, and within the same scope prefers
  * `kind = 'EXACT'` over `'RANGE'` (E10's "resolve EXACT before RANGE"); ties broken by the most
  * recent `effectiveFrom`. Reads `commission_disclosures` directly rather than through E10's
- * `CommissionRatesSource`: rewiring that binding is outside this task's files.
+ * `CommissionRatesSource`: rewiring that binding is outside this task's files. Exported for E20's purchase
+ * eligibility and PURCHASE snapshot, which read it inside their own transactions (hence `DbExecutor`).
  */
-async function resolveCommissionLine(db: Database, schemeId: string, amcId: string, asOf: string) {
-  const rows = await db
+export async function resolveCommissionLine(
+  exec: DbExecutor,
+  schemeId: string,
+  amcId: string,
+  asOf: string,
+) {
+  const rows = await exec
     .select({
       kind: commissionDisclosures.kind,
       trailMinBps: commissionDisclosures.trailMinBps,

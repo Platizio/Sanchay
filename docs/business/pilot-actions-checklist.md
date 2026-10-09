@@ -69,34 +69,35 @@
 | PB-32a | CO and counsel sign off the **four** SMS texts below (R-10) before filing; a later wording change means refiling | CO + COUNSEL | **Thu 10-08** | PB-02, PB-03 | Signed texts filed in `docs/legal/` | G-B4, G-C1 |
 | PB-32 | Register the **four** Service-Implicit templates (details below; R-10). Submit Mon 10-12; **approved Fri 10-23** | CO (wording) + DEV-A | Fri 10-23 | PB-31, PB-32a | Four template ids mapped in `apps/api/src/integrations/sms/templates.ts` (Plan-01 B12; its tests assert the WebOTP last line with and without a hash for all four) | G-B4 |
 | PB-33 | Prod SMS controls: 2,000 per day cap, MSG91 low-balance alert, DLR capture | DEV-A | Fri 11-13 | PB-30 | Alarm test | G-E5 |
-| PB-34 | Real-handset test on Jio, Airtel, Vi and BSNL: delivery; WebOTP autofill in Android Chrome on `app.sanchay.in`; hash line with the Play-signed build | DEV-B | Fri 11-20 | PB-32, PB-57 | Screenshots | G-E6 |
+| PB-34 | Real-handset test on Jio, Airtel, Vi and BSNL: delivery, operator scrubbing of the tagged values, and WebOTP autofill in Android Chrome on `app.sanchay.in` | DEV-B | Fri 11-20 | PB-32, PB-57 | Screenshots | G-E6 |
 
-**PB-32 templates (R-10: all four are decided).** Each is three lines: the text line, then the hash variable, then the WebOTP line last.
+**PB-32 templates (R-10, amended by H16 on 2026-10-09; the owner, the CO and counsel sign the amendment off before filing).** Each is two lines: the text line, then the WebOTP line last. Every variable carries a TRAI typed tag (TRAI Direction of 18-Nov-2025). The registration text and the rules behind it are in `docs/dlt/sms-templates.md`, which a unit test keeps byte-for-byte equal to the code.
 
 ```
 SANCHAY_LOGIN_OTP_V1:
-{#var#} is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio
-{#var#}
-@app.sanchay.in #{#var#}
+{#numeric#} is your Sanchay login OTP. Valid 5 min. Never share it; Sanchay staff never ask for it. -Platizio
+@app.sanchay.in #{#numeric#}
 
 SANCHAY_CONSENT_OTP_V1 (amount: purchase, SIP/mandate, SIP cancel):
-{#var#} is your OTP to {#var#} Rs {#var#} in {#var#} on Sanchay. Valid 5 min. Never share it. -Platizio
-{#var#}
-@app.sanchay.in #{#var#}
+{#numeric#} is your OTP to {#alphanumeric#} Rs {#numeric#}.{#numeric#} in {#alphanumeric#} on Sanchay. Valid 5 min. Never share it. -Platizio
+@app.sanchay.in #{#numeric#}
 
-SANCHAY_CONSENT_UNITS_OTP_V1 (redeem by units; "all" for redeem-all):
-{#var#} is your OTP to redeem {#var#} units of {#var#} on Sanchay. Valid 5 min. Never share it. -Platizio
-{#var#}
-@app.sanchay.in #{#var#}
+SANCHAY_CONSENT_UNITS_OTP_V1 (redeem all; the units variable is "all"):
+{#numeric#} is your OTP to redeem {#alphanumeric#} units of {#alphanumeric#} on Sanchay. Valid 5 min. Never share it. -Platizio
+@app.sanchay.in #{#numeric#}
 
 SANCHAY_ATTEST_OTP_V1 (onboarding attest):
-{#var#} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio
-{#var#}
-@app.sanchay.in #{#var#}
+{#numeric#} is your OTP to confirm your Sanchay account details. Valid 5 min. Never share it. -Platizio
+@app.sanchay.in #{#numeric#}
 ```
 
-- Line 2 is always filled with the 11-character SMS Retriever hash: the API refuses to boot outside local/test without `SANCHAY_SMS_RETRIEVER_HASH` (Plan-01 B2 invariant 7). The hash is registered as a `{#var#}`, so DLT approval does not wait for Play App Signing (11-06).
-- Variables are at most 30 characters, so scheme names use their short form.
+- **No SMS Retriever hash line.** The hash can contain `+` or `/`, which no TRAI tag accepts, and the MVP app does not read SMS through the Retriever. `SANCHAY_SMS_RETRIEVER_HASH` and API boot invariant 7 are removed.
+- **Amounts are digits only:** `5,000.00` is sent as `Rs 5000.00`.
+- **Variables are at most 30 characters**, so scheme names use their short form. The code strips punctuation (`&` becomes `and`).
+- **Confirm with MSG91 before filing:**
+  - spaces inside an `{#alphanumeric#}` value;
+  - the `.` between the rupees and paise variables;
+  - a variable as the last word of the template (the WebOTP code).
 - Confirm with MSG91 that `#` directly before a variable is accepted.
 - In the units template, "all" is a valid value for the units variable.
 
@@ -174,7 +175,6 @@ SANCHAY_ATTEST_OTP_V1 (onboarding attest):
 - Generate the upload key and keep it offline and in Secrets Manager, never in the repo.
 - Internal-testing track with tester lists for founders and invitees.
 - Put the app-signing SHA-256 into `assetlinks.json`.
-- Compute the SMS Retriever hash and set it as `SANCHAY_SMS_RETRIEVER_HASH`.
 
 **PB-58 app-content declarations**
 - **Financial features declaration:** the investment / portfolio-management category (check the label in the Console). Description: "Mutual fund distribution (Regular plans), execution-only, by Platizio, AMFI-registered MFD, ARN-xxxxx; payments via Cybrilla/ONDC; no lending". Upload the ARN certificate if asked.

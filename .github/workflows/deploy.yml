@@ -108,9 +108,8 @@ jobs:
         env:
           CDK_DEFAULT_ACCOUNT: ${{ vars.SANCHAY_AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ap-south-1
-          # Deploy inputs: infra/lib/config.ts refuses to synthesise without them.
+          # Deploy input: infra/lib/config.ts refuses to synthesise without it.
           SANCHAY_PLATFORM_ARN: ${{ vars.SANCHAY_PLATFORM_ARN }}
-          SANCHAY_SMS_RETRIEVER_HASH: ${{ vars.SANCHAY_SMS_RETRIEVER_HASH }}
           # The repository the deploy role trusts (bin/sanchay.ts refuses a deploy without it), in
           # the exact owner/repo case that IAM compares.
           SANCHAY_GITHUB_REPOSITORY: ${{ github.repository }}

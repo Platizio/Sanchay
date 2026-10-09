@@ -81,9 +81,9 @@ export const riskProfiles = appSchema.table(
 );
 
 /**
- * One row per suitability evaluation, MATCH rows included. `order_id` / `plan_id` carry no FK yet:
- * `orders` and `plans` do not exist until E20 / F2, and each of those adds its own
- * `ALTER TABLE app.suitability_checks ADD CONSTRAINT ... FOREIGN KEY` once its table exists.
+ * One row per suitability evaluation, MATCH rows included. `order_id` references `orders` through
+ * `suitability_checks_order_id_orders_id_fk`, added by E20's 0030_orders_guard. `plan_id` carries no FK yet:
+ * `plans` does not exist until F2, which adds its own `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`.
  */
 export const suitabilityChecks = appSchema.table(
   'suitability_checks',

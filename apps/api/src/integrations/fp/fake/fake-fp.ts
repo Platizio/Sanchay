@@ -103,6 +103,8 @@ function purchasePayload(p: StoredPurchase): Record<string, unknown> {
     mf_investment_account: p.mfInvestmentAccount,
     source_ref_id: p.sourceRefId,
     folio_number: p.folioNumber,
+    // FP's GET returns the consent a PATCH set (null until then); E20's checkout skips the PATCH when present.
+    consent: p.consent,
   };
 }
 
@@ -281,7 +283,7 @@ export class FakeFp {
     if (script === undefined) return result;
     if (script.mode === 'timeout') {
       // The object above was created as normal ("FP received it"); only the response is lost, so a
-      // later list-by-source_ref_id (LOOKUP-ADOPT) still finds it.
+      // later list of the investment account (LOOKUP-ADOPT) still finds it.
       throw new Error(`FakeFp: scripted timeout for ${op}`);
     }
     if (script.mode === '5xx') {
@@ -446,11 +448,13 @@ export class FakeFp {
         return { statusCode: 200, data: purchasePayload(purchase) };
       }
       case 'purchase.list': {
-        const sourceRefId = query.get('source_ref_id');
-        const items =
-          sourceRefId === null
-            ? [...this.state.purchases.values()]
-            : this.state.findPurchasesBySourceRefId(sourceRefId);
+        // R-46: FP documents only the mf_investment_account filter (research fp-api.md:159). source_ref_id,
+        // plan and folio_number are ignored here, so a caller that trusts an undocumented filter fails
+        // against FakeFp as it would against FP; LOOKUP-ADOPT matches source_ref_id locally.
+        const account = query.get('mf_investment_account');
+        const items = [...this.state.purchases.values()].filter(
+          (p) => account === null || p.mfInvestmentAccount === account,
+        );
         return { statusCode: 200, data: { object: 'list', data: items.map(purchasePayload) } };
       }
       case 'purchase.update': {

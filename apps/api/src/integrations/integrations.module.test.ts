@@ -15,6 +15,7 @@ const base = {
   DATABASE_URL: 'postgres://sanchay@localhost:55432/sanchay',
   SANCHAY_APP_ORIGIN: 'https://app.sanchay.test',
   SANCHAY_API_ORIGIN: 'https://api.sanchay.test',
+  SANCHAY_PLATFORM_ARN: 'ARN-000000',
   SANCHAY_CLIENT_IP_SOURCE: 'socket',
   SANCHAY_KEY_SERVICE: 'local',
   SANCHAY_LOCAL_PII_KEY: key(1),
