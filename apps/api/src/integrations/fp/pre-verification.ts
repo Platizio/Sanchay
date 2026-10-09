@@ -71,8 +71,9 @@ export function firstFieldFailure(
 
 /**
  * A 4xx that FP gave for this investor's data, so retrying cannot help: the check settles at once. Not 401/403
- * (our credentials, not the investor: the job keeps failing and is retried, E20 owns eviction); 408/429 never
- * reach here, the transport raises them as FpAmbiguousError.
+ * (our credentials, not the investor): the transport evicts the token, retries once and then raises
+ * FpUnavailableError (R-47), so the exclusion is defensive. 408/429 never reach here either; the transport
+ * raises them as FpAmbiguousError.
  */
 export function isDefinitiveFpRejection(error: unknown): error is FpRejectedError {
   return (

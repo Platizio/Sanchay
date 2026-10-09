@@ -78,13 +78,51 @@ export class FpTokenCache {
     } catch (error) {
       throw new FpAmbiguousError(`token.${audience}`, { cause: error });
     }
-    const text = await response.body.text();
+    let text: string;
+    try {
+      text = await response.body.text();
+    } catch (error) {
+      throw new FpAmbiguousError(`token.${audience}`, {
+        status: response.statusCode,
+        cause: error,
+      });
+    }
     if (response.statusCode >= 400) {
       throw new FpAmbiguousError(`token.${audience}`, { status: response.statusCode });
     }
-    const parsed = JSON.parse(text) as { access_token: string; expires_in?: number };
-    const expiresAt = this.now() + (parsed.expires_in ?? DEFAULT_EXPIRES_IN_SECONDS) * 1000;
-    this.tokens.set(audience, { accessToken: parsed.access_token, expiresAt });
-    return parsed.access_token;
+    const reply = parseTokenReply(text);
+    if (reply === null) {
+      throw new FpAmbiguousError(`token.${audience}`, { status: response.statusCode });
+    }
+    const expiresAt = this.now() + reply.expiresInSeconds * 1000;
+    this.tokens.set(audience, { accessToken: reply.accessToken, expiresAt });
+    return reply.accessToken;
   }
+
+  /**
+   * Drops `token` after FP refused it (401/403), so the next call fetches a fresh one (R-47). A token a
+   * concurrent call has already replaced is left alone.
+   */
+  evict(audience: FpAudience, token: string): void {
+    if (this.tokens.get(audience)?.accessToken === token) this.tokens.delete(audience);
+  }
+}
+
+/**
+ * A usable token reply, or null (R-47): a body that is not JSON, an `access_token` that is not a non-empty
+ * string, or an `expires_in` that is not a positive number would otherwise cache `Bearer undefined`.
+ */
+function parseTokenReply(text: string): { accessToken: string; expiresInSeconds: number } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const { access_token: accessToken, expires_in: expiresIn } = parsed as Record<string, unknown>;
+  if (typeof accessToken !== 'string' || accessToken.length === 0) return null;
+  if (expiresIn === undefined) return { accessToken, expiresInSeconds: DEFAULT_EXPIRES_IN_SECONDS };
+  if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn) || expiresIn <= 0) return null;
+  return { accessToken, expiresInSeconds: expiresIn };
 }

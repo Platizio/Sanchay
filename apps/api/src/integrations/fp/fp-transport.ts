@@ -1,14 +1,25 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { isLosslessNumber } from 'lossless-json';
 import type { ClsService } from 'nestjs-cls';
 import type { Dispatcher } from 'undici';
 import { request } from 'undici';
 import { isRedactedKey, REDACTED, scrub } from '../../modules/platform/logging.js';
+import { pgErrorCodeOf } from '../../modules/platform/pg-errors.js';
 import type { SanchayClsStore } from '../../modules/platform/request-context.js';
 import { assertConsumed, type ConsumedConsent } from './consumed-consent.js';
-import { FpAmbiguousError, FpRejectedError, ProviderCallInTransactionError } from './fp-errors.js';
+import {
+  FpAmbiguousError,
+  FpRejectedError,
+  FpUnavailableError,
+  ProviderCallInTransactionError,
+} from './fp-errors.js';
 import { fpJson } from './fp-json.js';
-import { FP_OPERATIONS, type FpAudience, type FpOperationKey } from './fp-operations.js';
+import {
+  FP_OPERATIONS,
+  type FpAudience,
+  type FpHttpMethod,
+  type FpOperationKey,
+} from './fp-operations.js';
 import type { FpBaseUrls, FpTokenCache } from './fp-token-cache.js';
 
 /** DI token for the undici Dispatcher (`Agent` live, or D4 FakeFp's `MockAgent` in fake mode). */
@@ -189,6 +200,38 @@ function extractProviderCode(body: unknown): string | null {
   return typeof code === 'string' ? code : null;
 }
 
+/** The provider-calls fields that stay the same for every row one `call` writes. */
+type CallRow = Pick<
+  ProviderCallRecordInput,
+  'operation' | 'audience' | 'aggregateType' | 'aggregateId' | 'requestMeta'
+>;
+
+interface CallContext {
+  readonly op: FpOperationKey;
+  readonly method: FpHttpMethod;
+  readonly audience: FpAudience;
+  /** True for every write (classes K, P and M): an unreadable 2xx or a 3xx there is ambiguous (R-47). */
+  readonly writes: boolean;
+  readonly url: URL;
+  readonly path: string;
+  readonly body: unknown;
+  readonly requestBody: string | undefined;
+  readonly row: CallRow;
+}
+
+/** One request and its fully read response. */
+interface Exchange {
+  readonly token: string;
+  readonly status: number;
+  readonly text: string;
+  readonly durationMs: number;
+  readonly rawForBodyEnc: string;
+}
+
+function isAuthRejection(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 /**
  * FpGateway single call surface. Every FpRead/FpKyc/FpProvision/FpTransact method routes through
  * this. Timeouts: 10s connect / 30s body, set on the `Agent`/`MockAgent` passed in as `dispatcher`
@@ -196,6 +239,8 @@ function extractProviderCode(body: unknown): string | null {
  */
 @Injectable()
 export class FpTransport {
+  private readonly log = new Logger(FpTransport.name);
+
   constructor(
     private readonly baseUrls: FpBaseUrls,
     private readonly tokens: FpTokenCache,
@@ -217,15 +262,61 @@ export class FpTransport {
     for (const [key, value] of Object.entries(args.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const token = await this.tokens.tokenFor(definition.audience);
-    const requestBody = args.body === undefined ? undefined : JSON.stringify(args.body);
-    const aggregateType = args.aggregate?.type ?? null;
-    const aggregateId = args.aggregate?.id ?? null;
-    const requestMeta = {
+    const context: CallContext = {
+      op,
       method: definition.method,
+      audience: definition.audience,
+      writes: definition.class !== 'R',
+      url,
       path,
-      body: meta(args.body, true),
+      body: args.body,
+      requestBody: args.body === undefined ? undefined : JSON.stringify(args.body),
+      row: {
+        operation: op,
+        audience: definition.audience,
+        aggregateType: args.aggregate?.type ?? null,
+        aggregateId: args.aggregate?.id ?? null,
+        requestMeta: { method: definition.method, path, body: meta(args.body, true) },
+      },
     };
+
+    // R-47: FP refusing our token says nothing about the investor. Evict it and retry once with a fresh
+    // one; a second refusal is retryable (FpUnavailableError), never a terminal FpRejectedError.
+    let exchange = await this.exchange(context);
+    if (isAuthRejection(exchange.status)) {
+      await this.authRejected(context, exchange);
+      exchange = await this.exchange(context);
+      if (isAuthRejection(exchange.status)) {
+        await this.authRejected(context, exchange);
+        throw new FpUnavailableError(op, 'AUTH', { status: exchange.status });
+      }
+    }
+    return this.settle(context, exchange);
+  }
+
+  /** Fetches a token and sends the request once. Token and transport failures are recorded and thrown. */
+  private async exchange(context: CallContext): Promise<Exchange> {
+    const { op, method, path, body } = context;
+    let token: string;
+    try {
+      token = await this.tokens.tokenFor(context.audience);
+    } catch (error) {
+      // No request was sent: the row carries no HTTP status (the token endpoint's is in body_enc).
+      await this.record(context, {
+        httpStatus: null,
+        durationMs: 0,
+        errorCode: 'TOKEN_ERROR',
+        responseMeta: null,
+        rawForBodyEnc: JSON.stringify({
+          request: { method, path, body },
+          error: String(error),
+          ...(error instanceof FpAmbiguousError && error.httpStatus !== null
+            ? { tokenStatus: error.httpStatus }
+            : {}),
+        }),
+      });
+      throw new FpUnavailableError(op, 'TOKEN', { cause: error });
+    }
     const startedAt = Date.now();
 
     let response: Awaited<ReturnType<typeof request>>;
@@ -235,31 +326,26 @@ export class FpTransport {
     // failures are the ambiguous case, and each records exactly one TRANSPORT_ERROR row.
     let statusSeen: number | null = null;
     try {
-      response = await request(url, {
-        method: definition.method,
+      response = await request(context.url, {
+        method: context.method,
         dispatcher: this.dispatcher,
         headers: {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
-          ...(definition.audience === 'poa' ? {} : { 'x-tenant-id': this.tokens.tenantId }),
+          ...(context.audience === 'poa' ? {} : { 'x-tenant-id': this.tokens.tenantId }),
         },
-        ...(requestBody === undefined ? {} : { body: requestBody }),
+        ...(context.requestBody === undefined ? {} : { body: context.requestBody }),
       });
       statusSeen = response.statusCode;
       text = await response.body.text();
     } catch (error) {
-      await this.recordCall({
-        operation: op,
-        audience: definition.audience,
-        aggregateType,
-        aggregateId,
+      await this.record(context, {
         httpStatus: statusSeen,
         durationMs: Date.now() - startedAt,
         errorCode: 'TRANSPORT_ERROR',
-        requestMeta,
         responseMeta: null,
         rawForBodyEnc: JSON.stringify({
-          request: { method: definition.method, path, body: args.body },
+          request: { method, path, body },
           ...(statusSeen === null ? {} : { response: { status: statusSeen } }),
           error: String(error),
         }),
@@ -270,93 +356,100 @@ export class FpTransport {
       });
     }
 
-    const durationMs = Date.now() - startedAt;
-    const rawForBodyEnc = JSON.stringify({
-      request: { method: definition.method, path, body: args.body },
-      response: { status: response.statusCode, body: text },
-    });
+    return {
+      token,
+      status: response.statusCode,
+      text,
+      durationMs: Date.now() - startedAt,
+      rawForBodyEnc: JSON.stringify({
+        request: { method, path, body },
+        response: { status: response.statusCode, body: text },
+      }),
+    };
+  }
 
-    if (response.statusCode === 409) {
-      await this.recordCall({
-        operation: op,
-        audience: definition.audience,
-        aggregateType,
-        aggregateId,
-        httpStatus: 409,
-        durationMs,
-        errorCode: 'DUPLICATE_OR_CONFLICT',
-        requestMeta,
-        responseMeta: meta(safeParse(text)),
-        rawForBodyEnc,
-      });
+  private async authRejected(context: CallContext, exchange: Exchange): Promise<void> {
+    await this.recordResponse(context, exchange, 'AUTH_REJECTED', safeParse(exchange.text));
+    this.tokens.evict(context.audience, exchange.token);
+  }
+
+  /** Maps a received response to the call's result or its error, recording one row. */
+  private async settle(context: CallContext, exchange: Exchange): Promise<FpCallResult> {
+    const { op } = context;
+    const { status } = exchange;
+    const parsedBody = safeParse(exchange.text);
+
+    // R-47: redirects are never followed. On a write the request may have been acted on; on a read it is
+    // an error. Either way the caller retries or reconciles.
+    if (status >= 300 && status < 400) {
+      await this.recordResponse(context, exchange, 'UNEXPECTED_3XX', parsedBody);
+      throw new FpAmbiguousError(op, { status });
+    }
+    if (status === 409) {
+      await this.recordResponse(context, exchange, 'DUPLICATE_OR_CONFLICT', parsedBody);
       throw new FpAmbiguousError(op, { status: 409 });
     }
-    if (response.statusCode >= 500) {
-      await this.recordCall({
-        operation: op,
-        audience: definition.audience,
-        aggregateType,
-        aggregateId,
-        httpStatus: response.statusCode,
-        durationMs,
-        errorCode: 'UPSTREAM_5XX',
-        requestMeta,
-        responseMeta: meta(safeParse(text)),
-        rawForBodyEnc,
-      });
-      throw new FpAmbiguousError(op, { status: response.statusCode });
+    if (status >= 500) {
+      await this.recordResponse(context, exchange, 'UPSTREAM_5XX', parsedBody);
+      throw new FpAmbiguousError(op, { status });
     }
-
-    const parsedBody = safeParse(text);
-
     // A throttle (429) and a request timeout (408) say nothing about whether FP acted on the request, so
     // they are retryable like a 5xx, never a terminal FpRejectedError (final review MF-6; the provisioning
-    // spec row: "5xx/429 backoff x5; 4xx -> FAILED"). 401/403 eviction is left to the E20 ruling.
-    if (response.statusCode === 429 || response.statusCode === 408) {
-      await this.recordCall({
-        operation: op,
-        audience: definition.audience,
-        aggregateType,
-        aggregateId,
-        httpStatus: response.statusCode,
-        durationMs,
-        errorCode: response.statusCode === 429 ? 'RATE_LIMITED' : 'TIMEOUT_408',
-        requestMeta,
-        responseMeta: meta(parsedBody),
-        rawForBodyEnc,
-      });
-      throw new FpAmbiguousError(op, { status: response.statusCode });
+    // spec row: "5xx/429 backoff x5; 4xx -> FAILED"). 401/403 are retried in `call` (R-47).
+    if (status === 429 || status === 408) {
+      await this.recordResponse(
+        context,
+        exchange,
+        status === 429 ? 'RATE_LIMITED' : 'TIMEOUT_408',
+        parsedBody,
+      );
+      throw new FpAmbiguousError(op, { status });
     }
-
-    if (response.statusCode >= 400) {
+    if (status >= 400) {
       const providerCode = extractProviderCode(parsedBody);
-      await this.recordCall({
-        operation: op,
-        audience: definition.audience,
-        aggregateType,
-        aggregateId,
-        httpStatus: response.statusCode,
-        durationMs,
-        errorCode: providerCode ?? 'REJECTED',
-        requestMeta,
-        responseMeta: meta(parsedBody),
-        rawForBodyEnc,
-      });
-      throw new FpRejectedError(op, response.statusCode, providerCode);
+      await this.recordResponse(context, exchange, providerCode ?? 'REJECTED', parsedBody);
+      throw new FpRejectedError(op, status, providerCode);
+    }
+    // R-47: a write FP accepted but whose reply cannot be read may have created the object. Callers still
+    // validate the ids they need from a readable body.
+    if (parsedBody === undefined && context.writes) {
+      await this.recordResponse(context, exchange, 'UNPARSABLE_2XX', parsedBody);
+      throw new FpAmbiguousError(op, { status });
     }
 
-    await this.recordCall({
-      operation: op,
-      audience: definition.audience,
-      aggregateType,
-      aggregateId,
-      httpStatus: response.statusCode,
-      durationMs,
-      errorCode: null,
-      requestMeta,
+    await this.recordResponse(context, exchange, null, parsedBody);
+    return { status, body: parsedBody };
+  }
+
+  private recordResponse(
+    context: CallContext,
+    exchange: Exchange,
+    errorCode: string | null,
+    parsedBody: unknown,
+  ): Promise<void> {
+    return this.record(context, {
+      httpStatus: exchange.status,
+      durationMs: exchange.durationMs,
+      errorCode,
       responseMeta: meta(parsedBody),
-      rawForBodyEnc,
+      rawForBodyEnc: exchange.rawForBodyEnc,
     });
-    return { status: response.statusCode, body: parsedBody };
+  }
+
+  /**
+   * Writes one provider-calls row. A failed write is logged and swallowed (R-47): FP's result, a success
+   * or an error, is what the caller must act on, and the audit gap shows as this log line.
+   */
+  private async record(
+    context: CallContext,
+    fields: Omit<ProviderCallRecordInput, keyof CallRow>,
+  ): Promise<void> {
+    try {
+      await this.recordCall({ ...context.row, ...fields });
+    } catch (error) {
+      this.log.error(
+        `fp.provider_call_record_failed: ${context.op} ${fields.errorCode ?? 'OK'} HTTP ${fields.httpStatus ?? 'none'} (${pgErrorCodeOf(error) ?? (error instanceof Error ? error.name : 'unknown')})`,
+      );
+    }
   }
 }
