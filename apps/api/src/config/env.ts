@@ -144,10 +144,6 @@ export const EnvSchema = z.object({
   SANCHAY_MAILPIT_URL: z.url({ protocol: /^https?$/ }).default('http://localhost:8025'),
   SANCHAY_MSG91_CREDENTIALS_JSON: z.string().optional(),
   SANCHAY_SES_FROM: z.email().optional(),
-  SANCHAY_SMS_RETRIEVER_HASH: z
-    .string()
-    .regex(/^[A-Za-z0-9+/]{11}$/)
-    .optional(),
   SANCHAY_THROTTLE_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(120),
   SANCHAY_OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(20),
   SANCHAY_FP_WEBHOOK_AUTH: z.enum(['hmac', 'shared_secret']).default('hmac'),
@@ -230,12 +226,7 @@ export function assertBootInvariants(env: Env): void {
       'SANCHAY_CLIENT_IP_SOURCE must be alb outside local/test (the ALB appends the client IP to X-Forwarded-For)',
     );
   }
-  // 7 (R-10): every registered DLT OTP template has three lines, so the hash line must always be filled.
-  if (!localOrTest && role === 'api' && env.SANCHAY_SMS_RETRIEVER_HASH === undefined) {
-    problems.push(
-      'SANCHAY_SMS_RETRIEVER_HASH is required outside local/test (every DLT OTP template has three lines, R-10)',
-    );
-  }
+  // 7: retired (H16, 2026-10-09). The DLT templates carry no SMS Retriever hash line any more.
   // 8 (plan-02-mvp-kernel D3): the fake FP transport must never run outside local/test.
   if (!localOrTest && env.SANCHAY_PROVIDER_MODE_FP === 'fake') {
     problems.push('SANCHAY_PROVIDER_MODE_FP=fake is refused outside local/test');

@@ -77,7 +77,7 @@ describe('OtpService.issue', () => {
     const issued = await f.otp.issue(sms(mobile, '203.0.113.10'));
     const code = f.sms.latestCode(mobile);
     const sent = must(f.sms.outbox[0]);
-    expect(sent.text).toBe(loginSmsText(code, f.env.SANCHAY_SMS_RETRIEVER_HASH));
+    expect(sent.text).toBe(loginSmsText(code));
     expect(sent.text).toMatch(WEBOTP_LAST_LINE);
     expect(sent.templateId).toBe('SANCHAY_LOGIN_OTP_V1');
     expect(issued.challengeId).toMatch(UUIDV7);
@@ -343,7 +343,7 @@ describe('OtpService.issue', () => {
       expect(must(f.sms.outbox.at(-1))).toMatchObject({
         to: mobile,
         templateId,
-        text: renderConsentSms(consentSms, code, f.env.SANCHAY_SMS_RETRIEVER_HASH).text,
+        text: renderConsentSms(consentSms, code).text,
       });
       const row = await rowById(issued.challengeId);
       expect(row).toMatchObject({ referenceId: REFERENCE, templateId });

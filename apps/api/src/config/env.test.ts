@@ -42,14 +42,13 @@ function keyringJson(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-/** A configuration that boots outside local/test: secrets keyring, ALB client IP, OTP IP limit 20, retriever hash. */
+/** A configuration that boots outside local/test: secrets keyring, ALB client IP, OTP IP limit 20. */
 const devSecrets: Record<string, string> = {
   ...omit(base, ...LOCAL_KEYS),
   SANCHAY_APP_ENV: 'dev',
   SANCHAY_KEY_SERVICE: 'secrets',
   SANCHAY_KEYRING_JSON: keyringJson(),
   SANCHAY_CLIENT_IP_SOURCE: 'alb',
-  SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu',
   SANCHAY_PROVIDER_MODE_FP: 'sandbox',
   SANCHAY_FP_WEBHOOK_SECRET: 'x'.repeat(32),
 };
@@ -136,7 +135,6 @@ describe('parseEnv', () => {
       'SANCHAY_PROVIDER_MODE_FP',
       'SANCHAY_PROVIDER_MODE_SMS',
       'SANCHAY_SES_FROM',
-      'SANCHAY_SMS_RETRIEVER_HASH',
       'SANCHAY_THROTTLE_PER_MINUTE',
     ]);
   });
@@ -163,38 +161,12 @@ describe('parseEnv', () => {
     ).toMatch(/SANCHAY_PROVIDER_MODE_FP=production requires SANCHAY_APP_ENV=prod/);
   });
 
-  it('requires SANCHAY_SMS_RETRIEVER_HASH outside local/test (invariant 7, R-10)', () => {
-    for (const appEnv of ['dev', 'staging', 'prod']) {
-      expect(
-        errorMessage(() =>
-          parseEnv({ ...omit(devSecrets, 'SANCHAY_SMS_RETRIEVER_HASH'), SANCHAY_APP_ENV: appEnv }),
-        ),
-      ).toMatch(/SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/);
-    }
-    expect(errorMessage(() => parseEnv({ ...devSecrets, SANCHAY_SMS_RETRIEVER_HASH: '' }))).toMatch(
-      /SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/,
-    );
+  it('no longer knows SANCHAY_SMS_RETRIEVER_HASH: invariant 7 is retired with the DLT hash line (H16)', () => {
+    expect(Object.keys(EnvSchema.shape)).not.toContain('SANCHAY_SMS_RETRIEVER_HASH');
+    expect(parseEnv({ ...devSecrets, SANCHAY_APP_ROLE: 'api' }).SANCHAY_APP_ROLE).toBe('api');
     expect(
-      errorMessage(() => parseEnv({ ...devSecrets, SANCHAY_SMS_RETRIEVER_HASH: 'short' })),
-    ).toContain('SANCHAY_SMS_RETRIEVER_HASH');
-    expect(parseEnv(base).SANCHAY_SMS_RETRIEVER_HASH).toBeUndefined();
-    expect(
-      parseEnv({ ...base, SANCHAY_APP_ENV: 'test' }).SANCHAY_SMS_RETRIEVER_HASH,
-    ).toBeUndefined();
-    expect(parseEnv(devSecrets).SANCHAY_SMS_RETRIEVER_HASH).toBe('FA+9qCX9VSu');
-  });
-
-  it('binds the retriever hash (invariant 7) to the api role only (R-19 owning containers, E25)', () => {
-    const noHash = {
-      ...omit(devSecrets, 'SANCHAY_SMS_RETRIEVER_HASH'),
-      SANCHAY_PROVIDER_MODE_FP: 'sandbox',
-    };
-    expect(errorMessage(() => parseEnv({ ...noHash, SANCHAY_APP_ROLE: 'api' }))).toMatch(
-      /SANCHAY_SMS_RETRIEVER_HASH is required outside local\/test/,
-    );
-    for (const role of ['worker', 'migrate']) {
-      expect(parseEnv({ ...noHash, SANCHAY_APP_ROLE: role }).SANCHAY_APP_ROLE).toBe(role);
-    }
+      parseEnv({ ...devSecrets, SANCHAY_SMS_RETRIEVER_HASH: 'FA+9qCX9VSu' }),
+    ).not.toHaveProperty('SANCHAY_SMS_RETRIEVER_HASH');
   });
 
   it('requires SANCHAY_FP_WEBHOOK_SECRET outside local/test (invariant 13)', () => {
@@ -231,10 +203,7 @@ describe('parseEnv', () => {
         /fake SMS\/email providers \(capture, mailpit\) are refused in staging\/prod/,
       );
     }
-    const migrate = parseEnv({
-      ...omit(prod, 'SANCHAY_SMS_RETRIEVER_HASH'),
-      SANCHAY_APP_ROLE: 'migrate',
-    });
+    const migrate = parseEnv({ ...prod, SANCHAY_APP_ROLE: 'migrate' });
     expect(migrate.SANCHAY_PROVIDER_MODE_SMS).toBe('capture');
   });
 

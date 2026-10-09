@@ -3,9 +3,8 @@ import { assertDeployInputs, loadStackConfig } from '../lib/config.js';
 import { SanchayMvpStack } from '../lib/sanchay-mvp-stack.js';
 
 const app = new App();
-// R-31: prod is the only stack. Reads SANCHAY_PLATFORM_ARN, SANCHAY_SMS_RETRIEVER_HASH and
-// SANCHAY_GITHUB_REPOSITORY from this process's environment; a real synth or deploy also needs the
-// repository the deploy role trusts.
+// R-31: prod is the only stack. Reads SANCHAY_PLATFORM_ARN and SANCHAY_GITHUB_REPOSITORY from this
+// process's environment; a real synth or deploy also needs the repository the deploy role trusts.
 const config = loadStackConfig('prod');
 assertDeployInputs(config);
 

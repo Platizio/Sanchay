@@ -510,12 +510,11 @@ export class OtpService {
 
   private render(input: IssueOtpInput, code: string): RenderedOtp {
     const { purpose, destination } = input;
-    const hash = this.config.env.SANCHAY_SMS_RETRIEVER_HASH;
     if (destination.channel === 'SMS' && purpose === 'LOGIN') {
-      return { templateId: SMS_TEMPLATE_IDS.LOGIN, subject: '', text: loginSmsText(code, hash) };
+      return { templateId: SMS_TEMPLATE_IDS.LOGIN, subject: '', text: loginSmsText(code) };
     }
     if (destination.channel === 'SMS' && purpose === 'CONSENT' && input.consentSms !== undefined) {
-      return { subject: '', ...renderConsentSms(input.consentSms, code, hash) };
+      return { subject: '', ...renderConsentSms(input.consentSms, code) };
     }
     if (destination.channel === 'EMAIL' && (purpose === 'VERIFY_EMAIL' || purpose === 'CONSENT')) {
       return { templateId: EMAIL_TEMPLATE_IDS.OTP, ...emailOtpMessage(code, purpose) };
