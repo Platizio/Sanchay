@@ -17,6 +17,7 @@ import { SessionGuard } from './modules/identity/session.guard.js';
 import { LegalConsentModule } from './modules/legal-consent/legal-consent.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
+import { OrdersModule } from './modules/orders/orders.module.js';
 import { ApiExceptionFilter } from './modules/platform/api-exception.filter.js';
 import { AppConfigRouter } from './modules/platform/app-config.router.js';
 import { AppVersionGuard } from './modules/platform/app-version.guard.js';
@@ -81,6 +82,7 @@ export class AppModule {
         // "Providers are called only from worker jobs": FpModule is never imported in the api role.
         ...(env.SANCHAY_APP_ROLE === 'worker' ? [FpModule.forRoot(env)] : []),
         CatalogueModule.forRoot(env),
+        OrdersModule.forRoot(env),
       ],
       controllers: [HealthRouter, AppConfigRouter],
       providers: [

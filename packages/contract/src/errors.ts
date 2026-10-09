@@ -74,6 +74,9 @@ export const ERROR_CATALOGUE = {
   PROVIDER_REJECTED: 502,
   PROVIDER_UNAVAILABLE: 503,
   SMS_UNAVAILABLE: 503,
+  // E20 (Plan 03): appended; the order kill switch and a create FP proved absent twice (R-46).
+  ORDERS_DISABLED: 403,
+  PROVIDER_OBJECT_ABSENT: 502,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_CATALOGUE;

@@ -48,7 +48,10 @@ export type TableName =
   | 'sebi_categories'
   | 'suitability_acknowledgements'
   | 'suitability_checks'
-  | 'worker_heartbeats';
+  | 'worker_heartbeats'
+  | 'orders'
+  | 'order_events'
+  | 'folios';
 
 declare const rowIdBrand: unique symbol;
 

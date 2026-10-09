@@ -10,6 +10,7 @@ import {
   otpCodes,
 } from '../../src/modules/identity/identity.schema.js';
 import {
+  APPROVE_RECHECKS,
   CHALLENGE_EXPIRY_MS,
   CONSENT_SUBJECT_JOBS,
   ConsentEngine,
@@ -24,6 +25,8 @@ import {
   legalDocuments,
 } from '../../src/modules/legal-consent/legal-consent.schema.js';
 import {
+  CONSENT_TEXT_RENDERERS,
+  genericBuilder,
   SNAPSHOT_BUILDERS,
   type SnapshotBuilder,
 } from '../../src/modules/legal-consent/snapshot-builders.js';
@@ -80,8 +83,36 @@ async function seedLegalDoc(key: string): Promise<void> {
     .onConflictDoNothing(); // legal_documents_key_version_uq: every test's beforeEach seeds the same (key, version)
 }
 
+/**
+ * This file drives the engine with PURCHASE challenges for orders that do not exist. E20 registers the real
+ * PURCHASE builder, approve re-check, consent text and submit job at module load (orders.module.ts); the
+ * suite saves all four in beforeAll, once the app has loaded that module, swaps in the generic builder,
+ * removes the other three, and restores all four afterwards.
+ */
+let savedPurchaseRegistry: {
+  builder: SnapshotBuilder;
+  recheck: (typeof APPROVE_RECHECKS)['PURCHASE'];
+  renderer: (typeof CONSENT_TEXT_RENDERERS)['PURCHASE'];
+  job: (typeof CONSENT_SUBJECT_JOBS)['PURCHASE'];
+};
+
+function restore<T>(registry: Partial<Record<'PURCHASE', T>>, value: T | undefined): void {
+  if (value === undefined) delete registry.PURCHASE;
+  else registry.PURCHASE = value;
+}
+
 beforeAll(async () => {
   ta = await bootFpTestApp();
+  savedPurchaseRegistry = {
+    builder: SNAPSHOT_BUILDERS.PURCHASE,
+    recheck: APPROVE_RECHECKS.PURCHASE,
+    renderer: CONSENT_TEXT_RENDERERS.PURCHASE,
+    job: CONSENT_SUBJECT_JOBS.PURCHASE,
+  };
+  SNAPSHOT_BUILDERS.PURCHASE = genericBuilder('PURCHASE');
+  delete APPROVE_RECHECKS.PURCHASE;
+  delete CONSENT_TEXT_RENDERERS.PURCHASE;
+  delete CONSENT_SUBJECT_JOBS.PURCHASE;
   engine = ta.app.get(ConsentEngine);
   vi.spyOn(ta.app.get(Jobs), 'enqueue').mockImplementation(async (_exec, name, data) => {
     enqueued.push({ name, data });
@@ -91,6 +122,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await ta.close();
+  SNAPSHOT_BUILDERS.PURCHASE = savedPurchaseRegistry.builder;
+  restore(APPROVE_RECHECKS, savedPurchaseRegistry.recheck);
+  restore(CONSENT_TEXT_RENDERERS, savedPurchaseRegistry.renderer);
+  restore(CONSENT_SUBJECT_JOBS, savedPurchaseRegistry.job);
 });
 
 beforeEach(async () => {
@@ -171,7 +206,7 @@ describe('ConsentEngine.approve', () => {
       .from(consentRecords)
       .where(eq(consentRecords.challengeId, c.challengeId));
     expect(record?.deliveryEvidence ?? null).not.toBeNull();
-    expect(enqueued).toEqual([]); // no job registered for PURCHASE until E20
+    expect(enqueued).toEqual([]); // this suite unregisters E20's PURCHASE job in beforeAll
   });
 
   it('enqueues the job registered for the subject type, in the approve transaction', async () => {
@@ -339,6 +374,28 @@ describe('ConsentEngine.approve', () => {
     }
   });
 
+  it("dispatches the approve-time re-check by subject type, with the challenge's subjects (E20 item 6)", async () => {
+    const recheck = vi.fn().mockResolvedValue(false);
+    APPROVE_RECHECKS.PURCHASE = recheck;
+    try {
+      const c = await createChallenge();
+      await engine.sendOtp(c.challengeId, 'SMS');
+      const code = ta.sms.latestCode('9999999999') ?? '000000';
+      await expect(engine.approve(c.challengeId, { smsCode: code })).rejects.toMatchObject({
+        code: 'SUITABILITY_CHANGED',
+      });
+      expect(recheck).toHaveBeenCalledWith(expect.anything(), {
+        investorId,
+        subjectType: 'PURCHASE',
+        subjects: [{ table: 'orders', id: expect.any(String) }],
+      });
+      expect(await challengeStatus(c.challengeId)).toBe('PENDING');
+      expect(enqueued).toHaveLength(0);
+    } finally {
+      delete APPROVE_RECHECKS.PURCHASE;
+    }
+  });
+
   it('approve after 10 min is expired', async () => {
     const c = await createChallenge();
     await engine.sendOtp(c.challengeId, 'SMS');
@@ -393,6 +450,33 @@ describe('ConsentEngine.create', () => {
       .where(eq(consentChallenges.id, c.challengeId));
     expect(row?.createdAt.getTime()).toBe(c.expiresAt.getTime() - CHALLENGE_EXPIRY_MS);
     expect(row?.createdAt.getTime()).toBe(ta.clock.now().getTime());
+  });
+});
+
+describe('ConsentEngine.create with a pre-allocated id, and verifiedFactors (E20 items 7 and 8)', () => {
+  it('create uses the caller-allocated challengeId', async () => {
+    const challengeId = newId('consent_challenges');
+    const c = await engine.create(ta.db.db, {
+      challengeId,
+      investorId,
+      subjectType: 'PURCHASE',
+      subjects: [{ table: 'orders', id: newId('orders' as never) }],
+      templateKey: 'TPL_PURCHASE',
+      folioId: null,
+      amount: '25000.00',
+      fields: { amount: '25000.00', schemeShort: 'Parag Flexi', action: 'invest' },
+    });
+    expect(c.challengeId).toBe(challengeId);
+    expect(await challengeStatus(challengeId)).toBe('PENDING');
+  });
+
+  it("verifiedFactors returns a CONSUMED challenge's verified channels and refuses any other", async () => {
+    const pending = await createChallenge();
+    await expect(engine.verifiedFactors(ta.db.db, pending.challengeId)).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+    const consumed = await approvedChallenge();
+    await expect(engine.verifiedFactors(ta.db.db, consumed.challengeId)).resolves.toEqual(['SMS']);
   });
 });
 

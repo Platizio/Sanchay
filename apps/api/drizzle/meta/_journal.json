@@ -183,6 +183,20 @@
       "when": 1791442919323,
       "tag": "0028_onboarding_blocked_in_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791533182399,
+      "tag": "0029_orders_folios",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791533196995,
+      "tag": "0030_orders_guard",
+      "breakpoints": true
     }
   ]
 }

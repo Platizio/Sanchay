@@ -17,6 +17,8 @@ export interface SuitabilityHookArgs {
 }
 
 export interface SuitabilityHookResult {
+  /** The suitability_checks row this evaluation wrote (E20: orders.suitability_check_id points at it). */
+  checkId: string;
   outcome: 'MATCH' | 'MISMATCH';
   level: RiskLevel;
   maxRiskometer: Riskometer;
@@ -54,18 +56,24 @@ export class SuitabilityService implements OnModuleInit {
     if (profile.status !== 'ACTIVE') throw new AppError('ONBOARDING_INCOMPLETE');
 
     const outcome = compareRiskometer(profile.maxRiskometer, args.schemeRiskometer);
-    await tx.insert(suitabilityChecks).values({
-      orderId: args.orderId ?? null,
-      planId: args.planId ?? null,
-      schemeId: args.schemeId,
-      schemeRiskometer: args.schemeRiskometer,
-      fundFactsAsOf: args.fundFactsAsOf,
-      riskProfileId: profile.id,
-      level: profile.level,
-      outcome,
-    });
+    const [written] = await tx
+      .insert(suitabilityChecks)
+      .values({
+        orderId: args.orderId ?? null,
+        planId: args.planId ?? null,
+        schemeId: args.schemeId,
+        schemeRiskometer: args.schemeRiskometer,
+        fundFactsAsOf: args.fundFactsAsOf,
+        riskProfileId: profile.id,
+        level: profile.level,
+        outcome,
+      })
+      .returning({ id: suitabilityChecks.id });
+    if (written === undefined)
+      throw new AppError('INTERNAL', { message: 'suitability_checks insert returned no row' });
 
     return {
+      checkId: written.id,
       outcome,
       level: profile.level,
       maxRiskometer: profile.maxRiskometer,

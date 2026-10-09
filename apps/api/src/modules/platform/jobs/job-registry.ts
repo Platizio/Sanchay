@@ -28,6 +28,9 @@ export const JOB_POLICIES = {
   'onboarding.bank.verify': 'stately', // key: the kyc_checks id; creates the bank pre-verification once, then re-enqueues itself to poll (E7)
   'onboarding.kyc.sweep': 'stately', // every 5 minutes, keyless; re-enqueues the poll of a PENDING kyc_checks row whose job died (ONB-1)
   'onboarding.provision': 'exclusive', // key: the ATTEST challenge id (approve); FP provisioning writes, retried by pg-boss (E11)
+  'orders.purchase.submit': 'exclusive', // key: the challenge id (approve); POSTs the purchase (E20)
+  'orders.purchase.advance': 'stately', // key: the order id; polls FP and re-enqueues itself (E20)
+  'fp.reconcile.nonfinal': 'stately', // every 5 minutes, keyless: one sweep queued and one running (E20, F7)
 } as const satisfies Record<string, JobPolicy>;
 
 /**

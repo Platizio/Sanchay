@@ -124,6 +124,12 @@ export const ERROR_COPY: ReadonlyMap<string, string> = new Map<string, string>([
     'We could not send the code right now. Please try again in a few minutes.',
   ],
   ['SMS_UNAVAILABLE', 'We could not send the SMS right now. Please try again in a few minutes.'],
+  // E20 (appended codes)
+  ['ORDERS_DISABLED', 'New investments are paused right now. Please try again later.'],
+  [
+    'PROVIDER_OBJECT_ABSENT',
+    'We could not confirm this order with the fund house. No money has moved.',
+  ],
   // client-only (@sanchay/api-client NETWORK_ERROR)
   ['NETWORK_ERROR', 'You seem to be offline. Check your connection and try again.'],
 ]);

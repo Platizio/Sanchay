@@ -47,4 +47,10 @@ export async function registerSchedules(boss: PgBoss): Promise<void> {
     {},
     { tz, key: 'onboarding-kyc-sweep' },
   );
+  await boss.schedule(
+    'fp.reconcile.nonfinal',
+    '*/5 * * * *',
+    {},
+    { tz, key: 'fp-reconcile-nonfinal' },
+  );
 }

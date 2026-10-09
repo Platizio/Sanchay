@@ -149,6 +149,8 @@ export const EnvSchema = z.object({
   SANCHAY_FP_WEBHOOK_AUTH: z.enum(['hmac', 'shared_secret']).default('hmac'),
   SANCHAY_FP_WEBHOOK_SECRET: z.string().min(16).optional(),
   SANCHAY_PILOT_INVITE_ONLY: z.stringbool().default(true),
+  /** The platform's AMFI ARN, stamped on every order (E20; execution-only, no EUIN). */
+  SANCHAY_PLATFORM_ARN: z.string().regex(/^ARN-\d+$/),
   SANCHAY_PROVIDER_MODE_FP: z.enum(['fake', 'sandbox', 'production']).default('fake'),
   SANCHAY_FP_BASE_URL: z.url({ protocol: /^https?$/ }).optional(),
   SANCHAY_FP_CREDENTIALS_JSON: z.string().optional(),

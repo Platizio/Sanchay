@@ -89,7 +89,7 @@ describe('FakeFp', () => {
     expect(new Set(body.data.map((s) => s.isin)).size).toBe(10);
   });
 
-  it('LOOKUP-ADOPT: a purchase created before a scripted timeout is found by listing on source_ref_id', async () => {
+  it('LOOKUP-ADOPT: a purchase created before a scripted timeout is found by listing the investment account', async () => {
     const fakeFp = new FakeFp(BASE_URLS);
     const transport = transportFor(fakeFp);
     fakeFp.script('purchase.create', 'timeout');
@@ -104,15 +104,17 @@ describe('FakeFp', () => {
         consent: consent(),
       }),
     ).rejects.toBeInstanceOf(FpAmbiguousError);
+    // R-46: list by the filter FP documents (mf_investment_account) and match source_ref_id locally.
     const list = await transport.call('purchase.list', {
-      query: { source_ref_id: 'order-lookup-1' },
+      query: { mf_investment_account: 'mfia_1' },
     });
     const body = list.body as { data: Array<{ source_ref_id: string; state: string }> };
     expect(body.data).toHaveLength(1);
+    expect(body.data[0]?.source_ref_id).toBe('order-lookup-1');
     expect(body.data[0]?.state).toBe('under_review');
   });
 
-  it('a scripted 4xx creates no object, so a later list on source_ref_id is empty (final review MF-5)', async () => {
+  it('a scripted 4xx creates no object, so a later list of the account is empty (final review MF-5)', async () => {
     const fakeFp = new FakeFp(BASE_URLS);
     const transport = transportFor(fakeFp);
     fakeFp.script('purchase.create', {
@@ -130,9 +132,45 @@ describe('FakeFp', () => {
         consent: consent(),
       }),
     ).rejects.toMatchObject({ httpStatus: 422 });
-    const list = await transport.call('purchase.list', { query: { source_ref_id: 'order-422' } });
+    const list = await transport.call('purchase.list', {
+      query: { mf_investment_account: 'mfia_1' },
+    });
     expect((list.body as { data: unknown[] }).data).toEqual([]);
     expect(fakeFp.calls({ op: 'purchase.create' })).toHaveLength(1);
+  });
+
+  it('purchase.list ignores source_ref_id and plan', async () => {
+    // R-46: FP documents only the mf_investment_account filter (research fp-api.md:159). FakeFp honours
+    // that one and ignores the rest, so a caller that trusts an undocumented filter fails here.
+    const fakeFp = new FakeFp(BASE_URLS);
+    const transport = transportFor(fakeFp);
+    for (const [ref, account] of [
+      ['order-a', 'mfia_1'],
+      ['order-b', 'mfia_1'],
+      ['order-c', 'mfia_2'],
+    ] as const) {
+      await transport.call('purchase.create', {
+        body: {
+          source_ref_id: ref,
+          mf_investment_account: account,
+          scheme: 'INF209K01157',
+          amount: '1500.00',
+        },
+        consent: consent(),
+      });
+    }
+    const refsOf = (body: unknown) =>
+      (body as { data: Array<{ source_ref_id: string }> }).data.map((p) => p.source_ref_id).sort();
+    const bySourceRef = await transport.call('purchase.list', {
+      query: { source_ref_id: 'order-a' },
+    });
+    expect(refsOf(bySourceRef.body)).toEqual(['order-a', 'order-b', 'order-c']);
+    const byPlan = await transport.call('purchase.list', { query: { plan: 'mfpp_1' } });
+    expect(refsOf(byPlan.body)).toEqual(['order-a', 'order-b', 'order-c']);
+    const byAccount = await transport.call('purchase.list', {
+      query: { mf_investment_account: 'mfia_1', source_ref_id: 'order-c', plan: 'mfpp_1' },
+    });
+    expect(refsOf(byAccount.body)).toEqual(['order-a', 'order-b']);
   });
 
   it('H-2 lumpsum state path: under_review -> pending -> submitted -> successful', async () => {
@@ -164,6 +202,8 @@ describe('FakeFp', () => {
     const fetched = await transport.call('purchase.get', { pathParams: { id } });
     expect((fetched.body as { state: string; folio_number: string }).state).toBe('successful');
     expect((fetched.body as { folio_number: string }).folio_number).toBe('12345/67');
+    // FP's GET carries the consent the PATCH set.
+    expect((fetched.body as { consent: unknown }).consent).toEqual({ email: 'a@example.com' });
   });
 
   it('rejects a second live payment against the same order (H-2 "no multiple payments")', async () => {

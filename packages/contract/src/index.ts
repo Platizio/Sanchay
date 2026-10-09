@@ -6,6 +6,7 @@ import { legalContract } from './legal.js';
 import { meContract } from './me.js';
 import { metaContract } from './meta.js';
 import { onboardingContract, riskProfileContract } from './onboarding.js';
+import { ordersContract } from './orders.js';
 import { refContract } from './ref.js';
 
 export * from './auth.js';
@@ -18,6 +19,7 @@ export * from './legal.js';
 export * from './me.js';
 export * from './meta.js';
 export * from './onboarding.js';
+export * from './orders.js';
 export * from './ref.js';
 
 export const contract = {
@@ -31,5 +33,6 @@ export const contract = {
   onboarding: onboardingContract,
   ref: refContract,
   riskProfile: riskProfileContract,
+  orders: ordersContract,
 };
 export type Contract = typeof contract;
